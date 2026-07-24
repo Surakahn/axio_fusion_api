@@ -1,0 +1,53 @@
+{
+  "providers": [
+    {
+      "provider": "example-chat-channel",
+      "api_format": "chat",
+      "base_url_env": "AXIO_EXAMPLE_CHAT_BASE_URL",
+      "api_key_env": "AXIO_EXAMPLE_CHAT_API_KEY",
+      "models": [
+        {
+          "model": "channel-model-alias",
+          "canonical_model_id": "vendor-model-family-version"
+        }
+      ]
+    },
+    {
+      "provider": "example-responses-channel",
+      "api_format": "responses",
+      "base_url_env": "AXIO_EXAMPLE_RESPONSES_BASE_URL",
+      "api_key_env": "AXIO_EXAMPLE_RESPONSES_API_KEY",
+      "models": [
+        {
+          "model": "channel-model-alias",
+          "canonical_model_id": "vendor-model-family-version"
+        }
+      ]
+    },
+    {
+      "provider": "example-anthropic-channel",
+      "api_format": "anthropic",
+      "base_url_env": "AXIO_EXAMPLE_ANTHROPIC_BASE_URL",
+      "api_key_env": "AXIO_EXAMPLE_ANTHROPIC_API_KEY",
+      "discover_models": false,
+      "models": [
+        {
+          "model": "channel-model-alias",
+          "canonical_model_id": "vendor-model-family-version"
+        }
+      ]
+    },
+    {
+      "provider": "example-gemini-channel",
+      "api_format": "gemini",
+      "base_url_env": "AXIO_EXAMPLE_GEMINI_BASE_URL",
+      "api_key_env": "AXIO_EXAMPLE_GEMINI_API_KEY",
+      "models": [
+        {
+          "model": "channel-model-alias",
+          "canonical_model_id": "vendor-model-family-version"
+        }
+      ]
+    }
+  ]
+}

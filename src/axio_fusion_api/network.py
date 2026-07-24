@@ -1,0 +1,276 @@
+"""Process-local outbound network policy for the standalone Fusion runtime.
+
+The runtime never relies on urllib's implicit environment proxy selection.  A
+single policy decision chooses either an explicit proxy opener or an empty
+proxy mapping, which makes ``off`` and the direct branch of ``auto`` genuinely
+independent from inherited ``HTTP_PROXY``/``HTTPS_PROXY``/``ALL_PROXY`` values.
+
+Only the short-lived process may hold the configured proxy URL.  Public
+summaries intentionally expose state and reason codes, never the URL itself.
+"""
+
+from __future__ import annotations
+
+import os
+import socket
+import urllib.parse
+import urllib.request
+from dataclasses import dataclass
+from typing import Any, Iterable
+
+
+DEFAULT_SYSTEM_PROXY = "http://127.0.0.1:10808"
+NETWORK_MODES = ("auto", "on", "off")
+_LEGACY_HTTP_PROXY_ENV = "AXIO_FUSION_HTTP_PROXY"
+_LEGACY_USE_SYSTEM_PROXY_ENV = "AXIO_FUSION_USE_SYSTEM_PROXY"
+_NETWORK_MODE_ENV = "AXIO_FUSION_NETWORK_MODE"
+_SYSTEM_PROXY_ENV = "AXIO_FUSION_SYSTEM_PROXY"
+
+
+class NetworkPolicyError(RuntimeError):
+    """A safe, machine-readable outbound network policy failure."""
+
+    def __init__(self, reason_code: str) -> None:
+        self.reason_code = str(reason_code or "network_policy_failed")
+        super().__init__(f"fusion_network_policy_failed:{self.reason_code}")
+
+
+@dataclass(frozen=True)
+class NetworkPolicy:
+    mode: str
+    proxy_url: str
+    configured: bool
+    valid: bool
+    listener_detected: bool | None
+    selected_transport: str
+    reason_code: str
+    source: str
+    legacy_label: str = ""
+
+
+def provider_proxy_readiness(value: Any) -> dict[str, Any]:
+    """Validate an HTTP(S) proxy without returning its value."""
+
+    raw = str(value or "").strip()
+    result = {
+        "schema": "axio_fusion_api.provider_proxy_readiness.v2",
+        "configured": bool(raw),
+        "valid": False,
+        "reason_code": "proxy_missing",
+        "raw_proxy_url_persisted": False,
+        "secrets_persisted": False,
+    }
+    if not raw:
+        return result
+    if any(character.isspace() for character in raw):
+        result["reason_code"] = "proxy_contains_whitespace"
+        return result
+    if "@" in raw:
+        result["reason_code"] = "proxy_embedded_auth_not_allowed"
+        return result
+    if "?" in raw:
+        result["reason_code"] = "proxy_query_not_allowed"
+        return result
+    if "#" in raw:
+        result["reason_code"] = "proxy_fragment_not_allowed"
+        return result
+    try:
+        parsed = urllib.parse.urlsplit(raw)
+    except ValueError:
+        result["reason_code"] = "proxy_parse_failed"
+        return result
+    if parsed.scheme.lower() not in {"http", "https"}:
+        result["reason_code"] = "proxy_scheme_not_allowed"
+        return result
+    if not parsed.netloc or not parsed.hostname:
+        result["reason_code"] = "proxy_host_missing"
+        return result
+    if parsed.username or parsed.password:
+        result["reason_code"] = "proxy_embedded_auth_not_allowed"
+        return result
+    if parsed.path not in {"", "/"}:
+        result["reason_code"] = "proxy_path_not_allowed"
+        return result
+    try:
+        port = parsed.port
+    except ValueError:
+        result["reason_code"] = "proxy_invalid_port"
+        return result
+    if port is not None and not 1 <= int(port) <= 65535:
+        result["reason_code"] = "proxy_invalid_port"
+        return result
+    result["valid"] = True
+    result["reason_code"] = ""
+    return result
+
+
+def resolve_network_policy(*, check_listener: bool = True) -> NetworkPolicy:
+    """Resolve the current three-state network policy.
+
+    ``AXIO_FUSION_NETWORK_MODE`` is authoritative when present.  The two old
+    variables remain compatible for deployments that have not migrated yet:
+    an old explicit proxy or ``USE_SYSTEM_PROXY=1`` means forced proxy mode;
+    otherwise the new default is ``auto``.
+    """
+
+    raw_mode = os.getenv(_NETWORK_MODE_ENV, "").strip().casefold()
+    legacy_explicit = os.getenv(_LEGACY_HTTP_PROXY_ENV, "").strip()
+    legacy_system = _truthy_env(_LEGACY_USE_SYSTEM_PROXY_ENV)
+    legacy_label = ""
+    if raw_mode:
+        mode = raw_mode
+        source = "environment"
+    elif legacy_explicit:
+        mode = "on"
+        source = "legacy_environment"
+        legacy_label = "explicit"
+    elif legacy_system:
+        mode = "on"
+        source = "legacy_environment"
+        legacy_label = "system_10808"
+    else:
+        mode = "auto"
+        source = "default"
+
+    proxy_url, proxy_source = _configured_proxy_url(legacy_explicit=legacy_explicit)
+    if raw_mode and mode not in NETWORK_MODES:
+        return NetworkPolicy(
+            mode=mode,
+            proxy_url=proxy_url,
+            configured=bool(proxy_url),
+            valid=False,
+            listener_detected=None,
+            selected_transport="error",
+            reason_code="network_mode_invalid",
+            source=source,
+        )
+
+    readiness = provider_proxy_readiness(proxy_url)
+    valid = readiness["valid"] is True
+    if mode == "off":
+        return NetworkPolicy(
+            mode=mode,
+            proxy_url=proxy_url,
+            configured=readiness["configured"] is True,
+            valid=valid,
+            listener_detected=None,
+            selected_transport="direct",
+            reason_code="network_mode_off",
+            source=source,
+            legacy_label=legacy_label,
+        )
+
+    if not valid:
+        return NetworkPolicy(
+            mode=mode,
+            proxy_url=proxy_url,
+            configured=readiness["configured"] is True,
+            valid=False,
+            listener_detected=False,
+            selected_transport="direct" if mode == "auto" else "error",
+            reason_code=(
+                "proxy_invalid_auto_direct" if mode == "auto" else readiness["reason_code"]
+            ),
+            source=source,
+            legacy_label=legacy_label,
+        )
+
+    listener_detected = _proxy_listener_detected(proxy_url) if check_listener else None
+    if listener_detected is True:
+        return NetworkPolicy(
+            mode=mode,
+            proxy_url=proxy_url,
+            configured=True,
+            valid=True,
+            listener_detected=True,
+            selected_transport="proxy",
+            reason_code="proxy_listener_detected",
+            source=source if source != "default" else f"{source}:{proxy_source}",
+            legacy_label=legacy_label,
+        )
+    return NetworkPolicy(
+        mode=mode,
+        proxy_url=proxy_url,
+        configured=True,
+        valid=True,
+        listener_detected=False,
+        selected_transport="direct" if mode == "auto" else "error",
+        reason_code="proxy_listener_not_detected",
+        source=source if source != "default" else f"{source}:{proxy_source}",
+        legacy_label=legacy_label,
+    )
+
+
+def provider_proxy_runtime_summary() -> dict[str, Any]:
+    """Return a secret-free snapshot of the selected network transport."""
+
+    policy = resolve_network_policy()
+    return {
+        "schema": "axio_fusion_api.provider_proxy_runtime.v2",
+        "mode": policy.legacy_label or policy.mode,
+        "configured": policy.configured,
+        "valid": policy.valid,
+        "listener_detected": policy.listener_detected,
+        "selected_transport": policy.selected_transport,
+        "reason_code": policy.reason_code,
+        "source": policy.source,
+        "system_proxy_default": "local_default" if policy.proxy_url == DEFAULT_SYSTEM_PROXY else "",
+        "raw_proxy_url_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def build_network_opener(*handlers: Any):
+    """Build an opener whose proxy behavior is fully determined by policy."""
+
+    policy = resolve_network_policy()
+    if policy.reason_code == "network_mode_invalid":
+        raise NetworkPolicyError("network_mode_invalid")
+    if policy.selected_transport == "error":
+        raise NetworkPolicyError("proxy_unavailable")
+    if policy.selected_transport == "proxy":
+        proxy_handler = urllib.request.ProxyHandler(
+            {"http": policy.proxy_url, "https": policy.proxy_url}
+        )
+    else:
+        # An empty mapping is required.  Calling urllib.request.urlopen() would
+        # re-read inherited proxy environment variables and violate ``off`` or
+        # the direct branch of ``auto``.
+        proxy_handler = urllib.request.ProxyHandler({})
+    return urllib.request.build_opener(proxy_handler, *tuple(handlers))
+
+
+def _configured_proxy_url(*, legacy_explicit: str) -> tuple[str, str]:
+    if legacy_explicit:
+        return legacy_explicit, "legacy_explicit"
+    if _SYSTEM_PROXY_ENV in os.environ:
+        return os.getenv(_SYSTEM_PROXY_ENV, "").strip(), "configured_system_proxy"
+    return DEFAULT_SYSTEM_PROXY, "default_system_proxy"
+
+
+def _proxy_listener_detected(proxy_url: str) -> bool:
+    try:
+        parsed = urllib.parse.urlsplit(proxy_url)
+        hostname = parsed.hostname
+        port = parsed.port or (443 if parsed.scheme.casefold() == "https" else 80)
+        if not hostname or not 1 <= int(port) <= 65535:
+            return False
+        timeout = _proxy_detection_timeout()
+        with socket.create_connection((hostname, int(port)), timeout=timeout):
+            return True
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def _proxy_detection_timeout() -> float:
+    raw = os.getenv("AXIO_FUSION_PROXY_DETECTION_TIMEOUT_SECONDS", "0.25").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        value = 0.25
+    return max(0.05, min(2.0, value))
+
+
+def _truthy_env(name: str) -> bool:
+    return os.getenv(name, "").strip().casefold() in {"1", "true", "yes", "on"}
+

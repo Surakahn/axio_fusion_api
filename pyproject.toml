@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "axio-fusion-api"
+version = "0.1.0"
+description = "Standalone adaptive multi-model Fusion API service."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Axio Fusion contributors" }]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest"]
+benchmark = ["pyarrow>=14", "lxml>=4.9"]
+
+[project.scripts]
+axio-fusion-api-standalone = "axio_fusion_api.cli:main"
+axio-fusion-api-service = "axio_fusion_api.service_cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

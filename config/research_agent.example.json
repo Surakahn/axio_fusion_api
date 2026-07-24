@@ -1,0 +1,14 @@
+{
+  "schema": "axio_fusion_api.prefusion_research_agent_config.v1",
+  "provider": "nvidia",
+  "model": "openai/gpt-oss-120b",
+  "api_format": "chat",
+  "base_url_env": "AXIO_NVIDIA_BASE_URL",
+  "api_key_env": "AXIO_NVIDIA_API_KEYS",
+  "auth_scheme": "bearer",
+  "selection_basis": "operator_configured_remote_agent_only",
+  "ranking_prior_forbidden": true,
+  "candidate_batch_size": 4,
+  "research_max_workers": 4,
+  "merge_strategy": "deterministic_research_quality_confidence_candidate_id"
+}

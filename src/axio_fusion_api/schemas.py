@@ -1,0 +1,1119 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+import time
+import uuid
+from dataclasses import dataclass, field
+from typing import Any, Mapping, Sequence
+
+
+PUBLIC_MODELS = ("axio-fast", "axio-terra", "axio-pro")
+PUBLIC_MODEL_ALIASES = {
+    "fast": "axio-fast",
+    "terra": "axio-terra",
+    "budget": "axio-terra",
+    "balanced": "axio-terra",
+    "high": "axio-pro",
+    "pro": "axio-pro",
+    "fusion": "axio-terra",
+    "openrouter/fusion": "axio-terra",
+    "openrouter:fusion": "axio-terra",
+    "axio": "axio-terra",
+    "axio-fusion": "axio-terra",
+}
+
+CAPABILITY_AXES = (
+    "science_knowledge",
+    "multilingual",
+    "code",
+    "math",
+    "logic",
+    "agentic_tool_calling",
+    "daily_work",
+    "structured_output",
+    "critique",
+    "long_context",
+    "current_information",
+)
+
+TOOL_CAPABILITY_STATES = ("proven", "unproven", "failed")
+
+# Provider error values cross a trust boundary.  They are useful for an
+# operator to distinguish configuration, authentication, transport, and
+# framing failures, but arbitrary gateway-provided strings must never enter a
+# public response, safe trace, or benchmark artifact.
+SAFE_PROVIDER_ERROR_CODES = frozenset(
+    {
+        "api_key_missing",
+        "base_url_invalid",
+        "base_url_missing",
+        "empty_provider_response",
+        "empty_provider_stream",
+        "http_error",
+        "invalid_json",
+        "invalid_stream_json",
+        "invalid_stream_line",
+        "network_mode_invalid",
+        "non_object_json",
+        "non_object_stream_json",
+        "OSError",
+        "provider_request_failed",
+        "provider_response_timeout_exceeded_90s",
+        "proxy_unavailable",
+        "stream_framing_unverified",
+        "TimeoutError",
+        "tool_call_without_text",
+        "unframed_stream_response",
+        "URLError",
+    }
+)
+
+
+def safe_provider_error_code(value: Any) -> str:
+    """Return a closed-form provider error code suitable for safe receipts."""
+
+    code = str(value or "").strip()
+    if not code:
+        return ""
+    return code if code in SAFE_PROVIDER_ERROR_CODES else "unknown_provider_error"
+
+
+def safe_provider_http_status(value: Any) -> int | None:
+    """Accept only ordinary HTTP status values in safe diagnostics."""
+
+    if isinstance(value, bool):
+        return None
+    try:
+        status = int(value)
+    except (TypeError, ValueError):
+        return None
+    return status if 100 <= status <= 599 else None
+
+
+def safe_provider_error_class(
+    error_code: Any,
+    http_status: Any = None,
+) -> str:
+    """Map a provider failure to a small, non-provider-specific taxonomy."""
+
+    code = safe_provider_error_code(error_code)
+    status = safe_provider_http_status(http_status)
+    if code in {"api_key_missing", "base_url_missing", "base_url_invalid"}:
+        return "configuration"
+    if status in {401, 403}:
+        return "authentication_or_authorization"
+    if status == 429:
+        return "rate_limited"
+    if status is not None and 400 <= status <= 499:
+        return "provider_http_4xx"
+    if status is not None and 500 <= status <= 599:
+        return "provider_http_5xx"
+    if code == "http_error":
+        return "provider_http_error"
+    if code in {"TimeoutError", "provider_response_timeout_exceeded_90s"}:
+        return "timeout"
+    if code in {"URLError", "OSError", "proxy_unavailable", "network_mode_invalid"}:
+        return "transport_or_network_policy"
+    if code in {
+        "invalid_json",
+        "invalid_stream_json",
+        "invalid_stream_line",
+        "non_object_json",
+        "non_object_stream_json",
+        "stream_framing_unverified",
+        "unframed_stream_response",
+    }:
+        return "stream_or_response_protocol"
+    if code in {"empty_provider_response", "empty_provider_stream"}:
+        return "empty_provider_output"
+    if code == "tool_call_without_text":
+        return "tool_response_mismatch"
+    if code == "provider_request_failed":
+        return "provider_request_failed"
+    if code == "unknown_provider_error":
+        return "unknown_provider_error"
+    return ""
+
+
+def _normalized_tool_capability_state(value: Any, *, supports_tools: bool) -> str:
+    state = str(value or "").strip().lower()
+    if state not in TOOL_CAPABILITY_STATES:
+        return "proven" if supports_tools else "unproven"
+    return state
+
+
+def canonical_public_model(value: str | None) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in PUBLIC_MODELS:
+        return normalized
+    return PUBLIC_MODEL_ALIASES.get(normalized, "axio-terra")
+
+
+def sha256_text(value: str) -> str:
+    return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()
+
+
+def is_sha256_digest(value: Any) -> bool:
+    """Return whether a value is a 64-character SHA-256 hex digest."""
+
+    return bool(re.fullmatch(r"[0-9a-fA-F]{64}", str(value or "").strip()))
+
+
+def stable_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def runtime_model_identity(value: str | None) -> str:
+    """Normalize a model identity used only for runtime replica grouping.
+
+    The public channel alias remains in ``ModelProfile.model`` because that is
+    what a provider expects on the wire.  A configured canonical identity is
+    preferred when it is available; otherwise the normalized provider model
+    name gives ordinary same-name channels a conservative shared identity.
+    This deliberately does not relax the separate final-benchmark requirement
+    for an explicit ``canonical_model_id`` declaration.
+    """
+
+    return " ".join(str(value or "").strip().casefold().split())
+
+
+def logical_model_identity(value: Any) -> str:
+    """Return the canonical identity used to count one cognitive model.
+
+    Provider/model aliases are transport identities.  A declared
+    ``canonical_model_id`` is the logical identity; without one, the normalized
+    model alias is the conservative fallback.  This helper accepts both a
+    ``ModelProfile``-like object and a mapping so control-plane reports and
+    process-local profiles use exactly the same grouping rule.
+    """
+
+    if isinstance(value, Mapping):
+        canonical = value.get("canonical_model_id") or value.get("canonicalModelId")
+        model = value.get("model") or value.get("id") or value.get("name")
+    else:
+        canonical = getattr(value, "canonical_model_id", None)
+        model = getattr(value, "model", None)
+    return runtime_model_identity(str(canonical or model or ""))
+
+
+def logical_model_identities(values: Sequence[Any]) -> tuple[str, ...]:
+    """Return deterministic unique logical model identities."""
+
+    return tuple(sorted({identity for value in values if (identity := logical_model_identity(value))}))
+
+
+def logical_model_count(values: Sequence[Any]) -> int:
+    """Count logical models, never provider replicas."""
+
+    return len(logical_model_identities(values))
+
+
+def rough_token_count(value: str) -> int:
+    text = str(value or "").strip()
+    if not text:
+        return 0
+    ascii_count = sum(1 for ch in text if ord(ch) < 128)
+    non_ascii_count = len(text) - ascii_count
+    return max(1, int(ascii_count / 4.0 + non_ascii_count / 1.6))
+
+
+@dataclass(frozen=True)
+class ModelProfile:
+    provider: str
+    model: str
+    api_format: str = "chat"
+    capabilities: Mapping[str, float] = field(default_factory=dict)
+    input_cost_per_million: float | None = None
+    output_cost_per_million: float | None = None
+    p50_latency_ms: int | None = None
+    p95_latency_ms: int | None = None
+    context_tokens: int | None = None
+    recent_success_rate: float | None = None
+    availability: float | None = None
+    observed_success_count: int = 0
+    observed_failure_count: int = 0
+    supports_tools: bool = False
+    tool_capability: str = ""
+    tool_capability_source: str = ""
+    tool_probe_status: str = "not_run"
+    supports_vision: bool = False
+    privacy_tags: tuple[str, ...] = ("external_provider",)
+    base_url_env: str = ""
+    api_key_env: str = ""
+    auth_scheme: str = "bearer"
+    # Model discovery is an optional control-plane capability.  A provider can
+    # serve explicit model rows without exposing a compatible model-list route.
+    models_endpoint: str = "/models"
+    discover_models: bool = True
+    enabled: bool = True
+    health: str = "unknown"
+    source: str = "registry"
+    # This is deliberately separate from the routed channel alias in ``model``.
+    # It is only required by final-claim baseline binding, never by serving.
+    canonical_model_id: str = ""
+    # Pre-Fusion screening metadata is an operational prior, not benchmark
+    # evidence and not a replacement for declared/calibrated capabilities.
+    screening_prior_rank: int | None = None
+    screening_prior_confidence: float | None = None
+    screening_allowed_roles: tuple[str, ...] = ()
+    screening_disallowed_roles: tuple[str, ...] = ()
+    # Capability axes produced by the pre-Fusion research Agent.  These are
+    # deliberately kept separate from measured/calibrated ``capabilities``:
+    # they are useful routing priors, but cannot become benchmark evidence or
+    # silently overwrite operational calibration.
+    screening_capability_overall: float | None = None
+    screening_capability_axes: Mapping[str, float] = field(default_factory=dict)
+    screening_role_admission: Mapping[str, Any] = field(default_factory=dict)
+    # Operational ranking is computed only after the complete research prior
+    # and physical streaming probe are joined.  It is a serving-control score,
+    # never benchmark evidence.
+    screening_research_quality_score: float | None = None
+    screening_operational_rank: int | None = None
+    screening_operational_score: float | None = None
+    screening_operational_status: str = ""
+    screening_stream_reliability_score: float | None = None
+    screening_latency_score: float | None = None
+    # Runtime-only credential injection for programmatic deployments.  These
+    # values are intentionally excluded from equality, repr, safe_dict(), and
+    # every persisted registry/artifact.  Environment-backed deployments keep
+    # using base_url_env/api_key_env as before.
+    runtime_base_url: str = field(default="", repr=False, compare=False)
+    runtime_api_keys: tuple[str, ...] = field(default_factory=tuple, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        """Keep legacy tool flags compatible with explicit capability state.
+
+        Older manifests only supplied ``supports_tools``.  Treat that value as
+        an external attestation until a newer operational probe supersedes it;
+        an unprobed profile with no attestation remains explicitly unproven.
+        """
+
+        raw_state = str(self.tool_capability or "").strip().lower()
+        state = _normalized_tool_capability_state(
+            raw_state,
+            supports_tools=bool(self.supports_tools),
+        )
+        source = str(self.tool_capability_source or "").strip() or (
+            "external_attestation" if self.supports_tools else "none"
+        )
+        supports_tools = bool(self.supports_tools)
+        if state == "proven" and source == "operational_probe":
+            supports_tools = True
+        if state == "proven" and not supports_tools:
+            supports_tools = True
+        object.__setattr__(self, "supports_tools", supports_tools)
+        object.__setattr__(self, "tool_capability", state)
+        object.__setattr__(self, "tool_capability_source", source)
+        object.__setattr__(
+            self,
+            "tool_probe_status",
+            str(self.tool_probe_status or "not_run").strip().lower() or "not_run",
+        )
+        endpoint = str(self.models_endpoint or "/models").strip()
+        if endpoint.lower() in {"none", "disabled", "off"}:
+            endpoint = ""
+        object.__setattr__(self, "models_endpoint", endpoint)
+        object.__setattr__(self, "discover_models", bool(self.discover_models) and bool(endpoint))
+
+    @property
+    def profile_id(self) -> str:
+        return f"{self.provider}/{self.model}"
+
+    @property
+    def canonical_identity(self) -> str:
+        return runtime_model_identity(self.canonical_model_id or self.model)
+
+    @property
+    def canonical_identity_source(self) -> str:
+        return "declared_canonical_model_id" if self.canonical_model_id else "normalized_model_alias"
+
+    @property
+    def canonical_identity_sha256(self) -> str:
+        return sha256_text(self.canonical_identity)
+
+    def capability(self, axis: str) -> float:
+        return max(0.0, min(1.0, float(self.capabilities.get(axis, 0.0) or 0.0)))
+
+    def screening_capability(self, axis: str) -> float:
+        """Return a bounded pre-Fusion capability prior for one axis."""
+
+        return max(
+            0.0,
+            min(1.0, float(self.screening_capability_axes.get(axis, 0.0) or 0.0)),
+        )
+
+    def safe_dict(self) -> dict[str, Any]:
+        return {
+            "profile_id": self.profile_id,
+            "provider": self.provider,
+            "model": self.model,
+            "api_format": self.api_format,
+            "capabilities": {axis: self.capability(axis) for axis in CAPABILITY_AXES},
+            "input_cost_per_million": self.input_cost_per_million,
+            "output_cost_per_million": self.output_cost_per_million,
+            "p50_latency_ms": self.p50_latency_ms,
+            "p95_latency_ms": self.p95_latency_ms,
+            "context_tokens": self.context_tokens,
+            "recent_success_rate": self.recent_success_rate,
+            "availability": self.availability,
+            "observed_success_count": self.observed_success_count,
+            "observed_failure_count": self.observed_failure_count,
+            "supports_tools": self.supports_tools,
+            "tool_capability": self.tool_capability,
+            "tool_capability_source": self.tool_capability_source,
+            "tool_probe_status": self.tool_probe_status,
+            "supports_vision": self.supports_vision,
+            "privacy_tags": list(self.privacy_tags),
+            "base_url_env": self.base_url_env,
+            "api_key_env": self.api_key_env,
+            "auth_scheme": self.auth_scheme,
+            "models_endpoint": self.models_endpoint,
+            "discover_models": self.discover_models,
+            "base_url_persisted": False,
+            "api_key_persisted": False,
+            "enabled": self.enabled,
+            "health": self.health,
+            "source": self.source,
+            "screening_prior_rank": self.screening_prior_rank,
+            "screening_prior_confidence": self.screening_prior_confidence,
+            "screening_allowed_roles": list(self.screening_allowed_roles),
+            "screening_disallowed_roles": list(self.screening_disallowed_roles),
+            "screening_capability_overall": (
+                max(0.0, min(1.0, float(self.screening_capability_overall)))
+                if self.screening_capability_overall is not None
+                else None
+            ),
+            "screening_capability_axes": {
+                axis: self.screening_capability(axis) for axis in CAPABILITY_AXES
+            },
+            "screening_role_admission": dict(self.screening_role_admission)
+            if isinstance(self.screening_role_admission, Mapping)
+            else {},
+            "screening_operational_rank": self.screening_operational_rank,
+            "screening_research_quality_score": (
+                max(0.0, min(1.0, float(self.screening_research_quality_score)))
+                if self.screening_research_quality_score is not None
+                else None
+            ),
+            "screening_operational_score": (
+                max(0.0, min(1.0, float(self.screening_operational_score)))
+                if self.screening_operational_score is not None
+                else None
+            ),
+            "screening_operational_status": str(self.screening_operational_status or ""),
+            "screening_stream_reliability_score": (
+                max(0.0, min(1.0, float(self.screening_stream_reliability_score)))
+                if self.screening_stream_reliability_score is not None
+                else None
+            ),
+            "screening_latency_score": (
+                max(0.0, min(1.0, float(self.screening_latency_score)))
+                if self.screening_latency_score is not None
+                else None
+            ),
+            "screening_prior_only": True,
+            "canonical_model_identity_declared": bool(self.canonical_model_id),
+            "canonical_model_id_sha256": (
+                sha256_text(self.canonical_model_id)
+                if self.canonical_model_id
+                else ""
+            ),
+            "runtime_canonical_identity_sha256": self.canonical_identity_sha256,
+            "runtime_canonical_identity_source": self.canonical_identity_source,
+            "raw_canonical_model_id_persisted": False,
+        }
+
+    @property
+    def tool_calling_eligible(self) -> bool:
+        """Whether routing may spend a native-tool turn on this profile."""
+
+        return bool(self.supports_tools and self.tool_capability == "proven")
+
+
+@dataclass(frozen=True)
+class FusionPolicy:
+    max_cost_usd: float | None = None
+    max_latency_ms: int | None = None
+    quality_target: float | None = None
+    max_models: int | None = None
+    max_depth: int | None = None
+    max_total_model_calls: int | None = None
+    fusion_depth: int = 0
+    max_fusion_depth: int = 2
+    live: bool = False
+
+
+@dataclass(frozen=True)
+class FusionRequest:
+    model: str
+    prompt: str
+    system: str = "You are Axio Fusion, a careful and evidence-aware assistant."
+    # History may include protocol-neutral assistant tool calls and tool results
+    # in addition to ordinary text turns. It remains request-local and is
+    # represented only by a hash in durable receipts.
+    history: tuple[Mapping[str, Any], ...] = ()
+    api_format: str = "chat/completions"
+    task_type: str = "auto"
+    requested_capabilities: tuple[str, ...] = ()
+    temperature: float | None = None
+    top_p: float | None = None
+    max_output_tokens: int | None = None
+    stop: tuple[str, ...] = ()
+    tools: tuple[Mapping[str, Any], ...] = ()
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+    policy: FusionPolicy = field(default_factory=FusionPolicy)
+
+    @property
+    def public_model(self) -> str:
+        return canonical_public_model(self.model)
+
+    @property
+    def request_fingerprint(self) -> str:
+        return sha256_text(
+            stable_json(
+                {
+                    "model": self.public_model,
+                    "prompt": self.prompt,
+                    "system": self.system,
+                    "history": list(self.history),
+                    "api_format": self.api_format,
+                    "task_type": self.task_type,
+                    "requested_capabilities": list(self.requested_capabilities),
+                    "tools": list(self.tools),
+                }
+            )
+        )
+
+    def prompt_free_dict(self) -> dict[str, Any]:
+        return {
+            "model": self.public_model,
+            "api_format": self.api_format,
+            "prompt_sha256": sha256_text(self.prompt),
+            "prompt_char_count": len(self.prompt),
+            "system_sha256": sha256_text(self.system),
+            "system_char_count": len(self.system),
+            "history_count": len(self.history),
+            "history_sha256": sha256_text(stable_json(list(self.history))),
+            "task_type": self.task_type,
+            "requested_capabilities": list(self.requested_capabilities),
+            "tool_count": len(self.tools),
+            "metadata_keys": sorted(str(key) for key in self.metadata.keys()),
+            "max_output_tokens": self.max_output_tokens,
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            "stop_sequence_count": len(self.stop),
+            "stop_sha256": sha256_text(stable_json(list(self.stop))),
+            "request_fingerprint": self.request_fingerprint,
+            "raw_prompt_persisted": False,
+            "raw_source_text_persisted": False,
+            "secrets_persisted": False,
+        }
+
+
+@dataclass(frozen=True)
+class CandidateResult:
+    candidate_id: str
+    role: str
+    profile_id: str
+    provider: str
+    model: str
+    answer: str
+    confidence: float = 0.5
+    reasoning_summary: tuple[str, ...] = ()
+    evidence: tuple[Mapping[str, Any], ...] = ()
+    assumptions: tuple[str, ...] = ()
+    uncertainties: tuple[str, ...] = ()
+    status: str = "completed"
+    latency_ms: float = 0.0
+    error_type: str = ""
+    tool_execution: Mapping[str, Any] = field(default_factory=dict)
+    task_execution: Mapping[str, Any] = field(default_factory=dict)
+    escalation_plan: Mapping[str, Any] = field(default_factory=dict)
+    standardization: Mapping[str, Any] = field(default_factory=dict)
+    tool_calls: tuple[Mapping[str, Any], ...] = ()
+    # The runtime identity is carried only in memory. Safe receipts expose its
+    # digest so channel replicas cannot be mistaken for independent evidence.
+    canonical_identity: str = ""
+
+    @property
+    def runtime_canonical_identity(self) -> str:
+        return runtime_model_identity(self.canonical_identity or self.model)
+
+    def safe_dict(self) -> dict[str, Any]:
+        reasoning_payload = stable_json(list(self.reasoning_summary))
+        return {
+            "candidate_id": self.candidate_id,
+            "role": self.role,
+            "profile_id": self.profile_id,
+            "provider": self.provider,
+            "model": self.model,
+            "runtime_canonical_identity_sha256": sha256_text(
+                self.runtime_canonical_identity
+            ),
+            "answer_sha256": sha256_text(self.answer),
+            "answer_char_count": len(self.answer),
+            "confidence": round(max(0.0, min(1.0, self.confidence)), 4),
+            "reasoning_step_count": len(self.reasoning_summary),
+            "reasoning_summary_sha256": sha256_text(reasoning_payload),
+            "reasoning_summary_token_estimate": rough_token_count("\n".join(self.reasoning_summary)),
+            "evidence_count": len(self.evidence),
+            "assumption_count": len(self.assumptions),
+            "uncertainty_count": len(self.uncertainties),
+            "status": self.status,
+            "latency_ms": round(float(self.latency_ms), 3),
+            "error_type": self.error_type[:120],
+            "tool_execution": _safe_tool_execution_summary(self.tool_execution),
+            "tool_calls": _safe_tool_call_summary(self.tool_calls),
+            "task_execution": _safe_candidate_task_execution_summary(self.task_execution),
+            "escalation_plan": _safe_targeted_escalation_plan_summary(self.escalation_plan),
+            "standardization": _safe_candidate_standardization_summary(self.standardization),
+            "raw_prompt_persisted": False,
+            "raw_candidate_text_persisted": False,
+            "raw_reasoning_summary_persisted": False,
+            "secrets_persisted": False,
+        }
+
+
+@dataclass(frozen=True)
+class FusionResponse:
+    text: str
+    request: FusionRequest
+    route_plan: Mapping[str, Any]
+    candidates: tuple[CandidateResult, ...] = ()
+    judge_result: Mapping[str, Any] = field(default_factory=dict)
+    trace: Mapping[str, Any] = field(default_factory=dict)
+    tool_calls: tuple[Mapping[str, Any], ...] = ()
+    provider_calls_recorded: bool = False
+    response_id: str = field(default_factory=lambda: f"fusion-{uuid.uuid4().hex}")
+    created: int = field(default_factory=lambda: int(time.time()))
+
+    def usage(self) -> dict[str, int]:
+        prompt_text = "\n".join(
+            [
+                self.request.system,
+                *[str(item.get("content") or "") for item in self.request.history],
+                self.request.prompt,
+            ]
+        )
+        prompt_tokens = rough_token_count(prompt_text)
+        completion_tokens = rough_token_count(self.text)
+        return {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        }
+
+
+def _safe_tool_call_summary(calls: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    rows = [call for call in calls if isinstance(call, Mapping)]
+    return {
+        "schema": "axio_fusion_api.tool_call_summary.v1",
+        "tool_call_count": len(rows),
+        "tool_name_sha256s": [sha256_text(str(call.get("name") or "")) for call in rows[:16]],
+        "tool_call_id_sha256s": [sha256_text(str(call.get("id") or "")) for call in rows[:16]],
+        "argument_sha256s": [
+            sha256_text(stable_json(call.get("arguments") if isinstance(call.get("arguments"), Mapping) else {}))
+            for call in rows[:16]
+        ],
+        "source_formats": sorted({str(call.get("source_format") or "") for call in rows if str(call.get("source_format") or "")}),
+        "raw_tool_names_persisted": False,
+        "raw_tool_arguments_persisted": False,
+        "raw_tool_results_persisted": False,
+    }
+
+
+def _safe_tool_execution_summary(value: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or not value:
+        return {
+            "executed": False,
+            "requested_call_count": 0,
+            "success_count": 0,
+            "blocked_count": 0,
+            "failed_count": 0,
+            "raw_tool_arguments_persisted": False,
+            "raw_tool_result_persisted": False,
+            "raw_tool_schema_persisted": False,
+        }
+    results = value.get("results") if isinstance(value.get("results"), list) else []
+    return {
+        "schema": value.get("schema") or "axio_fusion_api.tool_execution_batch.v1",
+        "executed": True,
+        "requested_call_count": int(value.get("requested_call_count") or 0),
+        "executed_or_blocked_call_count": int(value.get("executed_or_blocked_call_count") or 0),
+        "success_count": int(value.get("success_count") or 0),
+        "blocked_count": int(value.get("blocked_count") or 0),
+        "failed_count": int(value.get("failed_count") or 0),
+        "result_receipts": [
+            {
+                "call_index": row.get("call_index"),
+                "tool_hash": str(row.get("tool_hash") or ""),
+                "tool_name_sha256": str(row.get("tool_name_sha256") or ""),
+                "tool_category": str(row.get("tool_category") or ""),
+                "status": str(row.get("status") or ""),
+                "result_sha256": str(row.get("result_sha256") or ""),
+                "error_code": str(row.get("error_code") or "")[:120],
+                "raw_tool_arguments_persisted": False,
+                "raw_tool_result_persisted": False,
+                "raw_tool_schema_persisted": False,
+            }
+            for row in results[:16]
+            if isinstance(row, Mapping)
+        ],
+        "raw_tool_arguments_persisted": False,
+        "raw_tool_result_persisted": False,
+        "raw_tool_schema_persisted": False,
+    }
+
+
+def _safe_candidate_standardization_summary(value: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or not value:
+        return {
+            "schema": "axio_fusion_api.candidate_standardization.v1",
+            "parsed": False,
+            "parse_mode": "unknown",
+            "answer_field": "",
+            "reasoning_field": "",
+            "normalized_field_count": 0,
+            "missing_required_fields": [],
+            "confidence_defaulted": True,
+            "confidence_clamped": False,
+            "source_text_sha256": "",
+            "source_char_count": 0,
+            "raw_candidate_text_persisted": False,
+            "raw_reasoning_summary_persisted": False,
+            "secrets_persisted": False,
+        }
+    missing = value.get("missing_required_fields") if isinstance(value.get("missing_required_fields"), list) else []
+    return {
+        "schema": value.get("schema") or "axio_fusion_api.candidate_standardization.v1",
+        "parsed": bool(value.get("parsed")),
+        "parse_mode": str(value.get("parse_mode") or "unknown")[:80],
+        "answer_field": str(value.get("answer_field") or "")[:80],
+        "reasoning_field": str(value.get("reasoning_field") or "")[:80],
+        "evidence_field": str(value.get("evidence_field") or "")[:80],
+        "assumptions_field": str(value.get("assumptions_field") or "")[:80],
+        "uncertainties_field": str(value.get("uncertainties_field") or "")[:80],
+        "confidence_field": str(value.get("confidence_field") or "")[:80],
+        "normalized_field_count": _safe_int(value.get("normalized_field_count"), default=0),
+        "answer_char_count": _safe_int(value.get("answer_char_count"), default=0),
+        "answer_sha256": str(value.get("answer_sha256") or ""),
+        "reasoning_step_count": _safe_int(value.get("reasoning_step_count"), default=0),
+        "reasoning_summary_sha256": str(value.get("reasoning_summary_sha256") or ""),
+        "evidence_count": _safe_int(value.get("evidence_count"), default=0),
+        "assumption_count": _safe_int(value.get("assumption_count"), default=0),
+        "uncertainty_count": _safe_int(value.get("uncertainty_count"), default=0),
+        "tool_call_count": _safe_int(value.get("tool_call_count"), default=0),
+        "missing_required_fields": [str(item)[:80] for item in missing[:12] if str(item)],
+        "confidence_defaulted": bool(value.get("confidence_defaulted")),
+        "confidence_clamped": bool(value.get("confidence_clamped")),
+        "source_text_sha256": str(value.get("source_text_sha256") or ""),
+        "source_char_count": _safe_int(value.get("source_char_count"), default=0),
+        "raw_candidate_text_persisted": False,
+        "raw_reasoning_summary_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _safe_candidate_task_execution_summary(value: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or not value:
+        return {
+            "schema": "axio_fusion_api.candidate_task_execution.v1",
+            "role": "",
+            "assigned_node_count": 0,
+            "verification_node_count": 0,
+            "dependency_count": 0,
+            "checkpoint_count": 0,
+            "node_receipts": [],
+            "checkpoint_receipts": [],
+            "replica_routing": _safe_replica_routing_summary({}),
+            "provider_error_code": "",
+            "provider_http_status": None,
+            "provider_error_class": "",
+            "hermes_cognitive_budget": {},
+            "hermes_reference_fanout_cadence": "",
+            "raw_prompt_persisted": False,
+            "raw_candidate_text_persisted": False,
+            "secrets_persisted": False,
+        }
+    nodes = value.get("node_receipts") if isinstance(value.get("node_receipts"), list) else []
+    checkpoints = value.get("checkpoint_receipts") if isinstance(value.get("checkpoint_receipts"), list) else []
+    provider_error_code = safe_provider_error_code(value.get("provider_error_code"))
+    provider_http_status = safe_provider_http_status(value.get("provider_http_status"))
+    return {
+        "schema": value.get("schema") or "axio_fusion_api.candidate_task_execution.v1",
+        "role": str(value.get("role") or "")[:80],
+        "assigned_node_count": _safe_int(value.get("assigned_node_count"), default=0),
+        "verification_node_count": _safe_int(value.get("verification_node_count"), default=0),
+        "dependency_count": _safe_int(value.get("dependency_count"), default=0),
+        "checkpoint_count": _safe_int(value.get("checkpoint_count"), default=0),
+        "node_receipts": [
+            {
+                "id": str(row.get("id") or "")[:120],
+                "kind": str(row.get("kind") or "")[:80],
+                "assigned_role": str(row.get("assigned_role") or "")[:80],
+                "dependency_count": _safe_int(row.get("dependency_count"), default=0),
+                "required_capabilities": [
+                    str(item)[:80]
+                    for item in row.get("required_capabilities", [])
+                    if str(item)
+                ][:8] if isinstance(row.get("required_capabilities"), list) else [],
+                "parallelizable": bool(row.get("parallelizable")),
+                "verification_required": bool(row.get("verification_required")),
+            }
+            for row in nodes[:24]
+            if isinstance(row, Mapping)
+        ],
+        "checkpoint_receipts": [
+            {
+                "id": str(row.get("id") or "")[:120],
+                "after_node": str(row.get("after_node") or "")[:120],
+                "record_count": _safe_int(row.get("record_count"), default=0),
+            }
+            for row in checkpoints[:12]
+            if isinstance(row, Mapping)
+        ],
+        "replica_routing": _safe_replica_routing_summary(
+            value.get("replica_routing")
+            if isinstance(value.get("replica_routing"), Mapping)
+            else {}
+        ),
+        "provider_error_code": provider_error_code,
+        "provider_http_status": provider_http_status,
+        "provider_error_class": safe_provider_error_class(
+            provider_error_code,
+            provider_http_status,
+        ),
+        "hermes_cognitive_budget": _safe_hermes_cognitive_budget(
+            value.get("hermes_cognitive_budget")
+            if isinstance(value.get("hermes_cognitive_budget"), Mapping)
+            else {}
+        ),
+        "hermes_reference_fanout_cadence": str(
+            value.get("hermes_reference_fanout_cadence") or ""
+        )[:80],
+        "raw_prompt_persisted": False,
+        "raw_candidate_text_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _safe_hermes_cognitive_budget(value: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or not value:
+        return {}
+    return {
+        "reasoning_effort": str(value.get("reasoning_effort") or "")[:24],
+        "budget_class": str(value.get("budget_class") or "")[:48],
+        "control_mode": str(value.get("control_mode") or "")[:80],
+        "wire_reasoning_parameter_forwarding": str(
+            value.get("wire_reasoning_parameter_forwarding") or ""
+        )[:80],
+        "hidden_chain_of_thought_requested": False,
+        "public_reasoning_summary_only": True,
+    }
+
+
+def _safe_replica_routing_summary(value: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or not value:
+        return {
+            "schema": "axio_fusion_api.runtime_canonical_replica_routing.v1",
+            "enabled": False,
+            "configured_replica_count": 0,
+            "runtime_eligible_replica_count": 0,
+            "comparable_replica_count": 0,
+            "bounded_failover_attempt_count": 0,
+            "selected_profile_sha256": "",
+            "attempted_profile_hash_count": 0,
+            "stage_attempt_count": 0,
+            "stage_failure_count": 0,
+            "failover_used": False,
+            "successful_profile_sha256": "",
+            "terminal_reason": "",
+            "initial_attempt_reason": "",
+            "stage_error_code_counts": {},
+            "stage_error_class_counts": {},
+            "stage_http_status_counts": {},
+            "last_stage_error_code": "",
+            "last_stage_error_class": "",
+            "last_stage_http_status": None,
+            "raw_canonical_identity_persisted": False,
+            "raw_profile_id_persisted": False,
+            "raw_provider_name_persisted": False,
+            "raw_model_name_persisted": False,
+        }
+    hashes = (
+        value.get("ordered_attempt_profile_hashes")
+        if isinstance(value.get("ordered_attempt_profile_hashes"), list)
+        else []
+    )
+    attempts = value.get("stage_attempt_receipts") if isinstance(value.get("stage_attempt_receipts"), list) else []
+    error_code_counts: dict[str, int] = {}
+    error_class_counts: dict[str, int] = {}
+    http_status_counts: dict[str, int] = {}
+    last_error_code = ""
+    last_error_class = ""
+    last_http_status: int | None = None
+    for attempt in attempts:
+        if not isinstance(attempt, Mapping):
+            continue
+        error_code = safe_provider_error_code(attempt.get("error_code"))
+        http_status = safe_provider_http_status(attempt.get("http_status"))
+        if error_code:
+            error_code_counts[error_code] = error_code_counts.get(error_code, 0) + 1
+            last_error_code = error_code
+        error_class = safe_provider_error_class(error_code, http_status)
+        if error_class:
+            error_class_counts[error_class] = error_class_counts.get(error_class, 0) + 1
+            last_error_class = error_class
+        if http_status is not None:
+            key = str(http_status)
+            http_status_counts[key] = http_status_counts.get(key, 0) + 1
+            last_http_status = http_status
+    provider_error_code = safe_provider_error_code(value.get("provider_error_code"))
+    provider_http_status = safe_provider_http_status(value.get("provider_http_status"))
+    return {
+        "schema": str(
+            value.get("schema")
+            or "axio_fusion_api.runtime_canonical_replica_routing.v1"
+        )[:120],
+        "enabled": bool(value.get("enabled")),
+        "runtime_canonical_identity_sha256": str(
+            value.get("runtime_canonical_identity_sha256") or ""
+        ),
+        "configured_replica_count": _safe_int(
+            value.get("configured_replica_count"), default=0
+        ),
+        "route_eligible_replica_count": _safe_int(
+            value.get("route_eligible_replica_count"), default=0
+        ),
+        "runtime_eligible_replica_count": _safe_int(
+            value.get("runtime_eligible_replica_count"), default=0
+        ),
+        "comparable_replica_count": _safe_int(
+            value.get("comparable_replica_count"), default=0
+        ),
+        "bounded_failover_attempt_count": _safe_int(
+            value.get("bounded_failover_attempt_count"), default=0
+        ),
+        "selected_profile_sha256": str(value.get("selected_profile_sha256") or ""),
+        "ordered_attempt_profile_hashes": [str(item) for item in hashes if str(item)][:24],
+        "attempted_profile_hash_count": len(
+            value.get("attempted_profile_hashes", [])
+        ) if isinstance(value.get("attempted_profile_hashes"), list) else 0,
+        "stage_attempt_count": _safe_int(value.get("stage_attempt_count"), default=0),
+        "stage_failure_count": _safe_int(value.get("stage_failure_count"), default=0),
+        "failover_used": bool(value.get("failover_used")),
+        "successful_profile_sha256": str(
+            value.get("successful_profile_sha256") or ""
+        ),
+        "terminal_reason": str(value.get("terminal_reason") or "")[:120],
+        "initial_attempt_reason": str(
+            value.get("initial_attempt_reason") or ""
+        )[:120],
+        "provider_error_code": provider_error_code,
+        "provider_http_status": provider_http_status,
+        "stage_error_code_counts": dict(sorted(error_code_counts.items())),
+        "stage_error_class_counts": dict(sorted(error_class_counts.items())),
+        "stage_http_status_counts": dict(sorted(http_status_counts.items())),
+        "last_stage_error_code": last_error_code,
+        "last_stage_error_class": last_error_class,
+        "last_stage_http_status": last_http_status,
+        "selection_policy": str(value.get("selection_policy") or "")[:120],
+        "selection_reason": str(value.get("selection_reason") or "")[:120],
+        "route_pool_restricted": bool(value.get("route_pool_restricted")),
+        "excluded_profile_hash_count": _safe_int(
+            value.get("excluded_profile_hash_count"), default=0
+        ),
+        "circuit_open_replica_count": _safe_int(
+            value.get("circuit_open_replica_count"), default=0
+        ),
+        "raw_canonical_identity_persisted": False,
+        "raw_profile_id_persisted": False,
+        "raw_provider_name_persisted": False,
+        "raw_model_name_persisted": False,
+    }
+
+
+def _safe_targeted_escalation_plan_summary(value: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or not value:
+        return {
+            "schema": "axio_fusion_api.targeted_escalation_plan.v1",
+            "enabled": False,
+            "triggered": False,
+            "subtask_count": 0,
+            "selected_subtask_count": 0,
+            "subtasks": [],
+            "quality_gap_triggered": False,
+            "requires_independent_answer_claim_verification": False,
+            "requires_cross_provider_verifier": False,
+            "requires_new_profile_verifier": False,
+            "answer_claim_independence_requirement": _safe_answer_claim_independence_requirement_summary({}),
+            "model_selection": _safe_targeted_escalation_model_selection_summary({}),
+            "raw_prompt_persisted": False,
+            "raw_candidate_text_persisted": False,
+            "secrets_persisted": False,
+        }
+    subtasks = value.get("subtasks") if isinstance(value.get("subtasks"), list) else []
+    return {
+        "schema": value.get("schema") or "axio_fusion_api.targeted_escalation_plan.v1",
+        "enabled": bool(value.get("enabled")),
+        "triggered": bool(value.get("triggered")),
+        "max_rounds": _safe_int(value.get("max_rounds"), default=0),
+        "subtask_count": _safe_int(value.get("subtask_count"), default=len(subtasks)),
+        "selected_subtask_count": _safe_int(value.get("selected_subtask_count"), default=len(subtasks)),
+        "quality_gap_triggered": bool(value.get("quality_gap_triggered")),
+        "blocking_gap_counts": _safe_counts(value.get("blocking_gap_counts") if isinstance(value.get("blocking_gap_counts"), Mapping) else {}),
+        "requires_independent_answer_claim_verification": bool(value.get("requires_independent_answer_claim_verification")),
+        "requires_cross_provider_verifier": bool(value.get("requires_cross_provider_verifier")),
+        "requires_new_profile_verifier": bool(value.get("requires_new_profile_verifier")),
+        "answer_claim_independence_requirement": _safe_answer_claim_independence_requirement_summary(
+            value.get("answer_claim_independence_requirement") if isinstance(value.get("answer_claim_independence_requirement"), Mapping) else {}
+        ),
+        "model_selection": _safe_targeted_escalation_model_selection_summary(
+            value.get("model_selection") if isinstance(value.get("model_selection"), Mapping) else {}
+        ),
+        "subtasks": [
+            {
+                "id": str(row.get("id") or "")[:120],
+                "kind": str(row.get("kind") or "")[:80],
+                "source": str(row.get("source") or "")[:80],
+                "priority": _safe_int(row.get("priority"), default=0),
+                "focus_sha256": str(row.get("focus_sha256") or ""),
+                "focus_label": str(row.get("focus_label") or "")[:160],
+                "focused_dag_node_ids": [
+                    str(item)[:120]
+                    for item in row.get("focused_dag_node_ids", [])
+                    if str(item)
+                ][:12] if isinstance(row.get("focused_dag_node_ids"), list) else [],
+                "raw_focus_persisted": False,
+            }
+            for row in subtasks[:12]
+            if isinstance(row, Mapping)
+        ],
+        "raw_prompt_persisted": False,
+        "raw_candidate_text_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _safe_answer_claim_independence_requirement_summary(value: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or not value:
+        return {
+            "schema": "axio_fusion_api.answer_claim_independence_requirement.v1",
+            "required": False,
+            "require_new_profile": False,
+            "require_new_canonical_model": False,
+            "require_new_provider": False,
+            "reason_codes": [],
+            "raw_answer_claim_persisted": False,
+            "raw_profile_id_persisted": False,
+            "raw_provider_name_persisted": False,
+            "raw_candidate_text_persisted": False,
+        }
+    return {
+        "schema": value.get("schema") or "axio_fusion_api.answer_claim_independence_requirement.v1",
+        "required": bool(value.get("required")),
+        "require_new_profile": bool(value.get("require_new_profile")),
+        "require_new_canonical_model": bool(value.get("require_new_canonical_model")),
+        "require_new_provider": bool(value.get("require_new_provider")),
+        "largest_answer_claim_fingerprint_sha256": str(value.get("largest_answer_claim_fingerprint_sha256") or ""),
+        "largest_answer_claim_equivalence_type": str(value.get("largest_answer_claim_equivalence_type") or "")[:80],
+        "largest_answer_claim_support_fraction": _safe_float(value.get("largest_answer_claim_support_fraction"), default=0.0),
+        "largest_answer_claim_unique_profile_count": _safe_int(value.get("largest_answer_claim_unique_profile_count"), default=0),
+        "largest_answer_claim_unique_provider_count": _safe_int(value.get("largest_answer_claim_unique_provider_count"), default=0),
+        "largest_answer_claim_unique_canonical_model_count": _safe_int(
+            value.get("largest_answer_claim_unique_canonical_model_count"),
+            default=0,
+        ),
+        "candidate_provider_hash_count": _safe_int(value.get("candidate_provider_hash_count"), default=0),
+        "required_unique_provider_count": _safe_int(value.get("required_unique_provider_count"), default=1),
+        "supporting_profile_hashes": [
+            str(item)
+            for item in value.get("supporting_profile_hashes", [])
+            if str(item)
+        ][:12] if isinstance(value.get("supporting_profile_hashes"), list) else [],
+        "supporting_provider_hashes": [
+            str(item)
+            for item in value.get("supporting_provider_hashes", [])
+            if str(item)
+        ][:12] if isinstance(value.get("supporting_provider_hashes"), list) else [],
+        "supporting_canonical_identity_hashes": [
+            str(item)
+            for item in value.get("supporting_canonical_identity_hashes", [])
+            if str(item)
+        ][:12]
+        if isinstance(value.get("supporting_canonical_identity_hashes"), list)
+        else [],
+        "reason_codes": [
+            str(item)[:120]
+            for item in value.get("reason_codes", [])
+            if str(item)
+        ][:12] if isinstance(value.get("reason_codes"), list) else [],
+        "raw_answer_claim_persisted": False,
+        "raw_profile_id_persisted": False,
+        "raw_provider_name_persisted": False,
+        "raw_candidate_text_persisted": False,
+    }
+
+
+def _safe_targeted_escalation_model_selection_summary(value: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or not value:
+        return {
+            "schema": "axio_fusion_api.targeted_escalation_model_selection.v1",
+            "selected": False,
+            "raw_profile_id_persisted": False,
+            "raw_provider_name_persisted": False,
+            "raw_model_name_persisted": False,
+        }
+    return {
+        "schema": value.get("schema") or "axio_fusion_api.targeted_escalation_model_selection.v1",
+        "selected": bool(value.get("selected")),
+        "selected_profile_sha256": str(value.get("selected_profile_sha256") or ""),
+        "selected_provider_sha256": str(value.get("selected_provider_sha256") or ""),
+        "selected_runtime_canonical_identity_sha256": str(
+            value.get("selected_runtime_canonical_identity_sha256") or ""
+        ),
+        "selected_is_new_profile_for_claim": bool(value.get("selected_is_new_profile_for_claim")),
+        "selected_is_new_provider_for_claim": bool(value.get("selected_is_new_provider_for_claim")),
+        "selected_is_new_canonical_model_for_claim": bool(
+            value.get("selected_is_new_canonical_model_for_claim")
+        ),
+        "requires_new_profile_verifier": bool(value.get("requires_new_profile_verifier")),
+        "requires_new_canonical_model_verifier": bool(
+            value.get("requires_new_canonical_model_verifier")
+        ),
+        "requires_cross_provider_verifier": bool(value.get("requires_cross_provider_verifier")),
+        "eligible_pool_count": _safe_int(value.get("eligible_pool_count"), default=0),
+        "used_profile_hash_count": _safe_int(value.get("used_profile_hash_count"), default=0),
+        "reason_codes": [
+            str(item)[:120]
+            for item in value.get("reason_codes", [])
+            if str(item)
+        ][:12] if isinstance(value.get("reason_codes"), list) else [],
+        "raw_profile_id_persisted": False,
+        "raw_provider_name_persisted": False,
+        "raw_model_name_persisted": False,
+    }
+
+
+def _safe_counts(value: Mapping[str, Any]) -> dict[str, int]:
+    return {
+        str(key)[:80]: _safe_int(item, default=0)
+        for key, item in value.items()
+        if str(key)
+    }
+
+
+def _safe_int(value: Any, *, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _safe_float(value: Any, *, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)

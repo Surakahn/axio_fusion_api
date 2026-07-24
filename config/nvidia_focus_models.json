@@ -1,0 +1,148 @@
+{
+  "schema": "axio_fusion_api.prefusion_focus_manifest.v1",
+  "selection_basis": "operator_focus_only",
+  "ranking_prior_forbidden": true,
+  "candidates": [
+    {
+      "provider": "nvidia",
+      "model": "openai/gpt-oss-120b",
+      "canonical_model_id": "openai/gpt-oss-120b",
+      "api_format": "chat",
+      "focus_reason": "重点关注的通用高容量候选，仍需独立公开证据与流式探测。",
+      "source_locators": [
+        {"url": "https://build.nvidia.com/openai/gpt-oss-120b", "title": "NVIDIA official model card"},
+        {"url": "https://artificialanalysis.ai/models/gpt-oss-120b", "title": "Artificial Analysis model page"}
+      ],
+      "allowed_roles": ["primary_solver", "independent_solver", "critic", "domain_specialist", "judge", "synthesizer", "structured_extraction", "short_verification"],
+      "ranking_prior_forbidden": true
+    },
+    {
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "canonical_model_id": "nvidia/nemotron-3-super-120b-a12b",
+      "api_format": "chat",
+      "focus_reason": "重点关注的通用高容量候选，角色能力由研究和探测后再决定。",
+      "source_locators": [
+        {"url": "https://build.nvidia.com/nvidia/nemotron-3-super-120b-a12b", "title": "NVIDIA official model card"},
+        {"url": "https://artificialanalysis.ai/models/nvidia-nemotron-3-super-120b-a12b", "title": "Artificial Analysis model page"}
+      ],
+      "allowed_roles": ["primary_solver", "independent_solver", "critic", "domain_specialist", "judge", "synthesizer", "structured_extraction", "short_verification"],
+      "ranking_prior_forbidden": true
+    },
+    {
+      "provider": "nvidia",
+      "model": "deepseek-ai/deepseek-v4-flash",
+      "canonical_model_id": "deepseek-ai/deepseek-v4-flash",
+      "api_format": "chat",
+      "focus_reason": "重点关注的低延迟候选，适合评估快速通道与受限子任务。",
+      "source_locators": [
+        {"url": "https://build.nvidia.com/deepseek-ai/deepseek-v4-flash", "title": "NVIDIA official model card"},
+        {"url": "https://artificialanalysis.ai/models/deepseek-v4-flash", "title": "Artificial Analysis model page"}
+      ],
+      "allowed_roles": ["primary_solver", "independent_solver", "critic", "domain_specialist", "structured_extraction", "short_verification", "simple_classification"],
+      "ranking_prior_forbidden": true
+    },
+    {
+      "provider": "nvidia",
+      "model": "deepseek-ai/deepseek-v4-pro",
+      "canonical_model_id": "deepseek-ai/deepseek-v4-pro",
+      "api_format": "chat",
+      "focus_reason": "重点关注的高质量通用候选，需以公开来源综合评估。",
+      "source_locators": [
+        {"url": "https://build.nvidia.com/deepseek-ai/deepseek-v4-pro", "title": "NVIDIA official model card"},
+        {"url": "https://artificialanalysis.ai/models/deepseek-v4-pro", "title": "Artificial Analysis model page"}
+      ],
+      "allowed_roles": ["primary_solver", "independent_solver", "critic", "domain_specialist", "judge", "synthesizer", "structured_extraction", "short_verification"],
+      "ranking_prior_forbidden": true
+    },
+    {
+      "provider": "nvidia",
+      "model": "minimaxai/minimax-m2.7",
+      "canonical_model_id": "minimaxai/minimax-m2.7",
+      "api_format": "chat",
+      "focus_reason": "重点关注的通用候选，工具和结构化角色需经过实测。",
+      "source_locators": [
+        {"url": "https://build.nvidia.com/minimaxai/minimax-m2.7", "title": "NVIDIA official model card"}
+      ],
+      "allowed_roles": ["primary_solver", "independent_solver", "critic", "domain_specialist", "judge", "synthesizer", "structured_extraction", "short_verification"],
+      "ranking_prior_forbidden": true
+    },
+    {
+      "provider": "nvidia",
+      "model": "mistralai/mistral-large-3-675b-instruct-2512",
+      "canonical_model_id": "mistralai/mistral-large-3-675b-instruct-2512",
+      "api_format": "chat",
+      "focus_reason": "重点关注的高容量通用候选，需关注实际渠道时延和可靠性。",
+      "source_locators": [
+        {"url": "https://build.nvidia.com/mistralai/mistral-large-3-675b-instruct-2512", "title": "NVIDIA official model card"},
+        {"url": "https://artificialanalysis.ai/models/mistral-large-3", "title": "Artificial Analysis model page"}
+      ],
+      "allowed_roles": ["primary_solver", "independent_solver", "critic", "domain_specialist", "judge", "synthesizer", "structured_extraction", "short_verification"],
+      "ranking_prior_forbidden": true
+    },
+    {
+      "provider": "nvidia",
+      "model": "stepfun-ai/step-3.5-flash",
+      "canonical_model_id": "stepfun-ai/step-3.5-flash",
+      "api_format": "chat",
+      "focus_reason": "重点关注的快速候选，优先验证简单任务和短校验角色。",
+      "source_locators": [
+        {"url": "https://build.nvidia.com/stepfun-ai/step-3.5-flash", "title": "NVIDIA official model card"},
+        {"url": "https://artificialanalysis.ai/models/step-3-5-flash", "title": "Artificial Analysis model page"}
+      ],
+      "allowed_roles": ["structured_extraction", "simple_classification", "short_verification", "single_tool_argument_validation"],
+      "ranking_prior_forbidden": true
+    },
+    {
+      "provider": "nvidia",
+      "model": "minimaxai/minimax-m3",
+      "canonical_model_id": "minimaxai/minimax-m3",
+      "api_format": "chat",
+      "focus_reason": "重点关注的通用候选，是否承担高风险角色必须由证据决定。",
+      "source_locators": [
+        {"url": "https://build.nvidia.com/minimaxai/minimax-m3", "title": "NVIDIA official model card"},
+        {"url": "https://artificialanalysis.ai/models/minimax-m3", "title": "Artificial Analysis model page"}
+      ],
+      "allowed_roles": ["primary_solver", "independent_solver", "critic", "domain_specialist", "judge", "synthesizer", "structured_extraction", "short_verification"],
+      "ranking_prior_forbidden": true
+    },
+    {
+      "provider": "nvidia",
+      "model": "z-ai/glm-5.2",
+      "canonical_model_id": "z-ai/glm-5.2",
+      "api_format": "chat",
+      "focus_reason": "重点关注的多语言和通用候选，需单独核验领域与代码能力。",
+      "source_locators": [
+        {"url": "https://build.nvidia.com/z-ai/glm-5.2", "title": "NVIDIA official model card"},
+        {"url": "https://artificialanalysis.ai/models/glm-5-2", "title": "Artificial Analysis model page"}
+      ],
+      "allowed_roles": ["primary_solver", "independent_solver", "critic", "domain_specialist", "judge", "synthesizer", "structured_extraction", "short_verification"],
+      "ranking_prior_forbidden": true
+    },
+    {
+      "provider": "nvidia",
+      "model": "stepfun-ai/step-3.7-flash",
+      "canonical_model_id": "stepfun-ai/step-3.7-flash",
+      "api_format": "chat",
+      "focus_reason": "重点关注的快速候选，优先作为快速通道和局部校验候选。",
+      "source_locators": [
+        {"url": "https://build.nvidia.com/stepfun-ai/step-3.7-flash", "title": "NVIDIA official model card"},
+        {"url": "https://artificialanalysis.ai/models/step-3-7-flash", "title": "Artificial Analysis model page"}
+      ],
+      "allowed_roles": ["structured_extraction", "simple_classification", "short_verification", "single_tool_argument_validation"],
+      "ranking_prior_forbidden": true
+    },
+    {
+      "provider": "nvidia",
+      "model": "openai/gpt-oss-20b",
+      "canonical_model_id": "openai/gpt-oss-20b",
+      "api_format": "chat",
+      "focus_reason": "重点关注的低成本候选，只承担边界清晰的轻量子任务。",
+      "source_locators": [
+        {"url": "https://build.nvidia.com/openai/gpt-oss-20b", "title": "NVIDIA official model card"}
+      ],
+      "allowed_roles": ["structured_extraction", "simple_classification", "short_verification", "single_tool_argument_validation"],
+      "ranking_prior_forbidden": true
+    }
+  ]
+}

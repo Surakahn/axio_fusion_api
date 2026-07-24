@@ -1,0 +1,29 @@
+{
+  "providers": [
+    {
+      "provider": "nvidia",
+      "api_format": "chat/completions",
+      "base_url_env": "AXIO_NVIDIA_BASE_URL",
+      "api_key_env": "AXIO_NVIDIA_API_KEYS",
+      "models_env": "AXIO_NVIDIA_MODELS"
+    },
+    {
+      "provider": "tokenapis",
+      "api_format": "responses",
+      "base_url_env": "AXIO_TOKENAPIS_BASE_URL",
+      "api_key_env": "AXIO_TOKENAPIS_API_KEY",
+      "models_env": "AXIO_TOKENAPIS_MODELS"
+    }
+  ],
+  "prefusion": {
+    "focus_manifest": "config/nvidia_focus_models.json",
+    "source_manifest": "config/public_model_sources.example.json",
+    "research_agent_config": "config/research_agent.example.json",
+    "min_available_models": 3,
+    "candidate_batch_size": 4,
+    "research_max_workers": 4,
+    "stream_probe_samples": 3,
+    "merge_strategy": "deterministic_research_quality_confidence_candidate_id",
+    "ranking_prior_forbidden": true
+  }
+}

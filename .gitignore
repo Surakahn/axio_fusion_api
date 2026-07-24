@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+build/
+dist/
+*.egg-info/
+.env
+.env.*
+*.private.json
+*.private.jsonl
+*.secret.json
+*.secret.jsonl
+private/
