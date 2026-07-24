@@ -26,7 +26,7 @@ from axio_fusion_api.hermes_moa import (
     stage_max_output_tokens,
 )
 from axio_fusion_api.learning import build_orchestrator_training_dataset
-from axio_fusion_api.orchestrator import FusionEngine
+from axio_fusion_api.orchestrator import FusionEngine, _provider_fusion_candidate_threshold
 from axio_fusion_api.providers import ProviderCompletion
 from axio_fusion_api.registry import normalize_profile
 from axio_fusion_api.trace_store import safe_execution_trace
@@ -82,10 +82,13 @@ def test_hermes_moa_2_process_policy_separates_stage_depth_and_output_budget() -
     assert pro["stage_cognitive_budget"]["slots"]["judge"]["reasoning_effort"] == "xhigh"
     assert pro["stage_output_budget"]["judge_max_tokens"] == 2_048
     assert terra["stage_output_budget"]["judge_max_tokens"] == 1_536
+    assert pro["stage_output_budget"]["judge_is_caller_output_capped"] is False
+    assert pro["stage_output_budget"]["synthesizer_caller_output_cap_applied"] is True
 
     assert cognitive_budget(terra, "critic")["public_reasoning_summary_only"] is True
     assert stage_max_output_tokens(terra, "judge", 4_096) == 1_536
-    assert stage_max_output_tokens(pro, "judge", 128) == 128
+    assert stage_max_output_tokens(pro, "judge", 128) == 2_048
+    assert stage_max_output_tokens(pro, "synthesizer", 128) == 128
     assert stage_max_output_tokens(pro, "synthesizer", 4_096) == 4_096
     assert stage_max_output_tokens(pro, "synthesizer", None) is None
 
@@ -95,6 +98,37 @@ def test_hermes_moa_2_process_policy_separates_stage_depth_and_output_budget() -
     )
     assert "Process budget:" in system
     assert "hidden chain-of-thought" in system
+
+
+def test_provider_fusion_threshold_does_not_use_single_candidate_degraded_floor() -> None:
+    provider_route = {
+        "judge_contract": {
+            "required": True,
+            "finalization_mode": "provider_judge_synthesis",
+        },
+        "budget": {"fusion_finalization_mode": "provider_judge_synthesis"},
+    }
+    assert (
+        _provider_fusion_candidate_threshold(
+            provider_route,
+            required_min_candidate_count=2,
+            minimum_viable_candidate_count=1,
+        )
+        == 2
+    )
+
+    local_route = {
+        "judge_contract": {"required": True},
+        "budget": {"fusion_finalization_mode": "local_consensus"},
+    }
+    assert (
+        _provider_fusion_candidate_threshold(
+            local_route,
+            required_min_candidate_count=2,
+            minimum_viable_candidate_count=1,
+        )
+        == 1
+    )
 
 
 def test_hermes_process_plan_only_enables_admitted_provider_route() -> None:
@@ -947,11 +981,20 @@ def test_hermes_reference_failure_is_nonfatal_and_receipt_is_partial() -> None:
     response = FusionEngine(profiles, client=PartialClient(), cache_enabled=False).complete(request, live=True)
     execution = response.trace["hermes_moa_execution"]
 
-    assert response.text == "partial hermes answer"
+    # A partial Hermes reference is useful recovery context, but it is not a
+    # quorum for the provider Judge/Synthesizer contract.  The runtime must
+    # return a clearly degraded reference answer instead of claiming that the
+    # acting aggregator completed.
+    assert response.text == "surviving reference"
     assert execution["reference_completed_count"] >= 1
     assert execution["reference_failed_or_empty_count"] >= 1
     assert execution["partial_reference_context_used"] is True
     assert execution["reference_failures_are_nonfatal"] is True
+    assert execution["aggregator_provider_call_count"] == 0
+    assert execution["process_contract_completed"] is False
+    assert response.trace["runtime_fusion_stage_outcome"]["execution_mode"] == (
+        "single_candidate_degraded_response"
+    )
 
 
 def test_hermes_high_agreement_still_requires_acting_aggregator() -> None:

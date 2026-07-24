@@ -1,9 +1,136 @@
-# Axio Fusion API Standalone
+# Axio Fusion API
 
-Axio Fusion API is a standalone commercial model-fusion service.  It is kept
-outside the ASciFS `axio` package on purpose: ASciFS may call it over HTTP or
-install it as an external package, but the Fusion service does not import ASciFS
-research workflow, paper database, graph database, Studio UI, or memory code.
+> **Turn a portfolio of remote model APIs into one coherent intelligence
+> product.**
+
+Axio Fusion API is a protocol-neutral, remote-only model-fusion runtime for
+building `axio-fast`, `axio-terra`, and `axio-pro` from the capabilities already
+available through configured model providers. It is not a new model-weight
+training project and it does not require local GPU inference. Axio is the
+engineering layer that decides which remote capabilities should collaborate,
+how much evidence is enough, when a smaller model should do one bounded job,
+and how the final answer is produced under cost, deadline, safety, and
+reliability constraints.
+
+The result is a practical model product layer: one public model family, four
+industry-standard API surfaces, provider-aware routing, bounded deliberation,
+structured evidence handling, and a controlled path for improving prompts and
+Harness composition without granting the runtime permission to rewrite its own
+code.
+
+## The Product Idea
+
+The central Axio thesis is simple:
+
+```text
+remote model capabilities
+        + canonical identity and replica routing
+        + role-scoped prompt and Harness composition
+        + bounded independent deliberation
+        + Judge / Synthesizer quality gates
+        + protocol-compatible streaming gateway
+        = one dependable Axio model family
+```
+
+This turns model diversity into an operational asset. A fast model can handle
+classification or a narrowly defined tool step; a stronger model can provide
+an independent solution; a critic can search for counterexamples and safety
+risks; and an acting synthesizer can produce the single user-facing answer.
+The system keeps these responsibilities explicit instead of pretending that a
+large number of provider calls automatically means better intelligence.
+
+## Why Axio Is Different
+
+| Capability | Engineering value |
+| --- | --- |
+| **Remote-only execution** | Uses provider APIs as the model substrate. No local weights, hidden training loop, or GPU deployment assumption. |
+| **Three product tiers** | `axio-fast` protects responsiveness, `axio-terra` spends bounded effort selectively, and `axio-pro` admits a deeper evidence panel only when it is justified. |
+| **Canonical model identity** | Multiple channels exposing the same model count as one cognitive model, while remaining available as health-aware replicas. Redundancy improves availability without inflating intelligence. |
+| **Hermes-style constrained MoA** | Reference models receive bounded, role-specific evidence tasks. Judge and acting Synthesizer stages remain explicit, budgeted, and auditable. |
+| **Harness as configuration** | Prompt fragments, role contracts, DAG composition, and policy preferences are the adjustable Lego pieces. Runtime Python remains immutable and outside the self-improvement surface. |
+| **Four protocol surfaces** | Chat Completions, Responses, Anthropic Messages, and Gemini GenerateContent can reach the same public Axio tiers through streaming-compatible adapters. |
+| **Hard operational guardrails** | Provider calls have a 90-second ceiling, Fusion routes carry a 3x single-model latency guard, and budget/deadline reservations prevent an incomplete pipeline from being reported as complete. |
+| **Evaluation boundary** | Benchmark execution is an external consumer of Axio, not a hidden routing input. Test labels, answers, and benchmark scores cannot steer production prompts or provider selection. |
+
+## Architecture At A Glance
+
+```text
+                         public streaming APIs
+          Chat / Responses / Anthropic / Gemini
+                                  |
+                        protocol-neutral request
+                                  |
+             +--------------------v--------------------+
+             |              Axio Gateway                |
+             | auth, normalization, streaming contract  |
+             +--------------------+--------------------+
+                                  |
+             +--------------------v--------------------+
+             |      Admission + Routing + Budgeting     |
+             | task analysis, tier policy, 3x guard      |
+             +--------------------+--------------------+
+                                  |
+             +--------------------v--------------------+
+             |      Canonical Expert Panel Scheduler    |
+             | identity de-dup, replica failover, roles  |
+             +--------------------+--------------------+
+                                  |
+             +--------------------v--------------------+
+             |       Hermes constrained deliberation    |
+             | references -> Judge -> feedback -> act   |
+             |             Synthesizer                  |
+             +--------------------+--------------------+
+                                  |
+                 one coherent Axio response + safe receipt
+
+   provider A / chat      provider B / responses      provider C / other
+        model replicas          model replicas             model replicas
+```
+
+## Current Project Situation
+
+The repository has been fully separated from the ASciFS project and is managed
+as an independent Git repository. Fusion code, tests, plans, architecture
+documents, provider configuration templates, screening workflows, and
+evaluation-control code live here. ASciFS may consume Axio as an external HTTP
+service or package boundary, but Axio does not import ASciFS runtime code.
+
+The implementation already includes the protocol adapters, provider enrollment
+and pre-Fusion screening path, streaming health probes, canonical replica
+routing, model-role assignment, bounded panel repair, Hermes process receipts,
+tool-call safety boundaries, response caching rules, and hash-safe operational
+traces. The current engineering milestone is the live end-to-end deliberation
+gate for Terra and Pro under the configured remote channels. The formal
+21-suite, 9-category benchmark campaign is intentionally downstream of that
+gate and is not represented here as a completed result.
+
+That distinction is deliberate: passing unit tests proves software behavior;
+it does not prove that a live Fusion pipeline is useful. Axio treats the live
+Fusion gate, then the independent benchmark campaign, as separate claims that
+must each earn their own evidence.
+
+## Application Outlook
+
+Axio is designed for environments where model choice changes faster than the
+product interface: enterprise copilots, coding and review workflows, research
+assistants, multilingual knowledge work, agentic tool execution, and regulated
+decision support. Organizations can add or replace remote channels without
+rewriting their public application integration. The provider-specific details
+stay behind the enrollment and routing boundary; the product surface remains
+the stable Axio model family.
+
+The commercial promise is not “more calls at any cost.” It is **capability
+composition with a measurable operating envelope**: stronger answers when
+independent evidence is valuable, fast direct execution when fusion would not
+pay for itself, bounded recovery when a channel fails, and receipts that make
+every quality or latency claim inspectable.
+
+## Standalone Boundary
+
+Axio Fusion API is intentionally kept outside the ASciFS `axio` package. ASciFS
+may call it over HTTP or install it as an external package, but the Fusion
+service does not import ASciFS research workflow, paper database, graph
+database, Studio UI, or memory code.
 
 ## Remote API Only
 

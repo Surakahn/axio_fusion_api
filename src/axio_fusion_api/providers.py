@@ -419,6 +419,10 @@ class HTTPProviderClient:
             "gemini": self._gemini_turn,
             "chat": self._chat_turn,
         }[api_format]
+        fusion_deadline_bound = bool(
+            isinstance(request.metadata, Mapping)
+            and request.metadata.get("_axio_request_deadline_bound") is True
+        )
         # A logical provider turn may contain a bounded semantic retry.  Keep
         # every adapter attempt inside one deadline so an empty gateway
         # response cannot silently double the branch latency budget.
@@ -436,6 +440,7 @@ class HTTPProviderClient:
                 prompt=prompt,
                 system=system,
                 timeout=_remaining_timeout(deadline_at),
+                fusion_deadline_bound=fusion_deadline_bound,
             )
             if completion.has_output:
                 return completion
@@ -470,13 +475,14 @@ class HTTPProviderClient:
             return completion.text
         raise ProviderExecutionError("gemini response contains no text", error_code="tool_call_without_text")
 
-    def _chat_turn(self, profile: ModelProfile, request: FusionRequest, *, prompt: str, system: str, timeout: float | None) -> ProviderCompletion:
+    def _chat_turn(self, profile: ModelProfile, request: FusionRequest, *, prompt: str, system: str, timeout: float | None, fusion_deadline_bound: bool = False) -> ProviderCompletion:
         result = _post_json(
             profile,
             "/chat/completions",
             _chat_payload(profile, request, prompt=prompt, system=system),
             timeout=timeout,
             require_streaming=self.require_streaming,
+            fusion_deadline_bound=fusion_deadline_bound,
         )
         choices = result.get("choices") if isinstance(result, Mapping) else []
         choice = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], Mapping) else {}
@@ -491,7 +497,7 @@ class HTTPProviderClient:
             text = _text_from_value(result.get("output_text") or result.get("text"))
         return ProviderCompletion(text, normalize_provider_tool_calls(result, api_format="chat"))
 
-    def _responses_turn(self, profile: ModelProfile, request: FusionRequest, *, prompt: str, system: str, timeout: float | None) -> ProviderCompletion:
+    def _responses_turn(self, profile: ModelProfile, request: FusionRequest, *, prompt: str, system: str, timeout: float | None, fusion_deadline_bound: bool = False) -> ProviderCompletion:
         payload = _responses_typed_payload(profile, request, prompt=prompt, system=system)
         typed_started = time.monotonic()
         try:
@@ -501,6 +507,7 @@ class HTTPProviderClient:
                 payload,
                 timeout=timeout,
                 require_streaming=self.require_streaming,
+                fusion_deadline_bound=fusion_deadline_bound,
             )
         except ProviderExecutionError as exc:
             if (
@@ -517,10 +524,11 @@ class HTTPProviderClient:
                 _responses_text_payload(profile, request, prompt=prompt, system=system),
                 timeout=fallback_timeout,
                 require_streaming=self.require_streaming,
+                fusion_deadline_bound=fusion_deadline_bound,
             )
         return ProviderCompletion(_extract_responses_text(result), normalize_provider_tool_calls(result, api_format="responses"))
 
-    def _anthropic_turn(self, profile: ModelProfile, request: FusionRequest, *, prompt: str, system: str, timeout: float | None) -> ProviderCompletion:
+    def _anthropic_turn(self, profile: ModelProfile, request: FusionRequest, *, prompt: str, system: str, timeout: float | None, fusion_deadline_bound: bool = False) -> ProviderCompletion:
         result = _post_json(
             profile,
             "/messages",
@@ -528,6 +536,7 @@ class HTTPProviderClient:
             timeout=timeout,
             extra_headers={"anthropic-version": "2023-06-01"},
             require_streaming=self.require_streaming,
+            fusion_deadline_bound=fusion_deadline_bound,
         )
         content = result.get("content") if isinstance(result, Mapping) else ""
         text = _text_from_value(content)
@@ -535,7 +544,7 @@ class HTTPProviderClient:
             text = _text_from_value(result.get("output_text") or result.get("text"))
         return ProviderCompletion(text, normalize_provider_tool_calls(result, api_format="anthropic"))
 
-    def _gemini_turn(self, profile: ModelProfile, request: FusionRequest, *, prompt: str, system: str, timeout: float | None) -> ProviderCompletion:
+    def _gemini_turn(self, profile: ModelProfile, request: FusionRequest, *, prompt: str, system: str, timeout: float | None, fusion_deadline_bound: bool = False) -> ProviderCompletion:
         result = _post_json(
             profile,
             _gemini_generate_content_endpoint(profile.model, stream=True),
@@ -543,6 +552,7 @@ class HTTPProviderClient:
             timeout=timeout,
             key_as_query=True,
             require_streaming=self.require_streaming,
+            fusion_deadline_bound=fusion_deadline_bound,
         )
         candidates = result.get("candidates") if isinstance(result, Mapping) else []
         candidate = candidates[0] if isinstance(candidates, list) and candidates and isinstance(candidates[0], Mapping) else {}
@@ -2474,6 +2484,7 @@ def _post_json(
     extra_headers: Mapping[str, str] | None = None,
     key_as_query: bool = False,
     require_streaming: bool = False,
+    fusion_deadline_bound: bool = False,
 ) -> Mapping[str, Any]:
     base_url = _base_url(profile)
     base_url_readiness = provider_base_url_readiness(base_url)
@@ -2564,9 +2575,14 @@ def _post_json(
                         api_format=_provider_adapter_format(profile.api_format),
                         timeout=remaining_timeout,
                         require_streaming=bool(require_streaming),
+                        fusion_deadline_bound=bool(fusion_deadline_bound),
                     )
                 else:
-                    result = _open_json_request(request, timeout=remaining_timeout)
+                    result = _open_json_request(
+                        request,
+                        timeout=remaining_timeout,
+                        fusion_deadline_bound=bool(fusion_deadline_bound),
+                    )
                 _advance_provider_key_rotation(profile, canonical_key_index)
                 _record_provider_request_receipt(
                     status="success",
@@ -2636,6 +2652,7 @@ def _open_stream_json_request(
     api_format: str,
     timeout: float,
     require_streaming: bool = False,
+    fusion_deadline_bound: bool = False,
 ) -> tuple[Mapping[str, Any], bool, bool, str, str, int]:
     """Read a provider SSE/NDJSON response incrementally and normalize it.
 
@@ -2649,6 +2666,10 @@ def _open_stream_json_request(
         max(0.001, float(timeout)),
     )
     deadline_at = time.monotonic() + budget
+    timeout_error_code = _timeout_error_code(
+        budget=budget,
+        fusion_deadline_bound=fusion_deadline_bound,
+    )
     accumulator = _StreamAccumulator()
     try:
         with _open_provider_url(request, timeout=budget) as response:
@@ -2685,6 +2706,7 @@ def _open_stream_json_request(
                 response,
                 deadline_at,
                 protocol_state=stream_state,
+                timeout_error_code=timeout_error_code,
             ):
                 frame_count += 1
                 _accumulate_stream_payload(
@@ -2706,8 +2728,8 @@ def _open_stream_json_request(
         raise ProviderExecutionError(
             _safe_provider_error_message("provider_stream_transport_error"),
             error_code=(
-                "provider_response_timeout_exceeded_90s"
-                if time.monotonic() >= deadline_at
+                timeout_error_code
+                if isinstance(exc, (TimeoutError, socket.timeout))
                 else type(exc).__name__
             ),
         ) from exc
@@ -2767,6 +2789,7 @@ def _iter_stream_events(
     deadline_at: float,
     *,
     protocol_state: dict[str, str] | None = None,
+    timeout_error_code: str = "provider_response_timeout_exceeded_90s",
 ) -> Iterator[tuple[str, Any]]:
     """Yield parsed SSE events and tolerate JSON-lines streaming gateways."""
 
@@ -2795,15 +2818,15 @@ def _iter_stream_events(
     while True:
         if time.monotonic() >= deadline_at:
             raise ProviderExecutionError(
-                "provider stream exceeded the 90 second response limit",
-                error_code="provider_response_timeout_exceeded_90s",
+                _safe_provider_error_message(timeout_error_code),
+                error_code=timeout_error_code,
             )
         try:
             raw_line = response.readline()
         except (TimeoutError, socket.timeout, OSError) as exc:
             raise ProviderExecutionError(
-                "provider stream exceeded the 90 second response limit",
-                error_code="provider_response_timeout_exceeded_90s",
+                _safe_provider_error_message(timeout_error_code),
+                error_code=timeout_error_code,
             ) from exc
         if not raw_line:
             item = flush()
@@ -2812,8 +2835,8 @@ def _iter_stream_events(
             return
         if time.monotonic() >= deadline_at:
             raise ProviderExecutionError(
-                "provider stream exceeded the 90 second response limit",
-                error_code="provider_response_timeout_exceeded_90s",
+                _safe_provider_error_message(timeout_error_code),
+                error_code=timeout_error_code,
             )
         if isinstance(raw_line, bytes):
             line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
@@ -3632,6 +3655,23 @@ def _provider_timeout_budget(value: float | None) -> float:
     return min(PROVIDER_MAX_RESPONSE_SECONDS, max(0.001, selected))
 
 
+def _timeout_error_code(*, budget: float, fusion_deadline_bound: bool) -> str:
+    """Classify a read timeout without confusing a local stage deadline.
+
+    A Fusion stage often receives only the few seconds left in the outer
+    request deadline.  That is not evidence that the provider violated the
+    product's independent 90-second ceiling.  Explicit short control-plane
+    timeouts are likewise recorded separately from the 90-second admission
+    rule.
+    """
+
+    if fusion_deadline_bound:
+        return "fusion_request_deadline_exhausted"
+    if float(budget) >= PROVIDER_MAX_RESPONSE_SECONDS:
+        return "provider_response_timeout_exceeded_90s"
+    return "provider_request_timeout"
+
+
 def _remaining_timeout_after_start(started_at: float, timeout: float | None) -> float:
     return max(0.001, _provider_timeout_budget(timeout) - (time.monotonic() - started_at))
 
@@ -3665,7 +3705,12 @@ def _sleep_before_retry(retry_attempt_index: int, *, deadline_at: float) -> None
     time.sleep(min(delay, max(0.0, remaining - 0.001)))
 
 
-def _open_json_request(request: urllib.request.Request, *, timeout: float) -> Mapping[str, Any]:
+def _open_json_request(
+    request: urllib.request.Request,
+    *,
+    timeout: float,
+    fusion_deadline_bound: bool = False,
+) -> Mapping[str, Any]:
     try:
         with _open_provider_url(request, timeout=timeout) as response:
             raw = response.read().decode("utf-8")
@@ -3677,9 +3722,13 @@ def _open_json_request(request: urllib.request.Request, *, timeout: float) -> Ma
             http_status=int(exc.code),
         ) from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        error_code = _timeout_error_code(
+            budget=timeout,
+            fusion_deadline_bound=fusion_deadline_bound,
+        ) if isinstance(exc, (TimeoutError, socket.timeout)) else type(exc).__name__
         raise ProviderExecutionError(
-            _safe_provider_error_message(type(exc).__name__),
-            error_code=type(exc).__name__,
+            _safe_provider_error_message(error_code),
+            error_code=error_code,
         ) from exc
     try:
         result = json.loads(raw)

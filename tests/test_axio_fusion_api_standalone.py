@@ -2153,7 +2153,11 @@ def test_standalone_mandatory_fusion_stage_reservations_keep_judge_and_synthesis
     request = canonicalize_payload(
         {
             "model": "axio-pro",
-            "quality_target": 0.95,
+            # Two independent survivors are enough for this reservation
+            # fixture. A 0.95 target deliberately requires three and would
+            # correctly force the runtime into degraded mode after the critic
+            # branch fails, which is a different contract.
+            "quality_target": 0.82,
             "max_total_model_calls": 5,
             "messages": [
                 {
@@ -3388,13 +3392,16 @@ def test_standalone_live_execution_prompts_receive_role_scoped_task_dag_without_
     assert "Deliberative search contract" in primary_prompt
     assert "bounded_deliberative_branch_and_verify" in primary_prompt
     assert "latency_multiplier_guard" in primary_prompt
-    assert '"target_max_vs_single_model": 3.0' in primary_prompt
+    assert (
+        '"target_max_vs_single_model": 3.0' in primary_prompt
+        or '"target_max_vs_single_model":3.0' in primary_prompt
+    )
     assert "answer_policy" in primary_prompt
-    assert '"quality_target": 0.95' in primary_prompt
-    assert '"evidence_standard": "high"' in primary_prompt
-    assert '"must_label_uncertainty": true' in primary_prompt
-    assert '"must_not_use_majority_vote_as_truth": true' in primary_prompt
-    assert '"public_reasoning_summary_only": true' in primary_prompt
+    assert '"quality_target": 0.95' in primary_prompt or '"quality_target":0.95' in primary_prompt
+    assert '"evidence_standard": "high"' in primary_prompt or '"evidence_standard":"high"' in primary_prompt
+    assert '"must_label_uncertainty": true' in primary_prompt or '"must_label_uncertainty":true' in primary_prompt
+    assert '"must_not_use_majority_vote_as_truth": true' in primary_prompt or '"must_not_use_majority_vote_as_truth":true' in primary_prompt
+    assert '"public_reasoning_summary_only": true' in primary_prompt or '"public_reasoning_summary_only":true' in primary_prompt
     assert "Role execution contract" in primary_prompt
     assert "role_intent" in primary_prompt
     assert "context_scaffold" in primary_prompt

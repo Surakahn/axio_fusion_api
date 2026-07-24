@@ -113,6 +113,13 @@ _MAX_CIRCUIT_BREAKER_COOLDOWN_SECONDS = 3_600.0
 _MANDATORY_STAGE_DEADLINE_MARGIN_MS = 180
 _MANDATORY_STAGE_DEADLINE_MIN_RESERVATION_MS = 250
 _MANDATORY_STAGE_DEADLINE_MAX_RESERVATION_MS = 12_000
+_RUNTIME_EXPERT_ROLE_PRIORITY = {
+    "primary_solver": 40,
+    "independent_solver": 30,
+    "critic": 20,
+    "domain_specialist": 10,
+    "backup_solver": 5,
+}
 
 
 class FusionExecutionError(RuntimeError):
@@ -535,13 +542,12 @@ def _mandatory_fusion_stage_deadline_reservations(
 
 
 def _minimum_viable_fusion_candidate_count(route_plan: Mapping[str, Any]) -> int:
-    """Return the smallest panel that can reach the admitted finalizer.
+    """Return the smallest panel that can produce a degraded answer.
 
-    A Hermes route can still aggregate one surviving reference output after
-    the other advisory calls fail.  The runtime receipt remains explicit that
-    the Judge was skipped or the panel was reduced; this lower bound only keeps
-    a non-empty partial advisory context from being discarded before the
-    single aggregator gets a chance to answer.
+    A Hermes route may retain one surviving reference output after the other
+    advisory calls fail.  This lower bound only keeps that non-empty partial
+    context available for a degraded response.  The separate provider Fusion
+    threshold controls whether a remote Judge/Synthesizer may run.
     """
 
     hermes_plan = _effective_hermes_plan(route_plan)
@@ -554,6 +560,44 @@ def _minimum_viable_fusion_candidate_count(route_plan: Mapping[str, Any]) -> int
         else {}
     )
     return 2 if judge_contract.get("required") is True else 1
+
+
+def _provider_fusion_candidate_threshold(
+    route_plan: Mapping[str, Any],
+    *,
+    required_min_candidate_count: int,
+    minimum_viable_candidate_count: int,
+) -> int:
+    """Return the quorum required before remote Fusion stages may run.
+
+    ``minimum_viable_candidate_count`` is intentionally permissive for a
+    degraded answer.  It must not be reused as the provider Judge/Synthesizer
+    admission threshold: a one-branch Hermes response has no independent
+    evidence panel to adjudicate.  Local-consensus routes are the one
+    exception because they do not claim a remote Judge/Synthesizer process.
+    """
+
+    judge_contract = (
+        route_plan.get("judge_contract")
+        if isinstance(route_plan.get("judge_contract"), Mapping)
+        else {}
+    )
+    budget = route_plan.get("budget") if isinstance(route_plan.get("budget"), Mapping) else {}
+    finalization_mode = str(
+        budget.get("fusion_finalization_mode")
+        or route_plan.get("fusion_finalization_mode")
+        or judge_contract.get("finalization_mode")
+        or "direct"
+    )
+    if (
+        judge_contract.get("required") is True
+        and finalization_mode == "provider_judge_synthesis"
+    ):
+        return max(
+            max(1, int(minimum_viable_candidate_count)),
+            max(1, int(required_min_candidate_count)),
+        )
+    return max(1, int(minimum_viable_candidate_count))
 
 
 def _hermes_history_contains_current_prompt(
@@ -651,6 +695,11 @@ def _runtime_fusion_stage_outcome(
     candidate_count = max(0, int(completed_candidate_count))
     required_count = max(1, int(required_min_candidate_count))
     viable_count = max(1, int(minimum_viable_candidate_count))
+    provider_fusion_count = _provider_fusion_candidate_threshold(
+        route_plan,
+        required_min_candidate_count=required_count,
+        minimum_viable_candidate_count=viable_count,
+    )
     hermes_plan = _effective_hermes_plan(route_plan)
     hermes_enabled = hermes_plan.get("enabled") is True
     hermes_reference_count = max(0, int(hermes_reference_completed_count))
@@ -664,7 +713,7 @@ def _runtime_fusion_stage_outcome(
     )
     candidate_quorum_met = candidate_count >= required_count
     viable_panel = bool(
-        candidate_count >= viable_count
+        candidate_count >= provider_fusion_count
         and (not hermes_enabled or hermes_reference_count > 0)
     )
     local_finalized = bool(
@@ -764,6 +813,7 @@ def _runtime_fusion_stage_outcome(
         "initial_complete_fusion_admitted": admitted,
         "required_min_candidate_count": required_count,
         "minimum_viable_candidate_count": viable_count,
+        "provider_fusion_candidate_threshold": provider_fusion_count,
         "completed_candidate_count": candidate_count,
         "hermes_reference_output_required": hermes_enabled,
         "hermes_reference_completed_count": hermes_reference_count,
@@ -1832,6 +1882,8 @@ class FusionEngine:
 
     def _complete_live(self, request: FusionRequest, route_plan: Mapping[str, Any]) -> FusionResponse:
         started = time.monotonic()
+        if not isinstance(route_plan, dict):
+            route_plan = dict(route_plan)
         roles = [role for role in route_plan.get("roles", []) if isinstance(role, Mapping)]
         budget = route_plan.get("budget") if isinstance(route_plan.get("budget"), Mapping) else {}
         guards = route_plan.get("runtime_guards") if isinstance(route_plan.get("runtime_guards"), Mapping) else {}
@@ -1859,7 +1911,7 @@ class FusionEngine:
         )
         local_consensus_mode = finalization_mode == "local_consensus"
         max_parallel = max(1, int(budget.get("max_parallel_experts") or 1))
-        expert_roles = [
+        configured_expert_roles = [
             role
             for role in roles
             if str(role.get("role"))
@@ -1871,6 +1923,10 @@ class FusionEngine:
                 "backup_solver",
             }
         ]
+        expert_roles, expert_panel_receipt = _dedupe_runtime_expert_roles(
+            configured_expert_roles
+        )
+        route_plan["runtime_expert_panel"] = expert_panel_receipt
         fusion_required = bool(route_plan.get("judge_contract", {}).get("required")) if isinstance(route_plan.get("judge_contract"), Mapping) else False
         candidates: list[CandidateResult] = []
         parallel_cancel_event: threading.Event | None = None
@@ -1887,6 +1943,7 @@ class FusionEngine:
             "raw_profile_ids_persisted": False,
             "raw_prompts_persisted": False,
             "secrets_persisted": False,
+            "expert_role_deduplication": expert_panel_receipt,
         }
         if max_parallel <= 1 or len(expert_roles) <= 1:
             for role in expert_roles:
@@ -2159,8 +2216,13 @@ class FusionEngine:
             for candidate in fusion_panel_candidates
             if hermes_is_reference_role(hermes_plan, candidate.role)
         ]
+        provider_fusion_candidate_threshold = _provider_fusion_candidate_threshold(
+            route_plan,
+            required_min_candidate_count=required_min_candidates,
+            minimum_viable_candidate_count=minimum_viable_candidates,
+        )
         fusion_panel_viable = bool(
-            len(fusion_panel_candidates) >= minimum_viable_candidates
+            len(fusion_panel_candidates) >= provider_fusion_candidate_threshold
             and (
                 hermes_plan.get("enabled") is not True
                 or any(candidate.answer.strip() for candidate in hermes_reference_candidates)
@@ -2544,6 +2606,7 @@ class FusionEngine:
             "deadline_budget": deadline_budget.safe_dict(),
             "prompt_budget": prompt_budget.safe_dict(),
             "parallel_wave": dict(parallel_wave_receipt),
+            "runtime_expert_panel": expert_panel_receipt,
             "hermes_moa_execution": hermes_moa_execution,
             "cache_hit": False,
             "circuit_breakers": self._circuit_snapshot(),
@@ -3158,6 +3221,7 @@ class FusionEngine:
                 prompt=prompt,
                 system=system,
                 timeout=provider_timeout,
+                deadline_bound=deadline_budget is not None,
             )
             provider_response_received = True
             self._record_success(
@@ -3298,6 +3362,7 @@ class FusionEngine:
         prompt: str,
         system: str,
         timeout: float | None,
+        deadline_bound: bool = False,
     ) -> ProviderCompletion:
         """Use native tool-call extraction when the client exposes it.
 
@@ -3307,9 +3372,13 @@ class FusionEngine:
         protocol adapter.
         """
 
+        provider_request = _request_with_deadline_marker(
+            request,
+            deadline_bound=deadline_bound,
+        )
         complete_turn = getattr(self.client, "complete_turn", None)
         if callable(complete_turn):
-            value = complete_turn(profile, request, prompt=prompt, system=system, timeout=timeout)
+            value = complete_turn(profile, provider_request, prompt=prompt, system=system, timeout=timeout)
             if isinstance(value, ProviderCompletion):
                 return value
             if isinstance(value, Mapping):
@@ -3318,7 +3387,7 @@ class FusionEngine:
                     normalize_tool_calls(value.get("tool_calls"), source_format="internal"),
                 )
             return ProviderCompletion(str(value or ""))
-        value = self.client.complete(profile, request, prompt=prompt, system=system, timeout=timeout)
+        value = self.client.complete(profile, provider_request, prompt=prompt, system=system, timeout=timeout)
         return ProviderCompletion(str(value or ""))
 
     def _complete_stage_with_replica_failover(
@@ -3427,12 +3496,16 @@ class FusionEngine:
                             role=role_name,
                             kind=kind,
                         ),
+                        deadline_bound=deadline_budget is not None,
                     )
                     output = completion.text
                 else:
                     output = self.client.complete(
                         replica,
-                        request,
+                        _request_with_deadline_marker(
+                            request,
+                            deadline_bound=deadline_budget is not None,
+                        ),
                         prompt=attempt_prompt,
                         system=attempt_system,
                         timeout=_timeout_for_request(
@@ -4181,9 +4254,24 @@ class FusionEngine:
         feedback_prompt = str(feedback_request.prompt or "")
         feedback_system = str(feedback_request.system or "")
         local = _local_judge_candidates(candidates, route_plan=route_plan)
+        # The feedback reference is appended to the panel before the
+        # re-Judge.  Reserve against the same candidate-packet shape that
+        # the real re-Judge will receive, including a bounded worst-case
+        # feedback answer and normalized summary fields.  Estimating only
+        # the current panel admits a stage that can overrun its cost budget
+        # after the feedback call has already consumed part of the budget.
+        feedback_candidate_for_budget = _feedback_candidate_for_budget(
+            fallback,
+            route_plan=route_plan,
+            escalation_plan=(
+                feedback_context.get("escalation_plan")
+                if isinstance(feedback_context.get("escalation_plan"), Mapping)
+                else {}
+            ),
+        )
         judge_prompt = _judge_prompt(
             request,
-            candidates,
+            [*candidates, feedback_candidate_for_budget],
             local,
             route_plan=route_plan,
         )
@@ -4515,6 +4603,27 @@ class FusionEngine:
         synth_role = next((role for role in roles if role.get("role") == "synthesizer"), None)
         prompt_candidates, compression_receipt = _rank_first_synthesis_candidates(route_plan, candidates, judge_result)
         minimum_viable_candidates = _minimum_viable_fusion_candidate_count(route_plan)
+        required_min_candidates = _required_min_candidate_count(
+            route_plan,
+            [
+                role
+                for role in route_plan.get("roles", [])
+                if isinstance(role, Mapping)
+                and str(role.get("role") or "")
+                in {
+                    "primary_solver",
+                    "independent_solver",
+                    "critic",
+                    "domain_specialist",
+                    "backup_solver",
+                }
+            ],
+        )
+        fusion_candidate_threshold = _provider_fusion_candidate_threshold(
+            route_plan,
+            required_min_candidate_count=required_min_candidates,
+            minimum_viable_candidate_count=minimum_viable_candidates,
+        )
         hermes_plan = _effective_hermes_plan(route_plan)
         hermes_reference_available = any(
             candidate.answer.strip()
@@ -4536,7 +4645,7 @@ class FusionEngine:
                 (),
                 False,
             )
-        if synth_role and len(candidates) >= minimum_viable_candidates:
+        if synth_role and len(candidates) >= fusion_candidate_threshold:
             routed_profile = _profile_from_safe_dict(
                 synth_role.get("model")
                 if isinstance(synth_role.get("model"), Mapping)
@@ -4935,7 +5044,7 @@ def _expert_system(system: str, role: str, *, route_plan: Mapping[str, Any] | No
         "fallback_solver": "You are a same-capability fallback. Solve the user task after another provider branch failed.",
     }.get(role, "Produce a useful bounded answer.")
     role_intent = _role_intent_for_prompt(route_plan, role)
-    role_context = f"\nRole intent metadata: {json.dumps(role_intent, ensure_ascii=False)}\n" if role_intent else ""
+    role_context = f"\nRole intent metadata: {_prompt_json(role_intent)}\n" if role_intent else ""
     return (
         f"{system}\n\nAxio Fusion role: {role_instruction}\n"
         f"{role_context}"
@@ -4962,9 +5071,15 @@ def _expert_prompt(
         f"{role_contract}"
         f"{task_plan}"
         f"{tool_plan}"
-        "Required output fields when possible: answer, reasoning_summary, evidence, assumptions, uncertainties, confidence. "
-        "reasoning_summary must be a public, concise rationale summary, not hidden chain-of-thought."
+        "Return the required fields when possible: answer, reasoning_summary, evidence, assumptions, uncertainties, confidence. "
+        "Keep reasoning_summary public and concise; never provide hidden chain-of-thought."
     )
+
+
+def _prompt_json(value: Any) -> str:
+    """Serialize control metadata compactly without changing its semantics."""
+
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
 def _provider_request_for_role(
@@ -5053,9 +5168,8 @@ def _routing_context_prompt_fragment(route_plan: Mapping[str, Any] | None, role:
         return ""
     return (
         "Axio Fusion routing context:\n"
-        f"{json.dumps(context, ensure_ascii=False)}\n\n"
-        "Use this routing context to choose depth, evidence standard, uncertainty handling, and stop behavior. "
-        "Do not reveal internal routing metadata unless it directly helps the user.\n\n"
+        f"{_prompt_json(context)}\n\n"
+        "Use it to choose depth, evidence, uncertainty handling, and stop behavior; do not reveal internal metadata.\n\n"
     )
 
 
@@ -5064,7 +5178,6 @@ def _routing_context_for_prompt(route_plan: Mapping[str, Any] | None, role: str)
         return {}
     analysis = route_plan.get("request_analysis") if isinstance(route_plan.get("request_analysis"), Mapping) else {}
     budget = route_plan.get("budget") if isinstance(route_plan.get("budget"), Mapping) else {}
-    guards = route_plan.get("runtime_guards") if isinstance(route_plan.get("runtime_guards"), Mapping) else {}
     admission = route_plan.get("fusion_admission") if isinstance(route_plan.get("fusion_admission"), Mapping) else {}
     model_policy = route_plan.get("model_selection_policy") if isinstance(route_plan.get("model_selection_policy"), Mapping) else {}
     privacy = route_plan.get("privacy_policy") if isinstance(route_plan.get("privacy_policy"), Mapping) else {}
@@ -5075,7 +5188,6 @@ def _routing_context_for_prompt(route_plan: Mapping[str, Any] | None, role: str)
     routing_policy = route_plan.get("routing_policy") if isinstance(route_plan.get("routing_policy"), Mapping) else {}
     panel_diversity = model_policy.get("panel_diversity_receipt") if isinstance(model_policy.get("panel_diversity_receipt"), Mapping) else {}
     return {
-        "schema": "axio_fusion_api.routing_context_prompt.v1",
         "role": str(role or "")[:80],
         "public_model": str(route_plan.get("public_model") or "")[:80],
         "strategy": str(route_plan.get("strategy") or "")[:120],
@@ -5103,29 +5215,10 @@ def _routing_context_for_prompt(route_plan: Mapping[str, Any] | None, role: str)
             "quality_target": _safe_float(budget.get("quality_target"), default=0.0),
             "max_depth": _safe_int(budget.get("max_depth"), default=0),
             "max_total_model_calls": _safe_int(budget.get("max_total_model_calls"), default=0),
-            "initial_fusion_minimum_call_count": _safe_int(budget.get("initial_fusion_minimum_call_count"), default=0),
-            "initial_fusion_planned_call_count": _safe_int(budget.get("initial_fusion_planned_call_count"), default=0),
-            "initial_fusion_call_budget_sufficient": bool(budget.get("initial_fusion_call_budget_sufficient")),
-            "initial_fusion_role_budget_constrained": bool(budget.get("initial_fusion_role_budget_constrained")),
-            "mandatory_fusion_stage_call_reservation_enabled": bool(
-                guards.get("mandatory_fusion_stage_call_reservation_enabled")
-            ),
-            "mandatory_fusion_stage_reservation_roles": [
-                str(item)[:80]
-                for item in guards.get("mandatory_fusion_stage_reservation_roles", [])
-                if str(item)
-            ][:4] if isinstance(guards.get("mandatory_fusion_stage_reservation_roles"), list) else [],
             "max_parallel_experts": _safe_int(budget.get("max_parallel_experts"), default=0),
             "min_judge_candidate_count": _safe_int(budget.get("min_judge_candidate_count"), default=1),
             "early_exit_enabled": bool(budget.get("early_exit_enabled")),
             "rank_first_candidate_compression": bool(budget.get("rank_first_candidate_compression")),
-            "initial_fusion_resource_admission": _safe_initial_fusion_resource_admission_for_prompt(
-                budget.get("initial_fusion_resource_admission")
-                if isinstance(budget.get("initial_fusion_resource_admission"), Mapping)
-                else admission.get("initial_fusion_resource_admission")
-                if isinstance(admission.get("initial_fusion_resource_admission"), Mapping)
-                else {}
-            ),
         },
         "fusion_admission": {
             "activated": bool(admission.get("activated")),
@@ -5167,10 +5260,6 @@ def _routing_context_for_prompt(route_plan: Mapping[str, Any] | None, role: str)
             "destructive_tools_require_external_approval": bool(tool_policy.get("destructive_tools_require_external_approval")),
         },
         "answer_policy": _answer_policy_for_prompt(analysis, budget),
-        "raw_prompt_persisted": False,
-        "raw_model_names_persisted": False,
-        "raw_profile_ids_persisted": False,
-        "secrets_persisted": False,
     }
 
 
@@ -5212,7 +5301,6 @@ def _safe_initial_fusion_call_plan_for_prompt(value: Mapping[str, Any]) -> dict[
     if not isinstance(value, Mapping):
         value = {}
     return {
-        "schema": str(value.get("schema") or "axio_fusion_api.initial_fusion_call_plan.v1")[:120],
         "max_total_model_calls": _safe_int(value.get("max_total_model_calls"), default=0),
         "minimum_complete_fusion_call_count": _safe_int(value.get("minimum_complete_fusion_call_count"), default=0),
         "planned_initial_fusion_call_count": _safe_int(value.get("planned_initial_fusion_call_count"), default=0),
@@ -5225,8 +5313,6 @@ def _safe_initial_fusion_call_plan_for_prompt(value: Mapping[str, Any]) -> dict[
         ][:8] if isinstance(value.get("omitted_expert_roles"), list) else [],
         "judge_reserved": bool(value.get("judge_reserved")),
         "synthesizer_reserved": bool(value.get("synthesizer_reserved")),
-        "raw_profile_id_persisted": False,
-        "raw_model_names_persisted": False,
     }
 
 
@@ -5240,7 +5326,6 @@ def _safe_initial_fusion_resource_admission_for_prompt(
     cost = value.get("cost") if isinstance(value.get("cost"), Mapping) else {}
     latency = value.get("latency") if isinstance(value.get("latency"), Mapping) else {}
     return {
-        "schema": str(value.get("schema") or "axio_fusion_api.initial_fusion_resource_admission.v1")[:120],
         "applicable": bool(value.get("applicable")),
         "complete_initial_fusion_shape": bool(value.get("complete_initial_fusion_shape")),
         "cost": {
@@ -5266,8 +5351,6 @@ def _safe_initial_fusion_resource_admission_for_prompt(
         "optional_repair_or_escalation_included": bool(
             value.get("optional_repair_or_escalation_included")
         ),
-        "raw_profile_id_persisted": False,
-        "raw_model_names_persisted": False,
     }
 
 
@@ -5283,8 +5366,8 @@ def _search_policy_prompt_fragment(route_plan: Mapping[str, Any] | None, role: s
     wrapped = {"deliberative_search_policy": payload}
     return (
         "Deliberative search contract:\n"
-        f"{json.dumps(wrapped, ensure_ascii=False)}\n\n"
-        "Follow this contract as a bounded branch in the answer search. Do not treat model agreement as proof.\n\n"
+        f"{_prompt_json(wrapped)}\n\n"
+        "Follow this bounded branch; agreement is not proof.\n\n"
     )
 
 
@@ -5352,10 +5435,6 @@ def _safe_search_policy_for_prompt(search_policy: Mapping[str, Any], role: str) 
             "no_training_on_eval_cases": bool(anti_cheating.get("no_training_on_eval_cases")),
             "case_hash_binding_required_for_claims": bool(anti_cheating.get("case_hash_binding_required_for_claims")),
         },
-        "raw_prompt_persisted": False,
-        "raw_model_names_persisted": False,
-        "raw_profile_ids_persisted": False,
-        "secrets_persisted": False,
     }
 
 
@@ -5377,18 +5456,7 @@ def _quality_diversity_summary_for_prompt(qd_archive: Mapping[str, Any], role: s
     if not relevant:
         relevant = [row for row in entries if isinstance(row, Mapping)]
     return {
-        "schema": str(qd_archive.get("schema") or "axio_fusion_api.quality_diversity_archive.v1")[:120],
-        "enabled": bool(qd_archive.get("enabled")),
         "selection_kernel": str(qd_archive.get("selection_kernel") or "")[:120],
-        "role": role_name,
-        "niche_count": _safe_int(qd_archive.get("niche_count"), default=0),
-        "average_novelty_estimate": _safe_float(qd_archive.get("average_novelty_estimate"), default=0.0),
-        "average_quality_estimate": _safe_float(qd_archive.get("average_quality_estimate"), default=0.0),
-        "objectives": [
-            str(item)[:100]
-            for item in qd_archive.get("objective", [])
-            if str(item)
-        ][:8] if isinstance(qd_archive.get("objective"), list) else [],
         "role_relevant_niches": [
             {
                 "niche_id_sha256": str(row.get("niche_id_sha256") or "")[:80],
@@ -5408,8 +5476,6 @@ def _quality_diversity_summary_for_prompt(qd_archive: Mapping[str, Any], role: s
             "critic_searches_failure_modes_not_majority_vote": True,
             "synthesizer_preserves_verified_minority_insights": True,
         },
-        "raw_profile_ids_persisted": False,
-        "raw_model_names_persisted": False,
     }
 
 
@@ -5418,19 +5484,10 @@ def _provider_routing_policy_for_prompt(provider_policy: Mapping[str, Any]) -> d
         return {}
     context_policy = provider_policy.get("context_transform_policy") if isinstance(provider_policy.get("context_transform_policy"), Mapping) else {}
     return {
-        "schema": str(provider_policy.get("schema") or "axio_fusion_api.provider_routing_policy.v1")[:120],
-        "enabled": bool(provider_policy.get("enabled")),
         "kernel": str(provider_policy.get("kernel") or "")[:120],
         "fallback_enabled": bool(provider_policy.get("fallback_enabled")),
-        "fallback_scope": str(provider_policy.get("fallback_scope") or "")[:120],
         "canonical_replica_routing_enabled": bool(
             provider_policy.get("canonical_replica_routing_enabled")
-        ),
-        "canonical_model_count": _safe_int(
-            provider_policy.get("canonical_model_count"), default=0
-        ),
-        "canonical_replica_group_count": _safe_int(
-            provider_policy.get("canonical_replica_group_count"), default=0
         ),
         "same_canonical_model_failover_precedes_cross_model_fallback": bool(
             provider_policy.get("same_canonical_model_failover_precedes_cross_model_fallback")
@@ -5448,14 +5505,7 @@ def _provider_routing_policy_for_prompt(provider_policy: Mapping[str, Any]) -> d
         "context_transform_policy": {
             "provider_context_window_budget_enabled": bool(context_policy.get("provider_context_window_budget_enabled")),
             "compress_lower_ranked_candidates_before_synthesis": bool(context_policy.get("compress_lower_ranked_candidates_before_synthesis")),
-            "middle_out_style_truncation_allowed_only_for_internal_candidate_packets": bool(
-                context_policy.get("middle_out_style_truncation_allowed_only_for_internal_candidate_packets")
-            ),
         },
-        "fallback_pool_count": _safe_int(provider_policy.get("fallback_pool_count"), default=0),
-        "raw_provider_names_persisted": False,
-        "raw_model_names_persisted": False,
-        "raw_provider_urls_persisted": False,
     }
 
 
@@ -5486,27 +5536,27 @@ def _role_execution_contract_prompt_fragment(route_plan: Mapping[str, Any] | Non
     if not intent and not scaffold and not cognitive:
         return ""
     payload = {
-        "schema": "axio_fusion_api.role_execution_contract_prompt.v1",
         "role": str(role or "")[:80],
         "role_intent": intent,
         "context_scaffold": scaffold,
         "cognitive_budget": cognitive,
         "output_contract": {
-            "answer": "bounded role output for the original task",
-            "reasoning_summary": "short key reasoning steps; do not include hidden chain-of-thought",
-            "evidence": "list of source or reasoning receipts when available",
-            "assumptions": "explicit assumptions only",
-            "uncertainties": "known gaps and unresolved conditions",
-            "confidence": "0.0 to 1.0 calibrated confidence",
-            "tool_calls": "optional safe tool calls only when allowed by the tool policy",
+            "fields": [
+                "answer",
+                "reasoning_summary",
+                "evidence",
+                "assumptions",
+                "uncertainties",
+                "confidence",
+                "tool_calls",
+            ],
+            "reasoning_summary": "public concise rationale; no hidden chain-of-thought",
+            "tool_calls": "only safe calls allowed by policy",
         },
-        "raw_prompt_persisted": False,
-        "raw_model_names_persisted": False,
-        "secrets_persisted": False,
     }
     return (
         "Role execution contract:\n"
-        f"{json.dumps(payload, ensure_ascii=False)}\n\n"
+        f"{_prompt_json(payload)}\n\n"
     )
 
 
@@ -5516,9 +5566,8 @@ def _role_task_plan_prompt_fragment(route_plan: Mapping[str, Any] | None, role: 
         return ""
     return (
         "Role-scoped task plan metadata from the Axio Fusion DAG:\n"
-        f"{json.dumps(task_plan, ensure_ascii=False)}\n\n"
-        "Use this DAG metadata to focus your work on the assigned nodes and dependencies. "
-        "Do not reveal this internal plan unless it is directly useful to the user.\n\n"
+        f"{_prompt_json(task_plan)}\n\n"
+        "Focus on the assigned nodes and dependencies; do not reveal internal plan metadata.\n\n"
     )
 
 
@@ -5537,18 +5586,12 @@ def _role_task_plan_for_prompt(route_plan: Mapping[str, Any] | None, role: str) 
     if not selected_nodes and not checkpoint_ids:
         return {}
     return {
-        "schema": "axio_fusion_api.role_task_plan_prompt.v1",
         "role": str(role or "primary_solver")[:80],
         "role_intent": _role_intent_for_prompt(route_plan, role),
         "node_count": len(selected_nodes),
-        "total_dag_node_count": _safe_int(dag.get("node_count"), default=len(nodes)),
         "max_dependency_depth": _safe_int(dag.get("max_dependency_depth"), default=0),
-        "subtask_count": _safe_int(dag.get("subtask_count"), default=0),
-        "nodes": [_safe_dag_node_for_prompt(node) for node in selected_nodes[:16]],
+        "nodes": [_safe_dag_node_for_prompt(node) for node in selected_nodes[:12]],
         "checkpoint_ids": checkpoint_ids[:8],
-        "raw_prompt_persisted": False,
-        "raw_model_names_persisted": False,
-        "secrets_persisted": False,
     }
 
 
@@ -5596,7 +5639,6 @@ def _context_scaffold_for_prompt(route_plan: Mapping[str, Any] | None, role: str
     fragments = context.get(key) if isinstance(context.get(key), list) else []
     stop_policy = scaffold.get("adaptive_stop_policy") if isinstance(scaffold.get("adaptive_stop_policy"), Mapping) else {}
     return {
-        "schema": "axio_fusion_api.context_scaffold_prompt.v1",
         "stage_order": [
             str(item)[:80]
             for item in scaffold.get("stage_order", [])
@@ -5605,9 +5647,6 @@ def _context_scaffold_for_prompt(route_plan: Mapping[str, Any] | None, role: str
         "context_fragments": [str(item)[:100] for item in fragments[:10]],
         "max_depth": _safe_int(stop_policy.get("max_depth"), default=0),
         "max_total_model_calls": _safe_int(stop_policy.get("max_total_model_calls"), default=0),
-        "raw_prompt_persisted": False,
-        "raw_candidate_text_persisted": False,
-        "secrets_persisted": False,
     }
 
 
@@ -5652,8 +5691,6 @@ def _safe_dag_node_for_prompt(node: Mapping[str, Any]) -> dict[str, Any]:
         "required_capabilities": capabilities[:8],
         "parallelizable": bool(node.get("parallelizable")),
         "verification_required": bool(node.get("verification_required")),
-        "max_cost_usd": _safe_float(node.get("max_cost_usd"), default=0.0),
-        "raw_prompt_persisted": False,
     }
 
 
@@ -6857,6 +6894,130 @@ def _stage_deduplication_receipt(value: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _runtime_expert_role_identity(role: Mapping[str, Any]) -> tuple[str, str, str]:
+    """Return a safe identity key for one runtime expert assignment.
+
+    The route plan already carries the hashed canonical identity generated by
+    the registry.  The profile hash fallback is only for hand-built or legacy
+    route plans; it prevents accidentally merging two assignments when the
+    canonical field is absent.
+    """
+
+    model = role.get("model") if isinstance(role.get("model"), Mapping) else {}
+    canonical_hash = str(
+        model.get("runtime_canonical_identity_sha256")
+        or model.get("canonical_model_id_sha256")
+        or ""
+    ).strip()
+    profile_id = str(model.get("profile_id") or "").strip()
+    profile_hash = sha256_text(profile_id) if profile_id else ""
+    identity_key = canonical_hash or (f"profile:{profile_hash}" if profile_hash else "")
+    return identity_key, canonical_hash, profile_hash
+
+
+def _dedupe_runtime_expert_roles(
+    expert_roles: Sequence[Mapping[str, Any]],
+) -> tuple[list[Mapping[str, Any]], dict[str, Any]]:
+    """Admit at most one provider call per real model in the initial wave.
+
+    A provider replica is an availability route, not an independent expert
+    vote.  Role priority preserves the strongest semantic seat when routing
+    assigned the same canonical model more than once.
+    """
+
+    grouped: dict[str, list[tuple[int, Mapping[str, Any]]]] = {}
+    unkeyed: list[tuple[int, Mapping[str, Any]]] = []
+    for index, role in enumerate(expert_roles):
+        identity_key, _canonical_hash, _profile_hash = _runtime_expert_role_identity(role)
+        if identity_key:
+            grouped.setdefault(identity_key, []).append((index, role))
+        else:
+            unkeyed.append((index, role))
+
+    kept_indexes: set[int] = {index for index, _role in unkeyed}
+    suppressed: list[dict[str, Any]] = []
+    retained: list[dict[str, Any]] = []
+    duplicate_canonical_count = 0
+    for identity_key, assignments in grouped.items():
+        if len(assignments) > 1:
+            duplicate_canonical_count += 1
+        retained_index, retained_role = min(
+            assignments,
+            key=lambda item: (
+                -_RUNTIME_EXPERT_ROLE_PRIORITY.get(
+                    str(item[1].get("role") or ""),
+                    0,
+                ),
+                item[0],
+            ),
+        )
+        kept_indexes.add(retained_index)
+        retained_canonical_hash = _runtime_expert_role_identity(retained_role)[1]
+        retained_profile_hash = _runtime_expert_role_identity(retained_role)[2]
+        retained.append(
+            {
+                "role": str(retained_role.get("role") or "")[:80],
+                "runtime_canonical_identity_sha256": retained_canonical_hash,
+                "profile_id_sha256": retained_profile_hash,
+                "deduplication_key": identity_key,
+                "role_priority": _RUNTIME_EXPERT_ROLE_PRIORITY.get(
+                    str(retained_role.get("role") or ""),
+                    0,
+                ),
+            }
+        )
+        for suppressed_index, suppressed_role in assignments:
+            if suppressed_index == retained_index:
+                continue
+            _suppressed_key, suppressed_canonical_hash, suppressed_profile_hash = (
+                _runtime_expert_role_identity(suppressed_role)
+            )
+            suppressed.append(
+                {
+                    "role": str(suppressed_role.get("role") or "")[:80],
+                    "runtime_canonical_identity_sha256": suppressed_canonical_hash,
+                    "profile_id_sha256": suppressed_profile_hash,
+                    "deduplication_key": identity_key,
+                    "retained_role": str(retained_role.get("role") or "")[:80],
+                    "retained_profile_id_sha256": retained_profile_hash,
+                    "reason": "duplicate_canonical_model_role_suppressed",
+                    "reuse_reason": (
+                        "same_runtime_canonical_model_is_an_availability_replica_"
+                        "not_independent_evidence"
+                    ),
+                    "counts_as_independent_evidence": False,
+                }
+            )
+
+    admitted = [
+        role
+        for index, role in enumerate(expert_roles)
+        if index in kept_indexes
+    ]
+    retained.sort(key=lambda row: str(row.get("role") or ""))
+    suppressed.sort(key=lambda row: (str(row.get("role") or ""), str(row.get("deduplication_key") or "")))
+    receipt = {
+        "schema": "axio_fusion_api.runtime_expert_panel_deduplication.v1",
+        "enabled": True,
+        "strategy": "one_initial_provider_call_per_runtime_canonical_identity",
+        "role_priority": {
+            role: priority
+            for role, priority in _RUNTIME_EXPERT_ROLE_PRIORITY.items()
+        },
+        "configured_role_count": len(expert_roles),
+        "admitted_role_count": len(admitted),
+        "suppressed_duplicate_role_count": len(suppressed),
+        "duplicate_canonical_identity_count": duplicate_canonical_count,
+        "retained_roles": retained[:24],
+        "suppressed_roles": suppressed[:24],
+        "raw_profile_ids_persisted": False,
+        "raw_provider_names_persisted": False,
+        "raw_model_names_persisted": False,
+        "secrets_persisted": False,
+    }
+    return admitted, receipt
+
+
 def _required_min_candidate_count(route_plan: Mapping[str, Any], expert_roles: Sequence[Mapping[str, Any]]) -> int:
     judge_contract = route_plan.get("judge_contract") if isinstance(route_plan.get("judge_contract"), Mapping) else {}
     if judge_contract.get("required") is not True:
@@ -7726,11 +7887,31 @@ def _required_candidate_roles_from_route(route_plan: Mapping[str, Any]) -> list[
         # failure in one role must not turn the whole wave into a hard missing
         # role error; the finalizer receives whichever references completed.
         return []
+    runtime_panel = (
+        route_plan.get("runtime_expert_panel")
+        if isinstance(route_plan.get("runtime_expert_panel"), Mapping)
+        else {}
+    )
+    suppressed_assignments = {
+        (
+            str(row.get("role") or ""),
+            str(row.get("deduplication_key") or ""),
+        )
+        for row in runtime_panel.get("suppressed_roles", [])
+        if isinstance(row, Mapping)
+        and str(row.get("role") or "")
+        and str(row.get("deduplication_key") or "")
+    } if isinstance(runtime_panel.get("suppressed_roles"), list) else set()
     roles = route_plan.get("roles") if isinstance(route_plan.get("roles"), list) else []
     required = [
         str(row.get("role") or "")
         for row in roles
-        if isinstance(row, Mapping) and str(row.get("role") or "") in {"primary_solver", "independent_solver", "critic", "domain_specialist"}
+        if isinstance(row, Mapping)
+        and str(row.get("role") or "") in {"primary_solver", "independent_solver", "critic", "domain_specialist"}
+        and (
+            str(row.get("role") or ""),
+            _runtime_expert_role_identity(row)[0],
+        ) not in suppressed_assignments
     ]
     return list(dict.fromkeys(required or ["primary_solver"]))
 
@@ -9549,6 +9730,50 @@ def _candidate_prompt_packet(candidate: CandidateResult, *, answer_char_limit: i
     }
 
 
+def _feedback_candidate_for_budget(
+    profile: ModelProfile,
+    *,
+    route_plan: Mapping[str, Any],
+    escalation_plan: Mapping[str, Any],
+) -> CandidateResult:
+    """Build a non-executed worst-case candidate for Hermes re-Judge admission.
+
+    This object is never sent to a provider and never appears in a response.
+    It exists only so the admission estimate uses the same bounded candidate
+    packet serializer as ``_judge_candidates`` after a feedback result is
+    appended.  The field limits mirror the parser and prompt packet limits;
+    raw output is intentionally represented by inert placeholder text.
+    """
+
+    return CandidateResult(
+        candidate_id="__feedback_candidate_budget__",
+        role="targeted_escalation",
+        profile_id=profile.profile_id,
+        provider=profile.provider,
+        model=profile.model,
+        canonical_identity=profile.canonical_identity,
+        answer="x" * 6000,
+        confidence=0.5,
+        reasoning_summary=tuple("x" * 600 for _ in range(8)),
+        evidence=tuple({} for _ in range(16)),
+        assumptions=tuple("x" * 600 for _ in range(8)),
+        uncertainties=tuple("x" * 600 for _ in range(8)),
+        task_execution=_candidate_task_execution_receipt(
+            route_plan,
+            "targeted_escalation",
+        ),
+        escalation_plan=dict(escalation_plan),
+        standardization={
+            "schema": "axio_fusion_api.candidate_standardization.v1",
+            "parsed": True,
+            "parse_mode": "admission_upper_bound",
+            "normalized_field_count": 0,
+            "raw_candidate_text_persisted": False,
+            "raw_reasoning_summary_persisted": False,
+        },
+    )
+
+
 def _safe_candidate_standardization_for_prompt(value: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(value, Mapping) or not value:
         return {
@@ -10747,6 +10972,26 @@ def _timeout_for_role(
         }
     )
     return timeout_seconds, receipt
+
+
+def _request_with_deadline_marker(
+    request: FusionRequest,
+    *,
+    deadline_bound: bool,
+) -> FusionRequest:
+    """Mark a provider request whose timeout is the outer Fusion deadline.
+
+    The marker is process-local metadata consumed only by the built-in HTTP
+    adapter.  It is not copied into any provider payload, public response, or
+    persisted receipt, and custom injected clients can continue accepting the
+    historical request shape.
+    """
+
+    if not deadline_bound:
+        return request
+    metadata = dict(request.metadata) if isinstance(request.metadata, Mapping) else {}
+    metadata["_axio_request_deadline_bound"] = True
+    return replace(request, metadata=metadata)
 
 
 def _safe_int(value: Any, *, default: int = 0) -> int:

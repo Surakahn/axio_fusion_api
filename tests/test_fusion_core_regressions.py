@@ -11,6 +11,8 @@ from axio_fusion_api.orchestrator import (
     _candidates_for_fusion_finalization,
     _local_judge_candidates,
     _normalize_provider_judge_result,
+    _dedupe_runtime_expert_roles,
+    _missing_required_candidate_roles,
     _required_min_candidate_count,
 )
 from axio_fusion_api.compat import canonicalize_payload, render_response
@@ -131,6 +133,67 @@ def test_required_runtime_quorum_does_not_count_reused_critic_as_independent_sea
     ]
 
     assert _required_min_candidate_count(route_plan, roles) == 2
+
+
+def test_runtime_expert_panel_suppresses_duplicate_canonical_role_without_hiding_unique_critic():
+    primary = _profile(0)
+    independent = _profile(1)
+    specialist = _profile(2)
+    roles = [
+        {"role": "primary_solver", "model": primary.safe_dict()},
+        {"role": "independent_solver", "model": independent.safe_dict()},
+        {"role": "critic", "model": independent.safe_dict()},
+        {"role": "domain_specialist", "model": specialist.safe_dict()},
+    ]
+
+    admitted, receipt = _dedupe_runtime_expert_roles(roles)
+
+    assert [row["role"] for row in admitted] == [
+        "primary_solver",
+        "independent_solver",
+        "domain_specialist",
+    ]
+    assert receipt["suppressed_duplicate_role_count"] == 1
+    suppressed = receipt["suppressed_roles"][0]
+    assert suppressed["role"] == "critic"
+    assert suppressed["retained_role"] == "independent_solver"
+    assert suppressed["counts_as_independent_evidence"] is False
+
+    route_plan = {
+        "roles": roles,
+        "runtime_expert_panel": receipt,
+    }
+    completed = [
+        CandidateResult(
+            "primary_solver",
+            "primary_solver",
+            primary.profile_id,
+            primary.provider,
+            primary.model,
+            "primary",
+            canonical_identity=primary.canonical_identity,
+        ),
+        CandidateResult(
+            "independent_solver",
+            "independent_solver",
+            independent.profile_id,
+            independent.provider,
+            independent.model,
+            "independent",
+            canonical_identity=independent.canonical_identity,
+        ),
+        CandidateResult(
+            "domain_specialist",
+            "domain_specialist",
+            specialist.profile_id,
+            specialist.provider,
+            specialist.model,
+            "specialist",
+            canonical_identity=specialist.canonical_identity,
+        ),
+    ]
+
+    assert _missing_required_candidate_roles(route_plan, completed) == []
 
 
 def test_judge_json_extractor_accepts_transport_wrappers_without_relaxing_schema():

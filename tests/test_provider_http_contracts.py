@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 import threading
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -224,6 +225,59 @@ def test_provider_config_file_is_a_first_class_cli_input() -> None:
         ]
     )
     assert args.provider_config_file == "/private/manifest.json"
+
+
+@pytest.mark.parametrize(
+    ("fusion_deadline_bound", "timeout", "expected_code"),
+    (
+        (True, 0.25, "fusion_request_deadline_exhausted"),
+        (False, 90.0, "provider_response_timeout_exceeded_90s"),
+    ),
+)
+def test_stream_timeout_classification_separates_fusion_deadline_from_provider_ceiling(
+    monkeypatch,
+    fusion_deadline_bound,
+    timeout,
+    expected_code,
+) -> None:
+    class TimeoutResponse:
+        headers = {"Content-Type": "text/event-stream"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            del exc_type, exc_value, traceback
+            return False
+
+        def readline(self):
+            raise TimeoutError("fixture timeout")
+
+    profile = normalize_profile(
+        {
+            "provider": "timeout-fixture",
+            "model": "timeout-model",
+            "api_format": "chat",
+        }
+    )
+    monkeypatch.setattr(
+        provider_module,
+        "_open_provider_url",
+        lambda request, timeout: TimeoutResponse(),
+    )
+
+    with pytest.raises(provider_module.ProviderExecutionError) as exc_info:
+        provider_module._open_stream_json_request(
+            urllib.request.Request("https://timeout.fixture/v1/chat/completions"),
+            profile=profile,
+            api_format="chat",
+            timeout=timeout,
+            require_streaming=True,
+            fusion_deadline_bound=fusion_deadline_bound,
+        )
+
+    assert exc_info.value.error_code == expected_code
+    assert expected_code in str(exc_info.value)
 
 
 def test_multi_sample_stream_probe_aggregates_independent_receipts(monkeypatch) -> None:

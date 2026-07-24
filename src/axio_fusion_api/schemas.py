@@ -51,6 +51,7 @@ SAFE_PROVIDER_ERROR_CODES = frozenset(
         "base_url_missing",
         "empty_provider_response",
         "empty_provider_stream",
+        "fusion_request_deadline_exhausted",
         "http_error",
         "invalid_json",
         "invalid_stream_json",
@@ -60,6 +61,7 @@ SAFE_PROVIDER_ERROR_CODES = frozenset(
         "non_object_stream_json",
         "OSError",
         "provider_request_failed",
+        "provider_request_timeout",
         "provider_response_timeout_exceeded_90s",
         "proxy_unavailable",
         "stream_framing_unverified",
@@ -112,7 +114,12 @@ def safe_provider_error_class(
         return "provider_http_5xx"
     if code == "http_error":
         return "provider_http_error"
-    if code in {"TimeoutError", "provider_response_timeout_exceeded_90s"}:
+    if code in {
+        "TimeoutError",
+        "fusion_request_deadline_exhausted",
+        "provider_request_timeout",
+        "provider_response_timeout_exceeded_90s",
+    }:
         return "timeout"
     if code in {"URLError", "OSError", "proxy_unavailable", "network_mode_invalid"}:
         return "transport_or_network_policy"

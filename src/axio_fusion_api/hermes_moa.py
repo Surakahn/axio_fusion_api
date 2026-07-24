@@ -102,6 +102,8 @@ def _stage_output_policy(*, public_model: str, reference_max_tokens: int) -> dic
             else HERMES_MOA_TERRA_JUDGE_MAX_TOKENS
         ),
         "synthesizer_max_tokens": "caller_bound_or_provider_default",
+        "judge_is_caller_output_capped": False,
+        "synthesizer_caller_output_cap_applied": True,
         "acting_aggregator_is_not_reference_capped": True,
         "structured_judge_output_is_bounded": True,
     }
@@ -371,7 +373,14 @@ def stage_max_output_tokens(
     role: str,
     requested: int | None,
 ) -> int | None:
-    """Resolve a stage output cap without ever expanding the caller limit."""
+    """Resolve a stage output cap for one internal or user-visible stage.
+
+    The caller's ``max_output_tokens`` is the contract for the final answer,
+    not for the private structured Judge packet.  A Judge packet has its own
+    fixed bounded budget so a small user-facing answer cap cannot truncate the
+    JSON required to validate the Fusion process.  The Synthesizer remains
+    caller-bound because its output is user-visible.
+    """
 
     try:
         requested_value = int(requested) if requested not in (None, "") else 0
@@ -394,6 +403,11 @@ def stage_max_output_tokens(
         )
     elif role_name == "judge":
         cap = _safe_int(output_policy.get("judge_max_tokens"), 0)
+        if cap > 0:
+            return cap
+        return max(1, requested_value) if requested_value > 0 else None
+    elif role_name == "synthesizer":
+        return max(1, requested_value) if requested_value > 0 else None
     else:
         return max(1, requested_value) if requested_value > 0 else None
     if cap <= 0:
