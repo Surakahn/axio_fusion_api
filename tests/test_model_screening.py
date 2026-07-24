@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 import urllib.error
 
 import pytest
 
 from axio_fusion_api import model_screening
+from axio_fusion_api import providers as provider_module
 from axio_fusion_api.calibration import build_registry_calibration
 from axio_fusion_api.cli import main as fusion_cli_main
 from axio_fusion_api.model_screening import (
@@ -627,6 +629,217 @@ def test_operator_role_allowlist_and_denylist_are_hard_constraints():
     )["ordered_models"][0]
     assert normalized["allowed_roles"] == ["judge", "primary_solver", "synthesizer"]
     assert "critic" in normalized["disallowed_roles"]
+
+
+def _role_probe_row(
+    profile,
+    role: str,
+    *,
+    status: str = "available",
+    http_status: int | None = None,
+    output_sha256: str | None = None,
+) -> dict:
+    return {
+        "schema": "axio_fusion_api.provider_role_probe.v1",
+        "contract": "axio_fusion_api.provider_role_probe.fixed_control_packet.v1",
+        "profile_id": profile.profile_id,
+        "provider": profile.provider,
+        "model": profile.model,
+        "api_format": profile.api_format,
+        "role": role,
+        "status": status,
+        "latency_ms": 120,
+        "output_sha256": output_sha256 or sha256_text(f"role:{profile.profile_id}:{role}"),
+        "role_output_contract_valid": status == "available",
+        "role_streaming_contract_valid": status == "available",
+        "error_type": "" if status == "available" else "ProviderExecutionError",
+        "error_code": "" if status == "available" else "http_error",
+        "http_status": http_status,
+        "probe_mode": "live_role_control_packet",
+        "live_probe_evidence": True,
+        "stream_requested": status == "available",
+        "stream_observed": status == "available",
+        "stream_fallback_used": False,
+        "stream_protocol": "sse" if status == "available" else "",
+        "stream_frame_count": 2 if status == "available" else 0,
+        "strict_streaming_requested": True,
+        "latency_eligibility": {"eligible": status == "available"},
+        "provider_request_count": 1,
+        "provider_request_success_count": 1 if status == "available" else 0,
+        "provider_request_failure_count": 0 if status == "available" else 1,
+        "key_attempt_count": 1,
+        "transport_attempt_count": 1,
+        "retry_attempt_count": 0,
+    }
+
+
+def _role_profile(profile, *, allowed_roles=None, denied_roles=()):
+    allowed = tuple(
+        allowed_roles
+        or ("critic", "judge", "synthesizer", "primary_solver")
+    )
+    admission = {
+        "schema": "axio_fusion_api.prefusion_role_admission.v1",
+        "effective_allowed_roles": list(allowed),
+        "effective_disallowed_roles": list(denied_roles),
+    }
+    return replace(
+        profile,
+        screening_allowed_roles=allowed,
+        screening_disallowed_roles=tuple(denied_roles),
+        screening_role_admission=admission,
+    )
+
+
+def test_operational_role_probe_http_400_removes_only_critic_role():
+    profile = _role_profile(_profile("provider-a", "alpha", "alpha"))
+    role_probe = {
+        "schema": "axio_fusion_api.provider_role_probe.v1",
+        "contract": "axio_fusion_api.provider_role_probe.fixed_control_packet.v1",
+        "status": "ready",
+        "requested_roles": ["critic", "judge", "synthesizer"],
+        "probes": [
+            _role_probe_row(profile, "critic", status="failed", http_status=400),
+            _role_probe_row(profile, "judge"),
+            _role_probe_row(profile, "synthesizer"),
+        ],
+    }
+    updated = model_screening._apply_operational_role_probe_metadata(
+        [profile], role_probe
+    )[0]
+    assert "critic" not in updated.screening_allowed_roles
+    assert "critic" in updated.screening_disallowed_roles
+    assert {"judge", "synthesizer"}.issubset(
+        set(updated.screening_allowed_roles)
+    )
+    receipt = updated.screening_role_admission["operational_role_probe"]
+    assert receipt["failed_roles"] == ["critic"]
+    assert receipt["passed_roles"] == ["judge", "synthesizer"]
+
+
+def test_logical_model_role_projection_unions_healthy_replicas():
+    failed_replica = _role_profile(
+        _profile("provider-a", "shared", "canonical-shared"),
+        allowed_roles=("primary_solver", "judge"),
+        denied_roles=("critic", "synthesizer"),
+    )
+    healthy_replica = _role_profile(
+        _profile("provider-b", "shared", "canonical-shared"),
+        allowed_roles=("primary_solver", "critic", "synthesizer"),
+        denied_roles=("judge",),
+    )
+    logical = model_screening._available_logical_model_list(
+        [failed_replica, healthy_replica]
+    )
+    assert len(logical) == 1
+    assert {"critic", "judge", "synthesizer"}.issubset(
+        set(logical[0]["allowed_roles"])
+    )
+    assert not set(logical[0]["allowed_roles"]).intersection(
+        logical[0]["disallowed_roles"]
+    )
+
+
+def test_role_probe_redaction_drops_raw_control_text_and_provider_output():
+    payload = {
+        "role_probe": {
+            "requested_roles": ["critic"],
+            "probes": [
+                {
+                    "profile_id": "provider-a/alpha",
+                    "provider": "provider-a",
+                    "model": "alpha",
+                    "role": "critic",
+                    "status": "available",
+                    "prompt": "UNIQUE_ROLE_PROMPT",
+                    "output": "UNIQUE_ROLE_OUTPUT",
+                    "output_sha256": sha256_text("UNIQUE_ROLE_OUTPUT"),
+                    "stream_requested": True,
+                    "stream_observed": True,
+                    "stream_fallback_used": False,
+                    "stream_protocol": "sse",
+                    "stream_frame_count": 2,
+                    "strict_streaming_requested": True,
+                }
+            ],
+        }
+    }
+    redacted = provider_module.redact_provider_probe_artifact(payload)
+    serialized = json.dumps(redacted, ensure_ascii=False)
+    assert "UNIQUE_ROLE_PROMPT" not in serialized
+    assert "UNIQUE_ROLE_OUTPUT" not in serialized
+    assert "provider-a" not in serialized
+    assert redacted["role_probe"]["raw_role_probe_prompt_persisted"] is False
+
+
+def test_role_probe_binding_is_hash_bound_and_rejects_manual_role_promotion(monkeypatch):
+    profile = _profile("provider-a", "alpha", "alpha")
+    groups = _groups([profile])
+    research = _research_output([str(groups[0]["candidate_id"])])
+    requested_roles = ["critic", "judge", "synthesizer"]
+
+    def fake_probe(probe_profiles, **_kwargs):
+        physical_rows = [
+            {
+                "profile_id": item.profile_id,
+                "provider": item.provider,
+                "model": item.model,
+                "status": "available",
+                "latency_ms": 100,
+                "output_sha256": sha256_text("physical-probe"),
+                "probe_mode": "live",
+                "live_probe_evidence": True,
+                **_stream_evidence(),
+                **_multi_sample_stability_evidence(3),
+            }
+            for item in probe_profiles
+        ]
+        role_rows = []
+        for item in probe_profiles:
+            role_rows.extend(
+                [
+                    _role_probe_row(item, "critic", status="failed", http_status=400),
+                    _role_probe_row(item, "judge"),
+                    _role_probe_row(item, "synthesizer"),
+                ]
+            )
+        return {
+            "schema": "axio_fusion_api.provider_probe.v1",
+            "mode": "live",
+            "network_calls_performed": True,
+            "probes": physical_rows,
+            "role_probe": {
+                "schema": "axio_fusion_api.provider_role_probe.v1",
+                "contract": "axio_fusion_api.provider_role_probe.fixed_control_packet.v1",
+                "status": "ready",
+                "requested_roles": requested_roles,
+                "probes": role_rows,
+                "benchmark_cases_or_labels_used": False,
+            },
+        }
+
+    monkeypatch.setattr(model_screening, "probe_provider_models", fake_probe)
+    report = run_prefusion_model_screening(
+        profiles=[profile],
+        source_manifest=_source_manifest(),
+        research_output=research,
+        live=True,
+        min_available_models=1,
+    )
+    assert report["status"] == "ready"
+    registry = report["fusion_registry"]
+    assert registry["prefusion_screening"]["role_probe_required"] is True
+    assert validate_prefusion_registry_handoff(
+        registry, require_ready=True
+    )["valid"] is True
+
+    tampered = json.loads(json.dumps(registry))
+    tampered["models"][0]["screening_allowed_roles"].append("critic")
+    validation = validate_prefusion_registry_handoff(tampered, require_ready=True)
+    assert validation["valid"] is False
+    assert "prefusion_registry_role_probe_allowed_roles_mismatch" in validation[
+        "reason_codes"
+    ]
 
 
 class _FakeClient:

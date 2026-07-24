@@ -54,6 +54,7 @@ from .prefusion_ranking import (
     PREFUSION_CAPABILITY_AXIS_MIN_NONZERO,
     PREFUSION_OPERATIONAL_RANKING_SCHEMA,
     PREFUSION_OPERATIONAL_RANKING_WEIGHTS,
+    aggregate_profile_role_projection,
     build_operational_model_rows,
     capability_axis_coverage,
     research_quality_score,
@@ -127,6 +128,11 @@ _SCREENING_FUSION_ROLES = (
     "judge",
     "synthesizer",
     *_SMALL_MODEL_ROLES,
+)
+_PREFUSION_OPERATIONAL_ROLE_PROBE_ROLES = (
+    "critic",
+    "judge",
+    "synthesizer",
 )
 _SENSITIVE_CONFIG_KEYS = frozenset(
     {
@@ -502,8 +508,15 @@ def run_prefusion_model_screening(
             require_streaming=True,
             max_workers=max(1, min(32, int(max_workers or 1))),
             samples_per_profile=configured_stream_probe_samples,
+            role_probe_roles=_PREFUSION_OPERATIONAL_ROLE_PROBE_ROLES,
         )
         eligible_profiles = _eligible_profiles_from_probe(ranked_profiles, probe_payload)
+        eligible_profiles = _apply_operational_role_probe_metadata(
+            eligible_profiles,
+            probe_payload.get("role_probe")
+            if isinstance(probe_payload, Mapping)
+            else {},
+        )
         available_logical_model_count = logical_model_count(eligible_profiles)
         if available_logical_model_count < max(1, int(min_available_models or 1)):
             blockers.append("prefusion_insufficient_streaming_eligible_models")
@@ -629,6 +642,12 @@ def run_prefusion_model_screening(
         "role_coverage_schema": PREFUSION_ROLE_COVERAGE_SCHEMA,
         "role_coverage_content_sha256": sha256_text(stable_json(role_coverage)),
         "role_coverage_is_capability_admission_diagnostic": True,
+        "role_probe_contract_required": fusion_prefusion_binding.get(
+            "role_probe_required"
+        ) is True,
+        "role_probe_content_sha256": str(
+            fusion_prefusion_binding.get("role_probe_content_sha256") or ""
+        ),
         "raw_provider_output_persisted": False,
         "secrets_persisted": False,
     }
@@ -1334,6 +1353,20 @@ def validate_prefusion_handoff(
         issues.append("prefusion_handoff_operational_ranking_weights_invalid")
     if handoff.get("operational_ranking_is_control_plane_only") is not True:
         issues.append("prefusion_handoff_operational_ranking_control_flag_invalid")
+    role_probe_required = binding.get("role_probe_required") is True
+    if (
+        role_probe_required
+        or "role_probe_contract_required" in handoff
+    ) and handoff.get("role_probe_contract_required") is not role_probe_required:
+        issues.append("prefusion_handoff_role_probe_requirement_mismatch")
+    binding_role_probe_digest = str(
+        binding.get("role_probe_content_sha256") or ""
+    ).strip().lower()
+    if (
+        role_probe_required
+        or "role_probe_content_sha256" in handoff
+    ) and handoff.get("role_probe_content_sha256") != binding_role_probe_digest:
+        issues.append("prefusion_handoff_role_probe_digest_mismatch")
     if require_ready:
         if str(report_operational.get("schema") or "") != PREFUSION_OPERATIONAL_RANKING_SCHEMA:
             issues.append("prefusion_report_operational_ranking_schema_invalid")
@@ -1361,6 +1394,7 @@ def validate_prefusion_handoff(
         "raw_provider_output_persisted": False,
         "secrets_persisted": False,
         "role_coverage": role_validation,
+        "role_probe_contract_required": role_probe_required,
     }
 
 
@@ -1646,6 +1680,15 @@ def build_fusion_registry_from_screening(
     role_coverage = _project_prefusion_role_coverage(
         _build_prefusion_role_coverage(available_model_list)
     )
+    raw_role_probe = streaming_probe.get("role_probe")
+    role_probe_requested = bool(
+        isinstance(raw_role_probe, Mapping)
+        and _normalize_roles(raw_role_probe.get("requested_roles", ()))
+    )
+    role_probe_binding = _build_role_probe_registry_binding(
+        raw_role_probe if isinstance(raw_role_probe, Mapping) else {},
+        selected,
+    )
     selected_hashes = {sha256_text(profile.profile_id).lower() for profile in selected}
     eligible_bindings = []
     for row in eligible_rows:
@@ -1726,6 +1769,8 @@ def build_fusion_registry_from_screening(
             "available_logical_model_count": len(available_model_list),
             "available_model_list": available_model_list,
             "role_coverage": role_coverage,
+            "role_probe": role_probe_binding,
+            "role_probe_required": role_probe_requested,
             "eligible_profile_bindings": eligible_bindings,
             "research_ranking_schema": ranking_projection["schema"],
             "research_ranking_count": ranking_projection["candidate_count"],
@@ -1748,6 +1793,10 @@ def build_fusion_registry_from_screening(
             "stream_fallback_is_ineligible": True,
             "stream_stability_contract": stability_contract,
             "multi_sample_stream_stability_required": requires_multi_sample_stability,
+            "role_probe_contract_required": role_probe_requested,
+            "role_probe_content_sha256": sha256_text(
+                stable_json(role_probe_binding)
+            ),
             "max_response_seconds": PROVIDER_MAX_RESPONSE_SECONDS,
             "raw_research_prompt_persisted": False,
             "raw_research_output_persisted": False,
@@ -1766,6 +1815,11 @@ def build_fusion_registry_from_screening(
             "stream_probe_requires_all_samples_success": stability_contract[
                 "requires_all_samples_success"
             ],
+            "role_probe_contract_required": role_probe_requested,
+            "role_probe_requires_strict_streaming": role_probe_requested,
+            "role_probe_content_sha256": sha256_text(
+                stable_json(role_probe_binding)
+            ),
             "same_canonical_model_replicas_remain_one_runtime_identity": True,
             "latency_ineligible_profiles_excluded": True,
             "api_keys_persisted": False,
@@ -1916,6 +1970,7 @@ def _available_logical_model_list(
         )
         representative = ordered[0]
         operational_row = operational_by_canonical.get(canonical_identity, {})
+        role_allowed, role_denied = aggregate_profile_role_projection(ordered)
         physical_replica_count = max(
             len(ordered),
             int(operational_row.get("physical_replica_count") or len(ordered)),
@@ -1962,11 +2017,24 @@ def _available_logical_model_list(
                 ],
                 "providers": sorted({member.provider for member in ordered}),
                 "api_formats": sorted({member.api_format for member in ordered}),
-                "allowed_roles": list(representative.screening_allowed_roles),
-                "disallowed_roles": list(representative.screening_disallowed_roles),
+                "allowed_roles": role_allowed,
+                "disallowed_roles": role_denied,
                 "role_admission": _project_prefusion_role_admission(
-                    operational_row.get("role_admission")
-                    or getattr(representative, "screening_role_admission", {})
+                    {
+                        **(
+                            operational_row.get("role_admission")
+                            if isinstance(
+                                operational_row.get("role_admission"), Mapping
+                            )
+                            else getattr(
+                                representative, "screening_role_admission", {}
+                            )
+                        ),
+                        "effective_allowed_roles": role_allowed,
+                        "effective_disallowed_roles": role_denied,
+                        "replica_role_projection_is_union_for_allowed": True,
+                        "replica_role_projection_is_intersection_for_denied": True,
+                    }
                 ),
                 "screening_capability_overall": representative.screening_capability_overall,
                 "screening_capability_axes": {
@@ -2223,6 +2291,342 @@ def _apply_operational_metadata(
                 screening_latency_score=_bounded_optional_float(
                     row.get("latency_score")
                 ),
+            )
+        )
+    return result
+
+
+def _project_operational_role_probe(value: Any) -> dict[str, Any]:
+    """Project role-probe evidence into a bounded profile-local receipt."""
+
+    payload = value if isinstance(value, Mapping) else {}
+    requested = _normalize_roles(payload.get("requested_roles", ()))
+    tested = _normalize_roles(payload.get("tested_roles", ()))
+    passed = _normalize_roles(payload.get("passed_roles", ()))
+    failed = _normalize_roles(payload.get("failed_roles", ()))
+    missing = _normalize_roles(payload.get("missing_roles", ()))
+    return {
+        "schema": str(
+            payload.get("schema") or "axio_fusion_api.provider_role_probe.v1"
+        ),
+        "contract": str(payload.get("contract") or "")[:120],
+        "status": str(payload.get("status") or "")[:64],
+        "requested_roles": requested,
+        "tested_roles": tested,
+        "passed_roles": passed,
+        "failed_roles": failed,
+        "missing_roles": missing,
+        "probe_count": max(0, int(payload.get("probe_count") or 0)),
+        "available_probe_count": max(
+            0, int(payload.get("available_probe_count") or 0)
+        ),
+        "failed_probe_count": max(0, int(payload.get("failed_probe_count") or 0)),
+        "probe_receipt_sha256": str(payload.get("probe_receipt_sha256") or ""),
+        "streaming_required": payload.get("streaming_required") is True,
+        "streaming_contract_verified": payload.get(
+            "streaming_contract_verified"
+        ) is True,
+        "latency_ceiling_ms": PROVIDER_MAX_RESPONSE_LATENCY_MS,
+        "benchmark_cases_or_labels_used": payload.get(
+            "benchmark_cases_or_labels_used"
+        ) is True,
+        "raw_role_probe_prompt_persisted": False,
+        "raw_provider_output_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _operational_role_probe_row_is_available(row: Mapping[str, Any]) -> bool:
+    """Validate one role result before projecting it into profile metadata."""
+
+    if str(row.get("status") or "").strip().casefold() != "available":
+        return False
+    if row.get("role_output_contract_valid") is not True:
+        return False
+    if row.get("role_streaming_contract_valid") is not True:
+        return False
+    if row.get("stream_requested") is not True:
+        return False
+    if row.get("strict_streaming_requested") is not True:
+        return False
+    if row.get("stream_observed") is not True:
+        return False
+    if row.get("stream_fallback_used") is True:
+        return False
+    if str(row.get("stream_protocol") or "").strip().casefold() not in {
+        "sse",
+        "ndjson",
+    }:
+        return False
+    try:
+        frame_count = int(row.get("stream_frame_count") or 0)
+        latency_ms = float(row.get("latency_ms") or 0.0)
+    except (TypeError, ValueError):
+        return False
+    if frame_count < 1 or latency_ms > PROVIDER_MAX_RESPONSE_LATENCY_MS:
+        return False
+    latency_receipt = row.get("latency_eligibility")
+    if isinstance(latency_receipt, Mapping) and latency_receipt.get(
+        "eligible"
+    ) is not True:
+        return False
+    return True
+
+
+def _role_probe_result_projection(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep one role result safe and sufficient for registry binding."""
+
+    return {
+        "role": " ".join(str(row.get("role") or "").strip().casefold().split()),
+        "status": str(row.get("status") or "")[:80],
+        "latency_ms": row.get("latency_ms"),
+        "output_sha256": str(row.get("output_sha256") or ""),
+        "role_output_contract_valid": row.get("role_output_contract_valid") is True,
+        "role_streaming_contract_valid": row.get(
+            "role_streaming_contract_valid"
+        )
+        is True,
+        "stream_requested": row.get("stream_requested") is True,
+        "stream_observed": row.get("stream_observed") is True,
+        "stream_fallback_used": row.get("stream_fallback_used") is True,
+        "stream_protocol": str(row.get("stream_protocol") or "")[:32],
+        "stream_frame_count": max(0, int(row.get("stream_frame_count") or 0)),
+        "strict_streaming_requested": row.get("strict_streaming_requested") is True,
+        "error_code": str(row.get("error_code") or "")[:120],
+    }
+
+
+def _build_role_probe_registry_binding(
+    role_probe: Mapping[str, Any] | None,
+    profiles: Sequence[ModelProfile],
+) -> dict[str, Any]:
+    """Project the live role probe into a hash-safe registry contract."""
+
+    payload = role_probe if isinstance(role_probe, Mapping) else {}
+    requested_roles = _normalize_roles(payload.get("requested_roles", ()))
+    raw_rows = payload.get("probes")
+    raw_rows = raw_rows if isinstance(raw_rows, list) else []
+    by_profile: dict[str, list[Mapping[str, Any]]] = {}
+    for row in raw_rows:
+        if not isinstance(row, Mapping):
+            continue
+        profile_id = str(row.get("profile_id") or "")
+        role = " ".join(str(row.get("role") or "").strip().casefold().split())
+        if profile_id and role in requested_roles:
+            by_profile.setdefault(profile_id, []).append(row)
+
+    profile_receipts: list[dict[str, Any]] = []
+    for profile in sorted(profiles, key=lambda item: item.profile_id):
+        own_rows = by_profile.get(profile.profile_id, [])
+        admission = profile.screening_role_admission
+        admission = admission if isinstance(admission, Mapping) else {}
+        base_allowed = set(
+            _normalize_roles(admission.get("effective_allowed_roles", ()))
+        )
+        targets = sorted(set(requested_roles).intersection(base_allowed))
+        projected_rows = [
+            _role_probe_result_projection(row)
+            for row in own_rows
+        ]
+        projected_rows.sort(
+            key=lambda row: (str(row.get("role") or ""), str(row.get("status") or ""))
+        )
+        tested = sorted(
+            {
+                str(row.get("role") or "")
+                for row in projected_rows
+                if str(row.get("role") or "")
+            }
+        )
+        passed = sorted(
+            {
+                str(row.get("role") or "")
+                for row in own_rows
+                if _operational_role_probe_row_is_available(row)
+            }
+        )
+        failed = sorted(set(tested).difference(passed))
+        missing = sorted(set(targets).difference(tested))
+        profile_receipts.append(
+            {
+                "profile_id_sha256": sha256_text(profile.profile_id),
+                "target_roles": targets,
+                "tested_roles": tested,
+                "passed_roles": passed,
+                "failed_roles": failed,
+                "missing_roles": missing,
+                "probe_count": len(projected_rows),
+                "available_probe_count": len(passed),
+                "failed_probe_count": len(failed),
+                "streaming_contract_verified": bool(
+                    projected_rows
+                    and all(
+                        _operational_role_probe_row_is_available(row)
+                        for row in own_rows
+                    )
+                )
+                if projected_rows
+                else not targets,
+                "probe_receipt_sha256": sha256_text(stable_json(projected_rows)),
+                "probe_results": projected_rows,
+            }
+        )
+    profile_receipts.sort(key=lambda row: str(row.get("profile_id_sha256") or ""))
+    return {
+        "schema": "axio_fusion_api.provider_role_probe.binding.v1",
+        "contract": str(payload.get("contract") or "")[:120],
+        "requested_roles": requested_roles,
+        "streaming_required": True,
+        "latency_ceiling_ms": PROVIDER_MAX_RESPONSE_LATENCY_MS,
+        "status": str(payload.get("status") or "")[:64],
+        "profile_count": len(profile_receipts),
+        "profile_receipts": profile_receipts,
+        "probe_receipt_sha256": sha256_text(
+            stable_json(profile_receipts)
+        ),
+        "benchmark_cases_or_labels_used": payload.get(
+            "benchmark_cases_or_labels_used"
+        ) is True,
+        "raw_role_probe_prompt_persisted": False,
+        "raw_provider_output_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _apply_operational_role_probe_metadata(
+    profiles: Sequence[ModelProfile],
+    role_probe: Mapping[str, Any] | None,
+) -> list[ModelProfile]:
+    """Restrict only roles that fail the real control-packet probe.
+
+    Text/latency admission remains independent: a model that cannot accept a
+    Judge or Critic control packet may still serve a bounded solver or small
+    extraction role.  Missing role receipts are fail-closed only when the
+    role-probe contract was actually requested; legacy/fake probe payloads
+    without that contract remain backward-compatible.
+    """
+
+    if not isinstance(role_probe, Mapping):
+        return list(profiles)
+    requested_roles = _normalize_roles(role_probe.get("requested_roles", ()))
+    if not requested_roles:
+        return list(profiles)
+    raw_rows = role_probe.get("probes")
+    raw_rows = raw_rows if isinstance(raw_rows, list) else []
+    by_profile: dict[str, list[Mapping[str, Any]]] = {}
+    for row in raw_rows:
+        if not isinstance(row, Mapping):
+            continue
+        profile_id = str(row.get("profile_id") or "")
+        role = " ".join(str(row.get("role") or "").strip().casefold().split())
+        if profile_id and role in requested_roles:
+            by_profile.setdefault(profile_id, []).append(row)
+    contract_attempted = str(role_probe.get("status") or "").strip().casefold() in {
+        "ready",
+        "incomplete",
+    }
+    result: list[ModelProfile] = []
+    for profile in profiles:
+        targets = {
+            role
+            for role in _PREFUSION_OPERATIONAL_ROLE_PROBE_ROLES
+            if role in requested_roles
+            and role in set(_normalize_roles(profile.screening_allowed_roles))
+            and role not in set(_normalize_roles(profile.screening_disallowed_roles))
+        }
+        own_rows = by_profile.get(profile.profile_id, [])
+        tested = {
+            " ".join(str(row.get("role") or "").strip().casefold().split())
+            for row in own_rows
+            if str(row.get("role") or "")
+        }
+        passed: set[str] = set()
+        for role in tested:
+            role_row = next(
+                (
+                    row
+                    for row in own_rows
+                    if " ".join(str(row.get("role") or "").strip().casefold().split())
+                    == role
+                ),
+                None,
+            )
+            if role_row is not None and _operational_role_probe_row_is_available(
+                role_row
+            ):
+                passed.add(role)
+        failed = {role for role in tested if role not in passed}
+        missing = targets.difference(tested)
+        if contract_attempted:
+            failed.update(missing)
+        if not targets and not own_rows:
+            result.append(profile)
+            continue
+        base_allowed = set(_normalize_roles(profile.screening_allowed_roles))
+        base_denied = set(_normalize_roles(profile.screening_disallowed_roles))
+        effective_allowed = base_allowed.difference(failed)
+        effective_denied = base_denied.union(failed)
+        safe_rows = [
+            {
+                "role": str(row.get("role") or "")[:80],
+                "status": str(row.get("status") or "")[:80],
+                "latency_ms": row.get("latency_ms"),
+                "output_sha256": str(row.get("output_sha256") or ""),
+                "role_output_contract_valid": row.get(
+                    "role_output_contract_valid"
+                )
+                is True,
+                "role_streaming_contract_valid": row.get(
+                    "role_streaming_contract_valid"
+                )
+                is True,
+                "stream_requested": row.get("stream_requested") is True,
+                "stream_observed": row.get("stream_observed") is True,
+                "stream_fallback_used": row.get("stream_fallback_used") is True,
+                "stream_protocol": str(row.get("stream_protocol") or "")[:32],
+                "stream_frame_count": max(
+                    0, int(row.get("stream_frame_count") or 0)
+                ),
+                "strict_streaming_requested": row.get(
+                    "strict_streaming_requested"
+                )
+                is True,
+                "error_code": str(row.get("error_code") or "")[:120],
+            }
+            for row in own_rows
+        ]
+        safe_rows.sort(key=lambda row: (str(row.get("role") or ""), str(row.get("status") or "")))
+        projected_probe = _project_operational_role_probe(
+            {
+                **dict(role_probe),
+                "status": "ready" if not missing else "incomplete",
+                "tested_roles": sorted(tested),
+                "passed_roles": sorted(passed),
+                "failed_roles": sorted(failed),
+                "missing_roles": sorted(missing),
+                "probe_count": len(own_rows),
+                "available_probe_count": len(passed),
+                "failed_probe_count": len(failed),
+                "probe_receipt_sha256": sha256_text(stable_json(safe_rows)),
+                "streaming_required": True,
+                "streaming_contract_verified": bool(
+                    own_rows
+                    and all(
+                        _operational_role_probe_row_is_available(row)
+                        for row in own_rows
+                    )
+                ),
+            }
+        )
+        admission = dict(profile.screening_role_admission)
+        admission["operational_role_probe"] = projected_probe
+        result.append(
+            replace(
+                profile,
+                screening_allowed_roles=tuple(sorted(effective_allowed)),
+                screening_disallowed_roles=tuple(sorted(effective_denied)),
+                screening_role_admission=admission,
+                source="prefusion_screened_role_calibrated",
             )
         )
     return result
@@ -4613,6 +5017,7 @@ def _project_prefusion_role_admission(value: Any) -> dict[str, Any]:
 
     eligibility = payload.get("local_role_eligibility")
     eligibility = eligibility if isinstance(eligibility, Mapping) else {}
+    operational_probe = payload.get("operational_role_probe")
     return {
         "schema": str(
             payload.get("schema") or "axio_fusion_api.prefusion_role_admission.v1"
@@ -4638,6 +5043,11 @@ def _project_prefusion_role_admission(value: Any) -> dict[str, Any]:
         "local_role_eligibility": {
             role: eligibility.get(role) is True for role in _ROLE_NAMES_ORDERED
         },
+        "operational_role_probe": _project_operational_role_probe(
+            operational_probe
+        )
+        if isinstance(operational_probe, Mapping) and operational_probe
+        else {},
         "ranking_prior_only": True,
         "ranking_prior_forbidden_for_final_benchmark_claims": True,
         "raw_research_output_persisted": False,

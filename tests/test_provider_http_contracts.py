@@ -728,6 +728,103 @@ def test_strict_streaming_receipt_contains_framing_evidence(monkeypatch):
     assert receipt["strict_streaming_requested"] is True
 
 
+def test_operational_role_probe_requires_framed_streaming_and_structured_judge():
+    profile = normalize_profile(
+        {
+            "provider": "role-fixture",
+            "model": "role-model",
+            "api_format": "chat",
+        }
+    )
+    required_keys = {
+        "consensus": "bounded retry",
+        "contradictions": [],
+        "unique_insights": [],
+        "missing_coverage": [],
+        "collective_blind_spots": [],
+        "ranked_candidates": [],
+        "follow_up_tasks": [],
+        "ready_for_synthesis": True,
+    }
+
+    class RoleClient:
+        def __init__(self, *, framed: bool):
+            self.framed = framed
+
+        def complete_turn(self, _profile, _request, *, system, **_kwargs):
+            provider_module._record_provider_request_receipt(
+                status="success",
+                key_attempt_count=1,
+                transport_attempt_count=1,
+                retry_attempt_count=0,
+                stream_requested=True,
+                stream_observed=self.framed,
+                stream_fallback_used=not self.framed,
+                stream_protocol="sse" if self.framed else "",
+                stream_frame_count=2 if self.framed else 0,
+                strict_streaming_requested=True,
+            )
+            output = json.dumps(required_keys) if "structured judge" in system else "bounded review"
+            return provider_module.ProviderCompletion(output)
+
+    framed = provider_module._probe_one_model_role(
+        profile,
+        "judge",
+        timeout=1.0,
+        client=RoleClient(framed=True),
+    )
+    assert framed["status"] == "available"
+    assert framed["role_output_contract_valid"] is True
+    assert framed["role_streaming_contract_valid"] is True
+    assert framed["stream_protocol"] == "sse"
+    assert framed["stream_frame_count"] == 2
+
+    unframed = provider_module._probe_one_model_role(
+        profile,
+        "judge",
+        timeout=1.0,
+        client=RoleClient(framed=False),
+    )
+    assert unframed["status"] == "incompatible"
+    assert unframed["error_code"] == "role_probe_streaming_contract_invalid"
+
+
+def test_operational_judge_role_probe_rejects_non_json_even_with_sse():
+    profile = normalize_profile(
+        {
+            "provider": "role-json-fixture",
+            "model": "role-json-model",
+            "api_format": "chat",
+        }
+    )
+
+    class InvalidJudgeClient:
+        def complete_turn(self, *_args, **_kwargs):
+            provider_module._record_provider_request_receipt(
+                status="success",
+                key_attempt_count=1,
+                transport_attempt_count=1,
+                retry_attempt_count=0,
+                stream_requested=True,
+                stream_observed=True,
+                stream_fallback_used=False,
+                stream_protocol="ndjson",
+                stream_frame_count=1,
+                strict_streaming_requested=True,
+            )
+            return provider_module.ProviderCompletion("not-json")
+
+    row = provider_module._probe_one_model_role(
+        profile,
+        "judge",
+        timeout=1.0,
+        client=InvalidJudgeClient(),
+    )
+    assert row["status"] == "incompatible"
+    assert row["error_code"] == "role_probe_output_contract_invalid"
+    assert row["role_streaming_contract_valid"] is True
+
+
 def test_provider_adapters_omit_unspecified_temperature_but_preserve_explicit_zero(monkeypatch):
     profiles = {
         "chat": normalize_profile({"provider": "fixture", "model": "chat", "api_format": "chat"}),

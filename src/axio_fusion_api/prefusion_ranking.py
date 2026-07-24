@@ -36,6 +36,18 @@ PREFUSION_OPERATIONAL_RANKING_WEIGHTS = {
 PREFUSION_CAPABILITY_AXIS_MIN_NONZERO = 1
 PREFUSION_BROAD_CAPABILITY_OVERALL_THRESHOLD = 0.70
 PREFUSION_BROAD_CAPABILITY_AXIS_MIN_NONZERO = 3
+PREFUSION_ROLE_NAMES = (
+    "primary_solver",
+    "independent_solver",
+    "critic",
+    "domain_specialist",
+    "judge",
+    "synthesizer",
+    "structured_extraction",
+    "simple_classification",
+    "short_verification",
+    "single_tool_argument_validation",
+)
 
 
 def clamp01(value: Any, default: float = 0.0) -> float:
@@ -212,6 +224,51 @@ def probe_success_summary(
     }
 
 
+def aggregate_profile_role_projection(
+    profiles: Sequence[Any],
+) -> tuple[list[str], list[str]]:
+    """Union roles across physical replicas without counting replicas twice.
+
+    A canonical model is one logical candidate, but its replicas may have
+    different operational role receipts.  A role is available for the logical
+    candidate when at least one currently eligible physical replica passed it;
+    a role remains denied only when every replica denies it.  This preserves
+    failover without letting one unhealthy replica erase a healthy one.
+    """
+
+    members = [profile for profile in profiles if profile is not None]
+    if not members:
+        return [], []
+    allowed_sets = [
+        {
+            " ".join(str(role or "").strip().casefold().split())
+            for role in getattr(profile, "screening_allowed_roles", ())
+            if str(role or "").strip()
+        }
+        for profile in members
+    ]
+    denied_sets = [
+        {
+            " ".join(str(role or "").strip().casefold().split())
+            for role in getattr(profile, "screening_disallowed_roles", ())
+            if str(role or "").strip()
+        }
+        for profile in members
+    ]
+    allowed = set().union(*allowed_sets)
+    denied = set.intersection(*denied_sets) if denied_sets else set()
+    denied.difference_update(allowed)
+    ordered_allowed = [role for role in PREFUSION_ROLE_NAMES if role in allowed]
+    ordered_allowed.extend(
+        sorted(role for role in allowed if role not in PREFUSION_ROLE_NAMES)
+    )
+    ordered_denied = [role for role in PREFUSION_ROLE_NAMES if role in denied]
+    ordered_denied.extend(
+        sorted(role for role in denied if role not in PREFUSION_ROLE_NAMES)
+    )
+    return ordered_allowed, ordered_denied
+
+
 def operational_score(
     *,
     research_quality: Any,
@@ -309,6 +366,9 @@ def build_operational_model_rows(
             summary = probe_success_summary([], probe_rows)
         if int(summary.get("successful_replica_count") or 0) < 1:
             continue
+        role_allowed, role_denied = aggregate_profile_role_projection(
+            physical_profiles
+        )
         capability = ranking.get("capability_summary")
         capability = capability if isinstance(capability, Mapping) else {}
         axes = capability.get("axes")
@@ -363,11 +423,19 @@ def build_operational_model_rows(
                     "strengths": list(capability.get("strengths") or [])[:8],
                     "limitations": list(capability.get("limitations") or [])[:8],
                 },
-                "allowed_roles": list(ranking.get("allowed_roles") or []),
-                "disallowed_roles": list(ranking.get("disallowed_roles") or []),
-                "role_admission": dict(ranking.get("role_admission") or {})
-                if isinstance(ranking.get("role_admission"), Mapping)
-                else {},
+                "allowed_roles": role_allowed,
+                "disallowed_roles": role_denied,
+                "role_admission": {
+                    **(
+                        dict(ranking.get("role_admission") or {})
+                        if isinstance(ranking.get("role_admission"), Mapping)
+                        else {}
+                    ),
+                    "effective_allowed_roles": role_allowed,
+                    "effective_disallowed_roles": role_denied,
+                    "replica_role_projection_is_union_for_allowed": True,
+                    "replica_role_projection_is_intersection_for_denied": True,
+                },
                 "confidence": confidence,
                 "research_quality_score": research_score,
                 "stream_reliability_score": reliability,
@@ -421,6 +489,7 @@ __all__ = [
     "capability_axis_coverage",
     "operational_rank_rows",
     "build_operational_model_rows",
+    "aggregate_profile_role_projection",
     "operational_score",
     "probe_row_is_successful",
     "probe_success_summary",

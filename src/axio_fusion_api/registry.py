@@ -60,6 +60,11 @@ _PREFUSION_REQUIRED_ROLES = (
     "judge",
     "synthesizer",
 )
+_PREFUSION_OPERATIONAL_ROLE_PROBE_ROLES = (
+    "critic",
+    "judge",
+    "synthesizer",
+)
 
 
 _PROVIDER_CONFIG_INLINE_ENV_NAMES = (
@@ -1751,6 +1756,19 @@ def validate_prefusion_registry_handoff(
         ):
             issues.append("prefusion_registry_stream_stability_contract_invalid")
 
+    role_probe_required = bool(
+        binding.get("role_probe_required") is True
+        or generation_contract.get("role_probe_contract_required") is True
+    )
+    if role_probe_required:
+        issues.extend(
+            _validate_prefusion_role_probe_binding(
+                binding=binding,
+                models=models,
+                generation_contract=generation_contract,
+            )
+        )
+
     model_hashes: set[str] = set()
     canonical_to_model_hashes: dict[str, set[str]] = {}
     for model in models:
@@ -2217,6 +2235,258 @@ def validate_prefusion_registry_handoff(
         "raw_provider_output_persisted": False,
         "secrets_persisted": False,
     }
+
+
+def _prefusion_role_result_is_available(row: Mapping[str, Any]) -> bool:
+    """Validate the persisted hash-safe result of one operational role probe."""
+
+    if str(row.get("status") or "").strip().casefold() != "available":
+        return False
+    if row.get("role_output_contract_valid") is not True:
+        return False
+    if row.get("role_streaming_contract_valid") is not True:
+        return False
+    if row.get("stream_requested") is not True:
+        return False
+    if row.get("strict_streaming_requested") is not True:
+        return False
+    if row.get("stream_observed") is not True:
+        return False
+    if row.get("stream_fallback_used") is True:
+        return False
+    if str(row.get("stream_protocol") or "").strip().casefold() not in {
+        "sse",
+        "ndjson",
+    }:
+        return False
+    if not is_sha256_digest(row.get("output_sha256")):
+        return False
+    try:
+        frame_count = int(row.get("stream_frame_count") or 0)
+        latency_ms = float(row.get("latency_ms") or 0.0)
+    except (TypeError, ValueError):
+        return False
+    return frame_count >= 1 and 0.0 <= latency_ms <= 90_000.0
+
+
+def _validate_prefusion_role_probe_binding(
+    *,
+    binding: Mapping[str, Any],
+    models: Sequence[Any],
+    generation_contract: Mapping[str, Any],
+) -> list[str]:
+    """Check role evidence, profile projections, and their content hashes."""
+
+    issues: list[str] = []
+    role_probe = binding.get("role_probe")
+    role_probe = role_probe if isinstance(role_probe, Mapping) else {}
+    if not role_probe:
+        return ["prefusion_registry_role_probe_binding_missing"]
+    if str(role_probe.get("schema") or "") != (
+        "axio_fusion_api.provider_role_probe.binding.v1"
+    ):
+        issues.append("prefusion_registry_role_probe_schema_invalid")
+    if str(role_probe.get("contract") or "") != (
+        "axio_fusion_api.provider_role_probe.fixed_control_packet.v1"
+    ):
+        issues.append("prefusion_registry_role_probe_contract_invalid")
+    requested_roles = [
+        str(item)
+        for item in role_probe.get("requested_roles", [])
+        if str(item)
+    ] if isinstance(role_probe.get("requested_roles"), list) else []
+    if requested_roles != list(_PREFUSION_OPERATIONAL_ROLE_PROBE_ROLES):
+        issues.append("prefusion_registry_role_probe_roles_invalid")
+    if role_probe.get("streaming_required") is not True:
+        issues.append("prefusion_registry_role_probe_streaming_required_invalid")
+    if int(role_probe.get("latency_ceiling_ms") or 0) != 90_000:
+        issues.append("prefusion_registry_role_probe_latency_ceiling_invalid")
+
+    profile_receipts = role_probe.get("profile_receipts")
+    profile_receipts = profile_receipts if isinstance(profile_receipts, list) else []
+    if int(role_probe.get("profile_count") or 0) != len(profile_receipts):
+        issues.append("prefusion_registry_role_probe_profile_count_invalid")
+    expected_top_digest = str(role_probe.get("probe_receipt_sha256") or "").lower()
+    if not is_sha256_digest(expected_top_digest) or expected_top_digest != sha256_text(
+        stable_json(profile_receipts)
+    ).lower():
+        issues.append("prefusion_registry_role_probe_digest_invalid")
+    expected_binding_digest = str(
+        binding.get("role_probe_content_sha256") or ""
+    ).lower()
+    expected_generation_digest = str(
+        generation_contract.get("role_probe_content_sha256") or ""
+    ).lower()
+    # The digest is over the canonical JSON, not over its hexadecimal text.
+    actual_role_probe_digest = sha256_text(stable_json(dict(role_probe))).lower()
+    if expected_binding_digest != actual_role_probe_digest:
+        issues.append("prefusion_registry_role_probe_binding_digest_mismatch")
+    if expected_generation_digest != actual_role_probe_digest:
+        issues.append("prefusion_registry_role_probe_generation_digest_mismatch")
+
+    model_by_hash: dict[str, Mapping[str, Any]] = {}
+    for model in models:
+        if not isinstance(model, Mapping):
+            continue
+        profile_id = str(model.get("profile_id") or "")
+        if profile_id:
+            model_by_hash[sha256_text(profile_id).lower()] = model
+    receipt_by_hash: dict[str, Mapping[str, Any]] = {}
+    for receipt in profile_receipts:
+        if not isinstance(receipt, Mapping):
+            issues.append("prefusion_registry_role_probe_receipt_invalid")
+            continue
+        profile_hash = str(receipt.get("profile_id_sha256") or "").lower()
+        if not is_sha256_digest(profile_hash) or profile_hash in receipt_by_hash:
+            issues.append("prefusion_registry_role_probe_profile_hash_invalid")
+            continue
+        receipt_by_hash[profile_hash] = receipt
+        results = receipt.get("probe_results")
+        results = results if isinstance(results, list) else []
+        if str(receipt.get("probe_receipt_sha256") or "").lower() != sha256_text(
+            stable_json(results)
+        ).lower():
+            issues.append("prefusion_registry_role_probe_profile_digest_invalid")
+        result_roles = [
+            str(row.get("role") or "")
+            for row in results
+            if isinstance(row, Mapping) and str(row.get("role") or "")
+        ]
+        if len(result_roles) != len(set(result_roles)) or not set(result_roles).issubset(
+            set(requested_roles)
+        ):
+            issues.append("prefusion_registry_role_probe_result_roles_invalid")
+        passed = sorted(
+            role
+            for role in result_roles
+            if any(
+                isinstance(row, Mapping)
+                and str(row.get("role") or "") == role
+                and _prefusion_role_result_is_available(row)
+                for row in results
+            )
+        )
+        tested = sorted(set(result_roles))
+        failed = sorted(set(tested).difference(passed))
+        target = sorted(
+            str(role)
+            for role in receipt.get("target_roles", [])
+            if str(role)
+        ) if isinstance(receipt.get("target_roles"), list) else []
+        missing = sorted(set(target).difference(tested))
+        for key, expected in (
+            ("tested_roles", tested),
+            ("passed_roles", passed),
+            ("failed_roles", failed),
+            ("missing_roles", missing),
+        ):
+            observed = sorted(
+                str(role)
+                for role in receipt.get(key, [])
+                if str(role)
+            ) if isinstance(receipt.get(key), list) else []
+            if observed != expected:
+                issues.append(f"prefusion_registry_role_probe_{key}_mismatch")
+        if int(receipt.get("probe_count") or 0) != len(results):
+            issues.append("prefusion_registry_role_probe_count_invalid")
+        if int(receipt.get("available_probe_count") or 0) != len(passed):
+            issues.append("prefusion_registry_role_probe_available_count_invalid")
+        if int(receipt.get("failed_probe_count") or 0) != len(failed):
+            issues.append("prefusion_registry_role_probe_failed_count_invalid")
+        streaming_verified = bool(
+            results and all(_prefusion_role_result_is_available(row) for row in results)
+        ) if results else not target
+        if receipt.get("streaming_contract_verified") is not streaming_verified:
+            issues.append("prefusion_registry_role_probe_streaming_projection_invalid")
+
+        model = model_by_hash.get(profile_hash)
+        if model is None:
+            issues.append("prefusion_registry_role_probe_model_binding_mismatch")
+            continue
+        admission = model.get("screening_role_admission")
+        admission = admission if isinstance(admission, Mapping) else {}
+        operational = admission.get("operational_role_probe")
+        operational = operational if isinstance(operational, Mapping) else {}
+        if not operational:
+            issues.append("prefusion_registry_role_probe_profile_admission_missing")
+            continue
+        if str(operational.get("probe_receipt_sha256") or "").lower() != str(
+            receipt.get("probe_receipt_sha256") or ""
+        ).lower():
+            issues.append("prefusion_registry_role_probe_profile_admission_digest_mismatch")
+        for key in (
+            "requested_roles",
+            "tested_roles",
+            "passed_roles",
+            "failed_roles",
+            "missing_roles",
+        ):
+            observed = sorted(
+                str(role)
+                for role in operational.get(key, [])
+                if str(role)
+            ) if isinstance(operational.get(key), list) else []
+            expected = sorted(
+                str(role)
+                for role in (
+                    requested_roles
+                    if key == "requested_roles"
+                    else receipt.get(key, [])
+                )
+                if str(role)
+            )
+            if observed != expected:
+                issues.append(
+                    f"prefusion_registry_role_probe_profile_admission_{key}_mismatch"
+                )
+        for key, expected in (
+            ("probe_count", len(results)),
+            ("available_probe_count", len(passed)),
+            ("failed_probe_count", len(failed)),
+        ):
+            if int(operational.get(key) or 0) != expected:
+                issues.append(
+                    f"prefusion_registry_role_probe_profile_admission_{key}_mismatch"
+                )
+        if operational.get("streaming_contract_verified") is not streaming_verified:
+            issues.append(
+                "prefusion_registry_role_probe_profile_admission_streaming_projection_mismatch"
+            )
+        base_allowed = {
+            str(role)
+            for role in admission.get("effective_allowed_roles", [])
+            if str(role)
+        } if isinstance(admission.get("effective_allowed_roles"), list) else set()
+        base_denied = {
+            str(role)
+            for role in admission.get("effective_disallowed_roles", [])
+            if str(role)
+        } if isinstance(admission.get("effective_disallowed_roles"), list) else set()
+        failed_for_policy = set(failed).union(missing)
+        expected_allowed = sorted(base_allowed.difference(failed_for_policy))
+        expected_denied = sorted(
+            base_denied.union(failed_for_policy).difference(expected_allowed)
+        )
+        actual_allowed = sorted(
+            str(role)
+            for role in model.get("screening_allowed_roles", [])
+            if str(role)
+        ) if isinstance(model.get("screening_allowed_roles"), list) else []
+        actual_denied = sorted(
+            str(role)
+            for role in model.get("screening_disallowed_roles", [])
+            if str(role)
+        ) if isinstance(model.get("screening_disallowed_roles"), list) else []
+        if actual_allowed != expected_allowed:
+            issues.append("prefusion_registry_role_probe_allowed_roles_mismatch")
+        if actual_denied != expected_denied:
+            issues.append("prefusion_registry_role_probe_disallowed_roles_mismatch")
+
+    if set(receipt_by_hash) != set(model_by_hash):
+        issues.append("prefusion_registry_role_probe_profile_set_mismatch")
+    if int(role_probe.get("profile_count") or 0) != len(models):
+        issues.append("prefusion_registry_role_probe_model_count_mismatch")
+    return issues
 
 
 def _normalized_prefusion_identity(value: Any) -> str:
