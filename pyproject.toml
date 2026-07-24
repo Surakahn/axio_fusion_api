@@ -13,7 +13,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest"]
-benchmark = ["pyarrow>=14", "lxml>=4.9"]
+benchmark = ["pyarrow>=14", "lxml>=4.9", "numpy>=1.24", "pandas>=2.0"]
 
 [project.scripts]
 axio-fusion-api-standalone = "axio_fusion_api.cli:main"
