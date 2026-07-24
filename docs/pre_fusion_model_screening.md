@@ -304,38 +304,37 @@ the ranking complete while preventing cross-candidate evidence contamination.
 
 ## Current Live Handoff
 
-The current v6 handoff was completed on 2026-07-22 with the configured NVIDIA
-Chat Completions and TokenAPIs Responses channels. Complete `/models`
-discovery produced 139 physical profiles and 139 logical candidates. All 50
-bounded research batches passed the v2 capability-evidence prompt contract and
-were merged deterministically. The strict streaming probe covered all 139
-profiles: 34 profiles passed, 11 were excluded by the measured 90-second
-latency gate, and the remaining profiles failed transport or semantic stream
-admission. No ordinary JSON fallback was admitted; 49 probes observed a real
-SSE/NDJSON stream. Admitted latency ranged from 1,041.461 ms to 26,859.621 ms.
+The current r3 handoff was completed on 2026-07-25 after rediscovering the
+configured channels and reranking the complete inventory. `/models` discovery
+produced 136 physical profiles and 136 logical candidates, all with a
+validated research-prior record. Three strict streaming samples admitted 29
+profiles, 8 were rejected by the measured 90-second latency ceiling, and 99
+were rejected by stream/protocol stability. Forty-seven profiles observed at
+least one real SSE/NDJSON stream; the 29 admitted profiles each completed all
+three samples, for 87 successful samples. The slowest admitted sample was
+86,712.071 ms. Ordinary JSON fallback was never admitted.
 
-The serving projection contains 34 physical profiles and 34 logical models.
+The serving projection contains 29 physical profiles and 29 logical models.
 The required `primary_solver`, `judge`, and `synthesizer` role capacities are
 all present, and the report handoff validator, registry handoff validator, and
-`load_registry()` all pass. The ranking is still an operational prior, not
-benchmark evidence or a superiority claim.
+`load_registry(..., require_prefusion=True)` all pass. The public health
+projection carries a `single_provider_model_pool` warning for this cohort;
+channel availability must be re-screened before a formal comparison campaign.
+The ranking is still an operational prior, not benchmark evidence or a
+superiority claim.
 
-The active v6 artifacts are:
+The active r3 artifacts are:
 
 ```text
-private/prefusion_full_live_20260722.capability_axes.v6.report.json
-private/prefusion_full_live_20260722.capability_axes.v6.registry.private.json
-private/prefusion_full_live_20260722.capability_axes.v6.safe.json
+private/prefusion_live_20260725_r3/prefusion_screening.safe.json
+private/prefusion_live_20260725_r3/fusion-runtime-registry.private.json
 ```
 
-These v6 artifacts were generated before the latency-field naming cleanup and
-therefore retain `fastest_observed_p50_latency_ms` and
-`slowest_observed_p50_latency_ms` as compatibility aliases. The values are
-still single observed samples, not percentile estimates. Current source code
-emits the unambiguous `fastest_observed_latency_ms` and
-`slowest_observed_latency_ms` names for the next live handoff; the existing v6
-registry remains loadable because the validator accepts the compatibility
-projection and independently verifies the underlying probe receipt.
+The r3 registry uses the unambiguous latency fields and binds each admitted
+profile to its three-sample receipt. Native tool calibration was not part of
+this handoff, so tool capability remains unproven until a separate bounded
+probe is run. Earlier v2, v5, v6, v9, and operational-v1 artifacts remain
+historical diagnostics and cannot replace r3 without a fresh screening gate.
 
 ## Historical Live Handoff: v2
 
