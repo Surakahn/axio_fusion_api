@@ -717,6 +717,125 @@ def test_operational_role_probe_http_400_removes_only_critic_role():
     assert receipt["passed_roles"] == ["judge", "synthesizer"]
 
 
+def test_operational_role_probe_binds_profiles_without_role_targets():
+    profile = _role_profile(
+        _profile("provider-a", "narrow", "narrow"),
+        allowed_roles=("structured_extraction",),
+        denied_roles=("critic", "judge", "synthesizer"),
+    )
+    role_probe = {
+        "schema": "axio_fusion_api.provider_role_probe.v1",
+        "contract": "axio_fusion_api.provider_role_probe.fixed_control_packet.v1",
+        "status": "ready",
+        "requested_roles": ["critic", "judge", "synthesizer"],
+        "probes": [],
+    }
+
+    updated = model_screening._apply_operational_role_probe_metadata(
+        [profile], role_probe
+    )[0]
+    receipt = updated.screening_role_admission["operational_role_probe"]
+
+    assert receipt["status"] == "ready"
+    assert receipt["requested_roles"] == ["critic", "judge", "synthesizer"]
+    assert receipt["tested_roles"] == []
+    assert receipt["missing_roles"] == []
+    assert receipt["probe_count"] == 0
+    assert receipt["streaming_contract_verified"] is True
+
+
+def test_prefusion_registry_binds_empty_role_receipts_for_unprobed_profiles(
+    monkeypatch,
+):
+    profiles = [
+        _profile("provider-a", "broad", "broad"),
+        _profile("provider-b", "narrow", "narrow"),
+    ]
+    groups = _groups(profiles)
+    research = _research_output([str(row["candidate_id"]) for row in groups])
+    narrow_row = research["ordered_models"][1]
+    narrow_row["capability_summary"] = {
+        "overall": 0.30,
+        "axes": {
+            axis: 0.0 for axis in CAPABILITY_AXES
+        },
+        "strengths": ["narrow structured extraction evidence"],
+        "limitations": ["insufficient evidence for high-impact roles"],
+    }
+    narrow_row["capability_summary"]["axes"]["structured_output"] = 0.60
+    narrow_row["allowed_roles"] = ["structured_extraction"]
+    narrow_row["disallowed_roles"] = [
+        "critic",
+        "judge",
+        "synthesizer",
+        "primary_solver",
+        "independent_solver",
+    ]
+    narrow_row["confidence"] = 0.60
+    requested_roles = ["critic", "judge", "synthesizer"]
+
+    def fake_probe(probe_profiles, **_kwargs):
+        physical_rows = [
+            {
+                "profile_id": item.profile_id,
+                "provider": item.provider,
+                "model": item.model,
+                "status": "available",
+                "latency_ms": 100,
+                "output_sha256": sha256_text(f"physical:{item.profile_id}"),
+                "probe_mode": "live",
+                "live_probe_evidence": True,
+                **_stream_evidence(),
+                **_multi_sample_stability_evidence(3),
+            }
+            for item in probe_profiles
+        ]
+        role_rows = [
+            _role_probe_row(item, role)
+            for item in probe_profiles
+            for role in requested_roles
+            if role in item.screening_allowed_roles
+        ]
+        return {
+            "schema": "axio_fusion_api.provider_probe.v1",
+            "mode": "live",
+            "network_calls_performed": True,
+            "probes": physical_rows,
+            "role_probe": {
+                "schema": "axio_fusion_api.provider_role_probe.v1",
+                "contract": "axio_fusion_api.provider_role_probe.fixed_control_packet.v1",
+                "status": "ready",
+                "requested_roles": requested_roles,
+                "probes": role_rows,
+                "benchmark_cases_or_labels_used": False,
+            },
+        }
+
+    monkeypatch.setattr(model_screening, "probe_provider_models", fake_probe)
+    report = run_prefusion_model_screening(
+        profiles=profiles,
+        source_manifest=_source_manifest(),
+        research_output=research,
+        live=True,
+        min_available_models=1,
+    )
+
+    assert report["status"] == "ready"
+    registry = report["fusion_registry"]
+    assert validate_prefusion_registry_handoff(registry, require_ready=True)[
+        "valid"
+    ] is True
+    narrow_model = next(
+        row for row in registry["models"] if row["model"] == "narrow"
+    )
+    assert (
+        narrow_model["screening_role_admission"]["operational_role_probe"][
+            "probe_count"
+        ]
+        == 0
+    )
+
+
 def test_logical_model_role_projection_unions_healthy_replicas():
     failed_replica = _role_profile(
         _profile("provider-a", "shared", "canonical-shared"),

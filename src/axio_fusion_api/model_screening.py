@@ -2560,7 +2560,40 @@ def _apply_operational_role_probe_metadata(
         if contract_attempted:
             failed.update(missing)
         if not targets and not own_rows:
-            result.append(profile)
+            # A role probe is a contract over the complete admitted profile
+            # set. Profiles with no high-impact role target do not need a
+            # provider call, but they still need an explicit empty receipt so
+            # the registry can distinguish "not targeted" from missing or
+            # tampered admission metadata.
+            if contract_attempted:
+                empty_rows: list[dict[str, Any]] = []
+                admission = dict(profile.screening_role_admission)
+                admission["operational_role_probe"] = _project_operational_role_probe(
+                    {
+                        **dict(role_probe),
+                        "status": "ready",
+                        "tested_roles": [],
+                        "passed_roles": [],
+                        "failed_roles": [],
+                        "missing_roles": [],
+                        "probe_count": 0,
+                        "available_probe_count": 0,
+                        "failed_probe_count": 0,
+                        "probe_receipt_sha256": sha256_text(
+                            stable_json(empty_rows)
+                        ),
+                        "streaming_required": True,
+                        "streaming_contract_verified": True,
+                    }
+                )
+                result.append(
+                    replace(
+                        profile,
+                        screening_role_admission=admission,
+                    )
+                )
+            else:
+                result.append(profile)
             continue
         base_allowed = set(_normalize_roles(profile.screening_allowed_roles))
         base_denied = set(_normalize_roles(profile.screening_disallowed_roles))
