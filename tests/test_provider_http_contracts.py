@@ -750,8 +750,10 @@ def test_operational_role_probe_requires_framed_streaming_and_structured_judge()
     class RoleClient:
         def __init__(self, *, framed: bool):
             self.framed = framed
+            self.max_output_tokens: list[int | None] = []
 
-        def complete_turn(self, _profile, _request, *, system, **_kwargs):
+        def complete_turn(self, _profile, request, *, system, **_kwargs):
+            self.max_output_tokens.append(request.max_output_tokens)
             provider_module._record_provider_request_receipt(
                 status="success",
                 key_attempt_count=1,
@@ -767,17 +769,19 @@ def test_operational_role_probe_requires_framed_streaming_and_structured_judge()
             output = json.dumps(required_keys) if "structured judge" in system else "bounded review"
             return provider_module.ProviderCompletion(output)
 
+    framed_client = RoleClient(framed=True)
     framed = provider_module._probe_one_model_role(
         profile,
         "judge",
         timeout=1.0,
-        client=RoleClient(framed=True),
+        client=framed_client,
     )
     assert framed["status"] == "available"
     assert framed["role_output_contract_valid"] is True
     assert framed["role_streaming_contract_valid"] is True
     assert framed["stream_protocol"] == "sse"
     assert framed["stream_frame_count"] == 2
+    assert framed_client.max_output_tokens == [provider_module.ROLE_PROBE_JUDGE_MAX_OUTPUT_TOKENS]
 
     unframed = provider_module._probe_one_model_role(
         profile,
