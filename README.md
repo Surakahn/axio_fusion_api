@@ -12,6 +12,91 @@ how much evidence is enough, when a smaller model should do one bounded job,
 and how the final answer is produced under cost, deadline, safety, and
 reliability constraints.
 
+## Vision And Engineering Meaning
+
+Axio is built around a simple product thesis: **the next useful model layer
+does not have to be a single model**. The strongest practical intelligence can
+come from a disciplined composition of several remote model capabilities, each
+given a narrow responsibility and a bounded amount of time. One model may be
+excellent at independent problem solving, another at adversarial review, a
+smaller one at extraction or tool-argument validation, and a final acting model
+at turning the collected evidence into one clear answer. Axio turns that
+composition into a stable service identity that applications can use without
+knowing which providers are behind it.
+
+The long-term goal is a **reusable model-fusion operating layer**: providers
+can be replaced, added, duplicated for failover, or exposed through different
+wire protocols while the public product remains the same three-model family.
+The system is designed to make this change a controlled reconfiguration of
+model capability profiles, prompt contracts, and finite Harness building
+blocks, not a rewrite of application integrations or a self-modifying runtime.
+Every quality improvement must remain inspectable, reproducible, bounded by
+latency and cost, and separable from benchmark data.
+
+### The Product Horizon
+
+`axio-fast`, `axio-terra`, and `axio-pro` are intended to form one coherent
+capability ladder:
+
+- **Axio Fast** provides a responsive path for everyday knowledge work,
+  extraction, classification, concise coding help, and small tool steps.
+- **Axio Terra** applies selective multi-model verification when a second view,
+  critique, or domain perspective is worth the extra bounded work.
+- **Axio Pro** activates a deeper independent panel, structured adjudication,
+  targeted repair, and an acting synthesis stage for difficult or high-risk
+  tasks.
+
+The ambition is not to multiply calls indiscriminately. It is to make a modest
+remote-model portfolio behave like a dependable intelligence product: stronger
+coverage through complementary evidence, graceful degradation when a channel
+is unhealthy, replica failover when the same logical model has multiple
+providers, and a predictable operating envelope that applications can trust.
+The final claim that any Axio tier is better than a single-model baseline is
+earned only through the independent, preregistered benchmark campaign; the
+runtime never treats its own routing prior as proof of intelligence.
+
+### Where This Can Matter
+
+The architecture is meant for products whose model choice changes faster than
+their integration layer: enterprise copilots, research and scientific
+assistants, multilingual knowledge work, software engineering and code review,
+document-heavy operations, agentic tool execution, and regulated workflows in
+areas such as medicine, finance, law, consulting, and public policy. A product
+team can keep one authenticated Axio endpoint and one model family while the
+operator changes the remote capability portfolio behind it.
+
+This creates a practical bridge between frontier model progress and real
+software systems. Providers remain interchangeable infrastructure; Axio owns
+the semantic contracts, context assembly, role isolation, routing, evidence
+checks, streaming compatibility, and operational receipts that make a mixed
+portfolio usable. The same design also gives organizations a path to control
+cost and availability without silently lowering the quality bar: simple work
+can stay fast, difficult work can buy more independent evidence, and every
+trade-off is visible to the operator.
+
+### The Closed-Loop Principle
+
+Axio is intended to improve through a guarded operating loop rather than by
+rewriting itself:
+
+```text
+configure remote channels
+        -> research and screen model capabilities
+        -> admit only measured streaming profiles
+        -> compose bounded role prompts and Harness stages
+        -> observe safe operational receipts
+        -> calibrate configuration through sealed hard-task checks
+        -> promote only reviewed policy changes
+```
+
+Prompts, role contracts, and finite composition policies are deliberate
+configuration surfaces. Runtime code remains a protected foundation. The
+external benchmark harness is a separate consumer of the public Axio APIs, so
+benchmark cases and labels cannot become hidden routing instructions. This
+separation is central to the project's meaning: Axio seeks better answers by
+combining available model capabilities with sound engineering, not by claiming
+that a benchmark-aware orchestration loop is a new trained model.
+
 The result is a practical model product layer: one public model family, four
 industry-standard API surfaces, provider-aware routing, bounded deliberation,
 structured evidence handling, and a controlled path for improving prompts and
