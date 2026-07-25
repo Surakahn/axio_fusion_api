@@ -3454,10 +3454,14 @@ def _recover_private_checkpoint_state(
         if expected_private_sha256 and (
             _file_sha256(unit_path) != expected_private_sha256
         ):
-            # The normal resume verifier will report the mismatch and stop
-            # rather than allowing a changed failed/blocked artifact to be
-            # converted into fresh trusted state.
-            continue
+            # A failed/blocked unit can finish its private final write just
+            # before the parent process persists the refreshed safe index. In
+            # that crash window the digest is expected to drift. Rebuild the
+            # safe projection below, then require task binding and every
+            # previously successful answer hash to remain unchanged before
+            # accepting the newer private artifact. Failed cases have no
+            # answer and may legitimately succeed on retry.
+            pass
         unit = _rebuild_safe_unit_from_private_artifact(
             task=task,
             source=source,
@@ -3564,8 +3568,10 @@ def _retryable_unit_output_bindings_match(
         return False
     if set(previous_by_case) != set(rebuilt_by_case):
         return False
+    empty_output_digest = sha256_text("")
     return all(
-        str(previous_row.get("output_sha256") or "")
+        str(previous_row.get("output_sha256") or "") == empty_output_digest
+        or str(previous_row.get("output_sha256") or "")
         == str(rebuilt_by_case[case_hash].get("output_sha256") or "")
         for case_hash, previous_row in previous_by_case.items()
     )

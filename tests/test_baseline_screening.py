@@ -1439,6 +1439,121 @@ def test_private_checkpoint_recovery_rehydrates_retryable_aggregate_drift(
     ) == []
 
 
+def test_private_checkpoint_recovery_accepts_final_write_before_safe_state_flush(
+    tmp_path,
+    monkeypatch,
+):
+    """A retry may finish its private file before the safe state write."""
+
+    from axio_fusion_api.baseline_screening import _recover_private_checkpoint_state
+
+    profile = normalize_profile(_registry_rows()[2])
+    source = {
+        "source_id": "retry-final-write-source",
+        "adapter": "jsonl_multiple_choice",
+    }
+    source_hash = sha256_text(source["source_id"])
+    cases = [
+        ScreeningCase("retry-kept-answer", "Choose A.", "A", "fixture", {}),
+        ScreeningCase("retry-was-missing", "Choose A again.", "A", "fixture", {}),
+    ]
+    task = {
+        "task_id": sha256_text("retry-final-write-task"),
+        "source_id_sha256": source_hash,
+        "source_snapshot_sha256": sha256_text("snapshot"),
+        "case_set_digest_sha256": sha256_text("cases"),
+        "canonical_identity_sha256": profile.canonical_identity_sha256,
+        "candidate_id_sha256": sha256_text("candidate"),
+        "representative_profile_id_sha256": sha256_text(profile.profile_id),
+        "replica_profile_id_sha256s": [sha256_text(profile.profile_id)],
+    }
+    private_root = tmp_path / "units"
+    unit_path = _screening_unit_path(private_root, task)
+    unit_path.parent.mkdir(parents=True)
+    output = "A"
+    # This is the newer private file written by a retry. The first case was
+    # already completed in the old safe row; the previously failed case now
+    # has a valid answer and must be allowed to enter the new projection.
+    unit_path.write_text(
+        json.dumps(
+            {
+                "schema": "axio_fusion_api.non_target_screening_unit_private.v1",
+                "task_id": task["task_id"],
+                "source_id": source["source_id"],
+                "canonical_identity_sha256": task["canonical_identity_sha256"],
+                "candidate_id_sha256": task["candidate_id_sha256"],
+                "case_results": [
+                    {
+                        "case_id": case.case_id,
+                        "status": "completed",
+                        "score": 1.0,
+                        "output": output,
+                        "output_sha256": sha256_text(output),
+                        "latency_ms": 10.0,
+                        "attempts": [],
+                        "selected_replica_profile_id_sha256": sha256_text(
+                            profile.profile_id
+                        ),
+                    }
+                    for case in cases
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "axio_fusion_api.baseline_screening._score_screening_output_silently",
+        lambda *_args: 1.0,
+    )
+    old_safe = {
+        "task_id": task["task_id"],
+        "status": "failed",
+        "candidate_id_sha256": task["candidate_id_sha256"],
+        "source_id_sha256": source_hash,
+        "canonical_identity_sha256": task["canonical_identity_sha256"],
+        "private_unit_content_sha256": sha256_text("stale-private-file"),
+        "case_results": [
+            {
+                "case_id_sha256": sha256_text(cases[0].case_id),
+                "status": "completed",
+                "output_sha256": sha256_text(output),
+                "score": 1.0,
+            },
+            {
+                "case_id_sha256": sha256_text(cases[1].case_id),
+                "status": "transport_failed",
+                "output_sha256": sha256_text(""),
+                "score": None,
+            },
+        ],
+    }
+
+    recovered = _recover_private_checkpoint_state(
+        {
+            "schema": SCREENING_CAMPAIGN_SCHEMA,
+            "status": "partial",
+            "units": [old_safe],
+        },
+        base_state={
+            "schema": SCREENING_CAMPAIGN_SCHEMA,
+            "mode": "live",
+            "planned_task_count": 1,
+            "network_calls_performed": False,
+        },
+        task_rows=[task],
+        raw_sources={source_hash: source},
+        selected_cases={source_hash: cases},
+        source_receipts={source_hash: {"max_transport_failure_rate": 0.0}},
+        private_root=private_root,
+    )
+
+    recovered_unit = recovered["units"][0]
+    assert recovered_unit["status"] == "completed"
+    assert recovered_unit["scored_case_count"] == 2
+    assert recovered_unit["transport_failure_count"] == 0
+    assert recovered_unit["private_unit_content_sha256"] == _file_sha256(unit_path)
+
+
 def test_private_unit_recovery_preserves_partial_score_bootstrap_order(
     tmp_path,
     monkeypatch,
