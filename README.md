@@ -191,7 +191,52 @@ large number of provider calls automatically means better intelligence.
         model replicas          model replicas             model replicas
 ```
 
-## Current Project Situation
+## Mission And Product Thesis
+
+Axio is being built to make remote model capability behave like dependable
+product infrastructure. An application should be able to adopt one stable
+intelligence surface while the models behind it change with the market: a new
+provider can be admitted, a failing replica can be replaced, and a better
+specialist can take a narrow role without forcing every downstream product to
+rewrite its integration.
+
+This is deliberately more specific than an ensemble endpoint. Axio does not
+claim that sending the same prompt to more models creates intelligence. It
+assigns bounded jobs to different capabilities, supplies only the context each
+job is authorized to use, verifies disagreement where it matters, and asks one
+acting model to own the final answer. The product therefore has a semantic
+center of gravity: one public model family, one quality contract, one latency
+envelope, and a controlled set of replaceable remote capabilities.
+
+The intended value is a three-way balance that is difficult to obtain from a
+single provider endpoint:
+
+- **Quality:** independent solution, critique, evidence selection, and
+  synthesis are purchased only when they can add information.
+- **Economics:** routine work follows a small route; expensive capability is
+  reserved for difficult or consequential work.
+- **Continuity:** canonical model identity, health-aware replicas, streaming
+  failover, and protocol adapters protect the application from provider
+  churn.
+
+Axio's long-term significance is therefore architectural. It gives teams a
+place to encode model roles, prompt contracts, context authority, tool
+boundaries, and evaluation evidence once, instead of scattering those choices
+through every application. Its guarded improvement surface is intentionally
+small: reviewed prompt fragments, finite Harness building blocks, routing
+preferences, and model capability profiles may evolve; the runtime code that
+enforces isolation, deadlines, streaming, and auditability does not rewrite
+itself.
+
+The product horizon is ambitious but falsifiable. `axio-fast`, `axio-terra`,
+and `axio-pro` are intended to deliver increasingly deep composition while
+remaining useful as ordinary API models. The claim that any tier is stronger
+than its corresponding single-model baseline is not assumed in the design and
+is not established by this README. It must be earned through a sealed,
+case-paired, independently executed benchmark campaign with quality, latency,
+cost, and reliability evidence.
+
+## Engineering And Evidence Boundary
 
 The repository has been fully separated from the ASciFS project and is managed
 as an independent Git repository. Fusion code, tests, plans, architecture
@@ -199,19 +244,19 @@ documents, provider configuration templates, screening workflows, and
 evaluation-control code live here. ASciFS may consume Axio as an external HTTP
 service or package boundary, but Axio does not import ASciFS runtime code.
 
-The implementation already includes the protocol adapters, provider enrollment
-and pre-Fusion screening path, streaming health probes, canonical replica
-routing, model-role assignment, bounded panel repair, Hermes process receipts,
-tool-call safety boundaries, response caching rules, and hash-safe operational
-traces. The current engineering milestone is the live end-to-end deliberation
-gate for Terra and Pro under the configured remote channels. The formal
-21-suite, 9-category benchmark campaign is intentionally downstream of that
-gate and is not represented here as a completed result.
+The repository contains the implementation and controls for protocol adapters,
+provider enrollment, pre-Fusion screening, streaming health probes, canonical
+replica routing, model-role assignment, bounded panel repair, Hermes process
+receipts, tool-call safety boundaries, response caching, and hash-safe
+operational traces. The exact implementation status and the next engineering
+gate belong in [`PLAN.md`](PLAN.md), not in the product promise above.
 
-That distinction is deliberate: passing unit tests proves software behavior;
-it does not prove that a live Fusion pipeline is useful. Axio treats the live
-Fusion gate, then the independent benchmark campaign, as separate claims that
-must each earn their own evidence.
+The evidence boundary is strict: passing code tests proves software behavior,
+not model superiority. A live serving gate must first establish that the
+configured remote portfolio is usable. Only then may the independent evaluator
+compare the three Axio tiers with frozen canonical single-model baselines. The
+21-suite, 9-category campaign is a separate client of the public APIs; its
+questions, labels, and results cannot become hidden production routing input.
 
 ## Application Outlook
 
