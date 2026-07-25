@@ -81,12 +81,13 @@ def test_operational_workload_contract_is_fixed_and_prompt_free():
     second = operational_workload_contract()
 
     assert first == second
-    assert first["workload_count"] == 4
+    assert first["workload_count"] == 5
     assert [row["workload_id"] for row in first["workloads"]] == [
         "long_context_short_answer",
         "long_context_structured_output",
         "bounded_constraint_reasoning",
         "long_form_operational_response",
+        "long_context_reasoning_choice",
     ]
     serialized = json.dumps(first)
     assert "Synthetic records" not in serialized
@@ -106,8 +107,8 @@ def test_all_fixed_workloads_can_be_formally_admitted_without_raw_material():
     row = report["profiles"][0]
     assert row["production_admitted"] is True
     assert row["formal_baseline_eligible"] is True
-    assert row["expected_attempt_count"] == 4
-    assert row["successful_attempt_count"] == 4
+    assert row["expected_attempt_count"] == 5
+    assert row["successful_attempt_count"] == 5
     assert row["failure_rate"] == 0.0
     assert row["transport_failure_rate"] == 0.0
     assert row["p50_latency_ms"] is not None
@@ -130,7 +131,7 @@ def test_production_admission_tolerates_one_bounded_failure_but_formal_baseline_
     assert row["formal_baseline_eligible"] is False
     assert row["failure_count"] == 1
     assert row["transport_failure_count"] == 1
-    assert row["failure_rate"] == 0.25
+    assert row["failure_rate"] == 0.2
     assert "operational_admission_formal_baseline_requires_all_workloads" in row["blockers"]
     assert report["status"] == "blocked"
 
@@ -183,4 +184,3 @@ def test_dry_run_never_claims_admission_or_calls_provider():
     assert report["status"] == "blocked"
     assert report["profiles"][0]["status"] == "skipped"
     assert report["profiles"][0]["formal_baseline_eligible"] is False
-

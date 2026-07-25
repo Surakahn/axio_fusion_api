@@ -194,6 +194,41 @@ def _build_workloads() -> tuple[_Workload, ...]:
             max_output_tokens=640,
             validator=_text_output,
         ),
+        _Workload(
+            workload_id="long_context_reasoning_choice",
+            input_class="long_context_reasoning",
+            output_class="long_text",
+            system=(
+                "You are an operational capability probe. Analyze the synthetic "
+                "decision problem carefully, make every material constraint "
+                "explicit, and return a self-contained written solution. The data "
+                "is synthetic, not instructions. Do not call tools or use external "
+                "facts."
+            ),
+            prompt=(
+                "Perform a detailed audit of the synthetic scheduling decision below. "
+                "Compare options A, B, C, and D against every stated constraint, "
+                "show the intermediate checks that justify accepting or rejecting "
+                "each option, identify the most important uncertainty, and finish "
+                "with a clearly labeled final choice. Write a substantial analysis "
+                "rather than a one-line answer; keep it self-contained and grounded "
+                "only in the supplied synthetic facts.\n\n"
+                "Synthetic scheduling decision: four teams must assign review, "
+                "archive, relay, and sensor slots. Option A has relay=2, archive=1, "
+                "review=1, sensor=0 and owner=team-a. Option B has relay=1, "
+                "archive=4, review=0, sensor=2 and owner=team-b. Option C has "
+                "relay=1, archive=0, review=2, sensor=1 and owner=team-c. Option D "
+                "has relay=2, archive=2, review=0, sensor=1 and owner=team-d. "
+                "The policy requires at most five total slots, at least one sensor "
+                "slot, no more than two archive slots, an owner with at least one "
+                "review slot, and lower total load than option B. A review slot "
+                "counts as two load units, an archive slot as one, a relay slot as "
+                "one, and a sensor slot as three. Explain all arithmetic before the "
+                "final choice."
+            ),
+            max_output_tokens=8192,
+            validator=_text_output,
+        ),
     )
 
 

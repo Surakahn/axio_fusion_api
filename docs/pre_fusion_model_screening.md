@@ -61,12 +61,15 @@ The workflow has five ordered stages:
 
 The short health probe is intentionally not treated as evidence that a model
 will survive a realistic Fusion branch. A separate control-plane command runs
-four fixed, synthetic workloads against each selected profile:
+five fixed, synthetic workloads against each selected profile:
 
 1. long-context input with a short answer;
 2. long-context input with a JSON output contract;
 3. bounded synthetic constraint reasoning with a JSON output contract; and
-4. a longer operational memo request.
+4. a longer operational memo request; and
+5. a long-context, multi-option reasoning request with a substantial output
+   budget, which catches providers whose short probes pass but whose realistic
+   reasoning turn exceeds the 90-second serving ceiling.
 
 These workloads contain no benchmark questions, labels, reference answers, or
 provider ranking material. Their prompts are generated in memory and the
