@@ -39,7 +39,7 @@
         {"url": "https://build.nvidia.com/deepseek-ai/deepseek-v4-flash", "title": "NVIDIA official model card"},
         {"url": "https://artificialanalysis.ai/models/deepseek-v4-flash", "title": "Artificial Analysis model page"}
       ],
-      "allowed_roles": ["primary_solver", "independent_solver", "critic", "domain_specialist", "structured_extraction", "short_verification", "simple_classification"],
+      "allowed_roles": ["primary_solver", "independent_solver", "critic", "domain_specialist", "judge", "synthesizer", "structured_extraction", "short_verification", "simple_classification"],
       "ranking_prior_forbidden": true
     },
     {
