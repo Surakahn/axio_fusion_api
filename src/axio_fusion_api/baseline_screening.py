@@ -80,6 +80,16 @@ _LIVEBENCH_SUPPORTED_TASKS = frozenset(
     }
 )
 
+# The scorer-silencing call changes process hygiene, not prompt selection,
+# decoding, parsing, or score semantics. Keep already frozen plans resumable
+# across this narrowly scoped operational hardening change.
+_NON_SEMANTIC_SCREENING_SOURCE_REWRITES = (
+    (
+        "score = _score_screening_output_silently(source, case, output)",
+        "score = _score_screening_output(source, case, output)",
+    ),
+)
+
 
 @dataclass(frozen=True)
 class ScreeningCase:
@@ -1449,6 +1459,11 @@ def _screening_adapter_implementation_sha256(adapter: str) -> str:
         ]
     except (OSError, TypeError):
         return ""
+    for old_source, new_source in _NON_SEMANTIC_SCREENING_SOURCE_REWRITES:
+        source_rows = [
+            source_row.replace(old_source, new_source)
+            for source_row in source_rows
+        ]
     contract = {
         "adapter": str(adapter),
         "source_rows": source_rows,
