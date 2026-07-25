@@ -29,6 +29,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--source-manifest", required=True, type=Path)
     parser.add_argument("--private-probe-file", required=True, type=Path)
     parser.add_argument(
+        "--operational-admission-file",
+        type=Path,
+        default=None,
+        help="Private long-request receipt bound to the screening plan.",
+    )
+    parser.add_argument(
         "--credentials-file",
         type=Path,
         default=DEFAULT_CREDENTIAL_FILE,
@@ -89,9 +95,15 @@ def _run_chunk(args: argparse.Namespace, chunk: int) -> tuple[int, dict[str, Any
         str(max(1, args.max_workers)),
         "--max-tasks",
         str(max(1, args.max_tasks)),
-        "--output",
-        str(receipt),
     ]
+    if args.operational_admission_file is not None:
+        sys.argv.extend(
+            [
+                "--operational-admission-file",
+                str(args.operational_admission_file),
+            ]
+        )
+    sys.argv.extend(["--output", str(receipt)])
     try:
         exit_code = int(main())
     except SystemExit as exc:
