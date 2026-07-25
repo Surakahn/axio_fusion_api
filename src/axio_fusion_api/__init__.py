@@ -28,6 +28,12 @@ from .available_model_generation import (
     generate_available_model_set,
     publish_available_model_set,
 )
+from .operational_admission import (
+    OPERATIONAL_ADMISSION_SCHEMA,
+    operational_workload_contract,
+    redact_operational_admission,
+    run_operational_admission,
+)
 from .registry import (
     build_default_registry,
     load_registry,
@@ -71,6 +77,10 @@ __all__ = [
     "AvailableModelGenerationError",
     "generate_available_model_set",
     "publish_available_model_set",
+    "OPERATIONAL_ADMISSION_SCHEMA",
+    "operational_workload_contract",
+    "redact_operational_admission",
+    "run_operational_admission",
     "discover_runtime_profiles",
     "render_response",
     "runtime_channel_summary",

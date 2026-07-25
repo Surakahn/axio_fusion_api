@@ -57,6 +57,50 @@ The workflow has five ordered stages:
 5. Bind only the eligible profile hashes to a private loadable registry. A
    blocked screening run never produces enabled serving profiles.
 
+## Long-Request Operational Admission
+
+The short health probe is intentionally not treated as evidence that a model
+will survive a realistic Fusion branch. A separate control-plane command runs
+four fixed, synthetic workloads against each selected profile:
+
+1. long-context input with a short answer;
+2. long-context input with a JSON output contract;
+3. bounded synthetic constraint reasoning with a JSON output contract; and
+4. a longer operational memo request.
+
+These workloads contain no benchmark questions, labels, reference answers, or
+provider ranking material. Their prompts are generated in memory and the
+receipt keeps only workload/prompt hashes, output lengths, strict SSE/NDJSON
+evidence, bounded error classes, and the p50/p95/maximum latency across every
+attempt. A timeout or transport failure remains a failure even when another
+attempt succeeds; successful answers are never substituted for missing ones.
+
+The two resulting decisions are deliberately different:
+
+- `production_admitted` allows the configured bounded failure rate and is a
+  supplemental serving signal for a model that can still do useful bounded
+  work;
+- `formal_baseline_eligible` requires every fixed workload repetition to pass
+  its output contract, strict streaming evidence, and the inclusive 90-second
+  response ceiling. Only this decision may be used to form the non-target
+  baseline cohort.
+
+Run it against a private registry before creating or refreshing a baseline
+screening plan:
+
+```bash
+PYTHONPATH=src python3 -m axio_fusion_api.cli \
+  --registry <PRIVATE_REGISTRY.json> operational-admission --live \
+  --timeout 90 --max-workers 4 \
+  --output <PRIVATE_WORK_DIR>/operational_admission.private.json
+```
+
+The command returns a blocked status when no profile is formally eligible. A
+redacted report can be requested with `--redact-provider-identifiers`; it is
+for diagnostics and cannot be loaded as a serving registry. This gate is
+independent from both the production short-probe admission and the later
+21-suite evaluator. It does not make a capability or superiority claim.
+
 The independent non-target baseline-screening control plane applies the same
 fail-closed discipline before it spends provider budget: pinned official
 scorer imports are checked while the screening plan is created, and the

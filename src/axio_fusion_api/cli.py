@@ -87,6 +87,7 @@ from .official_harness import (
     import_official_harness_evaluation,
 )
 from .official_campaign import run_official_harness_campaign
+from .operational_admission import run_operational_admission
 from .orchestrator import FusionEngine
 from .policy_control import (
     activate_routing_policy,
@@ -359,6 +360,34 @@ def build_parser() -> argparse.ArgumentParser:
     tool_probe.add_argument("--redact-provider-identifiers", action="store_true")
     tool_probe.add_argument("--output", default=None)
     tool_probe.set_defaults(func=cmd_tool_probe)
+
+    operational_admission = sub.add_parser(
+        "operational-admission",
+        help=(
+            "Run fixed non-target long-request workloads and separate production "
+            "admission from formal baseline eligibility."
+        ),
+    )
+    operational_admission.add_argument(
+        "--registry", dest="registry", default=argparse.SUPPRESS
+    )
+    operational_admission.add_argument("--timeout", type=float, default=90.0)
+    operational_admission.add_argument("--live", action="store_true")
+    operational_admission.add_argument(
+        "--profile-hash",
+        action="append",
+        default=None,
+        help="Run only exact SHA-256 profile identifiers.",
+    )
+    operational_admission.add_argument("--max-models", type=int, default=None)
+    operational_admission.add_argument("--max-models-per-provider", type=int, default=None)
+    operational_admission.add_argument("--max-workers", type=int, default=4)
+    operational_admission.add_argument("--failure-rate-threshold", type=float, default=0.25)
+    operational_admission.add_argument("--min-successful-workloads", type=int, default=3)
+    operational_admission.add_argument("--repetitions", type=int, default=1)
+    operational_admission.add_argument("--redact-provider-identifiers", action="store_true")
+    operational_admission.add_argument("--output", default=None)
+    operational_admission.set_defaults(func=cmd_operational_admission)
 
     enrollment = sub.add_parser(
         "enroll-providers",
@@ -1655,6 +1684,26 @@ def cmd_tool_probe(args: argparse.Namespace) -> int:
         output=args.output,
     )
     return 0
+
+
+def cmd_operational_admission(args: argparse.Namespace) -> int:
+    profiles = load_registry(args.registry)
+    live = bool(args.live or os.getenv("AXIO_FUSION_PROBE_LIVE") == "1")
+    payload = run_operational_admission(
+        profiles,
+        timeout=args.timeout,
+        live=live,
+        max_workers=args.max_workers,
+        profile_hashes=args.profile_hash,
+        max_models=args.max_models,
+        max_models_per_provider=args.max_models_per_provider,
+        failure_rate_threshold=args.failure_rate_threshold,
+        min_successful_workloads=args.min_successful_workloads,
+        repetitions=args.repetitions,
+        redact_provider_identifiers=bool(args.redact_provider_identifiers),
+    )
+    _emit_json(payload, output=args.output)
+    return 0 if payload.get("status") == "ready" else 2
 
 
 def cmd_enroll_providers(args: argparse.Namespace) -> int:
