@@ -31,7 +31,9 @@ from axio_fusion_api.baseline_screening import (
 from axio_fusion_api.cli import build_parser
 from axio_fusion_api.evaluation import (
     _external_provider_ranking_selection_receipt,
+    _provider_baseline_selection_context,
     _provider_registry_receipt,
+    build_provider_baseline_freeze_manifest,
     build_external_provider_ranking_template,
 )
 from axio_fusion_api import providers as provider_module
@@ -409,6 +411,48 @@ def test_operational_admission_filters_baseline_pool_and_is_carried_into_preflig
 
     assert preflight["status"] == "preflight_ready"
     assert preflight["operational_admission"]["content_sha256"] == plan["operational_admission"]["content_sha256"]
+
+
+def test_provider_baseline_freeze_uses_formal_admission_pool_but_binds_full_registry(tmp_path):
+    registry_path, _, _, admission_path, _ = _fixture_admission(tmp_path)
+    profiles = load_registry(registry_path)
+    slow_replica = next(
+        profile for profile in profiles if profile.provider.endswith("SLOW_REPLICA")
+    )
+    slow_replica_hash = sha256_text(slow_replica.profile_id)
+
+    freeze = build_provider_baseline_freeze_manifest(
+        registry_path=registry_path,
+        max_provider_baselines=None,
+        operational_admission_path=admission_path,
+    )
+
+    assert freeze["provider_registry_receipt"]["profile_count"] == len(profiles)
+    assert freeze["provider_registry_receipt"]["registry_file_sha256"] == _file_sha256(
+        registry_path
+    )
+    assert freeze["operational_admission_receipt"]["status"] == "ready"
+    assert freeze["operational_admission_receipt"]["filtered_profile_count"] == 3
+    assert freeze["available_provider_replica_profile_count"] == 3
+    assert all(
+        slow_replica_hash not in row["replica_profile_id_sha256s"]
+        for row in freeze["frozen_candidate_rows"]
+    )
+
+    freeze_path = _write_json(tmp_path / "provider_baseline_freeze.safe.json", freeze)
+    context = _provider_baseline_selection_context(
+        profiles,
+        include_provider_baselines=True,
+        max_provider_baselines=3,
+        provider_baseline_freeze_path=freeze_path,
+        registry_path=registry_path,
+    )
+
+    assert len(context["provider_profiles"]) == 3
+    assert slow_replica_hash not in {
+        sha256_text(profile.profile_id) for profile in context["provider_profiles"]
+    }
+    assert "provider_baseline_freeze_external_profile_not_formally_admitted" not in context["blockers"]
 
 
 def test_admission_bound_campaign_and_ranking_keep_filtered_candidate_pool(tmp_path):

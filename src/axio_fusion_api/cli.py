@@ -631,6 +631,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Private pre-registration input with hash aliases and external-source evidence; it is never copied to safe output.",
     )
+    baseline_freeze.add_argument(
+        "--operational-admission-file",
+        default=None,
+        help="Private live admission receipt; only formally eligible profiles and replicas may enter the frozen baseline pool.",
+    )
     baseline_freeze.add_argument("--output", default=None)
     baseline_freeze.set_defaults(func=cmd_benchmark_provider_baseline_freeze)
 
@@ -1944,6 +1949,7 @@ def cmd_benchmark_provider_baseline_freeze(args: argparse.Namespace) -> int:
         min_provider_baselines=args.min_provider_baselines,
         provider_probe_evidence_audit_path=args.provider_probe_evidence_audit,
         external_ranking_manifest_path=args.external_ranking_manifest,
+        operational_admission_path=args.operational_admission_file,
     )
     _emit_json(payload, output=args.output)
     return 0

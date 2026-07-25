@@ -25,6 +25,7 @@ from .benchmark_acquisition import (
 from .compat import canonicalize_payload, normalize_api_format
 from .execution_boundary import build_remote_api_execution_audit
 from .orchestrator import FusionEngine
+from .operational_admission import validate_operational_admission_handoff
 from .providers import (
     HTTPProviderClient,
     build_provider_input_adapter_self_test,
@@ -3322,6 +3323,7 @@ def run_multiple_choice_benchmark(
     axio_gateway_url: str | None = None,
     engine: FusionEngine | None = None,
     profiles: Sequence[ModelProfile] | None = None,
+    provider_profiles: Sequence[ModelProfile] | None = None,
     max_latency_ms: int | None = None,
 ) -> dict[str, Any]:
     active_engine, active_profiles, active_client = _resolve_benchmark_runtime(
@@ -3346,6 +3348,7 @@ def run_multiple_choice_benchmark(
             engine=active_engine,
             live=live,
             client=active_client,
+            provider_profiles=provider_profiles,
             axio_gateway_url=axio_gateway_url,
             max_latency_ms=max_latency_ms,
         )
@@ -3409,6 +3412,7 @@ def run_benchmark_dataset(
     axio_gateway_url: str | None = None,
     engine: FusionEngine | None = None,
     profiles: Sequence[ModelProfile] | None = None,
+    provider_profiles: Sequence[ModelProfile] | None = None,
     max_latency_ms: int | None = None,
 ) -> dict[str, Any]:
     selected_format = _suite_task_format(suite_id) if task_format == "auto" else str(task_format or "multiple_choice")
@@ -3425,6 +3429,7 @@ def run_benchmark_dataset(
             axio_gateway_url=axio_gateway_url,
             engine=engine,
             profiles=profiles,
+            provider_profiles=provider_profiles,
             max_latency_ms=max_latency_ms,
         )
     active_engine, active_profiles, active_client = _resolve_benchmark_runtime(
@@ -3450,6 +3455,7 @@ def run_benchmark_dataset(
             engine=active_engine,
             live=live,
             client=active_client,
+            provider_profiles=provider_profiles,
             code_timeout_seconds=code_timeout_seconds,
             axio_gateway_url=axio_gateway_url,
             max_latency_ms=max_latency_ms,
@@ -7037,6 +7043,7 @@ def run_benchmark_campaign(
                     client=client,
                     code_timeout_seconds=code_timeout_seconds,
                     axio_gateway_url=axio_gateway_url,
+                    provider_profiles=selection_context.get("provider_profiles"),
                 )
                 write_json(run_path, run)
                 status = "completed"
@@ -22602,6 +22609,111 @@ def _provider_baseline_profiles(profiles: Sequence[ModelProfile]) -> list[ModelP
     )
 
 
+def _provider_formal_admission_pool(
+    profiles: Sequence[ModelProfile],
+    *,
+    operational_admission_path: str | Path | None,
+) -> tuple[list[ModelProfile], dict[str, Any]]:
+    """Resolve the profile pool allowed to support formal provider claims.
+
+    The registry remains the complete identity universe.  This helper only
+    narrows the candidate/replica pool when an operational admission receipt
+    is supplied, so a slow or contract-failing profile cannot re-enter a
+    baseline merely because it is still present in the registry.
+    """
+
+    if operational_admission_path is None or not str(operational_admission_path).strip():
+        return list(profiles), {
+            "required": False,
+            "status": "not_required",
+            "content_sha256": "",
+            "candidate_profile_count": len(profiles),
+            "filtered_profile_count": len(profiles),
+            "formal_baseline_eligible_count": None,
+            "eligible_profile_id_sha256s": [],
+            "reason_codes": [],
+            "eligible_profile_hashes_authoritative": False,
+            "raw_provider_names_persisted": False,
+            "raw_provider_model_ids_persisted": False,
+            "secrets_persisted": False,
+        }
+
+    validation = validate_operational_admission_handoff(
+        operational_admission_path,
+        profiles,
+        require_formal=True,
+    )
+    eligible_ids = {
+        str(value)
+        for value in validation.get("eligible_profile_ids", [])
+        if str(value)
+    }
+    filtered = [profile for profile in profiles if profile.profile_id in eligible_ids]
+    if validation.get("valid") is not True:
+        filtered = []
+    reason_codes = sorted(
+        {str(reason) for reason in validation.get("reason_codes", []) if str(reason)}
+    )
+    return filtered, {
+        "required": True,
+        "status": "ready" if validation.get("valid") is True else "blocked",
+        "content_sha256": str(validation.get("content_sha256") or ""),
+        "candidate_profile_count": len(profiles),
+        "filtered_profile_count": len(filtered),
+        "formal_baseline_eligible_count": int(
+            validation.get("formal_baseline_eligible_count") or 0
+        ),
+        "eligible_profile_id_sha256s": sorted(
+            str(value)
+            for value in validation.get("eligible_profile_id_sha256s", [])
+            if str(value)
+        ),
+        "reason_codes": reason_codes,
+        "eligible_profile_hashes_authoritative": True,
+        "raw_provider_names_persisted": False,
+        "raw_provider_model_ids_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _provider_pool_from_admission_receipt(
+    profiles: Sequence[ModelProfile],
+    receipt: Mapping[str, Any] | None,
+) -> tuple[list[ModelProfile], list[str]]:
+    """Reconstruct a frozen formal pool without persisting private profile ids."""
+
+    if not isinstance(receipt, Mapping) or receipt.get("required") is not True:
+        return list(profiles), []
+    hashes = {
+        str(value).lower()
+        for value in receipt.get("eligible_profile_id_sha256s", [])
+        if _looks_like_sha256(value)
+    }
+    if not hashes:
+        return [], ["provider_admission_frozen_eligible_profile_set_missing"]
+    profiles_by_hash = {
+        sha256_text(profile.profile_id): profile for profile in profiles
+    }
+    missing = sorted(hashes.difference(profiles_by_hash))
+    filtered = [
+        profile
+        for profile in profiles
+        if sha256_text(profile.profile_id) in hashes
+    ]
+    blockers = []
+    if missing:
+        blockers.append("provider_admission_frozen_eligible_profile_not_in_registry")
+    if sorted(hashes) != sorted(
+        str(value).lower()
+        for value in receipt.get("eligible_profile_id_sha256s", [])
+        if _looks_like_sha256(value)
+    ):
+        blockers.append("provider_admission_frozen_eligible_profile_hash_invalid")
+    if _optional_int(receipt.get("filtered_profile_count")) != len(filtered):
+        blockers.append("provider_admission_frozen_filtered_profile_count_mismatch")
+    return filtered, blockers
+
+
 def _limited_provider_baseline_profiles(
     profiles: Sequence[ModelProfile],
     *,
@@ -24725,41 +24837,77 @@ def _provider_baseline_selection_context(
     max_provider_baselines: int | None,
     provider_baseline_freeze_path: str | Path | None = None,
     registry_path: str | Path | None = None,
+    operational_admission_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Resolve provider candidates for either legacy exploration or fixed claims."""
 
-    available = _provider_baseline_profiles(profiles) if include_provider_baselines else []
+    full_profiles = list(profiles)
+    provider_profiles, admission_receipt = _provider_formal_admission_pool(
+        full_profiles,
+        operational_admission_path=operational_admission_path,
+    )
+    admission_blockers = list(admission_receipt.get("reason_codes", []))
+    if admission_receipt.get("required") is True and admission_receipt.get("status") != "ready":
+        admission_blockers.append("provider_admission_not_ready_for_baseline_selection")
+    available = _provider_baseline_profiles(provider_profiles) if include_provider_baselines else []
     if not include_provider_baselines:
         return {
             "profiles": [],
+            "provider_profiles": [],
             "selection_mode": "provider_baselines_disabled",
             "selected_all_available_provider_baselines": False,
             "external_ranking_pre_registered": False,
             "external_ranking_receipt": {},
-            "blockers": ["provider_baselines_disabled"],
+            "operational_admission_receipt": admission_receipt,
+            "blockers": sorted(set(["provider_baselines_disabled", *admission_blockers])),
         }
     if provider_baseline_freeze_path is None:
         return {
             "profiles": _limited_provider_baseline_profiles(
-                profiles,
+                provider_profiles,
                 max_provider_baselines=max_provider_baselines,
             ),
+            "provider_profiles": provider_profiles,
             "selection_mode": _provider_baseline_selection_mode(max_provider_baselines),
             "selected_all_available_provider_baselines": max_provider_baselines is None,
             "external_ranking_pre_registered": False,
             "external_ranking_receipt": {},
-            "blockers": [],
+            "operational_admission_receipt": admission_receipt,
+            "blockers": sorted(set(admission_blockers)),
         }
 
-    registry_receipt = _provider_registry_receipt(profiles, registry_path=registry_path)
+    registry_receipt = _provider_registry_receipt(full_profiles, registry_path=registry_path)
     artifact = _load_json_artifact(Path(provider_baseline_freeze_path))
     manifest = artifact.get("payload") if isinstance(artifact.get("payload"), Mapping) else {}
+    frozen_admission_receipt = (
+        manifest.get("operational_admission_receipt")
+        if isinstance(manifest.get("operational_admission_receipt"), Mapping)
+        else {}
+    )
+    if operational_admission_path is None and frozen_admission_receipt.get("required") is True:
+        provider_profiles, frozen_pool_blockers = _provider_pool_from_admission_receipt(
+            full_profiles,
+            frozen_admission_receipt,
+        )
+        admission_receipt = dict(frozen_admission_receipt)
+        admission_blockers.extend(frozen_pool_blockers)
+    elif frozen_admission_receipt.get("required") is True:
+        if str(frozen_admission_receipt.get("content_sha256") or "") != str(
+            admission_receipt.get("content_sha256") or ""
+        ):
+            admission_blockers.append("provider_admission_freeze_receipt_content_mismatch")
+        if sorted(
+            str(value) for value in frozen_admission_receipt.get("eligible_profile_id_sha256s", [])
+        ) != sorted(str(value) for value in admission_receipt.get("eligible_profile_id_sha256s", [])):
+            admission_blockers.append("provider_admission_freeze_receipt_profile_set_mismatch")
+    available = _provider_baseline_profiles(provider_profiles)
     external_receipt = (
         manifest.get("external_ranking_receipt")
         if isinstance(manifest.get("external_ranking_receipt"), Mapping)
         else {}
     )
     blockers: list[str] = []
+    blockers.extend(admission_blockers)
     if artifact.get("exists") is not True:
         blockers.append("provider_baseline_freeze_not_found")
     elif artifact.get("valid_json_object") is not True:
@@ -24788,7 +24936,10 @@ def _provider_baseline_selection_context(
     if freeze_receipt.get("freeze_digest_matches") is not True:
         blockers.append("provider_baseline_freeze_digest_mismatch")
 
-    profiles_by_hash = {sha256_text(profile.profile_id): profile for profile in profiles}
+    profiles_by_hash = {sha256_text(profile.profile_id): profile for profile in full_profiles}
+    provider_profile_hashes = {
+        sha256_text(profile.profile_id) for profile in provider_profiles
+    }
     selected_profiles_by_rank: dict[int, ModelProfile] = {}
     rows = manifest.get("frozen_candidate_rows") if isinstance(manifest.get("frozen_candidate_rows"), list) else []
     for row in rows:
@@ -24805,6 +24956,9 @@ def _provider_baseline_selection_context(
         profile = profiles_by_hash.get(profile_hash)
         if profile is None:
             blockers.append("provider_baseline_freeze_external_profile_not_in_registry")
+            continue
+        if profile_hash not in provider_profile_hashes:
+            blockers.append("provider_baseline_freeze_external_profile_not_formally_admitted")
             continue
         if candidate_hash != sha256_text(_provider_candidate_id(profile)):
             blockers.append("provider_baseline_freeze_external_candidate_hash_mismatch")
@@ -24825,6 +24979,8 @@ def _provider_baseline_selection_context(
         "freeze_manifest": manifest,
         "freeze_receipt": freeze_receipt,
         "registry_receipt": registry_receipt,
+        "provider_profiles": provider_profiles,
+        "operational_admission_receipt": admission_receipt,
         "blockers": sorted(set(blockers)),
         "available_provider_baseline_count": len(available),
     }
@@ -25162,6 +25318,7 @@ def build_provider_baseline_freeze_manifest(
     min_provider_baselines: int = 3,
     provider_probe_evidence_audit_path: str | Path | None = None,
     external_ranking_manifest_path: str | Path | None = None,
+    operational_admission_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Freeze the single-provider baseline candidate universe before a campaign.
 
@@ -25178,16 +25335,20 @@ def build_provider_baseline_freeze_manifest(
 
     profiles = load_registry(registry_path)
     registry_receipt = _provider_registry_receipt(profiles, registry_path=registry_path)
-    provider_portfolio_summary = _provider_baseline_freeze_portfolio_summary(
+    formal_profiles, operational_admission_receipt = _provider_formal_admission_pool(
         profiles,
+        operational_admission_path=operational_admission_path,
+    )
+    provider_portfolio_summary = _provider_baseline_freeze_portfolio_summary(
+        formal_profiles,
         registry_path=registry_path,
     )
-    available = _provider_baseline_profiles(profiles) if include_provider_baselines else []
+    available = _provider_baseline_profiles(formal_profiles) if include_provider_baselines else []
     external_ranking_receipt: dict[str, Any] | None = None
     if external_ranking_manifest_path is not None:
         ranking_receipt = _external_provider_ranking_selection_receipt(
             external_ranking_manifest_path,
-            profiles=profiles,
+            profiles=formal_profiles,
             registry_receipt=registry_receipt,
         )
         selected_by_rank = ranking_receipt.pop("selected_profiles_by_rank", {})
@@ -25208,7 +25369,7 @@ def build_provider_baseline_freeze_manifest(
                 rank=rank,
                 external_rank=rank,
                 external_evidence_row=evidence_by_rank.get(rank),
-                replicas=_provider_replica_groups(profiles).get(
+                replicas=_provider_replica_groups(formal_profiles).get(
                     _provider_replica_group_key(profile), (profile,)
                 ),
             )
@@ -25220,7 +25381,7 @@ def build_provider_baseline_freeze_manifest(
     else:
         selected = (
             _limited_provider_baseline_profiles(
-                profiles,
+                formal_profiles,
                 max_provider_baselines=max_provider_baselines,
             )
             if include_provider_baselines
@@ -25230,7 +25391,7 @@ def build_provider_baseline_freeze_manifest(
             _provider_baseline_freeze_candidate_row(
                 profile,
                 rank=index + 1,
-                replicas=_provider_replica_groups(profiles).get(
+                replicas=_provider_replica_groups(formal_profiles).get(
                     _provider_replica_group_key(profile), (profile,)
                 ),
             )
@@ -25246,13 +25407,13 @@ def build_provider_baseline_freeze_manifest(
     available_profile_hashes = [sha256_text(profile.profile_id) for profile in available]
     selected_profile_hashes = [sha256_text(profile.profile_id) for profile in selected]
     selected_candidate_hashes = [str(row["candidate_id_sha256"]) for row in selected_rows]
-    available_groups = _provider_baseline_group_summaries(profiles)
+    available_groups = _provider_baseline_group_summaries(formal_profiles)
     selected_group_by_identity = {
         _provider_replica_group_key(profile): profile for profile in selected
     }
     selected_groups = [
         row
-        for row in _provider_baseline_group_summaries(profiles)
+        for row in _provider_baseline_group_summaries(formal_profiles)
         if row["canonical_identity_sha256"] in selected_group_by_identity
     ]
     live_evidence_count = sum(1 for profile in selected if _profile_has_live_probe_evidence(profile))
@@ -25260,6 +25421,13 @@ def build_provider_baseline_freeze_manifest(
         1 for row in selected_groups for profile in row["replicas"] if _profile_has_live_probe_evidence(profile)
     )
     blockers: list[str] = []
+    blockers.extend(
+        str(reason)
+        for reason in operational_admission_receipt.get("reason_codes", [])
+        if str(reason)
+    )
+    if operational_admission_receipt.get("required") is True and operational_admission_receipt.get("status") != "ready":
+        blockers.append("provider_admission_not_ready_for_baseline_freeze")
     if include_provider_baselines is not True:
         blockers.append("provider_baselines_disabled")
     if len(selected) < required_provider_baseline_count:
@@ -25339,6 +25507,7 @@ def build_provider_baseline_freeze_manifest(
         "provider_registry_receipt": registry_receipt,
         "provider_portfolio_summary": provider_portfolio_summary,
         "provider_probe_evidence_audit_receipt": probe_evidence_receipt,
+        "operational_admission_receipt": operational_admission_receipt,
         "baseline_strength_policy": {
             "candidate_universe_frozen_before_campaign": True,
             "external_ranking_pre_registered_before_campaign": external_ranking_manifest_path is not None,
@@ -25555,6 +25724,11 @@ def _provider_baseline_freeze_digest_input(manifest: Mapping[str, Any]) -> dict[
         if isinstance(portfolio_summary.get("independent_verification_capacity"), Mapping)
         else {}
     )
+    operational_admission = (
+        manifest.get("operational_admission_receipt")
+        if isinstance(manifest.get("operational_admission_receipt"), Mapping)
+        else {}
+    )
     digest = {
         "schema": "axio_fusion_api.provider_baseline_freeze_digest_input.v1",
         "freeze_stage": str(manifest.get("freeze_stage") or ""),
@@ -25593,6 +25767,29 @@ def _provider_baseline_freeze_digest_input(manifest: Mapping[str, Any]) -> dict[
         "selected_provider_candidate_id_set_sha256": str(manifest.get("selected_provider_candidate_id_set_sha256") or ""),
         "registry_file_sha256": str(registry_receipt.get("registry_file_sha256") or ""),
         "registry_profile_set_sha256": str(registry_receipt.get("provider_baseline_profile_set_sha256") or ""),
+        "operational_admission": {
+            "required": operational_admission.get("required") is True,
+            "status": str(operational_admission.get("status") or ""),
+            "content_sha256": str(operational_admission.get("content_sha256") or ""),
+            "candidate_profile_count": _optional_int(operational_admission.get("candidate_profile_count")) or 0,
+            "filtered_profile_count": _optional_int(operational_admission.get("filtered_profile_count")) or 0,
+            "formal_baseline_eligible_count": _optional_int(
+                operational_admission.get("formal_baseline_eligible_count")
+            ),
+            "eligible_profile_id_sha256s": sorted(
+                str(value)
+                for value in operational_admission.get("eligible_profile_id_sha256s", [])
+                if value
+            ),
+            "reason_codes": sorted(
+                str(reason)
+                for reason in operational_admission.get("reason_codes", [])
+                if str(reason)
+            ),
+            "eligible_profile_hashes_authoritative": operational_admission.get(
+                "eligible_profile_hashes_authoritative"
+            ) is True,
+        },
         "provider_probe_evidence_audit": {
             "present": probe_evidence_receipt.get("present") is True,
             "audit_digest_sha256": str(probe_evidence_receipt.get("audit_digest_sha256") or ""),
@@ -25804,6 +26001,11 @@ def _provider_baseline_freeze_receipt(manifest: Mapping[str, Any]) -> dict[str, 
             "provider_portfolio_ready_verifier_count": 0,
             "provider_portfolio_ready_provider_hash_count": 0,
             "provider_portfolio_top_verifier_profile_set_sha256": "",
+            "operational_admission_bound": False,
+            "operational_admission_status": "",
+            "operational_admission_content_sha256": "",
+            "operational_admission_eligible_profile_count": 0,
+            "operational_admission_eligible_profile_set_sha256": sha256_text(stable_json([])),
             "external_ranking_identity_binding_ready": False,
             "external_ranking_identity_binding_count": 0,
             "raw_provider_model_ids_persisted": False,
@@ -25834,6 +26036,11 @@ def _provider_baseline_freeze_receipt(manifest: Mapping[str, Any]) -> dict[str, 
     registry_receipt = (
         manifest.get("provider_registry_receipt")
         if isinstance(manifest.get("provider_registry_receipt"), Mapping)
+        else {}
+    )
+    operational_admission = (
+        manifest.get("operational_admission_receipt")
+        if isinstance(manifest.get("operational_admission_receipt"), Mapping)
         else {}
     )
     external_ranking_validation_errors = (
@@ -25920,6 +26127,21 @@ def _provider_baseline_freeze_receipt(manifest: Mapping[str, Any]) -> dict[str, 
         "provider_portfolio_ready_verifier_count": _optional_int(portfolio_capacity.get("ready_verifier_count")) or 0,
         "provider_portfolio_ready_provider_hash_count": _optional_int(portfolio_capacity.get("ready_provider_hash_count")) or 0,
         "provider_portfolio_top_verifier_profile_set_sha256": str(portfolio_capacity.get("top_verifier_profile_set_sha256") or ""),
+        "operational_admission_bound": operational_admission.get("required") is True,
+        "operational_admission_status": str(operational_admission.get("status") or ""),
+        "operational_admission_content_sha256": str(operational_admission.get("content_sha256") or ""),
+        "operational_admission_eligible_profile_count": _optional_int(
+            operational_admission.get("filtered_profile_count")
+        ) or 0,
+        "operational_admission_eligible_profile_set_sha256": sha256_text(
+            stable_json(
+                sorted(
+                    str(value)
+                    for value in operational_admission.get("eligible_profile_id_sha256s", [])
+                    if value
+                )
+            )
+        ),
         "final_claim_freeze_ready": manifest.get("final_claim_freeze_ready") is True,
         "blockers": sorted(str(reason) for reason in manifest.get("blockers", []) if reason),
         "raw_provider_model_ids_persisted": False,
@@ -26247,6 +26469,7 @@ def _run_one_generic_case(
     code_timeout_seconds: float,
     axio_gateway_url: str | None,
     max_latency_ms: int | None,
+    provider_profiles: Sequence[ModelProfile] | None = None,
 ) -> dict[str, Any]:
     started = time.monotonic()
     prompt_case = _benchmark_prompt_case_projection(case, task_format)
@@ -26279,6 +26502,7 @@ def _run_one_generic_case(
                 candidate_id=candidate_id,
                 api_format=api_format,
                 profiles=profiles,
+                provider_profiles=provider_profiles,
                 engine=engine,
                 client=client,
                 max_output_tokens=_max_tokens_for_format(task_format),
@@ -26356,12 +26580,13 @@ def _complete_benchmark_candidate(
     axio_gateway_url: str | None,
     max_latency_ms: int | None,
     case_index: int = 0,
+    provider_profiles: Sequence[ModelProfile] | None = None,
 ) -> BenchmarkCompletion:
     if candidate_id.startswith("provider::"):
         system = _generic_system_prompt(task_type)
         request = FusionRequest(model="axio-fast", prompt=prompt, max_output_tokens=max_output_tokens, temperature=0.0)
         return _complete_provider_baseline_with_replica_failover(
-            profiles=profiles,
+            profiles=provider_profiles or profiles,
             candidate_id=candidate_id,
             request=request,
             prompt=prompt,
@@ -28025,6 +28250,7 @@ def _run_one_multiple_choice_case(
     client: HTTPProviderClient | None,
     axio_gateway_url: str | None,
     max_latency_ms: int | None,
+    provider_profiles: Sequence[ModelProfile] | None = None,
 ) -> dict[str, Any]:
     started = time.monotonic()
     prompt_case = _benchmark_prompt_case_projection(case, "multiple_choice")
@@ -28051,7 +28277,7 @@ def _run_one_multiple_choice_case(
         elif candidate_id.startswith("provider::"):
             system = _mcq_system_prompt()
             completion = _complete_provider_baseline_with_replica_failover(
-                profiles=profiles,
+                profiles=provider_profiles or profiles,
                 candidate_id=candidate_id,
                 request=FusionRequest(
                     model="axio-fast",

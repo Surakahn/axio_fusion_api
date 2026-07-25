@@ -361,3 +361,42 @@ def test_provider_baseline_rotation_and_same_group_failover_are_bounded():
     )
     assert case_result["provider_replica_execution"]["attempt_count"] == 2
     assert case_result["provider_call_count"] == 2
+
+
+def test_benchmark_provider_call_uses_formal_provider_profile_subset():
+    full_profiles = [
+        _profile("provider-a", "same-model", "same-model", latency=120),
+        _profile("provider-b", "same-model", "same-model", api_format="responses", latency=80),
+    ]
+    formal_profiles = [full_profiles[1]]
+    candidate_id = _provider_candidate_id(formal_profiles[0])
+
+    class _ChoiceReplicaClient(_ReplicaClient):
+        def complete(self, profile, request, *, prompt, system, timeout=None):
+            super().complete(profile, request, prompt=prompt, system=system, timeout=timeout)
+            return "A"
+
+    client = _ChoiceReplicaClient()
+
+    case_result = _run_one_multiple_choice_case(
+        case={
+            "question": "fixture question",
+            "options": ["fixture answer"],
+            "option_labels": ["A"],
+            "answer": "A",
+        },
+        index=0,
+        candidate_id=candidate_id,
+        api_format="chat/completions",
+        profiles=full_profiles,
+        provider_profiles=formal_profiles,
+        engine=None,
+        live=True,
+        client=client,
+        axio_gateway_url=None,
+        max_latency_ms=None,
+    )
+
+    assert case_result["status"] == "completed"
+    assert client.calls == [formal_profiles[0].profile_id]
+    assert case_result["provider_replica_execution"]["replica_count"] == 1
