@@ -59,21 +59,39 @@ survivor pool and would violate the pre-registered complete-pool contract.
 The formal 21-suite benchmark campaign is consequently **not started**. No
 Axio-vs-provider superiority claim has been made.
 
+## Refresh Campaign In Progress
+
+The required refresh was registered as a new campaign after the audit above;
+the old campaign remains immutable historical evidence and is not being
+retried. The refresh is bound to a new operational-admission receipt and a new
+screening plan. Its safe contract currently records:
+
+- 29 operationally admitted profiles were screened before formal selection.
+- 18 canonical candidates are in the complete formal pool.
+- 2 independent non-target source families are fixed for every candidate.
+- 36 source/candidate units and 3,960 estimated provider calls are registered.
+- The runner uses bounded concurrency and no retry of failed units.
+
+At the time of this audit update, the refresh remains `running`; 2 units are
+complete and 5 units are failed or blocked, while the remaining units are
+still executing. These are progress counters only, not ranking evidence. The
+campaign must reach a verified terminal state before conversion to a ranking
+input is attempted.
+
 ## Required Next Gate
 
-Before provider baseline freeze, the system needs a new, independently
-pre-registered provider-pool refresh based only on operational evidence:
+After the refresh reaches a verified terminal state, provider baseline freeze
+requires:
 
-1. re-run the bounded streaming availability/admission check with an explicit
-   concurrency policy;
-2. publish a new hash-bound registry only if the 90-second and strict-stream
-   contracts hold;
-3. generate a new complete-pool non-target screening plan before any target
-   benchmark calls; and
+1. authenticate the final state, every unit digest, and complete source
+   coverage;
+2. convert the private outputs with the pinned scorer into a complete ranking
+   input;
+3. re-run the provider portfolio and provider-probe evidence audits against
+   the exact registry cohort; and
 4. freeze exactly ranks 1, 2, and 3 only after every admitted candidate has
    valid coverage from both independent source families.
 
 The previous failed units must not be selectively retried into the existing
 campaign. Any refresh is a new, separately identified experiment with its
 own registry, plan, schedule, and receipts.
-
