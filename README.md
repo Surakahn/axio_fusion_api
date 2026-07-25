@@ -16,6 +16,37 @@ from the best available remote models for the task.** This makes model choice a
 replaceable systems concern rather than a permanent dependency in every product
 team's codebase.
 
+## Vision: A Capability Fabric For AI Products
+
+The destination of Axio is not another standalone chatbot and not a training
+project. It is a durable capability fabric between applications and the fast-
+changing remote model market. An application should be able to depend on one
+stable intelligence contract while the operator composes, replaces, or retires
+the remote capabilities behind it without rewriting every integration.
+
+That fabric turns model diversity into a product advantage. A frontier model
+can take the hardest reasoning role, a specialist can inspect one narrow
+domain, a fast model can validate a structured field or a tool argument, and a
+separate acting model can turn the surviving evidence into one coherent answer.
+Axio makes those responsibilities explicit, bounded, and measurable instead of
+equating a larger number of calls with better intelligence.
+
+The long-term application horizon is broad: enterprise copilots that need
+provider continuity, scientific and multilingual research assistants, coding
+and review systems, document operations, agentic tool execution, and regulated
+workflows in medicine, finance, law, consulting, and public policy. In each
+case the value is the same: one public model family, deliberate capability
+composition, graceful degradation, and an evidence trail for quality, cost,
+latency, and reliability decisions.
+
+`axio-fast`, `axio-terra`, and `axio-pro` are the first product expression of
+this vision. They are intended to make progressively deeper composition
+available through ordinary model APIs, with the smallest route that can do the
+work well and more independent evidence only when it is worth the cost and
+latency. Whether any tier is actually stronger than its corresponding single
+model baseline is a falsifiable research question; Axio earns that claim only
+through an independent, case-paired evaluation and never through product copy.
+
 The development significance is that model fusion becomes an accountable
 software discipline. Axio separates provider access from capability identity,
 separates narrow specialist work from final synthesis, and separates production
