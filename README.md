@@ -10,6 +10,21 @@ capabilities that already exist behind remote APIs through explicit prompts,
 bounded Harness stages, routing policy, evidence handling, and a stable public
 service contract.
 
+In one sentence: **Axio is the capability layer that lets an application keep
+one model identity while the intelligence behind that identity is assembled
+from the best available remote models for the task.** This makes model choice a
+replaceable systems concern rather than a permanent dependency in every product
+team's codebase.
+
+The development significance is that model fusion becomes an accountable
+software discipline. Axio separates provider access from capability identity,
+separates narrow specialist work from final synthesis, and separates production
+routing from independent evaluation. The result is intended to be a durable
+commercial substrate for quality, cost, latency, availability, and governance
+trade-offs as the remote model market changes. The three Axio tiers are the
+public expression of that idea; whether they outperform a single model is a
+measured claim that must be earned by the evaluation program described below.
+
 ## North Star: Capability Fusion As Product Infrastructure
 
 The central idea is that a useful model product does not have to be identical
