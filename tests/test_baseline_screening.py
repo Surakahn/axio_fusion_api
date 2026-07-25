@@ -3,6 +3,8 @@ import hashlib
 import sys
 from pathlib import Path
 
+import pytest
+
 
 STANDALONE_SRC = Path(__file__).resolve().parents[1] / "src"
 if str(STANDALONE_SRC) not in sys.path:
@@ -65,6 +67,39 @@ def test_official_scorer_dependency_failure_blocks_before_provider_calls(monkeyp
     assert _screening_adapter_runtime_preflight(source) == [
         "screening_source_runtime_dependency_missing"
     ]
+
+
+def test_official_scorer_diagnostics_are_silenced_on_failure(monkeypatch, capsys):
+    from axio_fusion_api.baseline_screening import (
+        _score_screening_output_silently,
+    )
+
+    def noisy_failure(_source, _case, _output):
+        print("PRIVATE_SCORER_STDOUT_MARKER")
+        print("PRIVATE_SCORER_STDERR_MARKER", file=sys.stderr)
+        raise RuntimeError("scorer fixture failure")
+
+    monkeypatch.setattr(
+        "axio_fusion_api.baseline_screening._score_livebench_output",
+        noisy_failure,
+    )
+
+    with pytest.raises(RuntimeError, match="scorer fixture failure"):
+        _score_screening_output_silently(
+            {"adapter": "livebench_official"},
+            ScreeningCase(
+                "silent-scorer-case",
+                "A pinned scorer fixture.",
+                "reference",
+                "fixture",
+                {"task": "zebra_puzzle"},
+            ),
+            "provider output",
+        )
+
+    captured = capsys.readouterr()
+    assert "PRIVATE_SCORER_STDOUT_MARKER" not in captured.out
+    assert "PRIVATE_SCORER_STDERR_MARKER" not in captured.err
 
 
 def _write_json(path: Path, payload) -> Path:

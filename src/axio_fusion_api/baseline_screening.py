@@ -2848,7 +2848,7 @@ def _run_screening_case(
             "error_type": error_type or "ProviderExecutionFailed",
         }
     try:
-        score = _score_screening_output(source, case, output)
+        score = _score_screening_output_silently(source, case, output)
     except Exception as exc:  # noqa: BLE001 - scorer failure is not model failure
         return {
             "case_id": case.case_id,

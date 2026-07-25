@@ -43,6 +43,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--max-tasks", type=int, default=2)
     parser.add_argument("--first-chunk", type=int, default=2)
     parser.add_argument("--max-chunks", type=int, default=49)
+    parser.add_argument(
+        "--retry-failed",
+        action="store_true",
+        help="Retry only failed or blocked units and preserve completed units.",
+    )
     return parser.parse_args()
 
 
@@ -96,6 +101,8 @@ def _run_chunk(args: argparse.Namespace, chunk: int) -> tuple[int, dict[str, Any
         "--max-tasks",
         str(max(1, args.max_tasks)),
     ]
+    if args.retry_failed:
+        sys.argv.append("--retry-failed")
     if args.operational_admission_file is not None:
         sys.argv.extend(
             [
