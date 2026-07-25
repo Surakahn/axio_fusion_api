@@ -572,6 +572,213 @@ def build_registry_from_probe_artifacts(
     }
 
 
+def build_probe_bound_registry(
+    *,
+    registry_path: str | Path,
+    probe_paths: Sequence[str | Path],
+    min_available_models: int = 3,
+) -> dict[str, Any]:
+    """Bind an operational registry to the exact live probe artifact set.
+
+    A pre-Fusion registry contains richer role, canonical-identity, and
+    routing metadata than the generic registry generated directly from probe
+    rows.  This function preserves that operational projection while attaching
+    the probe source counts and path hashes required by final-claim evidence.
+    The binding is only ready when the two registries contain the exact same
+    physical profile set and the probe-generated registry is live-ready.
+
+    The returned object is still a private registry because its ``models``
+    rows retain provider/model aliases needed by the runtime.  Safe evidence
+    must be produced separately with ``provider-probe-evidence-audit``.
+    """
+
+    selected_registry_path = Path(registry_path)
+    blockers: list[str] = []
+    try:
+        registry_payload = json.loads(
+            selected_registry_path.read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError):
+        registry_payload = {}
+        blockers.append("probe_bound_registry_input_unreadable")
+    if not isinstance(registry_payload, Mapping):
+        registry_payload = {}
+        blockers.append("probe_bound_registry_input_must_be_object")
+
+    minimum = max(1, int(min_available_models))
+    probe_registry = build_registry_from_probe_artifacts(
+        probe_paths=probe_paths,
+        min_available_models=minimum,
+    )
+    probe_readiness = (
+        probe_registry.get("readiness")
+        if isinstance(probe_registry.get("readiness"), Mapping)
+        else {}
+    )
+    source_models = registry_payload.get("models")
+    source_models = (
+        [row for row in source_models if isinstance(row, Mapping)]
+        if isinstance(source_models, list)
+        else []
+    )
+    probe_models = probe_registry.get("models")
+    probe_models = (
+        [row for row in probe_models if isinstance(row, Mapping)]
+        if isinstance(probe_models, list)
+        else []
+    )
+    source_profile_hashes = _registry_profile_hash_set(source_models)
+    probe_profile_hashes = _registry_profile_hash_set(probe_models)
+
+    if str(registry_payload.get("schema") or "") != "axio_fusion_api.registry.v1":
+        blockers.append("probe_bound_registry_schema_invalid")
+    if (
+        registry_payload.get("generated_from_prefusion_screening") is not True
+        and registry_payload.get("generated_from_probe") is not True
+    ):
+        blockers.append("probe_bound_registry_source_not_screening_or_probe")
+    if str(registry_payload.get("binding_status") or "").casefold() != "ready":
+        blockers.append("probe_bound_registry_input_not_ready")
+    if not source_profile_hashes:
+        blockers.append("probe_bound_registry_source_profile_set_empty")
+    if not probe_profile_hashes:
+        blockers.append("probe_bound_registry_probe_profile_set_empty")
+    if source_profile_hashes != probe_profile_hashes:
+        blockers.append("probe_bound_registry_profile_set_mismatch")
+    if len(source_models) != len(probe_models):
+        blockers.append("probe_bound_registry_profile_count_mismatch")
+    if probe_readiness.get("live_probe_proven") is not True:
+        blockers.append("probe_bound_registry_live_probe_not_proven")
+    if probe_readiness.get("final_claim_registry_ready") is not True:
+        blockers.append("probe_bound_registry_probe_registry_not_final_claim_ready")
+    if int(probe_registry.get("live_available_model_count") or 0) < minimum:
+        blockers.append("probe_bound_registry_live_model_count_too_small")
+    if not probe_paths:
+        blockers.append("probe_bound_registry_probe_file_missing")
+    if not isinstance(probe_registry.get("source_artifacts"), Mapping):
+        blockers.append("probe_bound_registry_probe_source_summary_missing")
+
+    source_artifacts = dict(probe_registry.get("source_artifacts") or {})
+    binding_core = {
+        "schema": "axio_fusion_api.registry_probe_binding.v1",
+        "status": "ready" if not blockers else "blocked",
+        "registry_input_path_sha256": sha256_text(str(selected_registry_path)),
+        "probe_file_path_hashes": list(
+            source_artifacts.get("probe_file_path_hashes") or []
+        ),
+        "probe_profile_set_sha256": sha256_text(
+            stable_json(sorted(probe_profile_hashes))
+        ),
+        "registry_profile_set_sha256": sha256_text(
+            stable_json(sorted(source_profile_hashes))
+        ),
+        "profile_set_matches": source_profile_hashes == probe_profile_hashes,
+        "probe_model_count": len(probe_models),
+        "registry_model_count": len(source_models),
+        "min_available_models": minimum,
+        "live_probe_proven": probe_readiness.get("live_probe_proven") is True,
+        "probe_registry_final_claim_ready": probe_readiness.get(
+            "final_claim_registry_ready"
+        )
+        is True,
+        "raw_probe_paths_persisted": False,
+        "raw_provider_outputs_persisted": False,
+        "secrets_persisted": False,
+    }
+    binding = {
+        **binding_core,
+        "blockers": sorted(set(blockers)),
+    }
+    binding["binding_digest_sha256"] = sha256_text(stable_json(binding_core))
+
+    if blockers:
+        blocked_registry = dict(registry_payload)
+        blocked_readiness = dict(
+            registry_payload.get("readiness")
+            if isinstance(registry_payload.get("readiness"), Mapping)
+            else {}
+        )
+        blocked_readiness.update(
+            {
+                "ready": False,
+                "status": "blocked",
+                "blockers": sorted(
+                    set(
+                        [
+                            *[
+                                str(item)
+                                for item in blocked_readiness.get("blockers", [])
+                                if str(item)
+                            ],
+                            *blockers,
+                        ]
+                    )
+                ),
+                "generated_from_probe": False,
+                "live_probe_proven": False,
+                "final_claim_registry_ready": False,
+            }
+        )
+        blocked_registry["binding_status"] = "blocked"
+        blocked_registry["readiness"] = blocked_readiness
+        blocked_registry["probe_evidence_binding"] = binding
+        blocked_registry["generated_from_probe"] = False
+        blocked_registry["raw_provider_outputs_persisted"] = False
+        blocked_registry["secrets_persisted"] = False
+        return blocked_registry
+
+    bound_registry = dict(registry_payload)
+    bound_registry["generated_from_probe"] = True
+    bound_registry["source_artifacts"] = source_artifacts
+    bound_registry["probe_evidence_binding"] = binding
+    bound_registry["generation_contract"] = {
+        **dict(registry_payload.get("generation_contract") or {}),
+        "probe_evidence_binding_required": True,
+        "probe_artifacts_are_prompt_free": True,
+        "probe_profile_set_must_match_operational_registry": True,
+        "live_probe_evidence_required": True,
+        "raw_probe_paths_persisted": False,
+        "raw_provider_outputs_persisted": False,
+        "secrets_persisted": False,
+    }
+    bound_readiness = dict(
+        registry_payload.get("readiness")
+        if isinstance(registry_payload.get("readiness"), Mapping)
+        else {}
+    )
+    bound_readiness.update(
+        {
+            "generated_from_probe": True,
+            "live_probe_proven": True,
+            "final_claim_registry_ready": True,
+            "probe_profile_set_sha256": sha256_text(
+                stable_json(sorted(probe_profile_hashes))
+            ),
+            "min_available_models": minimum,
+            "raw_prompt_persisted": False,
+            "raw_provider_outputs_persisted": False,
+            "secrets_persisted": False,
+        }
+    )
+    bound_registry["readiness"] = bound_readiness
+    bound_registry["raw_provider_outputs_persisted"] = False
+    bound_registry["secrets_persisted"] = False
+    return bound_registry
+
+
+def _registry_profile_hash_set(rows: Sequence[Mapping[str, Any]]) -> set[str]:
+    hashes: set[str] = set()
+    for row in rows:
+        profile_id = str(row.get("profile_id") or "").strip()
+        if not profile_id:
+            provider = str(row.get("provider") or "").strip()
+            model = str(row.get("model") or "").strip()
+            profile_id = f"{provider}/{model}" if provider or model else ""
+        if profile_id:
+            hashes.add(sha256_text(profile_id).lower())
+    return hashes
+
+
 def _profile_from_probe_row(row: Mapping[str, Any], *, status: str) -> ModelProfile:
     model_id = str(row.get("model") or row.get("id") or "").strip()
     profile_row: dict[str, Any] = {

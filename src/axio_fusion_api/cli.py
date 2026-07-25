@@ -113,6 +113,7 @@ from .providers import (
     redact_provider_tool_probe_artifact_file,
 )
 from .registry import (
+    build_probe_bound_registry,
     build_provider_portfolio_audit,
     build_registry_from_probe_artifacts,
     load_registry,
@@ -534,6 +535,20 @@ def build_parser() -> argparse.ArgumentParser:
     registry_from_probe.add_argument("--redact-provider-identifiers", action="store_true")
     registry_from_probe.add_argument("--output", required=True)
     registry_from_probe.set_defaults(func=cmd_registry_from_probe)
+
+    registry_bind_probe = sub.add_parser(
+        "registry-bind-probe",
+        help="Bind a private operational registry to its exact live probe artifacts.",
+    )
+    registry_bind_probe.add_argument(
+        "--registry-file",
+        required=True,
+        help="Existing private pre-Fusion or probe-generated registry.",
+    )
+    registry_bind_probe.add_argument("--probe-file", action="append", required=True)
+    registry_bind_probe.add_argument("--min-available-models", type=int, default=3)
+    registry_bind_probe.add_argument("--output", required=True)
+    registry_bind_probe.set_defaults(func=cmd_registry_bind_probe)
 
     portfolio = sub.add_parser("provider-portfolio-audit")
     portfolio.add_argument("--min-provider-baselines", type=int, default=3)
@@ -1912,6 +1927,16 @@ def cmd_registry_from_probe(args: argparse.Namespace) -> int:
     )
     _emit_json(payload, output=args.output)
     return 0
+
+
+def cmd_registry_bind_probe(args: argparse.Namespace) -> int:
+    payload = build_probe_bound_registry(
+        registry_path=args.registry_file,
+        probe_paths=args.probe_file,
+        min_available_models=args.min_available_models,
+    )
+    _emit_json(payload, output=args.output)
+    return 0 if payload.get("binding_status") == "ready" else 2
 
 
 def cmd_provider_portfolio_audit(args: argparse.Namespace) -> int:

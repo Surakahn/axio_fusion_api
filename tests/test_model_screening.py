@@ -26,6 +26,8 @@ from axio_fusion_api.prefusion_ranking import (
     research_quality_score,
 )
 from axio_fusion_api.registry import (
+    build_probe_bound_registry,
+    build_registry_from_probe_artifacts,
     load_registry,
     normalize_profile,
     validate_prefusion_registry_handoff,
@@ -2800,6 +2802,130 @@ def test_registry_binding_requires_measured_latency_and_sha256_output():
         {"status": "ready", "fusion_eligible_models": [invalid_output_hash]},
         profiles=[profile],
     )["models"] == []
+
+
+def test_probe_bound_registry_preserves_prefusion_runtime_metadata_and_provenance(tmp_path):
+    profile = _profile("provider-a", "alpha", "alpha")
+    probe_row = {
+        "profile_id": profile.profile_id,
+        "provider": profile.provider,
+        "model": profile.model,
+        "api_format": profile.api_format,
+        "status": "available",
+        "latency_ms": 100,
+        "output_sha256": sha256_text("probe-alpha"),
+        "probe_mode": "live",
+        "live_probe_evidence": True,
+        **_stream_evidence(),
+    }
+    probe_path = tmp_path / "provider-probe.private.json"
+    probe_path.write_text(
+        json.dumps(
+            {
+                "schema": "axio_fusion_api.provider_probe.v1",
+                "mode": "live",
+                "network_calls_performed": True,
+                "probes": [probe_row],
+            }
+        ),
+        encoding="utf-8",
+    )
+    registry = build_fusion_registry_from_screening(
+        {
+            "status": "ready",
+            "fusion_eligible_models": [
+                {
+                    "profile_id_sha256": sha256_text(profile.profile_id),
+                    "provider": profile.provider,
+                    "model": profile.model,
+                    "canonical_model_id": profile.canonical_model_id,
+                    "streaming_status": "available",
+                    "latency_ms": 100,
+                    "output_sha256": sha256_text("probe-alpha"),
+                    "probe_mode": "live",
+                    "live_probe_evidence": True,
+                    **_stream_evidence(),
+                }
+            ],
+            "research_ranking": {"ordered_models": []},
+        },
+        profiles=[profile],
+    )
+    registry_path = tmp_path / "runtime-registry.private.json"
+    registry_path.write_text(json.dumps(registry), encoding="utf-8")
+
+    bound = build_probe_bound_registry(
+        registry_path=registry_path,
+        probe_paths=[probe_path],
+        min_available_models=1,
+    )
+
+    assert bound["binding_status"] == "ready"
+    assert bound["generated_from_probe"] is True
+    assert bound["readiness"]["live_probe_proven"] is True
+    assert bound["readiness"]["final_claim_registry_ready"] is True
+    assert bound["source_artifacts"]["probe_file_count"] == 1
+    assert bound["probe_evidence_binding"]["profile_set_matches"] is True
+    assert bound["probe_evidence_binding"]["blockers"] == []
+    assert build_registry_from_probe_artifacts(
+        probe_paths=[probe_path],
+        min_available_models=1,
+    )["live_available_model_count"] == 1
+
+
+def test_probe_bound_registry_rejects_profile_set_drift(tmp_path):
+    profile = _profile("provider-a", "alpha", "alpha")
+    registry = build_registry_from_probe_artifacts(
+        probe_paths=[],
+        min_available_models=1,
+    )
+    registry.update(
+        {
+            "generated_from_prefusion_screening": True,
+            "binding_status": "ready",
+            "models": [profile.safe_dict()],
+            "model_count": 1,
+        }
+    )
+    registry_path = tmp_path / "runtime-registry.private.json"
+    registry_path.write_text(json.dumps(registry), encoding="utf-8")
+    other = _profile("provider-b", "beta", "beta")
+    probe_path = tmp_path / "provider-probe.private.json"
+    probe_path.write_text(
+        json.dumps(
+            {
+                "schema": "axio_fusion_api.provider_probe.v1",
+                "mode": "live",
+                "network_calls_performed": True,
+                "probes": [
+                    {
+                        "profile_id": other.profile_id,
+                        "provider": other.provider,
+                        "model": other.model,
+                        "api_format": other.api_format,
+                        "status": "available",
+                        "latency_ms": 100,
+                        "output_sha256": sha256_text("probe-beta"),
+                        "probe_mode": "live",
+                        "live_probe_evidence": True,
+                        **_stream_evidence(),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    blocked = build_probe_bound_registry(
+        registry_path=registry_path,
+        probe_paths=[probe_path],
+        min_available_models=1,
+    )
+
+    assert blocked["binding_status"] == "blocked"
+    assert blocked["generated_from_probe"] is False
+    assert "probe_bound_registry_profile_set_mismatch" in blocked["probe_evidence_binding"]["blockers"]
+    assert blocked["readiness"]["final_claim_registry_ready"] is False
 
 
 def test_config_rejects_secrets_and_low_confidence_cannot_promote_judge():
