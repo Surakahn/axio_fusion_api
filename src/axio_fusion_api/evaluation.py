@@ -25004,6 +25004,7 @@ def _provider_baseline_freeze_portfolio_summary(
 def build_external_provider_ranking_template(
     *,
     registry_path: str | Path | None = None,
+    profiles: Sequence[ModelProfile] | None = None,
 ) -> dict[str, Any]:
     """Create a private, non-ranking template for the final top-three freeze.
 
@@ -25017,9 +25018,12 @@ def build_external_provider_ranking_template(
     and checks that the submitted rows match it.
     """
 
-    profiles = load_registry(registry_path)
-    registry_receipt = _provider_registry_receipt(profiles, registry_path=registry_path)
-    candidates = _provider_baseline_group_summaries(profiles, live_only=True)
+    selected_profiles = list(profiles) if profiles is not None else load_registry(registry_path)
+    registry_receipt = _provider_registry_receipt(
+        selected_profiles,
+        registry_path=registry_path,
+    )
+    candidates = _provider_baseline_group_summaries(selected_profiles, live_only=True)
     candidate_rows = []
     missing_canonical_identity_count = 0
     for group in candidates:

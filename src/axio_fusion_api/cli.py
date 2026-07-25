@@ -568,6 +568,11 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
     )
     screening_plan.add_argument("--min-cases-per-source", type=int, default=100)
+    screening_plan.add_argument(
+        "--operational-admission-file",
+        default=None,
+        help="Private long-request admission receipt; formal baseline screening uses only its eligible profiles.",
+    )
     screening_plan.add_argument("--output", required=True)
     screening_plan.set_defaults(func=cmd_baseline_screening_plan)
 
@@ -585,6 +590,11 @@ def build_parser() -> argparse.ArgumentParser:
     screening_run.add_argument("--max-workers", type=int, default=4)
     screening_run.add_argument("--max-tasks", type=int, default=None)
     screening_run.add_argument("--retry-failed", action="store_true")
+    screening_run.add_argument(
+        "--operational-admission-file",
+        default=None,
+        help="The same private long-request admission receipt used to build the plan.",
+    )
     screening_run.add_argument("--output", default=None)
     screening_run.set_defaults(func=cmd_baseline_screening_run)
 
@@ -597,6 +607,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--private-probe-file",
         action="append",
         required=True,
+    )
+    screening_ranking.add_argument(
+        "--operational-admission-file",
+        default=None,
+        help="The same private long-request admission receipt used to build the plan.",
     )
     screening_ranking.add_argument("--output", required=True)
     screening_ranking.set_defaults(func=cmd_baseline_screening_to_ranking)
@@ -1955,6 +1970,7 @@ def cmd_baseline_screening_plan(args: argparse.Namespace) -> int:
         source_manifest_path=args.source_manifest,
         private_probe_files=args.private_probe_file,
         min_cases_per_source=args.min_cases_per_source,
+        operational_admission_path=args.operational_admission_file,
     )
     _emit_json(payload, output=args.output)
     return 0 if payload.get("ready") is True else 2
@@ -1973,6 +1989,7 @@ def cmd_baseline_screening_run(args: argparse.Namespace) -> int:
         max_tasks=args.max_tasks,
         retry_failed=bool(args.retry_failed),
         overwrite=False,
+        operational_admission_path=args.operational_admission_file,
     )
     _emit_json(payload, output=args.output)
     if payload.get("status") in {"completed", "preflight_ready"}:
@@ -1995,6 +2012,7 @@ def cmd_baseline_screening_to_ranking(args: argparse.Namespace) -> int:
         source_manifest_path=args.source_manifest,
         private_probe_files=args.private_probe_file,
         private_root=args.private_root,
+        operational_admission_path=args.operational_admission_file,
     )
     _emit_json(payload, output=args.output)
     return 0 if payload.get("screening_conversion_ready") is True else 2

@@ -33,6 +33,7 @@ from .operational_admission import (
     operational_workload_contract,
     redact_operational_admission,
     run_operational_admission,
+    validate_operational_admission_handoff,
 )
 from .registry import (
     build_default_registry,
@@ -81,6 +82,7 @@ __all__ = [
     "operational_workload_contract",
     "redact_operational_admission",
     "run_operational_admission",
+    "validate_operational_admission_handoff",
     "discover_runtime_profiles",
     "render_response",
     "runtime_channel_summary",

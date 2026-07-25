@@ -26,6 +26,7 @@ from .evaluation import (
     build_external_provider_ranking_template,
 )
 from .latency_policy import PROVIDER_MAX_RESPONSE_SECONDS
+from .operational_admission import validate_operational_admission_handoff
 from .providers import (
     HTTPProviderClient,
     ensure_strict_streaming_client,
@@ -95,6 +96,7 @@ def build_non_target_screening_plan(
     source_manifest_path: str | Path,
     private_probe_files: Sequence[str | Path] = (),
     min_cases_per_source: int = DEFAULT_MIN_CASES_PER_SOURCE,
+    operational_admission_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Pre-register a complete-pool, non-target provider screening matrix.
 
@@ -107,6 +109,11 @@ def build_non_target_screening_plan(
     source_file = Path(source_manifest_path)
     blockers: list[str] = []
     profiles = _load_registry_for_screening(registry_file, blockers)
+    profiles, operational_admission = _apply_operational_admission_filter(
+        profiles,
+        operational_admission_path=operational_admission_path,
+        blockers=blockers,
+    )
     source_manifest, source_manifest_sha256 = _load_private_json(
         source_file,
         reason_prefix="screening_source_manifest",
@@ -242,6 +249,7 @@ def build_non_target_screening_plan(
         "execution_mode": "remote_provider_api_only",
         "registry_file_sha256": registry_sha256,
         "source_manifest_content_sha256": source_manifest_sha256,
+        "operational_admission": operational_admission,
         "pre_registered_before_target_campaign": (
             pre_registration.get("declared_before_target_campaign") is True
         ),
@@ -740,6 +748,65 @@ def _load_private_json(
         blockers.append(f"{reason_prefix}_not_object")
         return {}, sha256_text(raw)
     return dict(value), sha256_text(raw)
+
+
+def _apply_operational_admission_filter(
+    profiles: Sequence[ModelProfile],
+    *,
+    operational_admission_path: str | Path | None,
+    blockers: list[str],
+) -> tuple[list[ModelProfile], dict[str, Any]]:
+    """Bind baseline candidates to the independent long-request gate."""
+
+    if operational_admission_path is None or not str(operational_admission_path).strip():
+        return list(profiles), {
+            "required": False,
+            "status": "not_required",
+            "content_sha256": "",
+            "eligible_profile_id_sha256s": [],
+            "candidate_profile_count": len(profiles),
+            "formal_baseline_eligible_count": None,
+            "reason_codes": [],
+            "raw_provider_names_persisted": False,
+            "raw_provider_model_ids_persisted": False,
+            "secrets_persisted": False,
+        }
+    validation = validate_operational_admission_handoff(
+        operational_admission_path,
+        profiles,
+        require_formal=True,
+    )
+    reason_codes = [str(reason) for reason in validation.get("reason_codes", []) if str(reason)]
+    blockers.extend(reason_codes)
+    eligible_ids = {
+        str(value)
+        for value in validation.get("eligible_profile_ids", [])
+        if str(value)
+    }
+    filtered = [profile for profile in profiles if profile.profile_id in eligible_ids]
+    if validation.get("valid") is not True:
+        filtered = []
+    if not filtered:
+        blockers.append("screening_operational_admission_left_no_baseline_profiles")
+    return filtered, {
+        "required": True,
+        "status": "ready" if validation.get("valid") is True else "blocked",
+        "content_sha256": str(validation.get("content_sha256") or ""),
+        "eligible_profile_id_sha256s": sorted(
+            str(value)
+            for value in validation.get("eligible_profile_id_sha256s", [])
+            if str(value)
+        ),
+        "candidate_profile_count": len(profiles),
+        "filtered_profile_count": len(filtered),
+        "formal_baseline_eligible_count": int(
+            validation.get("formal_baseline_eligible_count") or 0
+        ),
+        "reason_codes": sorted(set(reason_codes)),
+        "raw_provider_names_persisted": False,
+        "raw_provider_model_ids_persisted": False,
+        "secrets_persisted": False,
+    }
 
 
 def _canonical_live_groups(profiles: Sequence[ModelProfile]) -> list[dict[str, Any]]:
@@ -1692,6 +1759,7 @@ def run_non_target_screening_campaign(
     max_tasks: int | None = None,
     retry_failed: bool = False,
     overwrite: bool = False,
+    operational_admission_path: str | Path | None = None,
     client: HTTPProviderClient | None = None,
 ) -> dict[str, Any]:
     """Execute or resume a pre-registered complete-pool screening campaign."""
@@ -1722,6 +1790,7 @@ def run_non_target_screening_campaign(
         min_cases_per_source=int(
             plan.get("minimum_cases_per_source") or DEFAULT_MIN_CASES_PER_SOURCE
         ),
+        operational_admission_path=operational_admission_path,
     )
     plan_digest = str(plan.get("plan_digest_sha256") or "")
     if not _looks_like_sha256(plan_digest):
@@ -1739,6 +1808,11 @@ def run_non_target_screening_campaign(
         blockers=blockers,
     )
     profiles = _load_registry_for_screening(registry_file, blockers)
+    profiles, operational_admission = _apply_operational_admission_filter(
+        profiles,
+        operational_admission_path=operational_admission_path,
+        blockers=blockers,
+    )
     profile_by_hash = {sha256_text(item.profile_id): item for item in profiles}
     groups = {
         str(row["canonical_identity_sha256"]): row
@@ -1853,6 +1927,7 @@ def run_non_target_screening_campaign(
         ),
         "registry_file_sha256": _file_sha256(registry_file),
         "source_manifest_content_sha256": source_manifest_sha256,
+        "operational_admission": operational_admission,
         "private_root_sha256": sha256_text(str(output_root)),
         "planned_task_count": int(plan.get("task_count") or 0),
         "selected_task_count": len(task_rows),
@@ -2103,6 +2178,7 @@ def build_external_ranking_manifest_from_screening(
     source_manifest_path: str | Path,
     private_probe_files: Sequence[str | Path],
     private_root: str | Path,
+    operational_admission_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Convert a complete screening campaign into the strict ranking v3 input."""
 
@@ -2123,7 +2199,15 @@ def build_external_ranking_manifest_from_screening(
         blockers=blockers,
     )
     profiles = _load_registry_for_screening(Path(registry_path), blockers)
-    template = build_external_provider_ranking_template(registry_path=registry_path)
+    profiles, operational_admission = _apply_operational_admission_filter(
+        profiles,
+        operational_admission_path=operational_admission_path,
+        blockers=blockers,
+    )
+    template = build_external_provider_ranking_template(
+        registry_path=registry_path,
+        profiles=profiles,
+    )
     if plan.get("schema") != SCREENING_PLAN_SCHEMA or plan.get("ready") is not True:
         blockers.append("screening_ranking_plan_not_ready")
     blockers.extend(_screening_execution_schedule_errors(plan))
@@ -2154,6 +2238,10 @@ def build_external_ranking_manifest_from_screening(
         blockers.append("screening_ranking_registry_binding_mismatch")
     if str(state.get("source_manifest_content_sha256") or "") != source_manifest_sha256:
         blockers.append("screening_ranking_source_binding_mismatch")
+    if stable_json(state.get("operational_admission")) != stable_json(
+        plan.get("operational_admission")
+    ):
+        blockers.append("screening_ranking_operational_admission_binding_mismatch")
     declared_plan_digest = str(plan.get("plan_digest_sha256") or "")
     computed_plan_digest = sha256_text(
         stable_json(_screening_plan_digest_input(plan))
@@ -2167,6 +2255,7 @@ def build_external_ranking_manifest_from_screening(
         min_cases_per_source=int(
             plan.get("minimum_cases_per_source") or DEFAULT_MIN_CASES_PER_SOURCE
         ),
+        operational_admission_path=operational_admission_path,
     )
     if current_plan.get("ready") is not True:
         blockers.extend(

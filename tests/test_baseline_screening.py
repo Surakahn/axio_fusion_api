@@ -32,6 +32,12 @@ from axio_fusion_api.evaluation import (
     _provider_registry_receipt,
     build_external_provider_ranking_template,
 )
+from axio_fusion_api import providers as provider_module
+from axio_fusion_api.operational_admission import (
+    redact_operational_admission,
+    run_operational_admission,
+)
+from axio_fusion_api.providers import ProviderCompletion, ProviderExecutionError
 from axio_fusion_api.registry import load_registry, normalize_profile
 from axio_fusion_api.schemas import sha256_text, stable_json
 
@@ -283,6 +289,217 @@ class _SequenceClient:
         if isinstance(outcome, BaseException):
             raise outcome
         return outcome
+
+
+class _AdmissionFixtureClient:
+    def __init__(self, *, failed_profile_ids=()):
+        self.failed_profile_ids = set(failed_profile_ids)
+
+    def complete_turn(self, profile, request, *, prompt, system, timeout):
+        del prompt, system, timeout
+        workload_id = str(request.metadata.get("workload_id") or "")
+        provider_module._record_provider_request_receipt(
+            status="success" if profile.profile_id not in self.failed_profile_ids else "failed",
+            key_attempt_count=1,
+            transport_attempt_count=1,
+            retry_attempt_count=0,
+            stream_requested=True,
+            stream_observed=True,
+            stream_fallback_used=False,
+            stream_protocol="sse",
+            stream_content_type="text/event-stream",
+            stream_frame_count=3,
+            strict_streaming_requested=True,
+        )
+        if profile.profile_id in self.failed_profile_ids:
+            raise ProviderExecutionError("fixture admission failure", error_code="provider_request_timeout")
+        if workload_id.endswith("structured_output"):
+            output = json.dumps({"record_id": "record-01", "owner": "team-a", "priority": 8, "reason": "synthetic"})
+        elif workload_id == "bounded_constraint_reasoning":
+            output = json.dumps({"decision": "C", "checks": 4, "risk": "review load", "alternative": "A"})
+        elif workload_id == "long_form_operational_response":
+            output = "A bounded review policy should inspect the state before promotion. " * 24
+        else:
+            output = "record-63 is the largest open quota and belongs to team-d."
+        return ProviderCompletion(output)
+
+
+def _fixture_admission(tmp_path: Path):
+    registry_path, probe_path, manifest_path = _screening_fixture(tmp_path)
+    profiles = load_registry(registry_path)
+    failed_profile = next(
+        profile for profile in profiles if profile.provider.endswith("SLOW_REPLICA")
+    )
+    report = run_operational_admission(
+        profiles,
+        live=True,
+        max_workers=1,
+        client=_AdmissionFixtureClient(failed_profile_ids={failed_profile.profile_id}),
+    )
+    assert report["status"] == "ready"
+    assert report["formal_baseline_eligible_count"] == 3
+    admission_path = _write_json(tmp_path / "operational_admission.private.json", report)
+    return registry_path, probe_path, manifest_path, admission_path, report
+
+
+def test_operational_admission_filters_baseline_pool_and_is_carried_into_preflight(tmp_path):
+    registry_path, probe_path, manifest_path, admission_path, _ = _fixture_admission(tmp_path)
+
+    plan = build_non_target_screening_plan(
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        min_cases_per_source=4,
+        operational_admission_path=admission_path,
+    )
+
+    assert plan["ready"] is True, plan["blockers"]
+    assert plan["operational_admission"]["status"] == "ready"
+    assert plan["operational_admission"]["filtered_profile_count"] == 3
+    assert plan["canonical_model_group_count"] == 3
+    assert plan["replica_profile_count"] == 3
+
+    plan_path = _write_json(tmp_path / "screening_plan.safe.json", plan)
+    state_path = tmp_path / "campaign_state.safe.json"
+    preflight = run_non_target_screening_campaign(
+        plan_path=plan_path,
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        private_root=tmp_path / "private_units",
+        state_path=state_path,
+        live=False,
+        operational_admission_path=admission_path,
+    )
+
+    assert preflight["status"] == "preflight_ready"
+    assert preflight["operational_admission"]["content_sha256"] == plan["operational_admission"]["content_sha256"]
+
+
+def test_admission_bound_campaign_and_ranking_keep_filtered_candidate_pool(tmp_path):
+    registry_path, probe_path, manifest_path, admission_path, _ = _fixture_admission(tmp_path)
+    plan = build_non_target_screening_plan(
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        min_cases_per_source=4,
+        operational_admission_path=admission_path,
+    )
+    plan_path = _write_json(tmp_path / "screening_plan.safe.json", plan)
+    state_path = tmp_path / "campaign_state.safe.json"
+    private_root = tmp_path / "private_units"
+
+    campaign = run_non_target_screening_campaign(
+        plan_path=plan_path,
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        private_root=private_root,
+        state_path=state_path,
+        live=True,
+        max_workers=3,
+        client=_RankedFixtureClient(),
+        operational_admission_path=admission_path,
+    )
+    assert campaign["ready_for_ranking"] is True, campaign["reason_codes"]
+
+    ranking = build_external_ranking_manifest_from_screening(
+        plan_path=plan_path,
+        campaign_state_path=state_path,
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        private_root=private_root,
+        operational_admission_path=admission_path,
+    )
+
+    assert ranking["screening_conversion_ready"] is True, ranking.get("blockers")
+    assert ranking["candidate_inventory_count"] == 3
+    assert len(ranking["candidate_inventory"]) == 3
+
+
+def test_tampered_operational_admission_blocks_screening_plan(tmp_path):
+    registry_path, probe_path, manifest_path, admission_path, _ = _fixture_admission(tmp_path)
+    payload = json.loads(admission_path.read_text(encoding="utf-8"))
+    payload["formal_baseline_eligible_count"] = 2
+    _write_json(admission_path, payload)
+
+    plan = build_non_target_screening_plan(
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        min_cases_per_source=4,
+        operational_admission_path=admission_path,
+    )
+
+    assert plan["ready"] is False
+    assert "operational_admission_formal_count_mismatch" in plan["blockers"]
+
+
+def test_incomplete_operational_admission_coverage_blocks_screening_plan(tmp_path):
+    registry_path, probe_path, manifest_path, admission_path, _ = _fixture_admission(tmp_path)
+    payload = json.loads(admission_path.read_text(encoding="utf-8"))
+    payload["profiles"] = payload["profiles"][:-1]
+    _write_json(admission_path, payload)
+
+    plan = build_non_target_screening_plan(
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        min_cases_per_source=4,
+        operational_admission_path=admission_path,
+    )
+
+    assert plan["ready"] is False
+    assert "operational_admission_profile_coverage_incomplete" in plan["blockers"]
+
+
+def test_redacted_operational_admission_cannot_cross_private_screening_boundary(tmp_path):
+    registry_path, probe_path, manifest_path, admission_path, report = _fixture_admission(tmp_path)
+    redacted_path = _write_json(
+        tmp_path / "operational_admission.safe.json",
+        redact_operational_admission(report),
+    )
+
+    plan = build_non_target_screening_plan(
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        min_cases_per_source=4,
+        operational_admission_path=redacted_path,
+    )
+
+    assert plan["ready"] is False
+    assert "operational_admission_profile_coverage_incomplete" in plan["blockers"]
+
+
+def test_operational_admission_digest_change_invalidates_existing_screening_plan(tmp_path):
+    registry_path, probe_path, manifest_path, admission_path, _ = _fixture_admission(tmp_path)
+    plan = build_non_target_screening_plan(
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        min_cases_per_source=4,
+        operational_admission_path=admission_path,
+    )
+    plan_path = _write_json(tmp_path / "screening_plan.safe.json", plan)
+    payload = json.loads(admission_path.read_text(encoding="utf-8"))
+    payload["selection_policy"]["operator_annotation"] = "receipt-content-changed"
+    _write_json(admission_path, payload)
+
+    blocked = run_non_target_screening_campaign(
+        plan_path=plan_path,
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        private_root=tmp_path / "private_units",
+        state_path=tmp_path / "campaign_state.safe.json",
+        live=False,
+        operational_admission_path=admission_path,
+    )
+
+    assert blocked["status"] == "blocked"
+    assert "screening_plan_current_inputs_mismatch" in blocked["reason_codes"]
 
 
 def test_plan_uses_same_canonical_representatives_as_freeze_and_is_hash_only(tmp_path):

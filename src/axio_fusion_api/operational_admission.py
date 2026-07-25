@@ -19,6 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 import json
 import math
+from pathlib import Path
 import time
 from typing import Any, Callable, Mapping, Sequence
 
@@ -40,10 +41,12 @@ from .registry import normalize_profile
 from .schemas import (
     FusionRequest,
     ModelProfile,
+    is_sha256_digest,
     safe_provider_error_class,
     safe_provider_error_code,
     safe_provider_http_status,
     sha256_text,
+    stable_json,
 )
 
 
@@ -325,6 +328,193 @@ def run_operational_admission(
     if redact_provider_identifiers:
         return redact_operational_admission(payload)
     return payload
+
+
+def validate_operational_admission_handoff(
+    admission: Mapping[str, Any] | str | Path,
+    profiles: Sequence[ModelProfile | Mapping[str, Any]],
+    *,
+    require_formal: bool = True,
+) -> dict[str, Any]:
+    """Validate a private admission receipt before baseline screening uses it.
+
+    The validator binds every enabled input profile to an exact live receipt,
+    rechecks the fixed workload contract, and returns profile ids only for the
+    in-process caller. A redacted receipt intentionally cannot satisfy this
+    boundary because it no longer contains the exact private profile binding.
+    """
+
+    payload: Mapping[str, Any]
+    source_content_sha256 = ""
+    if isinstance(admission, Mapping):
+        payload = admission
+        source_content_sha256 = sha256_text(stable_json(dict(admission)))
+    else:
+        path = Path(admission)
+        try:
+            raw = path.read_text(encoding="utf-8")
+            loaded = json.loads(raw)
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            return {
+                "valid": False,
+                "reason_codes": ["operational_admission_artifact_unreadable"],
+                "eligible_profile_ids": [],
+                "eligible_profile_id_sha256s": [],
+                "content_sha256": "",
+                "secrets_persisted": False,
+            }
+        if not isinstance(loaded, Mapping):
+            return {
+                "valid": False,
+                "reason_codes": ["operational_admission_artifact_must_be_object"],
+                "eligible_profile_ids": [],
+                "eligible_profile_id_sha256s": [],
+                "content_sha256": "",
+                "secrets_persisted": False,
+            }
+        payload = loaded
+        source_content_sha256 = sha256_text(raw)
+
+    reason_codes: list[str] = []
+    if payload.get("schema") != OPERATIONAL_ADMISSION_SCHEMA:
+        reason_codes.append("operational_admission_schema_invalid")
+    if payload.get("mode") != "live" or payload.get("network_calls_performed") is not True:
+        reason_codes.append("operational_admission_not_live")
+    if payload.get("target_benchmark_cases_or_labels_used") is not False:
+        reason_codes.append("operational_admission_target_material_present")
+    if stable_json(payload.get("workload_contract")) != stable_json(
+        operational_workload_contract()
+    ):
+        reason_codes.append("operational_admission_workload_contract_mismatch")
+
+    normalized_profiles = [
+        item if isinstance(item, ModelProfile) else normalize_profile(item)
+        for item in profiles
+        if isinstance(item, (ModelProfile, Mapping))
+    ]
+    expected = {
+        profile.profile_id: profile
+        for profile in normalized_profiles
+        if profile.enabled
+    }
+    rows = payload.get("profiles") if isinstance(payload.get("profiles"), list) else []
+    by_profile_id: dict[str, Mapping[str, Any]] = {}
+    duplicate_ids: set[str] = set()
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        profile_id = str(row.get("profile_id") or "").strip()
+        if not profile_id or profile_id in by_profile_id:
+            if profile_id:
+                duplicate_ids.add(profile_id)
+            continue
+        by_profile_id[profile_id] = row
+    if duplicate_ids:
+        reason_codes.append("operational_admission_profile_duplicate")
+    missing = sorted(set(expected).difference(by_profile_id))
+    if missing:
+        reason_codes.append("operational_admission_profile_coverage_incomplete")
+
+    eligible_ids: list[str] = []
+    for profile_id, profile in expected.items():
+        row = by_profile_id.get(profile_id)
+        if row is None:
+            continue
+        if str(row.get("provider") or "") != profile.provider or str(row.get("model") or "") != profile.model:
+            reason_codes.append("operational_admission_profile_identity_mismatch")
+            continue
+        if str(row.get("canonical_identity_sha256") or "") != profile.canonical_identity_sha256:
+            reason_codes.append("operational_admission_canonical_identity_mismatch")
+            continue
+        if row.get("formal_baseline_eligible") is True:
+            if _formal_row_evidence_is_valid(row, payload.get("workload_contract")):
+                eligible_ids.append(profile_id)
+            else:
+                reason_codes.append("operational_admission_formal_evidence_invalid")
+        if any(
+            isinstance(attempt, Mapping)
+            and any(key in attempt for key in ("prompt", "system", "output"))
+            for attempt in row.get("attempts", [])
+        ):
+            reason_codes.append("operational_admission_raw_material_present")
+    expected_formal_count = len(eligible_ids)
+    if int(payload.get("formal_baseline_eligible_count") or 0) != expected_formal_count:
+        reason_codes.append("operational_admission_formal_count_mismatch")
+    if require_formal and expected_formal_count < 1:
+        reason_codes.append("operational_admission_no_formal_baseline_eligible_profile")
+    unique_reasons = sorted(set(reason_codes))
+    return {
+        "valid": not unique_reasons,
+        "status": "ready" if not unique_reasons else "blocked",
+        "reason_codes": unique_reasons,
+        "eligible_profile_ids": sorted(eligible_ids),
+        "eligible_profile_id_sha256s": sorted(sha256_text(value) for value in eligible_ids),
+        "candidate_profile_count": len(expected),
+        "formal_baseline_eligible_count": expected_formal_count,
+        "content_sha256": source_content_sha256,
+        "raw_prompts_persisted": False,
+        "raw_provider_outputs_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _formal_row_evidence_is_valid(
+    row: Mapping[str, Any], workload_contract: Any
+) -> bool:
+    if row.get("status") != "production_admitted":
+        return False
+    if row.get("all_workloads_success") is not True:
+        return False
+    if any(
+        int(row.get(key) or 0) != 0
+        for key in (
+            "failure_count",
+            "transport_failure_count",
+            "stream_failure_count",
+            "output_contract_failure_count",
+        )
+    ):
+        return False
+    expected_attempts = int(row.get("expected_attempt_count") or 0)
+    attempts = row.get("attempts") if isinstance(row.get("attempts"), list) else []
+    if expected_attempts < 1 or len(attempts) != expected_attempts:
+        return False
+    workload_rows = (
+        workload_contract.get("workloads")
+        if isinstance(workload_contract, Mapping)
+        and isinstance(workload_contract.get("workloads"), list)
+        else []
+    )
+    prompt_hashes = {
+        str(item.get("workload_id") or ""): str(item.get("prompt_sha256") or "")
+        for item in workload_rows
+        if isinstance(item, Mapping)
+    }
+    if not prompt_hashes:
+        return False
+    for attempt in attempts:
+        if not isinstance(attempt, Mapping):
+            return False
+        if attempt.get("status") != "passed":
+            return False
+        if attempt.get("streaming_evidence_valid") is not True:
+            return False
+        if attempt.get("output_contract_valid") is not True:
+            return False
+        if not is_sha256_digest(attempt.get("output_sha256")):
+            return False
+        workload_id = str(attempt.get("workload_id") or "")
+        if workload_id not in prompt_hashes:
+            return False
+        if str(attempt.get("prompt_sha256") or "") != prompt_hashes[workload_id]:
+            return False
+        if not is_sha256_digest(attempt.get("prompt_sha256")):
+            return False
+        if not isinstance(attempt.get("latency_eligibility"), Mapping):
+            return False
+        if attempt["latency_eligibility"].get("eligible") is not True:
+            return False
+    return True
 
 
 def _run_profile(
