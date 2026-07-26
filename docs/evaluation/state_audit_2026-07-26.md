@@ -79,20 +79,29 @@ groups happened to complete both source units, but that survivor set cannot be
 promoted to a provider top-three ranking because the complete-pool contract
 was not satisfied. Strict ranking conversion therefore remains blocked.
 
-## Stability Refresh In Progress
+## Stability Refresh Outcome
 
-A second, independently identified operational cohort is now running against
-the 18 profiles that passed the earlier fixed operational admission. It uses
-the same non-target workload contract, three repetitions per profile, strict
-streaming, a 90-second ceiling, and zero tolerated workload failures. This is
-an availability/stability gate, not a quality or target-benchmark result. A
-new complete screening plan will be built only from its final formal-eligible
-set; no unit from the partial campaign will be retried.
+A second, independently identified operational cohort was run against the
+complete 29-profile registry, using three repetitions per profile, strict
+streaming, a 90-second ceiling, and zero tolerated workload failures. All 29
+profiles had complete 15-attempt coverage; 11 remained formal baseline
+eligible and 18 were excluded by the stability gate. This is an
+availability/stability result, not a quality or target-benchmark result.
+
+The resulting new screening plan contained 11 canonical candidates, 2
+independent non-target source families, 22 source/candidate units, and 2,420
+fixed provider calls. All 22 units were executed and authenticated: 9 passed
+and 13 failed because of transport-failure-rate or no-score gates. Only 3
+candidate groups completed both source units. The ranking conversion is
+therefore template-only with no rank assignment, and the provider baseline
+freeze remains correctly blocked by incomplete complete-pool coverage. No
+unit from either earlier campaign was retried.
 
 ## Required Next Gate
 
-After the stability refresh reaches a verified terminal state, provider
-baseline freeze requires:
+Before provider baseline freeze can proceed, a new independently registered
+provider pool must satisfy the complete-pool screening contract. The next
+gate requires:
 
 1. authenticate the final state, every unit digest, and complete source
    coverage;
