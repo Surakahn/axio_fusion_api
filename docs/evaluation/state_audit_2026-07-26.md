@@ -154,3 +154,40 @@ gate requires:
 The previous failed units must not be selectively retried into the existing
 campaign. Any refresh is a new, separately identified experiment with its
 own registry, plan, schedule, and receipts.
+
+## Current Channel Cohort Outcome
+
+The latest independently registered cohort was completed after this audit's
+r3 work. It used a new calibrated registry, a new operational-admission
+receipt, and a new screening campaign. No r3 state, failed unit, or survivor
+list was reused. The cohort remained strictly separate from the Axio serving
+runtime and from target benchmark execution.
+
+The enrollment stage discovered 126 logical model entries and retained 31
+profiles after the strict text probe. The operational admission ran 15
+streaming attempts per profile (465 attempts total) under the 90-second hard
+response ceiling. It recorded 369 passed attempts, 72 ordinary failures, and
+24 latency-ineligible attempts; 11 profiles satisfied the formal zero-failure
+admission gate. This is an availability result only and is not a model
+quality ranking.
+
+The pre-registered screening plan contained 11 canonical candidates, two
+independent non-target source families, 22 source/candidate units, and 2,420
+fixed provider calls. The campaign reached a terminal `partial` state after
+all 22 units received a terminal result: 6 units passed the transport and
+scoring contract and 16 were rejected by transport-failure-rate or no-score
+gates. The complete case denominator contained 2,420 records, with 1,444
+scored responses and 976 transport failures. No scorer error was converted
+into a score, and no failed unit was selectively retried into this campaign.
+
+The screening-to-ranking conversion returned `screening_conversion_ready =
+false` with no rank assignment. Its blockers included the non-complete
+campaign status, failed or incomplete source units, and incomplete candidate
+source coverage. The generated ranking artifact is therefore a diagnostic
+template only; it cannot be used to freeze provider ranks 1, 2, or 3.
+
+The provider baseline freeze and the formal 9-category, 21-suite target
+benchmark remain **not started** for this cohort. No Axio-vs-provider
+superiority claim has been made. This preserves the complete-pool,
+case-paired, and contamination-controlled evaluation contract even though a
+small survivor subset produced usable responses.
