@@ -59,29 +59,40 @@ survivor pool and would violate the pre-registered complete-pool contract.
 The formal 21-suite benchmark campaign is consequently **not started**. No
 Axio-vs-provider superiority claim has been made.
 
-## Refresh Campaign In Progress
+## Refresh Campaign Outcome
 
 The required refresh was registered as a new campaign after the audit above;
-the old campaign remains immutable historical evidence and is not being
-retried. The refresh is bound to a new operational-admission receipt and a new
-screening plan. Its safe contract currently records:
+the old campaign remains immutable historical evidence and was not retried.
+The refresh was bound to a new operational-admission receipt and a new
+screening plan. Its safe contract recorded:
 
 - 29 operationally admitted profiles were screened before formal selection.
-- 18 canonical candidates are in the complete formal pool.
-- 2 independent non-target source families are fixed for every candidate.
-- 36 source/candidate units and 3,960 estimated provider calls are registered.
-- The runner uses bounded concurrency and no retry of failed units.
+- 18 canonical candidates were in the complete formal pool.
+- 2 independent non-target source families were fixed for every candidate.
+- 36 source/candidate units and 3,960 estimated provider calls were registered.
+- The runner used bounded concurrency and no retry of failed units.
 
-At the time of this audit update, the refresh remains `running`; 2 units are
-complete and 5 units are failed or blocked, while the remaining units are
-still executing. These are progress counters only, not ranking evidence. The
-campaign must reach a verified terminal state before conversion to a ranking
-input is attempted.
+The refresh reached a terminal `partial` state: 7 units passed and 29 units
+failed. The failures were transport-rate or no-score failures, not converted
+into wrong answers and not removed from the denominator. Only 3 candidate
+groups happened to complete both source units, but that survivor set cannot be
+promoted to a provider top-three ranking because the complete-pool contract
+was not satisfied. Strict ranking conversion therefore remains blocked.
+
+## Stability Refresh In Progress
+
+A second, independently identified operational cohort is now running against
+the 18 profiles that passed the earlier fixed operational admission. It uses
+the same non-target workload contract, three repetitions per profile, strict
+streaming, a 90-second ceiling, and zero tolerated workload failures. This is
+an availability/stability gate, not a quality or target-benchmark result. A
+new complete screening plan will be built only from its final formal-eligible
+set; no unit from the partial campaign will be retried.
 
 ## Required Next Gate
 
-After the refresh reaches a verified terminal state, provider baseline freeze
-requires:
+After the stability refresh reaches a verified terminal state, provider
+baseline freeze requires:
 
 1. authenticate the final state, every unit digest, and complete source
    coverage;
