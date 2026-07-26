@@ -99,6 +99,45 @@ unit from either earlier campaign was retried.
 
 ## Required Next Gate
 
+## r3 Refresh Outcome
+
+The next refresh was registered as a separate cohort and used the exact
+calibrated registry/probe binding for the current configured channel set. It
+did not reuse any r1 or r2 campaign state, failed unit, or survivor list.
+
+The strict operational-admission receipt covered all 45 profiles with three
+repetitions of five fixed non-target workloads per profile (675 attempts in
+total). Every profile completed all 15 attempts. The receipt recorded 301
+passed attempts, 312 ordinary failures, and 62 attempts beyond the 90-second
+latency ceiling; 11 profiles satisfied the zero-failure formal eligibility
+gate. The receipt was independently validator-ready and made no quality or
+target-benchmark claim.
+
+The resulting pre-registered screening plan contained 11 canonical
+candidates, two independent non-target source families, 22 source/candidate
+units, and 2,420 fixed provider calls. All 22 units completed execution and
+private-artifact digest verification. Seven units met the source transport and
+scoring contract; 15 were rejected by the transport-failure or no-score gate.
+Across the complete denominator there were 2,420 case records, 1,613 scored
+responses, 807 transport failures, and no scorer errors. The campaign is
+therefore complete as an experiment but remains `partial` for ranking
+eligibility.
+
+The r3 screening-to-ranking conversion correctly returned no rank assignment
+and no top-three candidate. The exact probe-evidence audit was ready and all
+private/safe profile-set, status-count, mode-count, and API-format bindings
+matched. The subsequent baseline-freeze audit remained blocked because the
+11 formally eligible profiles did not provide the required exact-cohort
+portfolio coverage for judge, synthesizer, structured output, and independent
+answer-claim verification. In particular, the current stable eligible pool
+could not satisfy the required provider/API diversity contract. This is a
+serving/freeze gate result, not a model-quality score.
+
+The formal 9-category, 21-suite target benchmark remains **not started**.
+No provider rank 1/2/3 baseline was frozen, and no Axio superiority claim was
+made. This is the scientifically correct fail-closed result for the current
+remote channel availability.
+
 Before provider baseline freeze can proceed, a new independently registered
 provider pool must satisfy the complete-pool screening contract. The next
 gate requires:
