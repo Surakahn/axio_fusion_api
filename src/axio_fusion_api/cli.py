@@ -12,6 +12,14 @@ from .benchmark_acquisition import (
     GPQA_DEFAULT_DOWNLOAD_MANIFEST,
     acquire_gpqa_diamond,
 )
+from .benchmark_replacements import (
+    BenchmarkReplacementError,
+    MMLU_PRO_DEFAULT_DATASET_PATH,
+    MMLU_PRO_DEFAULT_RAW_PATH,
+    MMLU_PRO_DEFAULT_RECEIPT_PATH,
+    MMLU_PRO_DEFAULT_SEED,
+    build_mmlu_pro_stem_replacement,
+)
 from .baseline_screening import (
     build_external_ranking_manifest_from_screening,
     build_non_target_screening_plan,
@@ -680,6 +688,11 @@ def build_parser() -> argparse.ArgumentParser:
     source_template.add_argument("--base-dir", default="data/benchmarks")
     source_template.add_argument("--import-dir", default="outputallresult/fusion_api_product/imports")
     source_template.add_argument("--min-cases-per-suite", type=int, default=100)
+    source_template.add_argument(
+        "--dataset-manifest",
+        default=None,
+        help="Optional replacement-aware dataset manifest used to bind source identity metadata.",
+    )
     source_template.add_argument("--output", default=None)
     source_template.set_defaults(func=cmd_benchmark_source_manifest_template)
 
@@ -769,6 +782,30 @@ def build_parser() -> argparse.ArgumentParser:
     gpqa_acquire.add_argument("--timeout-seconds", type=float, default=90.0)
     gpqa_acquire.add_argument("--output", default=None)
     gpqa_acquire.set_defaults(func=cmd_benchmark_acquire_gpqa_diamond)
+
+    mmlu_pro_replacement = sub.add_parser(
+        "benchmark-build-mmlu-pro-stem-replacement",
+        help=(
+            "Build an explicitly labelled, deterministic MMLU-Pro STEM replacement "
+            "for an unavailable GPQA slot."
+        ),
+    )
+    mmlu_pro_replacement.add_argument("--raw-parquet", default=MMLU_PRO_DEFAULT_RAW_PATH)
+    mmlu_pro_replacement.add_argument("--output-dataset", default=MMLU_PRO_DEFAULT_DATASET_PATH)
+    mmlu_pro_replacement.add_argument("--output", default=MMLU_PRO_DEFAULT_RECEIPT_PATH)
+    mmlu_pro_replacement.add_argument(
+        "--base-manifest",
+        default=None,
+        help="Existing 21-suite dataset manifest whose GPQA slot will be replaced explicitly.",
+    )
+    mmlu_pro_replacement.add_argument(
+        "--replacement-manifest",
+        default=None,
+        help="Output 21-suite manifest with the explicit replacement row.",
+    )
+    mmlu_pro_replacement.add_argument("--per-category", type=int, default=100)
+    mmlu_pro_replacement.add_argument("--seed", default=MMLU_PRO_DEFAULT_SEED)
+    mmlu_pro_replacement.set_defaults(func=cmd_benchmark_build_mmlu_pro_stem_replacement)
 
     matrix = sub.add_parser("benchmark-matrix")
     matrix.add_argument("--suite-id", action="append", default=None)
@@ -2085,6 +2122,7 @@ def cmd_benchmark_source_manifest_template(args: argparse.Namespace) -> int:
         base_dir=args.base_dir,
         import_dir=args.import_dir,
         min_cases_per_suite=args.min_cases_per_suite,
+        dataset_manifest_path=args.dataset_manifest,
     )
     _emit_json(payload, output=args.output)
     return 0
@@ -2178,6 +2216,25 @@ def cmd_benchmark_acquire_gpqa_diamond(args: argparse.Namespace) -> int:
         )
         exit_code = 0
     except BenchmarkAcquisitionError as exc:
+        payload = exc.safe_receipt()
+        exit_code = 2
+    _emit_json(payload, output=args.output)
+    return exit_code
+
+
+def cmd_benchmark_build_mmlu_pro_stem_replacement(args: argparse.Namespace) -> int:
+    try:
+        payload = build_mmlu_pro_stem_replacement(
+            raw_parquet_path=args.raw_parquet,
+            standardized_dataset_path=args.output_dataset,
+            receipt_path=args.output,
+            base_dataset_manifest_path=args.base_manifest,
+            replacement_dataset_manifest_path=args.replacement_manifest,
+            per_category=args.per_category,
+            seed=args.seed,
+        )
+        exit_code = 0
+    except BenchmarkReplacementError as exc:
         payload = exc.safe_receipt()
         exit_code = 2
     _emit_json(payload, output=args.output)

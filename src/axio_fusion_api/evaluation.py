@@ -589,8 +589,34 @@ def benchmark_manifest() -> dict[str, Any]:
     }
 
 
-def build_benchmark_methodology_manifest() -> dict[str, Any]:
+def build_benchmark_methodology_manifest(
+    *,
+    dataset_manifest_path: str | Path | None = None,
+) -> dict[str, Any]:
     suites = [_methodology_contract_for_suite(suite) for suite in BENCHMARK_SUITES]
+    replacement_specs: dict[str, Mapping[str, Any]] = {}
+    if dataset_manifest_path:
+        try:
+            replacement_manifest = _load_dataset_manifest(dataset_manifest_path)
+            replacement_specs = {
+                str(spec.get("suite_id") or ""): spec
+                for spec in _campaign_suite_specs(replacement_manifest)
+                if isinstance(spec, Mapping) and spec.get("replacement_active") is True
+            }
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            replacement_specs = {}
+    for suite in suites:
+        replacement = replacement_specs.get(str(suite.get("suite_id") or ""))
+        if not replacement:
+            continue
+        suite["benchmark_slot_id"] = str(replacement.get("suite_id") or "")
+        suite["benchmark_dataset_id"] = str(replacement.get("benchmark_dataset_id") or "")
+        suite["benchmark_identity"] = str(replacement.get("benchmark_identity") or "")
+        suite["replacement_active"] = True
+        suite["replacement_disclosure"] = (
+            "This suite uses an explicitly labelled replacement dataset; "
+            "its score must not be reported as the unavailable original suite."
+        )
     categories: dict[str, int] = {}
     for suite in suites:
         categories[suite["category"]] = categories.get(suite["category"], 0) + 1
@@ -603,6 +629,11 @@ def build_benchmark_methodology_manifest() -> dict[str, Any]:
         "category_contract": "first eight categories require two suites; vertical_domain requires five suites",
         "category_contract_satisfied": _benchmark_category_contract_satisfied(categories),
         "all_categories_have_two_suites": all(count >= 2 for count in categories.values()),
+        "replacement_count": len(replacement_specs),
+        "replacements_are_explicit": all(
+            replacement.get("explicitly_not_gpqa") is True
+            for replacement in replacement_specs.values()
+        ),
         "global_controls": {
             "fixed_dataset_snapshot_required": True,
             "train_eval_isolation_required": True,
@@ -737,6 +768,7 @@ def build_benchmark_source_manifest_template(
     base_dir: str = "data/benchmarks",
     import_dir: str = "outputallresult/fusion_api_product/imports",
     min_cases_per_suite: int = 100,
+    dataset_manifest_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Emit a safe source/snapshot/materialization manifest template.
 
@@ -745,22 +777,58 @@ def build_benchmark_source_manifest_template(
     provider responses.
     """
 
+    replacement_specs: dict[str, Mapping[str, Any]] = {}
+    if dataset_manifest_path:
+        try:
+            replacement_manifest = _load_dataset_manifest(dataset_manifest_path)
+            replacement_specs = {
+                str(spec.get("suite_id") or ""): spec
+                for spec in _campaign_suite_specs(replacement_manifest)
+                if isinstance(spec, Mapping) and spec.get("replacement_active") is True
+            }
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            replacement_specs = {}
     suites = []
     for suite in BENCHMARK_SUITES:
-        methodology = _methodology_contract_for_suite(suite)
+        replacement = replacement_specs.get(suite.suite_id, {})
+        replacement_methodology = (
+            replacement.get("methodology")
+            if isinstance(replacement.get("methodology"), Mapping)
+            else {}
+        )
+        methodology = (
+            dict(replacement_methodology)
+            if replacement_methodology
+            else _methodology_contract_for_suite(suite)
+        )
+        source_url = str(
+            methodology.get("source_url")
+            or methodology.get("reference")
+            or replacement.get("reference")
+            or suite.reference
+        )
         requires_official_harness = _suite_requires_official_harness(suite.suite_id, suite.task_format)
         input_mode = "official_or_audited_import" if requires_official_harness else "local_jsonl"
         effective_min_cases = _effective_min_cases_for_suite(suite.suite_id, min_cases_per_suite)
         suites.append(
             {
                 "suite_id": suite.suite_id,
+                "benchmark_slot_id": suite.suite_id,
+                "benchmark_dataset_id": str(replacement.get("benchmark_dataset_id") or suite.suite_id),
+                "benchmark_identity": str(replacement.get("benchmark_identity") or suite.title),
+                "replacement_active": replacement.get("replacement_active") is True,
+                "replacement_disclosure": (
+                    "This is an explicit replacement dataset and is not the original benchmark."
+                    if replacement.get("replacement_active") is True
+                    else ""
+                ),
                 "category": suite.category,
-                "title": suite.title,
+                "title": str(replacement.get("title") or suite.title),
                 "task_format": suite.task_format,
                 "input_mode": input_mode,
                 "source_type": str(methodology.get("source_type") or ""),
-                "source_url": str(methodology.get("source_url") or suite.reference),
-                "source_url_sha256": sha256_text(str(methodology.get("source_url") or suite.reference)),
+                "source_url": source_url,
+                "source_url_sha256": sha256_text(source_url),
                 "dataset_slice": str(methodology.get("dataset_slice") or ""),
                 "snapshot_policy": str(methodology.get("snapshot_policy") or ""),
                 "case_selection": str(methodology.get("case_selection") or ""),
@@ -805,6 +873,7 @@ def build_benchmark_source_manifest_template(
         "required_category_count": len({suite.category for suite in BENCHMARK_SUITES}),
         "suite_count": len(suites),
         "min_cases_per_suite": int(min_cases_per_suite),
+        "benchmark_replacement_count": len(replacement_specs),
         "input_receipts": {
             "base_dir_sha256": sha256_text(str(base_dir)),
             "import_dir_sha256": sha256_text(str(import_dir)),
@@ -1141,7 +1210,7 @@ def assemble_benchmark_dataset_manifest(
             base_dir=str(dataset_dir or "data/benchmarks"),
             min_cases_per_suite=min_cases_per_suite,
         )
-    suite_specs = _campaign_suite_specs(template)
+    suite_specs = _campaign_suite_specs(template, normalize_replacements=False)
     if not suite_specs:
         suite_specs = build_benchmark_dataset_manifest_template(
             base_dir=str(dataset_dir or "data/benchmarks"),
@@ -3678,6 +3747,11 @@ def run_runtime_benchmark_campaign(
                         max_latency_ms=max_latency_ms,
                     )
                     status = "completed"
+                run = _annotate_benchmark_run_identity(
+                    run,
+                    benchmark_slot_id=suite.suite_id,
+                    spec=spec,
+                )
                 write_json(run_path, run)
                 runs.append(run)
                 artifacts.append(
@@ -7047,6 +7121,12 @@ def run_benchmark_campaign(
                 )
                 write_json(run_path, run)
                 status = "completed"
+            run = _annotate_benchmark_run_identity(
+                run,
+                benchmark_slot_id=suite_id,
+                spec=spec,
+            )
+            write_json(run_path, run)
             runs.append(run)
             artifacts.append(
                 {
@@ -7083,7 +7163,9 @@ def run_benchmark_campaign(
         provider_baseline_freeze=provider_baseline_freeze,
         require_http_gateway=bool(live),
     )
-    methodology = build_benchmark_methodology_manifest()
+    methodology = build_benchmark_methodology_manifest(
+        dataset_manifest_path=dataset_manifest_path,
+    )
     methodology_receipt = _benchmark_methodology_receipt(methodology)
     runs_payload = build_benchmark_runs_payload(runs)
     write_json(output / "runs.json", runs_payload)
@@ -7830,7 +7912,9 @@ def _write_strict_live_preflight_blocked_campaign(
         min_cases_per_suite=min_cases_per_suite,
         alpha=alpha,
     )
-    methodology = build_benchmark_methodology_manifest()
+    methodology = build_benchmark_methodology_manifest(
+        dataset_manifest_path=dataset_manifest_path,
+    )
     methodology_receipt = _benchmark_methodology_receipt(methodology)
     training_contamination_audit = _default_training_contamination_audit_for_campaign(runs_payload)
     write_json(output / "runs.json", runs_payload)
@@ -8562,6 +8646,8 @@ def audit_benchmark_campaign_readiness(
         reasons = []
         if not spec:
             reasons.append("missing_suite_spec")
+        if spec.get("_replacement_invalid_reason"):
+            reasons.append(str(spec.get("_replacement_invalid_reason")))
         if requires_official_harness and imported_count < len(import_candidate_keys):
             reasons.append("official_harness_imports_incomplete")
         if task_format == "external_pairwise_judge":
@@ -8595,6 +8681,15 @@ def audit_benchmark_campaign_readiness(
                 "suite_id": suite_id,
                 "category": suite.category,
                 "task_format": task_format,
+                "benchmark_slot_id": str(spec.get("benchmark_slot_id") or suite_id),
+                "benchmark_dataset_id": str(spec.get("benchmark_dataset_id") or suite_id),
+                "benchmark_identity": str(spec.get("benchmark_identity") or suite.title),
+                "replacement_active": spec.get("replacement_active") is True,
+                "replacement_disclosure": (
+                    "This is an explicit replacement dataset and is not the original benchmark."
+                    if spec.get("replacement_active") is True
+                    else ""
+                ),
                 "dataset_path_sha256": sha256_text(str(dataset_path)) if dataset_path else "",
                 "dataset_exists": dataset_exists,
                 "case_count": case_count,
@@ -11944,7 +12039,9 @@ def build_benchmark_evidence_pack(
     """
 
     profiles = load_registry(registry_path)
-    methodology = build_benchmark_methodology_manifest()
+    methodology = build_benchmark_methodology_manifest(
+        dataset_manifest_path=dataset_manifest_path,
+    )
     dataset_template = build_benchmark_dataset_manifest_template(
         base_dir="<PINNED_DATASET_DIR>",
         min_cases_per_suite=min_cases_per_suite,
@@ -19716,6 +19813,15 @@ def _case_hash_manifest_local_suite_row(
     digest = _case_hash_set_digest(suite.suite_id, unique_hashes) if unique_hashes else ""
     return {
         "suite_id": suite.suite_id,
+        "benchmark_slot_id": suite.suite_id,
+        "benchmark_dataset_id": str(spec.get("benchmark_dataset_id") or suite.suite_id),
+        "benchmark_identity": str(spec.get("benchmark_identity") or suite.title),
+        "replacement_active": spec.get("replacement_active") is True,
+        "replacement_disclosure": (
+            "This is an explicit replacement dataset and is not the original benchmark."
+            if spec.get("replacement_active") is True
+            else ""
+        ),
         "category": suite.category,
         "task_format": suite.task_format,
         "input_mode": "local_jsonl",
@@ -21075,9 +21181,18 @@ def _suite_by_id(suite_id: str) -> BenchmarkSuite | None:
     return None
 
 
-def _campaign_suite_specs(manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _campaign_suite_specs(
+    manifest: Mapping[str, Any],
+    *,
+    normalize_replacements: bool = True,
+) -> list[dict[str, Any]]:
     if isinstance(manifest.get("suites"), list):
-        return [dict(row) for row in manifest["suites"] if isinstance(row, Mapping)]
+        specs = [dict(row) for row in manifest["suites"] if isinstance(row, Mapping)]
+        return (
+            [_normalize_benchmark_replacement_spec(spec) for spec in specs]
+            if normalize_replacements
+            else specs
+        )
     datasets = manifest.get("datasets") if isinstance(manifest.get("datasets"), Mapping) else {}
     specs = []
     for suite in BENCHMARK_SUITES:
@@ -21086,7 +21201,69 @@ def _campaign_suite_specs(manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
             specs.append({"suite_id": suite.suite_id, **dict(value)})
         elif value:
             specs.append({"suite_id": suite.suite_id, "dataset": str(value)})
-    return specs
+    return (
+        [_normalize_benchmark_replacement_spec(spec) for spec in specs]
+        if normalize_replacements
+        else specs
+    )
+
+
+def _normalize_benchmark_replacement_spec(spec: Mapping[str, Any]) -> dict[str, Any]:
+    """Normalize a valid replacement row to its canonical benchmark slot.
+
+    The original suite id remains the grouping key for paired statistics, while
+    the replacement identity stays attached to the spec and is copied into
+    campaign receipts.  Invalid or implicit substitutions are left unresolved
+    so readiness fails closed instead of silently treating them as originals.
+    """
+
+    normalized = dict(spec)
+    replacement_id = str(normalized.get("suite_id") or "").strip()
+    slot_id = str(
+        normalized.get("replaces_suite_id")
+        or normalized.get("benchmark_slot_id")
+        or ""
+    ).strip()
+    if not slot_id or slot_id == replacement_id:
+        return normalized
+    slot = _suite_by_id(slot_id)
+    receipt = normalized.get("replacement_receipt")
+    if (
+        slot is None
+        or normalized.get("explicitly_not_gpqa") is not True
+        or not isinstance(receipt, Mapping)
+        or str(receipt.get("source_revision") or "").strip() == ""
+    ):
+        normalized["_replacement_invalid_reason"] = "invalid_explicit_replacement_contract"
+        return normalized
+    normalized["benchmark_slot_id"] = slot_id
+    normalized["benchmark_dataset_id"] = replacement_id
+    normalized["replacement_suite_id"] = replacement_id
+    normalized["replacement_active"] = True
+    normalized["replacement_original_title"] = slot.title
+    normalized["suite_id"] = slot_id
+    return normalized
+
+
+def _annotate_benchmark_run_identity(
+    run: Mapping[str, Any],
+    *,
+    benchmark_slot_id: str,
+    spec: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Keep replacement identity attached to every run without raw content."""
+
+    annotated = dict(run)
+    if spec.get("replacement_active") is not True:
+        return annotated
+    annotated["benchmark_slot_id"] = str(benchmark_slot_id or "")
+    annotated["benchmark_dataset_id"] = str(spec.get("benchmark_dataset_id") or "")
+    annotated["benchmark_identity"] = str(spec.get("benchmark_identity") or "")
+    annotated["replacement_active"] = True
+    annotated["replacement_disclosure"] = (
+        "This run is for an explicitly labelled replacement dataset, not the unavailable original suite."
+    )
+    return annotated
 
 
 def _discover_safe_imported_runs(import_dirs: Sequence[str | Path]) -> dict[str, dict[str, str]]:

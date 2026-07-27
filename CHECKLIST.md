@@ -20,6 +20,10 @@
   3.11 tests passed, all 12 public protocol cells passed, all four provider
   input adapters passed, and the system-development receipt is ready for a
   separate benchmark-validation stage.
+- [x] Build and validate the explicit `mmlu_pro_stem` replacement for the
+  unavailable gated GPQA slot: pinned source revision, six STEM categories,
+  600 deterministic cases, prompt/label separation, and a 21-slot manifest
+  that records the replacement identity without relabelling it as GPQA.
 - [x] Keep provider baseline freeze and the 9-category/21-suite target
   campaign fail-closed because the complete-pool rank-1/rank-2/rank-3
   evidence is unavailable.

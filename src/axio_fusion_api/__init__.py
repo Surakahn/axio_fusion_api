@@ -35,6 +35,11 @@ from .operational_admission import (
     run_operational_admission,
     validate_operational_admission_handoff,
 )
+from .benchmark_replacements import (
+    BenchmarkReplacementError,
+    apply_replacement_to_dataset_manifest,
+    build_mmlu_pro_stem_replacement,
+)
 from .registry import (
     build_default_registry,
     build_probe_bound_registry,
@@ -85,6 +90,9 @@ __all__ = [
     "redact_operational_admission",
     "run_operational_admission",
     "validate_operational_admission_handoff",
+    "BenchmarkReplacementError",
+    "apply_replacement_to_dataset_manifest",
+    "build_mmlu_pro_stem_replacement",
     "discover_runtime_profiles",
     "render_response",
     "runtime_channel_summary",
