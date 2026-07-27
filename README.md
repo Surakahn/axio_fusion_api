@@ -1495,14 +1495,21 @@ binds prompt, reference, case-contract, adapter implementation, provider
 catalog identity, and a seed-derived execution order. Adjacent independent
 sources use reversed candidate order and execute one source per round to
 counterbalance long-campaign time drift. Wrong answers are never retried;
-only transport or scorer failures may resume. Resume authenticates the safe
+only classified transport or scorer failures may resume. Transport retry is
+limited to two total rounds with a fixed manifest-bound backoff; only
+timeouts, network failures, rate limits, 5xx, empty output, and stream or
+protocol failures can reach the second round. Resume authenticates the safe
 checkpoint and every existing private unit, while conversion rejects forged
 scores even if outer content digests have been recomputed.
 Transport failures are missing observations rather than wrong answers: they
 contribute to the pre-registered transport-failure rate and can block a unit,
 but they are excluded from that unit's score denominator and confidence
 interval. Only successfully scored completed responses contribute to the
-capability mean; scorer/internal errors remain unit failures.
+capability mean; scorer/internal errors remain unit failures. The safe unit
+also reports aggregate failed-attempt classes, status counts, fixed retry
+rounds, and recovered transport-failure cases, so a successful retry cannot
+erase availability evidence while it also cannot silently convert missing data
+into a wrong answer.
 
 There is no permanent universal top-three ordering across public leaderboards.
 For example, the current general text ranking at

@@ -17,6 +17,7 @@ from axio_fusion_api.baseline_screening import (
     _canonical_live_groups,
     _run_screening_case,
     _run_screening_unit,
+    _screening_retry_contract_errors,
     _private_resume_case_results,
     _persist_screening_private_checkpoint,
     _screening_adapter_runtime_preflight,
@@ -596,6 +597,18 @@ def test_plan_uses_same_canonical_representatives_as_freeze_and_is_hash_only(tmp
     assert plan["canonical_model_group_count"] == 3
     assert plan["replica_profile_count"] == 4
     assert plan["task_count"] == 6
+    assert plan["ranking_policy"]["transport_failure_score_policy"] == (
+        "exclude_missing_observations_after_pre_registered_rate_gate"
+    )
+    for source in plan["sources"]:
+        retry_policy = source["exception_retry_policy"]
+        assert retry_policy["schema"] == (
+            "axio_fusion_api.non_target_screening_exception_retry_policy.v1"
+        )
+        assert retry_policy["max_exception_attempt_rounds"] == 1
+        assert retry_policy["backoff_strategy"] == "fixed"
+        assert retry_policy["backoff_ms"] == 250.0
+        assert retry_policy["retry_on_wrong_answer"] is False
     plan_groups = {
         (
             row["canonical_identity_sha256"],
@@ -768,7 +781,11 @@ def test_wrong_answer_is_scored_once_without_replica_retry():
         source={"adapter": "jsonl_multiple_choice"},
         replicas=replicas,
         client=client,
-        decoding={"max_exception_attempt_rounds": 1, "max_output_tokens": 8},
+        decoding={
+            "max_exception_attempt_rounds": 2,
+            "exception_retry_backoff_ms": 1,
+            "max_output_tokens": 8,
+        },
         system_prompt="fixture",
     )
 
@@ -776,14 +793,24 @@ def test_wrong_answer_is_scored_once_without_replica_retry():
     assert result["score"] == 0.0
     assert len(client.calls) == 1
     assert len(result["attempts"]) == 1
+    assert result["retry_receipts"] == []
 
 
-def test_transport_failure_uses_next_replica_only():
+def test_provider_rejection_uses_next_replica_without_repeat_round():
     replicas = [
         normalize_profile(_registry_rows()[0]),
         normalize_profile(_registry_rows()[1]),
     ]
-    client = _SequenceClient([RuntimeError("transport fixture"), "A"])
+    client = _SequenceClient(
+        [
+            ProviderExecutionError(
+                "PRIVATE_PROVIDER_ERROR_MUST_NOT_PERSIST",
+                error_code="http_error",
+                http_status=400,
+            ),
+            "A",
+        ]
+    )
     result = _run_screening_case(
         case=ScreeningCase(
             case_id="transport-failover",
@@ -795,7 +822,11 @@ def test_transport_failure_uses_next_replica_only():
         source={"adapter": "jsonl_multiple_choice"},
         replicas=replicas,
         client=client,
-        decoding={"max_exception_attempt_rounds": 1, "max_output_tokens": 8},
+        decoding={
+            "max_exception_attempt_rounds": 2,
+            "exception_retry_backoff_ms": 1,
+            "max_output_tokens": 8,
+        },
         system_prompt="fixture",
     )
 
@@ -803,6 +834,197 @@ def test_transport_failure_uses_next_replica_only():
     assert result["score"] == 1.0
     assert len(client.calls) == 2
     assert [row["status"] for row in result["attempts"]] == ["failed", "completed"]
+    assert result["attempts"][0]["provider_error_code"] == "http_error"
+    assert result["attempts"][0]["http_status"] == 400
+    assert result["attempts"][0]["transport_failure_class"] == "provider_http_4xx"
+    assert result["attempts"][0]["retryable"] is False
+    assert result["retry_receipts"] == []
+    assert "PRIVATE_PROVIDER_ERROR_MUST_NOT_PERSIST" not in json.dumps(result)
+
+
+@pytest.mark.parametrize(
+    ("error_code", "http_status", "failure_class"),
+    [
+        ("http_error", 429, "rate_limited"),
+        ("http_error", 503, "provider_http_5xx"),
+        ("provider_request_timeout", None, "timeout"),
+        ("invalid_stream_json", None, "stream_or_response_protocol"),
+    ],
+)
+def test_retryable_provider_failures_use_fixed_second_round(
+    monkeypatch,
+    error_code,
+    http_status,
+    failure_class,
+):
+    profile = normalize_profile(_registry_rows()[2])
+    client = _SequenceClient(
+        [
+            ProviderExecutionError(
+                "PRIVATE_PROVIDER_ERROR_MUST_NOT_PERSIST",
+                error_code=error_code,
+                http_status=http_status,
+            ),
+            "A",
+        ]
+    )
+    sleep_calls = []
+    monkeypatch.setattr(
+        "axio_fusion_api.baseline_screening.time.sleep",
+        lambda seconds: sleep_calls.append(seconds),
+    )
+
+    result = _run_screening_case(
+        case=ScreeningCase(
+            case_id=f"retryable-{error_code}-{http_status}",
+            prompt="Choose A or B.",
+            reference="A",
+            stratum="fixture",
+            metadata={"adapter": "jsonl_multiple_choice"},
+        ),
+        source={"adapter": "jsonl_multiple_choice"},
+        replicas=[profile],
+        client=client,
+        decoding={
+            "max_exception_attempt_rounds": 2,
+            "exception_retry_backoff_ms": 7,
+            "max_output_tokens": 8,
+        },
+        system_prompt="fixture",
+    )
+
+    assert result["status"] == "completed"
+    assert result["score"] == 1.0
+    assert len(client.calls) == 2
+    assert result["attempts"][0]["provider_error_code"] == error_code
+    assert result["attempts"][0]["http_status"] == http_status
+    assert result["attempts"][0]["transport_failure_class"] == failure_class
+    assert result["attempts"][0]["retryable"] is True
+    assert result["retry_receipts"] == [
+        {
+            "after_round": 1,
+            "before_round": 2,
+            "eligible_profile_count": 1,
+            "delay_ms": 7.0,
+            "backoff_strategy": "fixed",
+            "trigger_failure_classes": [failure_class],
+        }
+    ]
+    assert sleep_calls == [0.007]
+    assert "PRIVATE_PROVIDER_ERROR_MUST_NOT_PERSIST" not in json.dumps(result)
+
+
+def test_retry_contract_rejects_tampered_fixed_backoff(monkeypatch):
+    profile = normalize_profile(_registry_rows()[2])
+    client = _SequenceClient(
+        [
+            ProviderExecutionError(
+                "PRIVATE_PROVIDER_ERROR_MUST_NOT_PERSIST",
+                error_code="http_error",
+                http_status=429,
+            ),
+            "A",
+        ]
+    )
+    monkeypatch.setattr("axio_fusion_api.baseline_screening.time.sleep", lambda _: None)
+    decoding = {
+        "max_exception_attempt_rounds": 2,
+        "exception_retry_backoff_ms": 7,
+        "max_output_tokens": 8,
+    }
+    result = _run_screening_case(
+        case=ScreeningCase(
+            case_id="retry-contract-tamper",
+            prompt="Choose A or B.",
+            reference="A",
+            stratum="fixture",
+            metadata={"adapter": "jsonl_multiple_choice"},
+        ),
+        source={"adapter": "jsonl_multiple_choice"},
+        replicas=[profile],
+        client=client,
+        decoding=decoding,
+        system_prompt="fixture",
+    )
+
+    assert _screening_retry_contract_errors(result, decoding) == []
+    result["retry_receipts"][0]["delay_ms"] = 8.0
+    assert _screening_retry_contract_errors(result, decoding) == [
+        "screening_retry_receipt_policy_mismatch"
+    ]
+
+
+def test_safe_unit_projects_attempt_failure_telemetry(tmp_path, monkeypatch):
+    profile = normalize_profile(_registry_rows()[2])
+    source = {
+        "source_id": "safe-failure-telemetry-source",
+        "adapter": "jsonl_multiple_choice",
+        "prompt_protocol": {"system_prompt": ""},
+        "decoding": {
+            "temperature": 0.0,
+            "max_output_tokens": 8,
+            "max_exception_attempt_rounds": 2,
+            "exception_retry_backoff_ms": 1,
+        },
+    }
+    task = {
+        "task_id": sha256_text("safe-failure-telemetry-task"),
+        "source_id_sha256": sha256_text(source["source_id"]),
+        "source_snapshot_sha256": sha256_text("safe-failure-telemetry-snapshot"),
+        "case_set_digest_sha256": sha256_text("safe-failure-telemetry-cases"),
+        "canonical_identity_sha256": profile.canonical_identity_sha256,
+        "candidate_id_sha256": sha256_text("safe-failure-telemetry-candidate"),
+        "representative_profile_id_sha256": sha256_text(profile.profile_id),
+        "replica_profile_id_sha256s": [sha256_text(profile.profile_id)],
+    }
+    monkeypatch.setattr("axio_fusion_api.baseline_screening.time.sleep", lambda _: None)
+    client = _SequenceClient(
+        [
+            ProviderExecutionError(
+                "PRIVATE_PROVIDER_ERROR_MUST_NOT_PERSIST",
+                error_code="http_error",
+                http_status=429,
+            ),
+            "A",
+        ]
+    )
+
+    unit = _run_screening_unit(
+        task=task,
+        private_source_id=source["source_id"],
+        source=source,
+        source_receipt={
+            "selected_case_count": 1,
+            "max_transport_failure_rate": 0.0,
+        },
+        cases=[
+            ScreeningCase(
+                "safe-failure-telemetry-case",
+                "Choose A or B.",
+                "A",
+                "fixture",
+                {"adapter": "jsonl_multiple_choice"},
+            )
+        ],
+        replicas=[profile],
+        private_root=tmp_path / "private-units",
+        client=client,
+        max_workers=1,
+    )
+
+    telemetry = unit["provider_failure_telemetry"]
+    assert telemetry["provider_attempt_count"] == 2
+    assert telemetry["provider_failure_attempt_count"] == 1
+    assert telemetry["recovered_transport_failure_case_count"] == 1
+    assert telemetry["transport_failure_class_counts"] == [
+        {"transport_failure_class": "rate_limited", "count": 1}
+    ]
+    assert telemetry["http_status_counts"] == [{"http_status": 429, "count": 1}]
+    case_telemetry = unit["case_results"][0]["failure_telemetry"]
+    assert case_telemetry["retry_round_count"] == 1
+    serialized = json.dumps(unit)
+    assert "PRIVATE_PROVIDER_ERROR_MUST_NOT_PERSIST" not in serialized
+    assert PRIVATE_OUTPUT_MARKER not in serialized
 
 
 def test_transport_failure_is_missing_data_when_within_failure_rate(tmp_path):

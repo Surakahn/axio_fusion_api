@@ -114,6 +114,20 @@ model-scoring error. Every provider request in that campaign is also bounded
 by the shared 90-second effective timeout even when a source manifest declares
 a larger timeout.
 
+The screening manifest also freezes a narrow exception-only retry policy:
+`max_exception_attempt_rounds` is capped at two total rounds (the initial
+attempt plus at most one eligible retry round), with a fixed per-source
+inter-round backoff. A failed physical replica may hand off immediately to a
+different replica of the same canonical model in the initial round. A second
+round includes only replicas that produced a classified recoverable transport
+failure: timeout, network transport, rate limit, 5xx, empty provider output,
+or stream/protocol failure. A `400` or another non-recoverable 4xx is recorded
+and may fall through to a different replica, but it does not trigger a second
+request to the same replica. Wrong answers, parser outcomes, labels, and
+scores never trigger a retry. Every failed attempt records only a closed error
+class, a whitelisted provider error code, and an ordinary HTTP status; raw
+provider error text, URLs, and bodies are excluded from the safe evidence.
+
 The generated private registry exposes two deliberately separate projections:
 
 - `models` contains each eligible physical profile because the provider and

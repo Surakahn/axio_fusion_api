@@ -29,11 +29,20 @@ from .latency_policy import PROVIDER_MAX_RESPONSE_SECONDS
 from .operational_admission import validate_operational_admission_handoff
 from .providers import (
     HTTPProviderClient,
+    ProviderExecutionError,
     ensure_strict_streaming_client,
     profile_credential_readiness,
 )
 from .registry import load_registry
-from .schemas import FusionRequest, ModelProfile, sha256_text, stable_json
+from .schemas import (
+    FusionRequest,
+    ModelProfile,
+    safe_provider_error_class,
+    safe_provider_error_code,
+    safe_provider_http_status,
+    sha256_text,
+    stable_json,
+)
 
 
 SCREENING_SOURCE_MANIFEST_SCHEMA = (
@@ -55,6 +64,42 @@ SUPPORTED_SCREENING_ADAPTERS = frozenset(
 DEFAULT_MIN_CASES_PER_SOURCE = 100
 DEFAULT_MAX_TRANSPORT_FAILURE_RATE = 0.02
 DEFAULT_BOOTSTRAP_RESAMPLES = 10_000
+SCREENING_EXCEPTION_RETRY_POLICY_SCHEMA = (
+    "axio_fusion_api.non_target_screening_exception_retry_policy.v1"
+)
+DEFAULT_SCREENING_EXCEPTION_RETRY_BACKOFF_MS = 250.0
+MAX_SCREENING_EXCEPTION_RETRY_BACKOFF_MS = 5_000.0
+SCREENING_RETRYABLE_HTTP_STATUSES = frozenset({408, 409, 425, 429})
+SCREENING_RETRYABLE_FAILURE_CLASSES = frozenset(
+    {
+        "empty_provider_output",
+        "provider_http_5xx",
+        "provider_request_failed",
+        "rate_limited",
+        "stream_or_response_protocol",
+        "timeout",
+        "transport_or_network_policy",
+    }
+)
+SCREENING_FAILURE_CLASSES = frozenset(
+    {
+        "authentication_or_authorization",
+        "client_execution_error",
+        "configuration",
+        "empty_provider_output",
+        "provider_execution_error",
+        "provider_http_4xx",
+        "provider_http_5xx",
+        "provider_http_error",
+        "provider_request_failed",
+        "rate_limited",
+        "stream_or_response_protocol",
+        "timeout",
+        "tool_response_mismatch",
+        "transport_or_network_policy",
+        "unknown_provider_error",
+    }
+)
 DEFAULT_TIE_BREAK_POLICY = (
     "source_mean_score_descending",
     "source_confidence_lower_bound_descending",
@@ -297,7 +342,10 @@ def build_non_target_screening_plan(
         "tasks": task_rows,
         "execution_schedule": execution_schedule,
         "ranking_policy": {
-            "source_rank_metric": "mean_case_score_with_transport_failures_scored_zero",
+            "source_rank_metric": "mean_case_score_after_transport_failure_gate",
+            "transport_failure_score_policy": (
+                "exclude_missing_observations_after_pre_registered_rate_gate"
+            ),
             "tie_break_policy": list(DEFAULT_TIE_BREAK_POLICY),
             "cross_source_aggregation": EXTERNAL_PROVIDER_RANKING_AGGREGATION,
             "same_case_set_for_every_candidate": True,
@@ -1037,6 +1085,9 @@ def _screening_source_receipt(
             "effective_timeout_seconds": decoding_receipt["timeout_seconds"],
             "timeout_cap_seconds": decoding_receipt["timeout_cap_seconds"],
             "timeout_cap_applied": decoding_receipt["timeout_cap_applied"],
+            "exception_retry_policy": _safe_exception_retry_policy_receipt(
+                decoding_receipt
+            ),
             "max_transport_failure_rate": _bounded_failure_rate(
                 source.get("max_transport_failure_rate")
             ),
@@ -1336,6 +1387,24 @@ def _safe_decoding_receipt(value: Any) -> dict[str, Any]:
         PROVIDER_MAX_RESPONSE_SECONDS,
         configured_timeout,
     )
+    configured_backoff = _optional_float(
+        decoding.get("exception_retry_backoff_ms")
+    )
+    exception_retry_backoff_ms = (
+        DEFAULT_SCREENING_EXCEPTION_RETRY_BACKOFF_MS
+        if configured_backoff is None
+        else max(
+            0.0,
+            min(MAX_SCREENING_EXCEPTION_RETRY_BACKOFF_MS, configured_backoff),
+        )
+    )
+    max_exception_attempt_rounds = max(
+        1,
+        min(
+            2,
+            _optional_int(decoding.get("max_exception_attempt_rounds")) or 1,
+        ),
+    )
     return {
         "temperature": _optional_float(decoding.get("temperature")),
         "top_p": _optional_float(decoding.get("top_p")),
@@ -1351,14 +1420,466 @@ def _safe_decoding_receipt(value: Any) -> dict[str, Any]:
         "timeout_seconds": round(effective_timeout, 3),
         "timeout_cap_seconds": PROVIDER_MAX_RESPONSE_SECONDS,
         "timeout_cap_applied": configured_timeout > PROVIDER_MAX_RESPONSE_SECONDS,
-        "max_exception_attempt_rounds": max(
-            1,
-            min(
-                3,
-                _optional_int(decoding.get("max_exception_attempt_rounds")) or 1,
-            ),
+        "exception_retry_policy_schema": SCREENING_EXCEPTION_RETRY_POLICY_SCHEMA,
+        "max_exception_attempt_rounds": max_exception_attempt_rounds,
+        "exception_retry_round_definition": (
+            "initial_attempt_plus_eligible_retry_rounds"
+        ),
+        "exception_retry_backoff_strategy": "fixed",
+        "exception_retry_backoff_ms": round(exception_retry_backoff_ms, 3),
+        "retryable_http_statuses": sorted(SCREENING_RETRYABLE_HTTP_STATUSES),
+        "retryable_failure_classes": sorted(
+            SCREENING_RETRYABLE_FAILURE_CLASSES
         ),
         "retry_on_wrong_answer": False,
+    }
+
+
+def _safe_exception_retry_policy_receipt(
+    decoding_receipt: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Expose the frozen retry contract without copying arbitrary config."""
+
+    return {
+        "schema": str(
+            decoding_receipt.get("exception_retry_policy_schema") or ""
+        ),
+        "max_exception_attempt_rounds": int(
+            decoding_receipt.get("max_exception_attempt_rounds") or 1
+        ),
+        "round_definition": str(
+            decoding_receipt.get("exception_retry_round_definition") or ""
+        ),
+        "backoff_strategy": str(
+            decoding_receipt.get("exception_retry_backoff_strategy") or ""
+        ),
+        "backoff_ms": round(
+            max(
+                0.0,
+                _optional_float(
+                    decoding_receipt.get("exception_retry_backoff_ms")
+                )
+                or 0.0,
+            ),
+            3,
+        ),
+        "retryable_http_statuses": sorted(
+            {
+                int(value)
+                for value in decoding_receipt.get(
+                    "retryable_http_statuses",
+                    [],
+                )
+                if safe_provider_http_status(value) is not None
+            }
+        ) if isinstance(
+            decoding_receipt.get("retryable_http_statuses"),
+            Sequence,
+        ) and not isinstance(
+            decoding_receipt.get("retryable_http_statuses"),
+            (str, bytes, bytearray),
+        ) else [],
+        "retryable_failure_classes": sorted(
+            {
+                str(value)
+                for value in decoding_receipt.get(
+                    "retryable_failure_classes",
+                    [],
+                )
+                if str(value) in SCREENING_RETRYABLE_FAILURE_CLASSES
+            }
+        ) if isinstance(
+            decoding_receipt.get("retryable_failure_classes"),
+            Sequence,
+        ) and not isinstance(
+            decoding_receipt.get("retryable_failure_classes"),
+            (str, bytes, bytearray),
+        ) else [],
+        "retry_on_wrong_answer": False,
+    }
+
+
+def _screening_failure_from_exception(exc: BaseException) -> dict[str, Any]:
+    """Return a closed-form failure receipt without provider-controlled text."""
+
+    provider_error_code = ""
+    http_status: int | None = None
+    if isinstance(exc, ProviderExecutionError):
+        error_type = "provider_execution_error"
+        provider_error_code = safe_provider_error_code(exc.error_code)
+        http_status = safe_provider_http_status(exc.http_status)
+        failure_class = safe_provider_error_class(
+            provider_error_code,
+            http_status,
+        ) or "provider_execution_error"
+    elif isinstance(exc, TimeoutError):
+        error_type = "timeout_error"
+        provider_error_code = "TimeoutError"
+        failure_class = "timeout"
+    elif isinstance(exc, OSError):
+        error_type = "os_error"
+        provider_error_code = "OSError"
+        failure_class = "transport_or_network_policy"
+    else:
+        # Injected test clients and third-party wrappers can raise arbitrary
+        # exception subclasses. Their names and messages are not receipt-safe.
+        error_type = "client_execution_error"
+        failure_class = "client_execution_error"
+
+    if failure_class not in SCREENING_FAILURE_CLASSES:
+        failure_class = "unknown_provider_error"
+    retryable = _screening_failure_is_retryable(
+        failure_class,
+        http_status=http_status,
+    )
+    return {
+        "error_type": error_type,
+        "provider_error_code": provider_error_code,
+        "http_status": http_status,
+        "transport_failure_class": failure_class,
+        "retryable": retryable,
+    }
+
+
+def _screening_failure_is_retryable(
+    failure_class: str,
+    *,
+    http_status: int | None,
+) -> bool:
+    """Keep screening retry eligibility fixed and independent of answer text."""
+
+    if http_status in SCREENING_RETRYABLE_HTTP_STATUSES:
+        return True
+    return failure_class in SCREENING_RETRYABLE_FAILURE_CLASSES
+
+
+def _screening_attempt_failure_receipt(value: Any) -> dict[str, Any] | None:
+    """Normalize a persisted failed attempt before it enters a safe artifact."""
+
+    attempt = value if isinstance(value, Mapping) else {}
+    if str(attempt.get("status") or "") != "failed":
+        return None
+    provider_error_code = safe_provider_error_code(
+        attempt.get("provider_error_code", attempt.get("error_code"))
+    )
+    http_status = safe_provider_http_status(attempt.get("http_status"))
+    failure_class = safe_provider_error_class(
+        provider_error_code,
+        http_status,
+    )
+    declared_class = str(attempt.get("transport_failure_class") or "")
+    if not failure_class and declared_class in SCREENING_FAILURE_CLASSES:
+        failure_class = declared_class
+    if not failure_class:
+        failure_class = "client_execution_error"
+    return {
+        "provider_error_code": provider_error_code,
+        "http_status": http_status,
+        "transport_failure_class": failure_class,
+        "retryable": _screening_failure_is_retryable(
+            failure_class,
+            http_status=http_status,
+        ),
+    }
+
+
+def _screening_count_rows(
+    values: Sequence[Any],
+    *,
+    key: str,
+) -> list[dict[str, Any]]:
+    counts: dict[Any, int] = {}
+    for value in values:
+        counts[value] = counts.get(value, 0) + 1
+    return [
+        {key: value, "count": counts[value]}
+        for value in sorted(counts, key=lambda item: str(item))
+    ]
+
+
+def _safe_screening_retry_receipts(value: Any) -> list[dict[str, Any]]:
+    rows = value if isinstance(value, Sequence) and not isinstance(
+        value,
+        (str, bytes, bytearray),
+    ) else []
+    receipts: list[dict[str, Any]] = []
+    for raw in rows:
+        row = raw if isinstance(raw, Mapping) else {}
+        after_round = _optional_int(row.get("after_round"))
+        before_round = _optional_int(row.get("before_round"))
+        eligible_profile_count = _optional_int(row.get("eligible_profile_count"))
+        delay_ms = _optional_float(row.get("delay_ms"))
+        if (
+            after_round is None
+            or before_round != after_round + 1
+            or after_round < 1
+            or eligible_profile_count is None
+            or eligible_profile_count < 1
+            or delay_ms is None
+        ):
+            continue
+        classes = [
+            str(item)
+            for item in row.get("trigger_failure_classes", [])
+            if str(item) in SCREENING_FAILURE_CLASSES
+        ] if isinstance(row.get("trigger_failure_classes"), Sequence) and not isinstance(
+            row.get("trigger_failure_classes"), (str, bytes, bytearray)
+        ) else []
+        receipts.append(
+            {
+                "after_round": after_round,
+                "before_round": before_round,
+                "eligible_profile_count": eligible_profile_count,
+                "delay_ms": round(
+                    max(0.0, min(MAX_SCREENING_EXCEPTION_RETRY_BACKOFF_MS, delay_ms)),
+                    3,
+                ),
+                "backoff_strategy": "fixed",
+                "trigger_failure_classes": sorted(set(classes)),
+            }
+        )
+    return receipts
+
+
+def _screening_case_failure_telemetry(
+    attempts: Any,
+    retry_receipts: Any,
+) -> dict[str, Any]:
+    attempt_rows = attempts if isinstance(attempts, Sequence) and not isinstance(
+        attempts,
+        (str, bytes, bytearray),
+    ) else []
+    failures = [
+        receipt
+        for row in attempt_rows
+        if (receipt := _screening_attempt_failure_receipt(row)) is not None
+    ]
+    safe_retries = _safe_screening_retry_receipts(retry_receipts)
+    return {
+        "attempt_count": len(attempt_rows),
+        "failed_attempt_count": len(failures),
+        "retryable_failed_attempt_count": sum(
+            1 for row in failures if row["retryable"] is True
+        ),
+        "transport_failure_class_counts": _screening_count_rows(
+            [row["transport_failure_class"] for row in failures],
+            key="transport_failure_class",
+        ),
+        "provider_error_code_counts": _screening_count_rows(
+            [row["provider_error_code"] for row in failures if row["provider_error_code"]],
+            key="provider_error_code",
+        ),
+        "http_status_counts": _screening_count_rows(
+            [row["http_status"] for row in failures if row["http_status"] is not None],
+            key="http_status",
+        ),
+        "retry_receipts": safe_retries,
+        "retry_round_count": len(safe_retries),
+    }
+
+
+def _screening_retry_contract_errors(
+    case_result: Mapping[str, Any],
+    decoding: Mapping[str, Any],
+) -> list[str]:
+    """Verify that a persisted case obeyed its frozen retry policy."""
+
+    policy = _safe_decoding_receipt(decoding)
+    max_rounds = int(policy["max_exception_attempt_rounds"])
+    expected_delay_ms = float(policy["exception_retry_backoff_ms"])
+    raw_attempts = case_result.get("attempts")
+    if not isinstance(raw_attempts, list):
+        return ["screening_retry_attempts_invalid"]
+    raw_receipts = case_result.get("retry_receipts", [])
+    if not isinstance(raw_receipts, list):
+        return ["screening_retry_receipts_invalid"]
+    safe_receipts = _safe_screening_retry_receipts(raw_receipts)
+    errors: list[str] = []
+    if len(safe_receipts) != len(raw_receipts):
+        errors.append("screening_retry_receipt_invalid")
+
+    attempts_by_round: dict[int, list[Mapping[str, Any]]] = {}
+    for raw in raw_attempts:
+        if not isinstance(raw, Mapping):
+            errors.append("screening_retry_attempt_invalid")
+            continue
+        round_index = _optional_int(raw.get("round"))
+        profile_hash = str(raw.get("profile_id_sha256") or "")
+        if (
+            round_index is None
+            or round_index < 1
+            or round_index > max_rounds
+            or not _looks_like_sha256(profile_hash)
+        ):
+            errors.append("screening_retry_attempt_binding_invalid")
+            continue
+        attempts_by_round.setdefault(round_index, []).append(raw)
+
+    receipt_by_round: dict[int, Mapping[str, Any]] = {}
+    for raw in raw_receipts:
+        if not isinstance(raw, Mapping):
+            continue
+        after_round = _optional_int(raw.get("after_round"))
+        if after_round is None or after_round in receipt_by_round:
+            errors.append("screening_retry_receipt_binding_invalid")
+            continue
+        receipt_by_round[after_round] = raw
+
+    for round_index in range(1, max_rounds + 1):
+        attempts = attempts_by_round.get(round_index, [])
+        hashes = [str(row.get("profile_id_sha256") or "") for row in attempts]
+        if len(hashes) != len(set(hashes)):
+            errors.append("screening_retry_replica_repeated_within_round")
+        if round_index == 1:
+            continue
+        previous = attempts_by_round.get(round_index - 1, [])
+        expected_profiles = {
+            str(row.get("profile_id_sha256") or "")
+            for row in previous
+            if (failure := _screening_attempt_failure_receipt(row)) is not None
+            and failure["retryable"] is True
+        }
+        actual_profiles = set(hashes)
+        if actual_profiles != expected_profiles:
+            errors.append("screening_retry_replica_set_mismatch")
+        if any(str(row.get("status") or "") == "completed" for row in previous):
+            errors.append("screening_retry_after_completed_attempt")
+        receipt = receipt_by_round.get(round_index - 1)
+        if not isinstance(receipt, Mapping):
+            errors.append("screening_retry_receipt_missing")
+            continue
+        receipt_delay = _optional_float(receipt.get("delay_ms"))
+        expected_classes = sorted(
+            {
+                str(failure["transport_failure_class"])
+                for row in previous
+                if (failure := _screening_attempt_failure_receipt(row)) is not None
+                and failure["retryable"] is True
+            }
+        )
+        raw_classes = receipt.get("trigger_failure_classes")
+        receipt_classes = sorted(
+            {
+                str(value)
+                for value in raw_classes
+                if str(value) in SCREENING_FAILURE_CLASSES
+            }
+        ) if isinstance(raw_classes, Sequence) and not isinstance(
+            raw_classes,
+            (str, bytes, bytearray),
+        ) else []
+        if (
+            str(receipt.get("backoff_strategy") or "") != "fixed"
+            or _optional_int(receipt.get("before_round")) != round_index
+            or _optional_int(receipt.get("eligible_profile_count"))
+            != len(expected_profiles)
+            or receipt_delay is None
+            or not math.isclose(
+                receipt_delay,
+                expected_delay_ms,
+                rel_tol=0.0,
+                abs_tol=1e-9,
+            )
+            or receipt_classes != expected_classes
+        ):
+            errors.append("screening_retry_receipt_policy_mismatch")
+
+    for after_round in receipt_by_round:
+        if after_round < 1 or after_round >= max_rounds:
+            errors.append("screening_retry_receipt_round_out_of_range")
+        if after_round + 1 not in attempts_by_round:
+            errors.append("screening_retry_receipt_without_retry_attempt")
+    return sorted(set(errors))
+
+
+def _safe_screening_case_receipt(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Project a private case row into a hash-only, transport-auditable row."""
+
+    attempts = value.get("attempts")
+    score = _optional_float(value.get("score"))
+    return {
+        "case_id_sha256": sha256_text(str(value.get("case_id") or "")),
+        "status": str(value.get("status") or ""),
+        "score": round(score, 12) if score is not None else None,
+        "latency_ms": round(float(value.get("latency_ms") or 0.0), 3),
+        "attempt_count": len(attempts) if isinstance(attempts, list) else 0,
+        "selected_replica_profile_id_sha256": str(
+            value.get("selected_replica_profile_id_sha256") or ""
+        ),
+        "output_sha256": str(value.get("output_sha256") or ""),
+        "failure_telemetry": _screening_case_failure_telemetry(
+            attempts,
+            value.get("retry_receipts"),
+        ),
+        "raw_prompt_persisted": False,
+        "raw_label_persisted": False,
+        "raw_provider_output_persisted": False,
+    }
+
+
+def _screening_unit_failure_telemetry(
+    case_results: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    case_telemetry = [
+        _screening_case_failure_telemetry(
+            row.get("attempts"),
+            row.get("retry_receipts"),
+        )
+        for row in case_results
+    ]
+    class_rows = [
+        item
+        for telemetry in case_telemetry
+        for item in telemetry["transport_failure_class_counts"]
+    ]
+    code_rows = [
+        item
+        for telemetry in case_telemetry
+        for item in telemetry["provider_error_code_counts"]
+    ]
+    status_rows = [
+        item
+        for telemetry in case_telemetry
+        for item in telemetry["http_status_counts"]
+    ]
+
+    def merge(rows: Sequence[Mapping[str, Any]], key: str) -> list[dict[str, Any]]:
+        counts: dict[Any, int] = {}
+        for row in rows:
+            value = row.get(key)
+            count = max(0, _optional_int(row.get("count")) or 0)
+            counts[value] = counts.get(value, 0) + count
+        return [
+            {key: value, "count": counts[value]}
+            for value in sorted(counts, key=lambda item: str(item))
+        ]
+
+    return {
+        "provider_attempt_count": sum(
+            int(telemetry["attempt_count"]) for telemetry in case_telemetry
+        ),
+        "provider_failure_attempt_count": sum(
+            int(telemetry["failed_attempt_count"]) for telemetry in case_telemetry
+        ),
+        "retryable_provider_failure_attempt_count": sum(
+            int(telemetry["retryable_failed_attempt_count"])
+            for telemetry in case_telemetry
+        ),
+        "recovered_transport_failure_case_count": sum(
+            1
+            for result, telemetry in zip(case_results, case_telemetry)
+            if str(result.get("status") or "") == "completed"
+            and int(telemetry["failed_attempt_count"]) > 0
+        ),
+        "retry_round_count": sum(
+            int(telemetry["retry_round_count"]) for telemetry in case_telemetry
+        ),
+        "transport_failure_class_counts": merge(
+            class_rows,
+            "transport_failure_class",
+        ),
+        "provider_error_code_counts": merge(code_rows, "provider_error_code"),
+        "http_status_counts": merge(status_rows, "http_status"),
     }
 
 
@@ -1430,7 +1951,14 @@ def _screening_case_contract_receipt(
 def _screening_adapter_implementation_sha256(adapter: str) -> str:
     common = [
         _select_screening_cases,
+        _safe_decoding_receipt,
+        _screening_failure_from_exception,
+        _screening_failure_is_retryable,
+        _screening_retry_contract_errors,
         _run_screening_case,
+        _run_screening_unit,
+        _safe_screening_case_receipt,
+        _screening_unit_failure_telemetry,
         _score_screening_output,
     ]
     selected = {
@@ -2629,7 +3157,8 @@ def _run_screening_unit(
                     "latency_ms": 0.0,
                     "attempts": [],
                     "selected_replica_profile_id_sha256": "",
-                    "error_type": "InternalScreeningError",
+                    "retry_receipts": [],
+                    "error_type": "internal_screening_error",
                 }
             case_results.append(result)
             _persist_screening_private_checkpoint(
@@ -2702,27 +3231,8 @@ def _run_screening_unit(
         # already complete.
         pass
     private_sha256 = _file_sha256(unit_path)
-    safe_cases = [
-        {
-            "case_id_sha256": sha256_text(str(row.get("case_id") or "")),
-            "status": str(row.get("status") or ""),
-            "score": (
-                round(float(row["score"]), 12)
-                if row.get("score") is not None
-                else None
-            ),
-            "latency_ms": round(float(row.get("latency_ms") or 0.0), 3),
-            "attempt_count": len(row.get("attempts", [])),
-            "selected_replica_profile_id_sha256": str(
-                row.get("selected_replica_profile_id_sha256") or ""
-            ),
-            "output_sha256": str(row.get("output_sha256") or ""),
-            "raw_prompt_persisted": False,
-            "raw_label_persisted": False,
-            "raw_provider_output_persisted": False,
-        }
-        for row in case_results
-    ]
+    safe_cases = [_safe_screening_case_receipt(row) for row in case_results]
+    provider_failure_telemetry = _screening_unit_failure_telemetry(case_results)
     return {
         "schema": SCREENING_UNIT_SAFE_SCHEMA,
         "task_id": str(task.get("task_id") or ""),
@@ -2753,6 +3263,7 @@ def _run_screening_unit(
         "confidence_interval_95_method": confidence_method,
         "p50_latency_ms": _percentile(latencies, 0.50),
         "p95_latency_ms": _percentile(latencies, 0.95),
+        "provider_failure_telemetry": provider_failure_telemetry,
         "case_results": safe_cases,
         "private_unit_content_sha256": private_sha256,
         "status": "completed" if not reason_codes else "failed",
@@ -2779,15 +3290,23 @@ def _run_screening_case(
     system_prompt: str,
 ) -> dict[str, Any]:
     started = time.monotonic()
-    effective_timeout_seconds = _safe_decoding_receipt(decoding)["timeout_seconds"]
+    effective_decoding = _safe_decoding_receipt(decoding)
+    effective_timeout_seconds = effective_decoding["timeout_seconds"]
     ordered = _rotated_replicas(replicas, case.case_id)
-    rounds = max(1, int(decoding.get("max_exception_attempt_rounds") or 1))
+    rounds = int(effective_decoding["max_exception_attempt_rounds"])
+    fixed_backoff_seconds = (
+        float(effective_decoding["exception_retry_backoff_ms"]) / 1000.0
+    )
     attempts: list[dict[str, Any]] = []
+    retry_receipts: list[dict[str, Any]] = []
     output = ""
     selected_hash = ""
-    error_type = ""
+    last_failure: dict[str, Any] = {}
+    profiles_for_round = list(ordered)
     for round_index in range(rounds):
-        for profile in ordered:
+        retryable_profiles: list[ModelProfile] = []
+        retryable_classes: list[str] = []
+        for profile in profiles_for_round:
             profile_hash = sha256_text(profile.profile_id)
             attempt_started = time.monotonic()
             request = FusionRequest(
@@ -2796,9 +3315,11 @@ def _run_screening_case(
                 system=system_prompt,
                 api_format=profile.api_format,
                 task_type="non_target_provider_baseline_screening",
-                temperature=_optional_float(decoding.get("temperature")),
-                top_p=_optional_float(decoding.get("top_p")),
-                max_output_tokens=int(decoding.get("max_output_tokens") or 1024),
+                temperature=_optional_float(effective_decoding.get("temperature")),
+                top_p=_optional_float(effective_decoding.get("top_p")),
+                max_output_tokens=int(
+                    effective_decoding.get("max_output_tokens") or 1024
+                ),
                 metadata={
                     "_axio_non_target_screening": True,
                     "_axio_target_suite_material_used": False,
@@ -2816,7 +3337,10 @@ def _run_screening_case(
                     or ""
                 )
                 if not output.strip():
-                    raise RuntimeError("empty screening output")
+                    raise ProviderExecutionError(
+                        "screening provider returned no visible text",
+                        error_code="empty_provider_response",
+                    )
                 selected_hash = profile_hash
                 attempts.append(
                     {
@@ -2830,23 +3354,48 @@ def _run_screening_case(
                     }
                 )
                 break
-            except Exception as exc:  # noqa: BLE001 - private error type only
-                error_type = type(exc).__name__[:120]
+            except Exception as exc:  # noqa: BLE001 - classify without persisting text
+                failure = _screening_failure_from_exception(exc)
+                last_failure = failure
                 attempts.append(
                     {
                         "profile_id_sha256": profile_hash,
                         "round": round_index + 1,
                         "status": "failed",
-                        "error_type": error_type,
+                        **failure,
                         "latency_ms": round(
                             (time.monotonic() - attempt_started) * 1000,
                             3,
                         ),
                     }
                 )
+                if failure["retryable"] is True:
+                    retryable_profiles.append(profile)
+                    retryable_classes.append(
+                        str(failure["transport_failure_class"])
+                    )
         if output.strip():
             break
+        if round_index + 1 >= rounds or not retryable_profiles:
+            break
+        retry_receipts.append(
+            {
+                "after_round": round_index + 1,
+                "before_round": round_index + 2,
+                "eligible_profile_count": len(retryable_profiles),
+                "delay_ms": round(fixed_backoff_seconds * 1000, 3),
+                "backoff_strategy": "fixed",
+                "trigger_failure_classes": sorted(set(retryable_classes)),
+            }
+        )
+        if fixed_backoff_seconds > 0:
+            time.sleep(fixed_backoff_seconds)
+        profiles_for_round = retryable_profiles
     latency_ms = (time.monotonic() - started) * 1000
+    failure_telemetry = _screening_case_failure_telemetry(
+        attempts,
+        retry_receipts,
+    )
     if not output.strip():
         return {
             "case_id": case.case_id,
@@ -2859,12 +3408,24 @@ def _run_screening_case(
             "output_sha256": sha256_text(""),
             "latency_ms": round(latency_ms, 3),
             "attempts": attempts,
+            "retry_receipts": retry_receipts,
+            "failure_telemetry": failure_telemetry,
             "selected_replica_profile_id_sha256": "",
-            "error_type": error_type or "ProviderExecutionFailed",
+            "error_type": str(
+                last_failure.get("error_type") or "provider_execution_error"
+            ),
+            "provider_error_code": str(
+                last_failure.get("provider_error_code") or ""
+            ),
+            "http_status": last_failure.get("http_status"),
+            "transport_failure_class": str(
+                last_failure.get("transport_failure_class")
+                or "provider_execution_error"
+            ),
         }
     try:
         score = _score_screening_output_silently(source, case, output)
-    except Exception as exc:  # noqa: BLE001 - scorer failure is not model failure
+    except Exception:  # noqa: BLE001 - scorer failure is not model failure
         return {
             "case_id": case.case_id,
             "status": "scorer_error",
@@ -2873,8 +3434,10 @@ def _run_screening_case(
             "output_sha256": sha256_text(output),
             "latency_ms": round(latency_ms, 3),
             "attempts": attempts,
+            "retry_receipts": retry_receipts,
+            "failure_telemetry": failure_telemetry,
             "selected_replica_profile_id_sha256": selected_hash,
-            "error_type": type(exc).__name__[:120],
+            "error_type": "scorer_error",
         }
     return {
         "case_id": case.case_id,
@@ -2884,6 +3447,8 @@ def _run_screening_case(
         "output_sha256": sha256_text(output),
         "latency_ms": round(latency_ms, 3),
         "attempts": attempts,
+        "retry_receipts": retry_receipts,
+        "failure_telemetry": failure_telemetry,
         "selected_replica_profile_id_sha256": selected_hash,
         "error_type": "",
     }
@@ -3024,6 +3589,7 @@ def _verify_screening_unit_private_artifact(
     latencies: list[float] = []
     transport_failures = 0
     scorer_errors = 0
+    private_case_rows: list[Mapping[str, Any]] = []
     safe_case_by_hash = {
         str(row.get("case_id_sha256") or ""): row
         for row in unit.get("case_results", [])
@@ -3037,6 +3603,15 @@ def _verify_screening_unit_private_artifact(
         row = result_by_case.get(case_id)
         if not isinstance(row, Mapping):
             continue
+        private_case_rows.append(row)
+        errors.extend(
+            _screening_retry_contract_errors(
+                row,
+                source.get("decoding")
+                if isinstance(source.get("decoding"), Mapping)
+                else {},
+            )
+        )
         status = str(row.get("status") or "")
         output = str(row.get("output") or "")
         if str(row.get("output_sha256") or "") != sha256_text(output):
@@ -3077,6 +3652,15 @@ def _verify_screening_unit_private_artifact(
             continue
         if str(safe_row.get("output_sha256") or "") != sha256_text(output):
             errors.append("screening_ranking_safe_output_digest_mismatch")
+        expected_safe_case = _safe_screening_case_receipt(row)
+        if int(safe_row.get("attempt_count") or 0) != int(
+            expected_safe_case["attempt_count"]
+        ):
+            errors.append("screening_ranking_safe_case_attempt_count_mismatch")
+        if stable_json(safe_row.get("failure_telemetry")) != stable_json(
+            expected_safe_case["failure_telemetry"]
+        ):
+            errors.append("screening_ranking_safe_case_failure_telemetry_mismatch")
         safe_score = _optional_float(safe_row.get("score"))
         if (safe_score is None) != (declared_score is None) or (
             safe_score is not None
@@ -3124,6 +3708,10 @@ def _verify_screening_unit_private_artifact(
             errors.append("screening_ranking_safe_unit_aggregate_mismatch")
     if str(unit.get("confidence_interval_95_method") or "") != method:
         errors.append("screening_ranking_safe_unit_confidence_method_mismatch")
+    if stable_json(unit.get("provider_failure_telemetry")) != stable_json(
+        _screening_unit_failure_telemetry(private_case_rows)
+    ):
+        errors.append("screening_ranking_safe_unit_failure_telemetry_mismatch")
     return sorted(set(errors))
 
 
@@ -3633,6 +4221,13 @@ def _rebuild_safe_unit_from_private_artifact(
     for case_id in sorted(expected, key=sha256_text):
         case = expected[case_id]
         row = by_case[case_id]
+        if _screening_retry_contract_errors(
+            row,
+            source.get("decoding")
+            if isinstance(source.get("decoding"), Mapping)
+            else {},
+        ):
+            return None
         output = str(row.get("output") or "")
         if str(row.get("output_sha256") or "") != sha256_text(output):
             return None
@@ -3664,7 +4259,11 @@ def _rebuild_safe_unit_from_private_artifact(
                 score = None
                 scorer_errors += 1
             else:
-                if status == "scorer_error":
+                if (
+                    status != "completed"
+                    or _optional_float(row.get("score")) != score
+                    or str(row.get("error_type") or "")
+                ):
                     row.update(
                         {
                             "status": "completed",
@@ -3673,6 +4272,7 @@ def _rebuild_safe_unit_from_private_artifact(
                         }
                     )
                     private_payload_changed = True
+                status = "completed"
         else:
             score = None
             scorer_errors += 1
@@ -3681,24 +4281,7 @@ def _rebuild_safe_unit_from_private_artifact(
             latencies.append(latency)
         if score is not None:
             scores.append(score)
-        safe_cases.append(
-            {
-                "case_id_sha256": sha256_text(case_id),
-                "status": status,
-                "score": round(score, 12) if score is not None else None,
-                "latency_ms": round(latency, 3),
-                "attempt_count": len(row.get("attempts", []))
-                if isinstance(row.get("attempts"), list)
-                else 0,
-                "selected_replica_profile_id_sha256": str(
-                    row.get("selected_replica_profile_id_sha256") or ""
-                ),
-                "output_sha256": sha256_text(output),
-                "raw_prompt_persisted": False,
-                "raw_label_persisted": False,
-                "raw_provider_output_persisted": False,
-            }
-        )
+        safe_cases.append(_safe_screening_case_receipt(row))
 
     expected_count = len(cases)
     failure_rate = transport_failures / expected_count if expected_count else 1.0
@@ -3717,6 +4300,9 @@ def _rebuild_safe_unit_from_private_artifact(
         repaired_payload = dict(payload)
         repaired_payload["case_results"] = mutable_rows
         _atomic_write_json(unit_path, repaired_payload)
+    provider_failure_telemetry = _screening_unit_failure_telemetry(
+        mutable_rows
+    )
 
     return {
         "schema": SCREENING_UNIT_SAFE_SCHEMA,
@@ -3742,6 +4328,7 @@ def _rebuild_safe_unit_from_private_artifact(
         "confidence_interval_95_method": confidence_method,
         "p50_latency_ms": _percentile(latencies, 0.50),
         "p95_latency_ms": _percentile(latencies, 0.95),
+        "provider_failure_telemetry": provider_failure_telemetry,
         "case_results": safe_cases,
         "private_unit_content_sha256": _file_sha256(unit_path),
         "status": "completed" if not reasons else "failed",
