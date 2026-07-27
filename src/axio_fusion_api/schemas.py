@@ -59,6 +59,10 @@ _REASONING_EFFORT_ORDER = {
 _REASONING_TRANSPORT_FORMATS = {
     "chat_reasoning_effort": "chat",
     "responses_reasoning": "responses",
+    # Some Responses-compatible gateways retain NVIDIA NIM's top-level
+    # spelling instead of the standard nested ``reasoning.effort`` object.
+    # This remains profile-local and is never inferred from a provider name.
+    "responses_reasoning_effort": "responses",
 }
 _REASONING_TRANSPORT_STATUSES = frozenset(
     {"unknown", "candidate", "verified", "unsupported"}

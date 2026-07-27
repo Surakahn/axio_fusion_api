@@ -68,6 +68,31 @@ candidate declaration and a successful strict probe.
 
 Source: <https://developers.openai.com/api/docs/guides/reasoning>
 
+### NVIDIA NIM Responses Variant
+
+NVIDIA's NIM GPT-OSS reference also exposes a Responses endpoint, but its
+documented request examples retain the top-level spelling instead of the
+standard nested object:
+
+```json
+{
+  "model": "openai/gpt-oss-120b",
+  "input": [{"role": "user", "content": "..."}],
+  "stream": true,
+  "reasoning_effort": "high"
+}
+```
+
+Axio represents this provider-local Responses variant as
+`responses_reasoning_effort`. It is deliberately distinct from
+`responses_reasoning`: a Responses profile can select one spelling only after
+an explicit candidate declaration and a successful live probe against that
+exact endpoint and model. It is not enabled merely because a channel is named
+NVIDIA, and it does not change the currently configured NVIDIA Chat or
+TokenAPIs Responses transports.
+
+Source: <https://docs.api.nvidia.com/nim/reference/openai-gpt-oss-120b-infer>
+
 ## Axio Configuration Gate
 
 The profile-level declaration is deliberately closed:
@@ -83,7 +108,8 @@ The profile-level declaration is deliberately closed:
 }
 ```
 
-- `transport` may only be `chat_reasoning_effort` or `responses_reasoning`.
+- `transport` may only be `chat_reasoning_effort`, `responses_reasoning`, or
+  `responses_reasoning_effort`.
 - `status` must be `verified` before the adapter writes a wire field.
 - The declared transport must match the profile API format.
 - An unsupported requested level is omitted unless `effort_map` explicitly

@@ -240,8 +240,10 @@ ROLE_PROBE_ROLES = ("critic", "judge", "synthesizer")
 ROLE_PROBE_JUDGE_MAX_OUTPUT_TOKENS = 512
 
 _REASONING_PROBE_TRANSPORTS = {
-    "chat": "chat_reasoning_effort",
-    "responses": "responses_reasoning",
+    "chat": frozenset({"chat_reasoning_effort"}),
+    "responses": frozenset(
+        {"responses_reasoning", "responses_reasoning_effort"}
+    ),
 }
 _REASONING_PROBE_TRANSIENT_HTTP_STATUSES = frozenset({401, 403, 408, 429})
 
@@ -745,11 +747,11 @@ def _reasoning_probe_plan(profile: ModelProfile) -> dict[str, Any] | None:
     if str(config.get("status") or "").strip().casefold() != "candidate":
         return None
     api_format = _provider_adapter_format(profile.api_format)
-    expected_transport = _REASONING_PROBE_TRANSPORTS.get(api_format, "")
+    expected_transports = _REASONING_PROBE_TRANSPORTS.get(api_format, frozenset())
     transport = str(config.get("transport") or "").strip().casefold()
     if (
-        not expected_transport
-        or transport != expected_transport
+        not expected_transports
+        or transport not in expected_transports
         or config.get("api_format_compatible") is not True
     ):
         return None
@@ -4214,6 +4216,8 @@ def _responses_typed_payload(
     )
     if reasoning_transport == "responses_reasoning":
         payload["reasoning"] = {"effort": effective_reasoning_effort}
+    elif reasoning_transport == "responses_reasoning_effort":
+        payload["reasoning_effort"] = effective_reasoning_effort
     tools = provider_tool_declarations(request.tools, api_format="responses") if profile.tool_calling_eligible else []
     if tools:
         payload["tools"] = tools
@@ -4250,6 +4254,8 @@ def _responses_text_payload(
     )
     if reasoning_transport == "responses_reasoning":
         payload["reasoning"] = {"effort": effective_reasoning_effort}
+    elif reasoning_transport == "responses_reasoning_effort":
+        payload["reasoning_effort"] = effective_reasoning_effort
     # This fallback exists for gateways that only accept textual Responses
     # input.  It cannot safely carry native tool call/result blocks.
     return payload

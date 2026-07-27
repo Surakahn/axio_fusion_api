@@ -47,9 +47,13 @@ unknown vendor field upstream. A model must carry a model-level
 }
 ```
 
-The only supported transports are `chat_reasoning_effort` for a Chat
-Completions model and `responses_reasoning` for a Responses model. `status`
-must be `verified`; `unknown`, `candidate`, and `unsupported` omit the field.
+The supported transports are `chat_reasoning_effort` for a Chat Completions
+model, `responses_reasoning` for a standard Responses `reasoning.effort`
+object, and `responses_reasoning_effort` for a Responses-compatible gateway
+that documents the top-level `reasoning_effort` spelling. The latter is a
+provider-local compatibility variant, not an inferred default for every
+Responses endpoint. `status` must be `verified`; `unknown`, `candidate`, and
+`unsupported` omit the field.
 An `effort_map` is optional and only permits an explicit non-escalating
 downgrade to a declared supported level. For example, it can map `xhigh` to
 `high` or `max` to `high`, but it cannot map `low` to `high`. The current

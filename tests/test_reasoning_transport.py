@@ -151,6 +151,43 @@ def test_verified_chat_and_responses_profiles_use_only_their_own_wire_shape(monk
     assert responses.resolve_reasoning_transport("max") == ("responses_reasoning", "high")
 
 
+def test_verified_nim_responses_profile_uses_top_level_reasoning_effort(monkeypatch):
+    profile = normalize_profile(
+        {
+            "provider": "nvidia-responses-fixture",
+            "model": "nvidia-responses-model",
+            "api_format": "responses",
+            "reasoning_transport": {
+                "status": "verified",
+                "transport": "responses_reasoning_effort",
+                "supported_efforts": ["low", "medium", "high"],
+            },
+        }
+    )
+    captured: dict[str, dict] = {}
+
+    def fake_post(_profile, _path, payload, *, timeout, **_kwargs):
+        del timeout
+        captured.update(payload)
+        return {"output_text": "responses-ok"}
+
+    monkeypatch.setattr(provider_module, "_post_json", fake_post)
+    request = FusionRequest(model="axio-pro", prompt="hello", reasoning_effort="high")
+
+    assert HTTPProviderClient().complete_turn(
+        profile,
+        request,
+        prompt=request.prompt,
+        system=request.system,
+    ).text == "responses-ok"
+    assert captured["reasoning_effort"] == "high"
+    assert "reasoning" not in captured
+    assert profile.resolve_reasoning_transport("high") == (
+        "responses_reasoning_effort",
+        "high",
+    )
+
+
 def test_candidate_or_protocol_mismatched_profile_omits_reasoning_fields(monkeypatch):
     candidate = _profile(
         api_format="chat",
@@ -339,6 +376,38 @@ def test_reasoning_probe_uses_protocol_local_wire_controls_and_promotes_only_exa
     assert all(profile.reasoning_transport["status"] == "verified" for profile in updated)
     assert updated[0].resolve_reasoning_transport("high") == ("chat_reasoning_effort", "high")
     assert updated[1].resolve_reasoning_transport("high") == ("responses_reasoning", "high")
+
+
+def test_reasoning_probe_accepts_explicit_responses_top_level_transport():
+    profile = normalize_profile(
+        {
+            "provider": "nvidia-responses-probe-fixture",
+            "model": "nvidia-responses-probe-model",
+            "api_format": "responses",
+            "reasoning_transport": {
+                "status": "candidate",
+                "transport": "responses_reasoning_effort",
+                "supported_efforts": ["low", "high"],
+            },
+        }
+    )
+    client = _ReasoningProbeClient()
+
+    report = probe_provider_reasoning_support(
+        [profile],
+        live=True,
+        client=client,
+        max_workers=1,
+    )
+
+    assert report["verified_count"] == 1
+    assert ("responses_reasoning_effort", "low") in client.calls
+    assert ("responses_reasoning_effort", "high") in client.calls
+    updated = _apply_runtime_reasoning_probe([profile], report["probes"])
+    assert updated[0].resolve_reasoning_transport("high") == (
+        "responses_reasoning_effort",
+        "high",
+    )
 
 
 def test_reasoning_probe_4xx_marks_only_parameterized_transport_unsupported():
