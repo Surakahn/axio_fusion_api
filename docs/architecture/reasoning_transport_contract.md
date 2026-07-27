@@ -68,6 +68,28 @@ candidate declaration and a successful strict probe.
 
 Source: <https://developers.openai.com/api/docs/guides/reasoning>
 
+### Current TokenAPIs Evidence Boundary
+
+The current TokenAPIs channel is configured as a candidate Responses channel
+because that is the operator-selected input protocol. Its public setup guide
+does document a separate OpenAI-compatible **Chat Completions** configuration
+for Grok CLI: the example names `api_backend = "chat_completions"`, enables
+`reasoning_effort`, and lists `none`, `minimal`, `low`, `medium`, `high`,
+`xhigh`, and `max` as client-facing choices. That evidence does **not** state
+the request-body contract for TokenAPIs' `/responses` endpoint, and therefore
+does not establish either `reasoning: {"effort": ...}` or top-level
+`reasoning_effort` for that endpoint.
+
+Axio consequently keeps the current TokenAPIs Responses declaration at
+`candidate`. It sends no reasoning field in normal serving until the exact
+provider/model/Responses endpoint passes the strict streaming probe. A later
+operator may explicitly declare `responses_reasoning_effort` for a particular
+model only when that alternate top-level spelling is supported by channel
+documentation or an independently controlled integration contract; Axio never
+falls back from one spelling to the other after a parameter rejection.
+
+Source: <https://tokenapis.com/docs/guide.html?id=grok>
+
 ### NVIDIA NIM Responses Variant
 
 NVIDIA's NIM GPT-OSS reference also exposes a Responses endpoint, but its
