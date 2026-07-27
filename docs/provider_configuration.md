@@ -88,6 +88,28 @@ failure, rate limit, malformed stream, or failed control request is
 indeterminate and leaves the profile at `candidate`; it must never be
 converted into a global provider-level verdict.
 
+When a completed enrollment's reasoning calibration must be carried into a
+different private serving registry, use the endpoint-bound reconciliation
+control plane rather than copying model rows or manually editing status:
+
+```bash
+axio-fusion-api-standalone reconcile-reasoning-transport \
+  --source-registry <PRIVATE_PREFUSION_REGISTRY.json> \
+  --calibration-registry <PRIVATE_ENROLLMENT_REGISTRY.json> \
+  --reasoning-probe <PRIVATE_REASONING_PROBE.json> \
+  --output-registry <NEW_PRIVATE_SERVING_REGISTRY.json> \
+  --output <SAFE_WORK_DIR>/reasoning_transport_reconciliation.safe.json
+```
+
+This command performs no provider calls. It accepts only a complete probe
+cohort whose hash-only endpoint, protocol, canonical-model, and transport
+binding matches both registries. The source registry is never overwritten,
+and the safe receipt contains hashes/counts only. A legacy probe without this
+binding is intentionally rejected and must be rerun after a channel changes.
+`calibrate-registry` also checks an endpoint-bound probe before it can update
+a local reasoning status, but it is not a substitute for this full-cohort
+cross-registry handoff.
+
 For a Hermes Fusion route, the caller's explicit level is an upper bound for a
 role's internal cognitive budget. Direct `axio-fast` cascades preserve the
 caller level. Actual wire forwarding remains profile-specific, so an

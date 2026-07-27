@@ -27,6 +27,14 @@
   receipt-to-dataset hash/count binding, and a 21-slot manifest that records
   the replacement identity without relabelling it as GPQA. Historical v1 is
   retained only for diagnostic inspection and is fail-closed for formal use.
+- [x] Add endpoint-bound reasoning-transport reconciliation: a reasoning probe
+  now freezes its model/protocol/transport contract and resolved channel
+  endpoint hash before the first request; both local calibration and the
+  full matching source/calibration/probe reconciliation path reject stale
+  endpoint evidence before a status-only capability change.
+- [ ] Run a new endpoint-bound live reasoning probe after this control-plane
+  upgrade before attempting to reuse reasoning results in any future formal
+  pre-Fusion registry; historical unbound probes remain diagnostic only.
 - [x] Keep provider baseline freeze and the 9-category/21-suite target
   campaign fail-closed because the complete-pool rank-1/rank-2/rank-3
   evidence is unavailable.

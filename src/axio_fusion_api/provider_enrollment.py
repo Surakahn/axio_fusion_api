@@ -32,11 +32,13 @@ from .model_screening import (
 from .orchestrator import FusionEngine
 from .providers import (
     HTTPProviderClient,
+    REASONING_TRANSPORT_BINDING_SCHEMA,
     ensure_strict_streaming_client,
     probe_exposed_provider_models,
     probe_provider_models,
     probe_provider_reasoning_support,
     probe_provider_tool_support,
+    reasoning_transport_probe_binding,
 )
 from .registry import (
     build_registry_from_probe_artifacts,
@@ -865,6 +867,7 @@ def _reasoning_probe_row_verifies_profile(
         or row.get("live_probe_evidence") is not True
         or row.get("strict_wire_shape_preserved") is not True
         or str(row.get("transport") or "") != str(config.get("transport") or "")
+        or not _reasoning_probe_binding_matches_profile(profile, row)
     ):
         return False
     declared_efforts = _normalized_reasoning_efforts(config.get("supported_efforts"))
@@ -908,6 +911,7 @@ def _reasoning_probe_row_rejects_profile(
         or str(row.get("status") or "").strip().casefold() != "rejected"
         or row.get("live_probe_evidence") is not True
         or str(row.get("transport") or "") != str(config.get("transport") or "")
+        or not _reasoning_probe_binding_matches_profile(profile, row)
     ):
         return False
     control = row.get("control") if isinstance(row.get("control"), Mapping) else {}
@@ -919,6 +923,37 @@ def _reasoning_probe_row_rejects_profile(
         and str(attempt.get("status") or "").strip().casefold() == "rejected"
         and 400 <= _safe_status_code(attempt.get("http_status")) < 500
         for attempt in attempts
+    )
+
+
+def _reasoning_probe_binding_matches_profile(
+    profile: ModelProfile,
+    row: Mapping[str, Any],
+) -> bool:
+    """Require the fresh in-memory probe to match the current endpoint."""
+
+    expected = reasoning_transport_probe_binding(profile)
+    observed = (
+        row.get("reasoning_transport_binding")
+        if isinstance(row.get("reasoning_transport_binding"), Mapping)
+        else {}
+    )
+    if str(observed.get("schema") or "") != REASONING_TRANSPORT_BINDING_SCHEMA:
+        return False
+    observed_digest = sha256_text(
+        stable_json(
+            {
+                key: value
+                for key, value in observed.items()
+                if key != "binding_sha256"
+            }
+        )
+    )
+    return bool(
+        observed.get("binding_sha256")
+        and observed_digest == str(observed.get("binding_sha256") or "")
+        and str(observed.get("binding_sha256") or "")
+        == str(expected.get("binding_sha256") or "")
     )
 
 

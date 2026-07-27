@@ -21,6 +21,7 @@ from axio_fusion_api.providers import (
     ProviderExecutionError,
     probe_provider_reasoning_support,
     redact_provider_reasoning_probe_artifact,
+    reasoning_transport_probe_binding,
 )
 from axio_fusion_api.registry import normalize_profile
 from axio_fusion_api.schemas import FusionRequest
@@ -363,6 +364,55 @@ def test_reasoning_probe_4xx_marks_only_parameterized_transport_unsupported():
     assert _apply_runtime_reasoning_probe([profile], [row])[0].reasoning_transport["status"] == "unsupported"
 
 
+def test_reasoning_probe_captures_endpoint_before_requests_and_rejects_retargeted_result(
+    monkeypatch,
+):
+    monkeypatch.setenv("REASONING_BINDING_BASE_URL", "https://binding-before.example/v1")
+    monkeypatch.setenv("REASONING_BINDING_API_KEY", "fixture-key")
+    profile = normalize_profile(
+        {
+            "provider": "binding-fixture",
+            "model": "binding-model",
+            "api_format": "chat",
+            "base_url_env": "REASONING_BINDING_BASE_URL",
+            "api_key_env": "REASONING_BINDING_API_KEY",
+            "reasoning_transport": {
+                "status": "candidate",
+                "transport": "chat_reasoning_effort",
+                "supported_efforts": ["low"],
+            },
+        }
+    )
+    binding_before = reasoning_transport_probe_binding(profile)
+
+    class RetargetingClient(_ReasoningProbeClient):
+        def complete_turn(self, *args, **kwargs):
+            completion = super().complete_turn(*args, **kwargs)
+            monkeypatch.setenv(
+                "REASONING_BINDING_BASE_URL",
+                "https://binding-after.example/v1",
+            )
+            return completion
+
+    report = probe_provider_reasoning_support(
+        [profile],
+        live=True,
+        client=RetargetingClient(),
+        max_workers=1,
+    )
+    row = report["probes"][0]
+
+    assert row["reasoning_transport_binding"]["binding_sha256"] == binding_before[
+        "binding_sha256"
+    ]
+    assert row["reasoning_transport_binding"]["binding_sha256"] != reasoning_transport_probe_binding(
+        profile
+    )["binding_sha256"]
+    assert _apply_runtime_reasoning_probe([profile], [row])[0].reasoning_transport[
+        "status"
+    ] == "candidate"
+
+
 def test_reasoning_probe_control_failure_and_missing_rows_preserve_candidate_state():
     profile = _profile(
         api_format="chat",
@@ -458,6 +508,46 @@ def test_reasoning_probe_redaction_removes_provider_model_prompt_and_output_deta
     assert "private prompt" not in serialized
     assert "private answer" not in serialized
     assert redacted["probes"][0]["raw_probe_prompt_persisted"] is False
+
+
+def test_reasoning_probe_redaction_keeps_endpoint_binding_hash_without_endpoint_value():
+    payload = {
+        "schema": "axio_fusion_api.provider_reasoning_probe.v1",
+        "probe_kind": "reasoning_transport",
+        "probes": [
+            {
+                "profile_id": "private-provider/private-model",
+                "provider": "private-provider",
+                "model": "private-model",
+                "reasoning_transport_binding": {
+                    "schema": "axio_fusion_api.reasoning_transport_probe_binding.v1",
+                    "profile_id_sha256": "profile-hash",
+                    "canonical_identity_sha256": "canonical-hash",
+                    "api_format": "responses",
+                    "auth_scheme": "bearer",
+                    "base_url_sha256": "endpoint-hash",
+                    "endpoint_binding_ready": True,
+                    "transport": "responses_reasoning",
+                    "supported_efforts": ["low"],
+                    "effort_map": {},
+                    "api_format_compatible": True,
+                    "binding_sha256": "binding-hash",
+                    "raw_endpoint": "https://private-gateway.example/v1",
+                    "api_key": "private-api-key",
+                },
+            }
+        ],
+    }
+
+    redacted = redact_provider_reasoning_probe_artifact(payload)
+    serialized = str(redacted)
+    binding = redacted["probes"][0]["reasoning_transport_binding"]
+
+    assert binding["base_url_sha256"] == "endpoint-hash"
+    assert binding["endpoint_binding_ready"] is True
+    assert "https://private-gateway.example" not in serialized
+    assert "private-api-key" not in serialized
+    assert "private-provider" not in serialized
 
 
 def test_responses_strict_wire_does_not_retry_as_text_input_after_parameterized_4xx(monkeypatch):

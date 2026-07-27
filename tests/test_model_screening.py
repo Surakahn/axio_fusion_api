@@ -20,7 +20,14 @@ from axio_fusion_api.model_screening import (
     validate_prefusion_research_output,
 )
 from axio_fusion_api.providers import ProviderCompletion
-from axio_fusion_api.providers import discover_provider_profiles
+from axio_fusion_api.providers import (
+    discover_provider_profiles,
+    reasoning_transport_probe_binding,
+)
+from axio_fusion_api.reasoning_reconciliation import (
+    apply_reasoning_transport_reconciliation,
+    build_reasoning_transport_reconciliation,
+)
 from axio_fusion_api.prefusion_ranking import (
     capability_axis_coverage,
     research_quality_score,
@@ -1706,6 +1713,137 @@ def test_prefusion_calibration_preserves_loadable_handoff_and_updates_tool_metad
     loaded = load_registry(updated_path, require_prefusion=True)
     assert len(loaded) == 1
     assert loaded[0].supports_tools is True
+
+
+def test_reasoning_reconciliation_preserves_loadable_prefusion_handoff(monkeypatch, tmp_path):
+    profile = replace(
+        _profile("provider-a", "alpha", "alpha", p50=220),
+        reasoning_transport={
+            "status": "candidate",
+            "transport": "chat_reasoning_effort",
+            "supported_efforts": ["low"],
+        },
+    )
+    monkeypatch.setenv("PROVIDER_A_BASE_URL", "https://provider-a.example/v1")
+    monkeypatch.setenv("PROVIDER_A_API_KEY", "fixture-key")
+    groups = _groups([profile])
+    research = _research_output([str(groups[0]["candidate_id"])])
+
+    def fake_probe(probe_profiles, **_kwargs):
+        return {
+            "schema": "axio_fusion_api.provider_probe.v1",
+            "mode": "live",
+            "network_calls_performed": True,
+            "probes": [
+                {
+                    "profile_id": item.profile_id,
+                    "provider": item.provider,
+                    "model": item.model,
+                    "status": "available",
+                    "latency_ms": 220,
+                    "output_sha256": sha256_text(f"prefusion:{item.profile_id}"),
+                    "probe_mode": "live",
+                    "live_probe_evidence": True,
+                    **_stream_evidence(),
+                }
+                for item in probe_profiles
+            ],
+        }
+
+    monkeypatch.setattr(model_screening, "probe_provider_models", fake_probe)
+    report = run_prefusion_model_screening(
+        profiles=[profile],
+        source_manifest=_source_manifest(),
+        research_output=research,
+        live=True,
+        min_available_models=1,
+    )
+    source_registry = report["fusion_registry"]
+    assert report["status"] == "ready"
+    assert validate_prefusion_registry_handoff(source_registry)["valid"] is True
+
+    source_path = tmp_path / "prefusion-source.private.json"
+    calibration_path = tmp_path / "prefusion-calibration.private.json"
+    probe_path = tmp_path / "prefusion-reasoning.private.json"
+    output_path = tmp_path / "prefusion-reconciled.private.json"
+    source_path.write_text(json.dumps(source_registry), encoding="utf-8")
+    calibration_registry = json.loads(json.dumps(source_registry))
+    calibration_registry["models"][0]["reasoning_transport"]["status"] = "verified"
+    calibration_path.write_text(json.dumps(calibration_registry), encoding="utf-8")
+    source_profile = normalize_profile(source_registry["models"][0])
+    accepted = {
+        "status": "accepted",
+        "marker_observed": True,
+        "strict_streaming_contract_valid": True,
+        "stream_requested": True,
+        "strict_streaming_requested": True,
+        "stream_observed": True,
+        "stream_fallback_used": False,
+        "stream_protocol": "sse",
+        "stream_frame_count": 2,
+        "latency_ms": 12,
+    }
+    probe_path.write_text(
+        json.dumps(
+            {
+                "schema": "axio_fusion_api.provider_reasoning_probe.v1",
+                "probe_kind": "reasoning_transport",
+                "mode": "live",
+                "network_calls_performed": True,
+                "timeout_seconds": 20,
+                "candidate_model_count_before_selection": 1,
+                "model_count": 1,
+                "selection_policy": {
+                    "profile_hash_filter_enabled": False,
+                    "max_models": None,
+                    "max_models_per_provider": None,
+                    "selected_model_count": 1,
+                },
+                "probes": [
+                    {
+                        "profile_id": source_profile.profile_id,
+                        "provider": source_profile.provider,
+                        "model": source_profile.model,
+                        "api_format": source_profile.api_format,
+                        "probe_kind": "reasoning_transport",
+                        "probe_mode": "live",
+                        "live_probe_evidence": True,
+                        "status": "verified",
+                        "strict_wire_shape_preserved": True,
+                        "all_declared_efforts_strict_streaming": True,
+                        "transport": "chat_reasoning_effort",
+                        "declared_efforts": ["low"],
+                        "control": accepted,
+                        "effort_results": [{"effort": "low", **accepted}],
+                        "reasoning_transport_binding": reasoning_transport_probe_binding(
+                            source_profile
+                        ),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    reconciliation = build_reasoning_transport_reconciliation(
+        source_registry_path=source_path,
+        calibration_registry_path=calibration_path,
+        reasoning_probe_path=probe_path,
+    )
+    receipt = apply_reasoning_transport_reconciliation(
+        reconciliation,
+        source_registry_path=source_path,
+        output_registry_path=output_path,
+    )
+
+    assert receipt["status"] == "ready"
+    assert receipt["registry_output_written"] is True
+    updated = json.loads(output_path.read_text(encoding="utf-8"))
+    assert updated["models"][0]["reasoning_transport"]["status"] == "verified"
+    assert updated["prefusion_screening"] == source_registry["prefusion_screening"]
+    assert updated["prefusion_model_catalog"] == source_registry["prefusion_model_catalog"]
+    assert validate_prefusion_registry_handoff(updated)["valid"] is True
+    assert len(load_registry(output_path, require_prefusion=True)) == 1
 
 
 def test_live_prefusion_binds_multi_sample_stability_evidence_and_rejects_tampering(

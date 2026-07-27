@@ -137,6 +137,45 @@ latency, status code class, stream framing, and output hashes. Neither form
 stores endpoint values, credentials, raw prompts, raw outputs, or hidden
 reasoning.
 
+The endpoint binding is captured immediately before the probe's first network
+request. This prevents a long-running probe from being attributed to a channel
+target that an operator configured only after the request began. Local
+registry calibration also verifies that binding against the endpoint currently
+resolved for the profile; a stale or legacy probe cannot promote a transport
+after a gateway retarget. That local check does not replace the full-cohort
+cross-registry reconciliation below.
+
+## Endpoint-Bound Reconciliation
+
+A provider/model alias is not sufficient to reuse a prior wire-capability
+result. An operator can retarget a channel environment variable to a different
+gateway while retaining the same provider label and model alias. Each newly
+generated reasoning probe therefore carries a hash-only binding over the
+profile identity, canonical identity, upstream API format, resolved endpoint
+hash, authentication scheme, and declared reasoning transport contract.
+
+`reconcile-reasoning-transport` is the only cross-registry promotion path. It
+accepts a source serving registry, the calibrated registry emitted from the
+same enrollment, and the private reasoning-probe artifact. Before writing a
+new private registry it requires all of the following:
+
+1. The source and calibration registries contain the exact same physical
+   profile set.
+2. Every candidate profile appears exactly once in a full, unbounded live
+   probe cohort.
+3. The probe binding matches the current endpoint, model, protocol, and
+   declared transport contract.
+4. The calibration status is independently justified by strict probe evidence.
+5. The output path differs from the source path and, for a pre-Fusion source,
+   the resulting handoff still validates.
+
+The operation changes only a candidate profile's reasoning transport status to
+`verified`, `unsupported`, or retained `candidate`. It never changes model
+ranking, capability scores, role admission, benchmark baselines, or benchmark
+results. Legacy probe artifacts without the endpoint binding remain useful
+diagnostics but are intentionally ineligible for this operation; rerun a live
+probe after upgrading the control plane.
+
 ## Fusion Budget Rule
 
 Hermes defines role-local cognitive budgets for advisor, critic, Judge, and

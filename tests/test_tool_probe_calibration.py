@@ -18,6 +18,7 @@ from axio_fusion_api.providers import (
     TOOL_PROBE_VALUE,
     probe_provider_tool_support,
     redact_provider_tool_probe_artifact,
+    reasoning_transport_probe_binding,
 )
 from axio_fusion_api import providers as provider_module
 from axio_fusion_api.registry import normalize_profile
@@ -298,12 +299,22 @@ def test_tool_probe_redaction_removes_provider_and_tool_details():
     assert redacted["probes"][0]["raw_tool_arguments_persisted"] is False
 
 
-def test_reasoning_probe_calibration_promotes_only_complete_strict_profile_evidence(tmp_path):
+def test_reasoning_probe_calibration_promotes_only_complete_strict_profile_evidence(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "REASONING_CALIBRATION_BASE_URL",
+        "https://reasoning-calibration.example/v1",
+    )
+    monkeypatch.setenv("REASONING_CALIBRATION_API_KEY", "fixture-key")
     profile = normalize_profile(
         {
             "provider": "reasoning-calibration-provider",
             "model": "reasoning-calibration-model",
             "api_format": "responses",
+            "base_url_env": "REASONING_CALIBRATION_BASE_URL",
+            "api_key_env": "REASONING_CALIBRATION_API_KEY",
             "reasoning_transport": {
                 "status": "candidate",
                 "transport": "responses_reasoning",
@@ -354,6 +365,9 @@ def test_reasoning_probe_calibration_promotes_only_complete_strict_profile_evide
                             {"effort": "low", **accepted},
                             {"effort": "medium", **accepted},
                         ],
+                        "reasoning_transport_binding": reasoning_transport_probe_binding(
+                            profile
+                        ),
                     }
                 ],
             }
@@ -372,12 +386,101 @@ def test_reasoning_probe_calibration_promotes_only_complete_strict_profile_evide
     assert updated["calibration"]["reasoning_transport_updated_from_operational_probe"] is True
 
 
-def test_reasoning_probe_calibration_rejects_missing_marker_or_slow_evidence(tmp_path):
+def test_reasoning_probe_calibration_rejects_endpoint_retargeting(tmp_path, monkeypatch):
+    monkeypatch.setenv(
+        "REASONING_RETARGET_BASE_URL",
+        "https://reasoning-retarget-before.example/v1",
+    )
+    monkeypatch.setenv("REASONING_RETARGET_API_KEY", "fixture-key")
+    profile = normalize_profile(
+        {
+            "provider": "reasoning-retarget-provider",
+            "model": "reasoning-retarget-model",
+            "api_format": "responses",
+            "base_url_env": "REASONING_RETARGET_BASE_URL",
+            "api_key_env": "REASONING_RETARGET_API_KEY",
+            "reasoning_transport": {
+                "status": "candidate",
+                "transport": "responses_reasoning",
+                "supported_efforts": ["low"],
+            },
+        }
+    )
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text(
+        json.dumps({"schema": "axio_fusion_api.registry.v1", "models": [profile.safe_dict()]}),
+        encoding="utf-8",
+    )
+    accepted = {
+        "status": "accepted",
+        "marker_observed": True,
+        "strict_streaming_contract_valid": True,
+        "stream_requested": True,
+        "strict_streaming_requested": True,
+        "stream_observed": True,
+        "stream_fallback_used": False,
+        "stream_protocol": "sse",
+        "stream_frame_count": 1,
+        "latency_ms": 12,
+    }
+    probe_path = tmp_path / "reasoning-probe.json"
+    probe_path.write_text(
+        json.dumps(
+            {
+                "schema": "axio_fusion_api.provider_reasoning_probe.v1",
+                "probe_kind": "reasoning_transport",
+                "probes": [
+                    {
+                        "profile_id": profile.profile_id,
+                        "status": "verified",
+                        "probe_kind": "reasoning_transport",
+                        "live_probe_evidence": True,
+                        "strict_wire_shape_preserved": True,
+                        "all_declared_efforts_strict_streaming": True,
+                        "transport": "responses_reasoning",
+                        "declared_efforts": ["low"],
+                        "control": accepted,
+                        "effort_results": [{"effort": "low", **accepted}],
+                        "reasoning_transport_binding": reasoning_transport_probe_binding(
+                            profile
+                        ),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(
+        "REASONING_RETARGET_BASE_URL",
+        "https://reasoning-retarget-after.example/v1",
+    )
+
+    calibration = build_registry_calibration(
+        registry_path=registry_path,
+        probe_paths=[probe_path],
+    )
+
+    updated = calibration["updated_registry"]["models"][0]
+    assert updated["reasoning_transport"]["status"] == "candidate"
+    assert updated["calibration"]["reasoning_transport_updated_from_operational_probe"] is False
+
+
+def test_reasoning_probe_calibration_rejects_missing_marker_or_slow_evidence(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "REASONING_CALIBRATION_INVALID_BASE_URL",
+        "https://reasoning-calibration-invalid.example/v1",
+    )
+    monkeypatch.setenv("REASONING_CALIBRATION_INVALID_API_KEY", "fixture-key")
     profile = normalize_profile(
         {
             "provider": "reasoning-calibration-provider",
             "model": "reasoning-calibration-model",
             "api_format": "responses",
+            "base_url_env": "REASONING_CALIBRATION_INVALID_BASE_URL",
+            "api_key_env": "REASONING_CALIBRATION_INVALID_API_KEY",
             "reasoning_transport": {
                 "status": "candidate",
                 "transport": "responses_reasoning",
@@ -433,6 +536,9 @@ def test_reasoning_probe_calibration_rejects_missing_marker_or_slow_evidence(tmp
                             "effort_results": [
                                 {"effort": "low", **accepted},
                             ],
+                            "reasoning_transport_binding": reasoning_transport_probe_binding(
+                                profile
+                            ),
                         }
                     ],
                 }

@@ -232,6 +232,7 @@ PROVIDER_INPUT_ADAPTER_FORMATS = ("chat", "responses", "anthropic", "gemini")
 TOOL_PROBE_NAME = "axio_probe_echo"
 TOOL_PROBE_VALUE = "AXIO_TOOL_PROBE_OK"
 REASONING_PROBE_SCHEMA = "axio_fusion_api.provider_reasoning_probe.v1"
+REASONING_TRANSPORT_BINDING_SCHEMA = "axio_fusion_api.reasoning_transport_probe_binding.v1"
 REASONING_PROBE_MARKER = "AXIO_REASONING_TRANSPORT_OK"
 ROLE_PROBE_SCHEMA = "axio_fusion_api.provider_role_probe.v1"
 ROLE_PROBE_CONTRACT = "axio_fusion_api.provider_role_probe.fixed_control_packet.v1"
@@ -711,6 +712,7 @@ def probe_provider_reasoning_support(
         "verification_contract": {
             "requires_model_level_candidate_declaration": True,
             "requires_protocol_local_wire_field": True,
+            "requires_endpoint_bound_profile_transport_identity": True,
             "control_request_omits_reasoning_field": True,
             "requires_control_and_every_declared_effort": True,
             "requires_strict_sse_or_ndjson_streaming": True,
@@ -785,6 +787,7 @@ def _reasoning_probe_skipped_row(
         effort_results=[],
         reason_codes=["live_flag_required"],
         probe_mode="dry_run",
+        transport_binding=reasoning_transport_probe_binding(profile),
     )
 
 
@@ -795,6 +798,11 @@ def _probe_one_model_reasoning_support(
     timeout: float,
     client: Any,
 ) -> dict[str, Any]:
+    # Capture the resolved endpoint binding before the first network request.
+    # A channel environment variable can be retargeted while a long probe is
+    # in progress; the evidence must describe the endpoint actually selected
+    # when that probe started, not whatever is configured after it finishes.
+    transport_binding = reasoning_transport_probe_binding(profile)
     control_request = FusionRequest(
         model="axio-fast",
         prompt=f"Return exactly {REASONING_PROBE_MARKER}.",
@@ -820,6 +828,7 @@ def _probe_one_model_reasoning_support(
             control=control,
             effort_results=[],
             reason_codes=["control_request_not_accepted"],
+            transport_binding=transport_binding,
         )
 
     transport = str(plan.get("transport") or "")
@@ -864,6 +873,7 @@ def _probe_one_model_reasoning_support(
         control=control,
         effort_results=effort_results,
         reason_codes=reason_codes,
+        transport_binding=transport_binding,
     )
 
 
@@ -1029,6 +1039,7 @@ def _reasoning_probe_profile_row(
     effort_results: Sequence[Mapping[str, Any]],
     reason_codes: Sequence[str],
     probe_mode: str = "live",
+    transport_binding: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     rows = [dict(row) for row in effort_results if isinstance(row, Mapping)]
     accepted_efforts = [
@@ -1047,6 +1058,11 @@ def _reasoning_probe_profile_row(
         if row.get("status") == "indeterminate" and str(row.get("effort") or "")
     ]
     all_attempts = [dict(control), *rows]
+    binding = (
+        dict(transport_binding)
+        if isinstance(transport_binding, Mapping)
+        else reasoning_transport_probe_binding(profile)
+    )
     return {
         "profile_id": profile.profile_id,
         "provider": profile.provider,
@@ -1086,11 +1102,69 @@ def _reasoning_probe_profile_row(
             _safe_int(row.get("provider_request_failure_count"), default=0)
             for row in all_attempts
         ),
+        "reasoning_transport_binding": binding,
         "raw_probe_prompt_persisted": False,
         "raw_provider_output_persisted": False,
         "raw_provider_body_persisted": False,
         "secrets_persisted": False,
     }
+
+
+def reasoning_transport_probe_binding(profile: ModelProfile) -> dict[str, Any]:
+    """Return a hash-only identity binding for one reasoning-wire probe.
+
+    A provider/model alias alone is not enough to reuse a reasoning transport
+    result. Operators can retarget an environment variable to a different
+    gateway while retaining the same alias. The binding therefore includes the
+    resolved endpoint hash and the declarative wire contract, but never the
+    endpoint value, provider key, or raw canonical model identity.
+    """
+
+    config = (
+        dict(profile.reasoning_transport)
+        if isinstance(profile.reasoning_transport, Mapping)
+        else {}
+    )
+    credential = profile_credential_readiness(profile)
+    supported_efforts = []
+    raw_efforts = config.get("supported_efforts")
+    if isinstance(raw_efforts, Sequence) and not isinstance(
+        raw_efforts,
+        (str, bytes, bytearray),
+    ):
+        for raw_effort in raw_efforts:
+            effort = normalize_reasoning_effort(raw_effort)
+            if effort and effort not in supported_efforts:
+                supported_efforts.append(effort)
+    raw_effort_map = config.get("effort_map")
+    effort_map: dict[str, str] = {}
+    if isinstance(raw_effort_map, Mapping):
+        for source, target in raw_effort_map.items():
+            requested = normalize_reasoning_effort(source)
+            effective = normalize_reasoning_effort(target)
+            if requested and effective:
+                effort_map[requested] = effective
+    binding = {
+        "schema": REASONING_TRANSPORT_BINDING_SCHEMA,
+        "profile_id_sha256": sha256_text(profile.profile_id),
+        "canonical_identity_sha256": profile.canonical_identity_sha256,
+        "api_format": _provider_adapter_format(profile.api_format),
+        "auth_scheme": str(credential.get("auth_scheme") or "")[:80],
+        "base_url_sha256": str(credential.get("base_url_sha256") or ""),
+        "endpoint_binding_ready": bool(
+            credential.get("base_url_valid") is True
+            and credential.get("base_url_sha256")
+        ),
+        "transport": str(config.get("transport") or "")[:80],
+        "supported_efforts": supported_efforts,
+        "effort_map": dict(sorted(effort_map.items())),
+        "api_format_compatible": config.get("api_format_compatible") is True,
+        "raw_provider_url_persisted": False,
+        "raw_provider_model_id_persisted": False,
+        "secrets_persisted": False,
+    }
+    binding["binding_sha256"] = sha256_text(stable_json(binding))
+    return binding
 
 
 def discover_provider_inventory(*, live: bool = False, timeout: float = 10.0) -> dict[str, Any]:
@@ -3351,10 +3425,56 @@ def _redact_reasoning_probe_row(row: Mapping[str, Any]) -> dict[str, Any]:
         "provider_request_count": _safe_int(row.get("provider_request_count"), default=0),
         "provider_request_success_count": _safe_int(row.get("provider_request_success_count"), default=0),
         "provider_request_failure_count": _safe_int(row.get("provider_request_failure_count"), default=0),
+        "reasoning_transport_binding": _redact_reasoning_transport_binding(
+            row.get("reasoning_transport_binding")
+            if isinstance(row.get("reasoning_transport_binding"), Mapping)
+            else {}
+        ),
         "raw_provider_names_persisted": False,
         "raw_provider_model_ids_persisted": False,
         "raw_provider_output_persisted": False,
         "raw_probe_prompt_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _redact_reasoning_transport_binding(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep the endpoint-bound transport identity while removing raw values."""
+
+    raw_efforts = value.get("supported_efforts")
+    efforts = (
+        [
+            normalize_reasoning_effort(item)
+            for item in raw_efforts
+            if normalize_reasoning_effort(item)
+        ]
+        if isinstance(raw_efforts, Sequence)
+        and not isinstance(raw_efforts, (str, bytes, bytearray))
+        else []
+    )
+    raw_map = value.get("effort_map")
+    effort_map = {}
+    if isinstance(raw_map, Mapping):
+        for source, target in raw_map.items():
+            requested = normalize_reasoning_effort(source)
+            effective = normalize_reasoning_effort(target)
+            if requested and effective:
+                effort_map[requested] = effective
+    return {
+        "schema": str(value.get("schema") or "")[:120],
+        "profile_id_sha256": str(value.get("profile_id_sha256") or "")[:128],
+        "canonical_identity_sha256": str(value.get("canonical_identity_sha256") or "")[:128],
+        "api_format": str(value.get("api_format") or "")[:40],
+        "auth_scheme": str(value.get("auth_scheme") or "")[:80],
+        "base_url_sha256": str(value.get("base_url_sha256") or "")[:128],
+        "endpoint_binding_ready": value.get("endpoint_binding_ready") is True,
+        "transport": str(value.get("transport") or "")[:80],
+        "supported_efforts": efforts,
+        "effort_map": dict(sorted(effort_map.items())),
+        "api_format_compatible": value.get("api_format_compatible") is True,
+        "binding_sha256": str(value.get("binding_sha256") or "")[:128],
+        "raw_provider_url_persisted": False,
+        "raw_provider_model_id_persisted": False,
         "secrets_persisted": False,
     }
 
@@ -3413,6 +3533,11 @@ def _reasoning_probe_redaction_source_digest_input(
                     for value in row.get("declared_efforts", [])
                     if normalize_reasoning_effort(value)
                 ] if isinstance(row.get("declared_efforts"), list) else [],
+                "reasoning_transport_binding": _redact_reasoning_transport_binding(
+                    row.get("reasoning_transport_binding")
+                    if isinstance(row.get("reasoning_transport_binding"), Mapping)
+                    else {}
+                ),
                 "control": _redact_reasoning_probe_attempt(
                     row.get("control") if isinstance(row.get("control"), Mapping) else {}
                 ),

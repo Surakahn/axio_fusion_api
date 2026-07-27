@@ -112,6 +112,10 @@ from .provider_onboarding import (
     review_provider_onboarding_candidate,
 )
 from .provider_enrollment import enroll_provider_channels
+from .reasoning_reconciliation import (
+    apply_reasoning_transport_reconciliation,
+    build_reasoning_transport_reconciliation,
+)
 from .runtime_requirements import ensure_supported_python_runtime
 from .providers import (
     build_provider_input_adapter_self_test,
@@ -1496,6 +1500,14 @@ def build_parser() -> argparse.ArgumentParser:
     calibrate.add_argument("--output", default=None)
     calibrate.add_argument("--updated-registry-output", default=None)
     calibrate.set_defaults(func=cmd_calibrate_registry)
+
+    reconcile_reasoning = sub.add_parser("reconcile-reasoning-transport")
+    reconcile_reasoning.add_argument("--source-registry", required=True)
+    reconcile_reasoning.add_argument("--calibration-registry", required=True)
+    reconcile_reasoning.add_argument("--reasoning-probe", required=True)
+    reconcile_reasoning.add_argument("--output-registry", required=True)
+    reconcile_reasoning.add_argument("--output", default=None)
+    reconcile_reasoning.set_defaults(func=cmd_reconcile_reasoning_transport)
 
     tool = sub.add_parser("tool-execute")
     tool.add_argument("--role", default="primary_solver")
@@ -3086,6 +3098,21 @@ def cmd_calibrate_registry(args: argparse.Namespace) -> int:
         return 0
     _emit_json(payload)
     return 0
+
+
+def cmd_reconcile_reasoning_transport(args: argparse.Namespace) -> int:
+    reconciliation = build_reasoning_transport_reconciliation(
+        source_registry_path=args.source_registry,
+        calibration_registry_path=args.calibration_registry,
+        reasoning_probe_path=args.reasoning_probe,
+    )
+    receipt = apply_reasoning_transport_reconciliation(
+        reconciliation,
+        source_registry_path=args.source_registry,
+        output_registry_path=args.output_registry,
+    )
+    _emit_json(receipt, output=args.output)
+    return 0 if receipt.get("status") == "ready" and receipt.get("registry_output_written") is True else 2
 
 
 def cmd_tool_execute(args: argparse.Namespace) -> int:

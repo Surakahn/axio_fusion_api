@@ -5,6 +5,10 @@ import os
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from .providers import (
+    REASONING_TRANSPORT_BINDING_SCHEMA,
+    reasoning_transport_probe_binding,
+)
 from .registry import (
     build_default_registry,
     load_registry,
@@ -16,6 +20,7 @@ from .schemas import (
     ModelProfile,
     normalize_reasoning_effort,
     sha256_text,
+    stable_json,
 )
 
 
@@ -89,7 +94,13 @@ def build_registry_calibration(
     _apply_benchmark_signals(signals, benchmark_rows)
     _apply_feedback_signals(signals, feedback_rows, hash_to_profile)
     _apply_trace_signals(signals, trace_rows, hash_to_profile)
-    patches = [_signal_to_patch(signal) for signal in signals.values()]
+    patches = [
+        _signal_to_patch(
+            signal,
+            profile=profile_map.get(str(signal.get("profile_id") or "")),
+        )
+        for signal in signals.values()
+    ]
     patches.sort(key=lambda row: str(row["profile_id"]))
     updated_registry = _updated_registry_payload(
         profiles,
@@ -140,6 +151,8 @@ def build_registry_calibration(
             "benchmark_calibration_blocked": benchmark_calibration_blocked,
             "prefusion_handoff_blocked": prefusion_handoff_blocked,
             "benchmark_results_used_for_registry_calibration": benchmark_calibration_applied,
+            "reasoning_transport_probe_requires_current_endpoint_binding": True,
+            "cross_registry_reasoning_transport_promotion_requires_reconciliation": True,
             "final_claim_eligible_without_training_contamination_audit": not benchmark_calibration_applied
             and not prefusion_handoff_blocked,
             "blocker_reason_codes": (
@@ -318,7 +331,11 @@ def _apply_trace_signals(
                 signals[profile_id]["trace_provider_calls"].append(calls)
 
 
-def _signal_to_patch(signal: Mapping[str, Any]) -> dict[str, Any]:
+def _signal_to_patch(
+    signal: Mapping[str, Any],
+    *,
+    profile: ModelProfile | None,
+) -> dict[str, Any]:
     status_counts = signal.get("status_counts") if isinstance(signal.get("status_counts"), Mapping) else {}
     available = int(status_counts.get("available") or 0)
     failures = int(status_counts.get("failed") or 0) + int(status_counts.get("unexpected_output") or 0)
@@ -386,6 +403,7 @@ def _signal_to_patch(signal: Mapping[str, Any]) -> dict[str, Any]:
             else False
         )
     reasoning_transport_patch = _reasoning_transport_patch(
+        profile,
         signal.get("current_reasoning_transport"),
         signal.get("reasoning_probe_rows"),
     )
@@ -429,13 +447,14 @@ def _signal_to_patch(signal: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _reasoning_transport_patch(
+    profile: ModelProfile | None,
     current: Any,
     rows: Any,
 ) -> dict[str, Any] | None:
     """Return a status-only capability promotion from strict probe evidence."""
 
     config = dict(current) if isinstance(current, Mapping) else {}
-    if str(config.get("status") or "").strip().casefold() != "candidate":
+    if profile is None or str(config.get("status") or "").strip().casefold() != "candidate":
         return None
     declared_efforts = _normalized_reasoning_efforts(config.get("supported_efforts"))
     if not declared_efforts:
@@ -448,6 +467,7 @@ def _reasoning_transport_patch(
         and row.get("live_probe_evidence") is True
         and str(row.get("transport") or "") == str(config.get("transport") or "")
         and _normalized_reasoning_efforts(row.get("declared_efforts")) == declared_efforts
+        and _reasoning_probe_binding_matches(profile, row)
     ]
     if not exact_rows:
         return None
@@ -460,6 +480,45 @@ def _reasoning_transport_patch(
         patched["status"] = "unsupported"
         return patched
     return None
+
+
+def _reasoning_probe_binding_matches(
+    profile: ModelProfile,
+    row: Mapping[str, Any],
+) -> bool:
+    """Accept only a valid probe bound to the endpoint currently configured.
+
+    Generic calibration may aggregate several operational artifacts, but it
+    must not turn an old reasoning probe into a capability claim after an
+    operator retargets the profile's gateway. Cross-registry promotion still
+    requires the stricter full-cohort reconciliation control plane.
+    """
+
+    expected = reasoning_transport_probe_binding(profile)
+    observed = (
+        row.get("reasoning_transport_binding")
+        if isinstance(row.get("reasoning_transport_binding"), Mapping)
+        else {}
+    )
+    if expected.get("endpoint_binding_ready") is not True:
+        return False
+    if str(observed.get("schema") or "") != REASONING_TRANSPORT_BINDING_SCHEMA:
+        return False
+    observed_digest = sha256_text(
+        stable_json(
+            {
+                key: value
+                for key, value in observed.items()
+                if key != "binding_sha256"
+            }
+        )
+    )
+    return bool(
+        observed.get("binding_sha256")
+        and observed_digest == str(observed.get("binding_sha256") or "")
+        and str(observed.get("binding_sha256") or "")
+        == str(expected.get("binding_sha256") or "")
+    )
 
 
 def _reasoning_probe_row_verified(
