@@ -691,6 +691,10 @@ environment so an older system Python or a distribution-managed `pip` cannot
 silently select an unsupported interpreter or fail to install the
 `pyproject.toml` package in editable mode:
 
+Both public CLI entry points also fail before any provider I/O when invoked
+with Python 3.8 or 3.9, so an unsupported host interpreter cannot spend remote
+API calls before reaching an incompatible runtime feature.
+
 ```bash
 cd axio_fusion_api
 python3.11 -m venv .venv

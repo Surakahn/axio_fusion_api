@@ -4,6 +4,10 @@ The standalone package requires Python 3.10 or newer. Install it in an
 isolated virtual environment before using the console entrypoint; do not use a
 system Python 3.8/3.9 interpreter or a distribution-managed `pip`:
 
+Both CLI entry points check this requirement before parsing an operation or
+opening a provider connection. An unsupported interpreter exits with code `2`
+and cannot start a discovery, enrollment, or serving attempt.
+
 ```bash
 python3.11 -m venv .venv
 . .venv/bin/activate

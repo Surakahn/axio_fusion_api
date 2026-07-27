@@ -21,6 +21,7 @@ from .providers import HTTPProviderClient
 from .provider_enrollment import enroll_provider_channels
 from .providers import discover_provider_inventory
 from .registry import load_registry
+from .runtime_requirements import ensure_supported_python_runtime
 from .server import (
     build_api_surface_live_smoke,
     build_api_surface_protocol_self_test,
@@ -348,6 +349,8 @@ def cmd_remote_api_execution_audit(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if not ensure_supported_python_runtime():
+        return 2
     parser = build_parser()
     args = parser.parse_args(argv)
     previous_config_path = os.environ.get("AXIO_FUSION_PROVIDER_CONFIG_FILE")

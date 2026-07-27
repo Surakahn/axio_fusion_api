@@ -112,6 +112,7 @@ from .provider_onboarding import (
     review_provider_onboarding_candidate,
 )
 from .provider_enrollment import enroll_provider_channels
+from .runtime_requirements import ensure_supported_python_runtime
 from .providers import (
     build_provider_input_adapter_self_test,
     discover_provider_inventory,
@@ -3117,6 +3118,8 @@ def cmd_tool_execute(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if not ensure_supported_python_runtime():
+        return 2
     parser = build_parser()
     args = parser.parse_args(argv)
     previous_provider_config_file = os.environ.get("AXIO_FUSION_PROVIDER_CONFIG_FILE")
