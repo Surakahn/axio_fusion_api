@@ -127,6 +127,9 @@ request to the same replica. Wrong answers, parser outcomes, labels, and
 scores never trigger a retry. Every failed attempt records only a closed error
 class, a whitelisted provider error code, and an ordinary HTTP status; raw
 provider error text, URLs, and bodies are excluded from the safe evidence.
+If a later same-round replica returns a visible answer, that case ends
+immediately: an earlier recoverable failover remains transport telemetry, but
+does not create a second-round replay requirement.
 
 The generated private registry exposes two deliberately separate projections:
 

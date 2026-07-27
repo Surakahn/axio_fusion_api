@@ -1733,18 +1733,30 @@ def _screening_retry_contract_errors(
         if round_index == 1:
             continue
         previous = attempts_by_round.get(round_index - 1, [])
+        previous_completed = any(
+            str(row.get("status") or "") == "completed" for row in previous
+        )
         expected_profiles = {
             str(row.get("profile_id_sha256") or "")
             for row in previous
             if (failure := _screening_attempt_failure_receipt(row)) is not None
             and failure["retryable"] is True
         }
+        # A successful same-round failover ends the case. Earlier retryable
+        # transport failures in that round are evidence for telemetry, not a
+        # mandate to replay those replicas in a later round.
+        if previous_completed:
+            expected_profiles = set()
         actual_profiles = set(hashes)
         if actual_profiles != expected_profiles:
             errors.append("screening_retry_replica_set_mismatch")
-        if any(str(row.get("status") or "") == "completed" for row in previous):
+        if previous_completed and actual_profiles:
             errors.append("screening_retry_after_completed_attempt")
         receipt = receipt_by_round.get(round_index - 1)
+        if not attempts:
+            if expected_profiles:
+                errors.append("screening_retry_receipt_missing")
+            continue
         if not isinstance(receipt, Mapping):
             errors.append("screening_retry_receipt_missing")
             continue

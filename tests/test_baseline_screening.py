@@ -842,6 +842,48 @@ def test_provider_rejection_uses_next_replica_without_repeat_round():
     assert "PRIVATE_PROVIDER_ERROR_MUST_NOT_PERSIST" not in json.dumps(result)
 
 
+def test_retryable_failover_success_in_same_round_does_not_require_retry_receipt():
+    replicas = [
+        normalize_profile(_registry_rows()[0]),
+        normalize_profile(_registry_rows()[1]),
+    ]
+    decoding = {
+        "max_exception_attempt_rounds": 2,
+        "exception_retry_backoff_ms": 1,
+        "max_output_tokens": 8,
+    }
+    client = _SequenceClient(
+        [
+            ProviderExecutionError(
+                "PRIVATE_PROVIDER_ERROR_MUST_NOT_PERSIST",
+                error_code="provider_request_timeout",
+            ),
+            "A",
+        ]
+    )
+
+    result = _run_screening_case(
+        case=ScreeningCase(
+            case_id="retryable-failover-same-round",
+            prompt="Choose A or B.",
+            reference="A",
+            stratum="fixture",
+            metadata={"adapter": "jsonl_multiple_choice"},
+        ),
+        source={"adapter": "jsonl_multiple_choice"},
+        replicas=replicas,
+        client=client,
+        decoding=decoding,
+        system_prompt="fixture",
+    )
+
+    assert result["status"] == "completed"
+    assert [row["round"] for row in result["attempts"]] == [1, 1]
+    assert [row["status"] for row in result["attempts"]] == ["failed", "completed"]
+    assert result["retry_receipts"] == []
+    assert _screening_retry_contract_errors(result, decoding) == []
+
+
 @pytest.mark.parametrize(
     ("error_code", "http_status", "failure_class"),
     [
