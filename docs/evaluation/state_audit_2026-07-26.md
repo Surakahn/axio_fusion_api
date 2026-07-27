@@ -191,3 +191,21 @@ benchmark remain **not started** for this cohort. No Axio-vs-provider
 superiority claim has been made. This preserves the complete-pool,
 case-paired, and contamination-controlled evaluation contract even though a
 small survivor subset produced usable responses.
+
+## System Readiness Re-audit
+
+After the screening campaign closed, the serving/runtime boundary was
+re-audited against the current calibrated registry. The full Python 3.11
+regression suite passed again with 678 tests in 144.92 seconds. The protocol
+self-test covered all three public Axio models across all four public API
+surfaces: 12 of 12 requests passed, with route consistency across surfaces.
+The provider input adapter self-test covered `chat`, `responses`, `anthropic`,
+and `gemini`; all four adapters were present and passed. These self-tests did
+not make network calls and did not persist prompts, outputs, or credentials.
+
+The system-readiness receipt therefore reports the Fusion implementation as
+ready for a separate benchmark-validation stage. It does not report a final
+model claim: provider baseline freeze remains unavailable, the ranking
+artifact has no assignment, and the target campaign has not been started.
+This distinction keeps engineering readiness separate from scientific
+performance evidence.
