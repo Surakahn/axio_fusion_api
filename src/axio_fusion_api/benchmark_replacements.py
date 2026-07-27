@@ -40,6 +40,13 @@ MMLU_PRO_CATEGORY_ORDER = (
 )
 MMLU_PRO_DEFAULT_PER_CATEGORY = 100
 MMLU_PRO_DEFAULT_SEED = "axio-mmlu-pro-stem-v1"
+MMLU_PRO_SCREENING_DISJOINT_VERSION = "mmlu-pro-stem-v2-screening-disjoint"
+MMLU_PRO_SCREENING_EXCLUSION_SCHEMA = (
+    "axio_fusion_api.mmlu_pro_screening_exclusion_manifest.v1"
+)
+MMLU_PRO_SCREENING_EXCLUSION_RECEIPT_SCHEMA = (
+    "axio_fusion_api.mmlu_pro_screening_exclusion_receipt.v1"
+)
 MMLU_PRO_DEFAULT_RAW_PATH = "/mnt/storage/axio_fusion_benchmarks/raw/mmlu_pro/test-00000-of-00001.parquet"
 MMLU_PRO_DEFAULT_DATASET_PATH = "/mnt/storage/axio_fusion_benchmarks/standardized/mmlu_pro_stem.jsonl"
 MMLU_PRO_DEFAULT_RECEIPT_PATH = "/mnt/storage/axio_fusion_benchmarks/manifests/mmlu_pro_stem_replacement.safe.json"
@@ -83,6 +90,8 @@ def build_mmlu_pro_stem_replacement(
     per_category: int = MMLU_PRO_DEFAULT_PER_CATEGORY,
     seed: str = MMLU_PRO_DEFAULT_SEED,
     expected_raw_sha256: str = MMLU_PRO_EXPECTED_RAW_SHA256,
+    screening_exclusion_manifest_path: str | Path | None = None,
+    replacement_version: str | None = None,
 ) -> dict[str, Any]:
     """Build and optionally publish the MMLU-Pro STEM replacement.
 
@@ -113,6 +122,22 @@ def build_mmlu_pro_stem_replacement(
             "raw_source_byte_count_mismatch",
             details={"actual_bytes": raw_bytes, "expected_bytes": MMLU_PRO_EXPECTED_RAW_BYTES},
         )
+    exclusion = _load_screening_exclusion_manifest(
+        screening_exclusion_manifest_path
+    )
+    if (
+        exclusion["status"] == "verified"
+        and exclusion["screening_mmlu_pro_raw_file_sha256"] != raw_digest
+    ):
+        raise BenchmarkReplacementError(
+            "screening_exclusion_source_snapshot_mismatch",
+            details={
+                "actual_sha256": raw_digest,
+                "expected_sha256": exclusion[
+                    "screening_mmlu_pro_raw_file_sha256"
+                ],
+            },
+        )
     rows = _read_mmlu_pro_rows(raw_path)
     source_counts = Counter(str(row.get("category") or "") for row in rows)
     missing_categories = [
@@ -128,18 +153,33 @@ def build_mmlu_pro_stem_replacement(
                 "expected_row_count": len(MMLU_PRO_CATEGORY_ORDER) * selected_per_category,
             },
         )
-    selected = _select_rows(
+    selected_version = _replacement_version(
+        replacement_version,
+        screening_exclusion_manifest_path=screening_exclusion_manifest_path,
+    )
+    selected, selection_summary = _select_rows(
         rows,
         per_category=selected_per_category,
         seed=selected_seed,
+        replacement_version=selected_version,
+        excluded_source_row_identities=exclusion["source_row_identities"],
     )
+    selected_source_row_identities = selection_summary[
+        "selected_source_row_identities"
+    ]
+    overlap = selected_source_row_identities & exclusion["source_row_identities"]
+    if overlap:
+        raise BenchmarkReplacementError(
+            "screening_case_overlap_detected_after_selection",
+            details={"row_count": len(overlap)},
+        )
     _write_jsonl_atomic(output_path, selected)
     standardized_digest, standardized_bytes = _sha256_file(output_path)
     selected_counts = Counter(str(row["category"]) for row in selected)
     receipt = {
         "schema": "axio_fusion_api.benchmark_replacement_receipt.v1",
         "replacement_id": MMLU_PRO_REPLACEMENT_ID,
-        "replacement_version": MMLU_PRO_REPLACEMENT_VERSION,
+        "replacement_version": selected_version,
         "status": "ready",
         "benchmark_slot_id": MMLU_PRO_REPLACES_SUITE_ID,
         "explicitly_not_gpqa": True,
@@ -169,6 +209,40 @@ def build_mmlu_pro_stem_replacement(
             "ordering": "category_order_then_public_material_selection_key",
             "selection_key": "sha256(seed,revision,category,question,options,source_row_identity)",
             "gold_answers_used_for_selection": False,
+            "screening_case_disjointness": {
+                "status": exclusion["status"],
+                "enforced": exclusion["status"] == "verified",
+                "exclusion_manifest_schema": exclusion["schema"],
+                "exclusion_manifest_content_sha256": exclusion["content_sha256"],
+                "screening_source_manifest_content_sha256": exclusion[
+                    "screening_source_manifest_content_sha256"
+                ],
+                "screening_source_raw_file_sha256": exclusion[
+                    "screening_mmlu_pro_raw_file_sha256"
+                ],
+                "replacement_raw_file_sha256": raw_digest,
+                "screening_mmlu_pro_source_count": exclusion[
+                    "screening_mmlu_pro_source_count"
+                ],
+                "excluded_source_row_identity_count": len(
+                    exclusion["source_row_identities"]
+                ),
+                "excluded_source_row_identity_set_sha256": sha256_text(
+                    stable_json(sorted(exclusion["source_row_identities"]))
+                ),
+                "excluded_matching_source_row_count": selection_summary[
+                    "excluded_matching_source_row_count"
+                ],
+                "selected_source_row_identity_count": len(
+                    selected_source_row_identities
+                ),
+                "selected_source_row_identity_set_sha256": sha256_text(
+                    stable_json(sorted(selected_source_row_identities))
+                ),
+                "selected_overlap_count": len(overlap),
+                "gold_answers_used_for_exclusion": False,
+                "raw_case_ids_persisted": False,
+            },
         },
         "standardized_dataset": {
             "path_sha256": sha256_text(str(output_path)),
@@ -213,6 +287,129 @@ def build_mmlu_pro_stem_replacement(
         }
         _write_json_atomic(receipt_path, receipt)
     return receipt
+
+
+def build_mmlu_pro_screening_exclusion_manifest(
+    *,
+    screening_source_manifest_path: str | Path,
+    output_path: str | Path,
+    safe_receipt_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Bind selected non-target MMLU-Pro rows as target-set exclusions.
+
+    The private manifest intentionally contains only public source row ids. It
+    does not preserve prompts, questions, answer labels, provider outputs, or
+    model ranking outcomes. The matching safe receipt contains counts and
+    hashes only, allowing the replacement builder to prove disjointness without
+    leaking the exclusion set into campaign evidence.
+    """
+
+    source_path = Path(screening_source_manifest_path)
+    try:
+        source_text = source_path.read_text(encoding="utf-8")
+        source_manifest = json.loads(source_text)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise BenchmarkReplacementError("screening_source_manifest_unreadable") from exc
+    if not isinstance(source_manifest, Mapping):
+        raise BenchmarkReplacementError("screening_source_manifest_schema_invalid")
+    if source_manifest.get("schema") != "axio_fusion_api.non_target_screening_source_manifest.v1":
+        raise BenchmarkReplacementError("screening_source_manifest_schema_invalid")
+    pre_registration = source_manifest.get("pre_registration")
+    if not isinstance(pre_registration, Mapping):
+        raise BenchmarkReplacementError("screening_source_manifest_pre_registration_missing")
+    selection_seed = str(pre_registration.get("selection_seed") or "").strip()
+    if not selection_seed:
+        raise BenchmarkReplacementError("screening_source_manifest_selection_seed_missing")
+
+    sources = [
+        dict(source)
+        for source in source_manifest.get("sources", [])
+        if isinstance(source, Mapping) and str(source.get("adapter") or "") == "mmlu_pro"
+    ]
+    if not sources:
+        raise BenchmarkReplacementError("screening_source_manifest_mmlu_pro_source_missing")
+
+    # Import locally so ordinary replacement builds do not pull screening
+    # mechanics into the dataset-only code path.
+    from .baseline_screening import _load_mmlu_pro_cases, _select_screening_cases
+
+    source_rows: list[dict[str, Any]] = []
+    source_raw_snapshots: set[tuple[str, int]] = set()
+    excluded_source_row_identities: set[str] = set()
+    for source in sources:
+        source_id = str(source.get("source_id") or "").strip()
+        if not source_id:
+            raise BenchmarkReplacementError("screening_source_manifest_mmlu_pro_source_id_missing")
+        try:
+            source_dataset_path = Path(str(source.get("dataset_path") or ""))
+            source_dataset_digest, source_dataset_bytes = _sha256_file(
+                source_dataset_path
+            )
+            cases = _load_mmlu_pro_cases(source)
+            selected_cases = _select_screening_cases(
+                cases,
+                source.get("selection"),
+                selection_seed=selection_seed,
+                source_id=source_id,
+            )
+        except Exception as exc:  # noqa: BLE001 - source paths stay private
+            raise BenchmarkReplacementError(
+                "screening_source_manifest_mmlu_pro_case_selection_failed"
+            ) from exc
+        identities = {
+            str(case.case_id).removeprefix("mmlu-pro:")
+            for case in selected_cases
+            if str(case.case_id).startswith("mmlu-pro:")
+        }
+        if len(identities) != len(selected_cases) or not identities:
+            raise BenchmarkReplacementError(
+                "screening_source_manifest_mmlu_pro_case_identity_invalid"
+            )
+        excluded_source_row_identities.update(identities)
+        source_raw_snapshots.add((source_dataset_digest, source_dataset_bytes))
+        source_rows.append(
+            {
+                "source_id_sha256": sha256_text(source_id),
+                "selected_case_count": len(selected_cases),
+                "source_dataset_file_sha256": source_dataset_digest,
+                "source_dataset_file_bytes": source_dataset_bytes,
+                "source_row_identity_set_sha256": sha256_text(
+                    stable_json(sorted(identities))
+                ),
+            }
+        )
+
+    if len(source_raw_snapshots) != 1:
+        raise BenchmarkReplacementError(
+            "screening_source_manifest_mmlu_pro_raw_snapshot_ambiguous"
+        )
+    source_raw_digest, source_raw_bytes = next(iter(source_raw_snapshots))
+    sorted_identities = sorted(excluded_source_row_identities)
+    private_manifest = {
+        "schema": MMLU_PRO_SCREENING_EXCLUSION_SCHEMA,
+        "status": "ready",
+        "screening_source_manifest_content_sha256": sha256_text(source_text),
+        "screening_selection_seed_sha256": sha256_text(selection_seed),
+        "screening_mmlu_pro_source_count": len(source_rows),
+        "screening_mmlu_pro_raw_file_sha256": source_raw_digest,
+        "screening_mmlu_pro_raw_file_bytes": source_raw_bytes,
+        "sources": sorted(source_rows, key=lambda row: row["source_id_sha256"]),
+        "mmlu_pro_source_row_identities": sorted_identities,
+        "mmlu_pro_source_row_identity_set_sha256": sha256_text(
+            stable_json(sorted_identities)
+        ),
+        "raw_questions_persisted": False,
+        "raw_labels_persisted": False,
+        "raw_provider_outputs_persisted": False,
+        "secrets_persisted": False,
+    }
+    _write_json_atomic(output_path, private_manifest)
+    safe_receipt = _screening_exclusion_safe_receipt(
+        private_manifest,
+        private_manifest_path=Path(output_path),
+    )
+    _write_json_atomic(safe_receipt_path, safe_receipt)
+    return safe_receipt
 
 
 def apply_replacement_to_dataset_manifest(
@@ -335,10 +532,20 @@ def _replacement_suite_spec(
         "imported_runs": None,
         "replacement_receipt": {
             "schema": str(replacement_receipt.get("schema") or ""),
+            "replacement_version": str(
+                replacement_receipt.get("replacement_version") or ""
+            ),
             "file_sha256": str((replacement_receipt.get("standardized_dataset") or {}).get("file_sha256") or ""),
             "case_count": case_count,
             "source_revision": MMLU_PRO_REVISION,
+            "raw_file_sha256": str(
+                (replacement_receipt.get("source") or {}).get("raw_file_sha256")
+                or ""
+            ),
             "explicitly_not_gpqa": True,
+            "screening_case_disjointness": _replacement_screening_disjointness_summary(
+                selection
+            ),
         },
         "raw_dataset_content_persisted": False,
         "raw_labels_persisted": False,
@@ -378,7 +585,7 @@ def _read_mmlu_pro_rows(path: Path) -> list[dict[str, Any]]:
     if not _REQUIRED_COLUMNS.issubset(columns):
         raise BenchmarkReplacementError("mmlu_pro_schema_missing_required_columns")
     rows = []
-    for raw in table.to_pylist():
+    for index, raw in enumerate(table.to_pylist()):
         if not isinstance(raw, Mapping):
             raise BenchmarkReplacementError("mmlu_pro_row_not_object")
         row = {
@@ -387,6 +594,7 @@ def _read_mmlu_pro_rows(path: Path) -> list[dict[str, Any]]:
             "answer": str(raw.get("answer") or "").strip().upper(),
             "category": str(raw.get("category") or "").strip().lower(),
             "question_id": str(raw.get("question_id") or ""),
+            "source_row_identity": str(raw.get("question_id") or index),
         }
         if (
             not row["question"]
@@ -405,17 +613,24 @@ def _select_rows(
     *,
     per_category: int,
     seed: str,
-) -> list[dict[str, Any]]:
+    replacement_version: str,
+    excluded_source_row_identities: set[str] | frozenset[str],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     grouped: dict[str, list[tuple[str, Mapping[str, Any]]]] = {category: [] for category in MMLU_PRO_CATEGORY_ORDER}
+    excluded_matching_source_row_count = 0
     for index, row in enumerate(rows):
         category = str(row.get("category") or "")
         if category not in grouped:
+            continue
+        source_row_identity = str(row.get("source_row_identity") or row.get("question_id") or index)
+        if source_row_identity in excluded_source_row_identities:
+            excluded_matching_source_row_count += 1
             continue
         public_material = {
             "category": category,
             "question": str(row.get("question") or ""),
             "options": list(row.get("options") or []),
-            "source_row_identity": str(row.get("question_id") or index),
+            "source_row_identity": source_row_identity,
         }
         selection_key = sha256_text(
             stable_json(
@@ -428,12 +643,30 @@ def _select_rows(
         )
         grouped[category].append((selection_key, row))
     selected: list[dict[str, Any]] = []
+    selected_source_row_identities: set[str] = set()
+    remaining_counts = {
+        category: len(grouped[category]) for category in MMLU_PRO_CATEGORY_ORDER
+    }
+    if any(count < per_category for count in remaining_counts.values()):
+        raise BenchmarkReplacementError(
+            "stem_category_population_insufficient_after_screening_exclusion",
+            details={
+                "row_count": sum(remaining_counts.values()),
+                "expected_row_count": len(MMLU_PRO_CATEGORY_ORDER) * per_category,
+            },
+        )
     for category in MMLU_PRO_CATEGORY_ORDER:
         ordered = sorted(grouped[category], key=lambda item: (item[0], str(item[1].get("question_id") or "")))
         for selection_key, row in ordered[:per_category]:
+            source_row_identity = str(
+                row.get("source_row_identity") or row.get("question_id") or ""
+            )
+            if not source_row_identity:
+                raise BenchmarkReplacementError("mmlu_pro_source_row_identity_missing")
+            selected_source_row_identities.add(source_row_identity)
             selected.append(
                 {
-                    "id": f"{MMLU_PRO_REPLACEMENT_VERSION}::{category}::{selection_key[:16]}",
+                    "id": f"{replacement_version}::{category}::{selection_key[:16]}",
                     "question": str(row["question"]),
                     "options": [str(option) for option in row["options"]],
                     "answer": str(row["answer"]),
@@ -441,7 +674,178 @@ def _select_rows(
                     "subject": f"mmlu_pro_{category.replace(' ', '_')}",
                 }
             )
+    return selected, {
+        "excluded_matching_source_row_count": excluded_matching_source_row_count,
+        "remaining_source_row_count": sum(remaining_counts.values()),
+        "selected_source_row_identities": frozenset(selected_source_row_identities),
+    }
+
+
+def _load_screening_exclusion_manifest(
+    path: str | Path | None,
+) -> dict[str, Any]:
+    if path is None:
+        return {
+            "status": "unverified",
+            "schema": "",
+            "content_sha256": "",
+            "screening_source_manifest_content_sha256": "",
+            "screening_mmlu_pro_source_count": 0,
+            "screening_mmlu_pro_raw_file_sha256": "",
+            "source_row_identities": frozenset(),
+        }
+    selected = Path(path)
+    try:
+        text = selected.read_text(encoding="utf-8")
+        payload = json.loads(text)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise BenchmarkReplacementError("screening_exclusion_manifest_unreadable") from exc
+    if not isinstance(payload, Mapping):
+        raise BenchmarkReplacementError("screening_exclusion_manifest_schema_invalid")
+    if payload.get("schema") != MMLU_PRO_SCREENING_EXCLUSION_SCHEMA:
+        raise BenchmarkReplacementError("screening_exclusion_manifest_schema_invalid")
+    if payload.get("status") != "ready":
+        raise BenchmarkReplacementError("screening_exclusion_manifest_not_ready")
+    raw_identities = payload.get("mmlu_pro_source_row_identities")
+    if (
+        not isinstance(raw_identities, list)
+        or not raw_identities
+        or not all(str(value) for value in raw_identities)
+    ):
+        raise BenchmarkReplacementError("screening_exclusion_manifest_source_row_identities_invalid")
+    identities = [str(value) for value in raw_identities]
+    if len(identities) != len(set(identities)):
+        raise BenchmarkReplacementError("screening_exclusion_manifest_source_row_identities_duplicate")
+    expected_digest = str(payload.get("mmlu_pro_source_row_identity_set_sha256") or "")
+    actual_digest = sha256_text(stable_json(sorted(identities)))
+    if expected_digest != actual_digest:
+        raise BenchmarkReplacementError("screening_exclusion_manifest_source_row_identity_digest_mismatch")
+    screening_source_manifest_digest = str(
+        payload.get("screening_source_manifest_content_sha256") or ""
+    )
+    if not _is_sha256(screening_source_manifest_digest):
+        raise BenchmarkReplacementError("screening_exclusion_manifest_source_manifest_digest_invalid")
+    try:
+        source_count = int(payload.get("screening_mmlu_pro_source_count") or 0)
+    except (TypeError, ValueError) as exc:
+        raise BenchmarkReplacementError(
+            "screening_exclusion_manifest_mmlu_pro_source_count_invalid"
+        ) from exc
+    if source_count < 1:
+        raise BenchmarkReplacementError("screening_exclusion_manifest_mmlu_pro_source_missing")
+    source_raw_digest = str(
+        payload.get("screening_mmlu_pro_raw_file_sha256") or ""
+    )
+    if not _is_sha256(source_raw_digest):
+        raise BenchmarkReplacementError(
+            "screening_exclusion_manifest_source_snapshot_digest_invalid"
+        )
+    return {
+        "status": "verified",
+        "schema": MMLU_PRO_SCREENING_EXCLUSION_SCHEMA,
+        "content_sha256": sha256_text(text),
+        "screening_source_manifest_content_sha256": screening_source_manifest_digest,
+        "screening_mmlu_pro_source_count": source_count,
+        "screening_mmlu_pro_raw_file_sha256": source_raw_digest,
+        "source_row_identities": frozenset(identities),
+    }
+
+
+def _screening_exclusion_safe_receipt(
+    private_manifest: Mapping[str, Any],
+    *,
+    private_manifest_path: Path,
+) -> dict[str, Any]:
+    identities = [
+        str(value)
+        for value in private_manifest.get("mmlu_pro_source_row_identities", [])
+        if str(value)
+    ]
+    return {
+        "schema": MMLU_PRO_SCREENING_EXCLUSION_RECEIPT_SCHEMA,
+        "status": "ready",
+        "private_manifest_path_sha256": sha256_text(str(private_manifest_path)),
+        "private_manifest_content_sha256": _sha256_file(private_manifest_path)[0],
+        "screening_source_manifest_content_sha256": str(
+            private_manifest.get("screening_source_manifest_content_sha256") or ""
+        ),
+        "screening_selection_seed_sha256": str(
+            private_manifest.get("screening_selection_seed_sha256") or ""
+        ),
+        "screening_mmlu_pro_source_count": int(
+            private_manifest.get("screening_mmlu_pro_source_count") or 0
+        ),
+        "screening_mmlu_pro_raw_file_sha256": str(
+            private_manifest.get("screening_mmlu_pro_raw_file_sha256") or ""
+        ),
+        "excluded_source_row_identity_count": len(identities),
+        "excluded_source_row_identity_set_sha256": sha256_text(
+            stable_json(sorted(identities))
+        ),
+        "raw_case_ids_persisted": False,
+        "raw_questions_persisted": False,
+        "raw_labels_persisted": False,
+        "raw_provider_outputs_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _replacement_version(
+    value: str | None,
+    *,
+    screening_exclusion_manifest_path: str | Path | None,
+) -> str:
+    selected = str(value or "").strip()
+    if not selected:
+        selected = (
+            MMLU_PRO_SCREENING_DISJOINT_VERSION
+            if screening_exclusion_manifest_path is not None
+            else MMLU_PRO_REPLACEMENT_VERSION
+        )
+    if not selected or len(selected) > 160:
+        raise BenchmarkReplacementError("replacement_version_invalid")
+    if (
+        screening_exclusion_manifest_path is not None
+        and selected != MMLU_PRO_SCREENING_DISJOINT_VERSION
+    ):
+        raise BenchmarkReplacementError(
+            "screening_disjoint_replacement_version_invalid"
+        )
+    if (
+        screening_exclusion_manifest_path is None
+        and selected == MMLU_PRO_SCREENING_DISJOINT_VERSION
+    ):
+        raise BenchmarkReplacementError(
+            "screening_disjoint_replacement_requires_exclusion_manifest"
+        )
     return selected
+
+
+def _replacement_screening_disjointness_summary(
+    selection: Mapping[str, Any],
+) -> dict[str, Any]:
+    proof = selection.get("screening_case_disjointness")
+    if not isinstance(proof, Mapping):
+        return {}
+    fields = (
+        "status",
+        "enforced",
+        "exclusion_manifest_schema",
+        "exclusion_manifest_content_sha256",
+        "screening_source_manifest_content_sha256",
+        "screening_source_raw_file_sha256",
+        "replacement_raw_file_sha256",
+        "screening_mmlu_pro_source_count",
+        "excluded_source_row_identity_count",
+        "excluded_source_row_identity_set_sha256",
+        "excluded_matching_source_row_count",
+        "selected_source_row_identity_count",
+        "selected_source_row_identity_set_sha256",
+        "selected_overlap_count",
+        "gold_answers_used_for_exclusion",
+        "raw_case_ids_persisted",
+    )
+    return {field: proof.get(field) for field in fields}
 
 
 def _normalize_options(value: Any) -> list[str]:
@@ -541,8 +945,10 @@ __all__ = [
     "MMLU_PRO_EXPECTED_RAW_SHA256",
     "MMLU_PRO_REPLACEMENT_ID",
     "MMLU_PRO_REPLACES_SUITE_ID",
+    "MMLU_PRO_SCREENING_DISJOINT_VERSION",
     "MMLU_PRO_REVISION",
     "MMLU_PRO_SOURCE_URL",
     "apply_replacement_to_dataset_manifest",
+    "build_mmlu_pro_screening_exclusion_manifest",
     "build_mmlu_pro_stem_replacement",
 ]

@@ -38,6 +38,7 @@ from .operational_admission import (
 from .benchmark_replacements import (
     BenchmarkReplacementError,
     apply_replacement_to_dataset_manifest,
+    build_mmlu_pro_screening_exclusion_manifest,
     build_mmlu_pro_stem_replacement,
 )
 from .registry import (
@@ -92,6 +93,7 @@ __all__ = [
     "validate_operational_admission_handoff",
     "BenchmarkReplacementError",
     "apply_replacement_to_dataset_manifest",
+    "build_mmlu_pro_screening_exclusion_manifest",
     "build_mmlu_pro_stem_replacement",
     "discover_runtime_profiles",
     "render_response",

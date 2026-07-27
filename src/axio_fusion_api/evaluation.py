@@ -22,6 +22,11 @@ from .benchmark_acquisition import (
     GPQA_DEFAULT_DOWNLOAD_MANIFEST,
     audit_gpqa_authorized_artifact,
 )
+from .benchmark_replacements import (
+    MMLU_PRO_REPLACEMENT_ID,
+    MMLU_PRO_SCREENING_DISJOINT_VERSION,
+    MMLU_PRO_SCREENING_EXCLUSION_SCHEMA,
+)
 from .compat import canonicalize_payload, normalize_api_format
 from .execution_boundary import build_remote_api_execution_audit
 from .orchestrator import FusionEngine
@@ -8578,6 +8583,7 @@ def audit_benchmark_campaign_readiness(
     manifest = _load_dataset_manifest(dataset_manifest_path)
     suite_specs = _campaign_suite_specs(manifest)
     by_suite = {str(spec.get("suite_id") or ""): spec for spec in suite_specs}
+    invalid_replacement_reasons = _invalid_replacement_reasons_by_slot(suite_specs)
     profiles = load_registry(registry_path)
     registry_claim_readiness = _registry_claim_readiness_receipt(registry_path)
     selection_context = _provider_baseline_selection_context(
@@ -8646,8 +8652,16 @@ def audit_benchmark_campaign_readiness(
         reasons = []
         if not spec:
             reasons.append("missing_suite_spec")
+        reasons.extend(invalid_replacement_reasons.get(suite_id, ()))
         if spec.get("_replacement_invalid_reason"):
             reasons.append(str(spec.get("_replacement_invalid_reason")))
+        replacement_binding_reason = _replacement_dataset_binding_invalid_reason(
+            spec,
+            dataset_path=dataset_path,
+            observed_case_count=case_count,
+        )
+        if replacement_binding_reason:
+            reasons.append(replacement_binding_reason)
         if requires_official_harness and imported_count < len(import_candidate_keys):
             reasons.append("official_harness_imports_incomplete")
         if task_format == "external_pairwise_judge":
@@ -21236,6 +21250,11 @@ def _normalize_benchmark_replacement_spec(spec: Mapping[str, Any]) -> dict[str, 
     ):
         normalized["_replacement_invalid_reason"] = "invalid_explicit_replacement_contract"
         return normalized
+    if replacement_id == MMLU_PRO_REPLACEMENT_ID:
+        disjointness_reason = _mmlu_pro_screening_disjointness_invalid_reason(receipt)
+        if disjointness_reason:
+            normalized["_replacement_invalid_reason"] = disjointness_reason
+            return normalized
     normalized["benchmark_slot_id"] = slot_id
     normalized["benchmark_dataset_id"] = replacement_id
     normalized["replacement_suite_id"] = replacement_id
@@ -21243,6 +21262,117 @@ def _normalize_benchmark_replacement_spec(spec: Mapping[str, Any]) -> dict[str, 
     normalized["replacement_original_title"] = slot.title
     normalized["suite_id"] = slot_id
     return normalized
+
+
+def _invalid_replacement_reasons_by_slot(
+    specs: Sequence[Mapping[str, Any]],
+) -> dict[str, tuple[str, ...]]:
+    """Keep rejected replacements visible to readiness without activating them."""
+
+    by_slot: dict[str, set[str]] = {}
+    for spec in specs:
+        reason = str(spec.get("_replacement_invalid_reason") or "").strip()
+        slot_id = str(
+            spec.get("replaces_suite_id")
+            or spec.get("benchmark_slot_id")
+            or ""
+        ).strip()
+        if reason and slot_id:
+            by_slot.setdefault(slot_id, set()).add(reason)
+    return {slot_id: tuple(sorted(reasons)) for slot_id, reasons in by_slot.items()}
+
+
+def _mmlu_pro_screening_disjointness_invalid_reason(
+    receipt: Mapping[str, Any],
+) -> str:
+    """Require a non-leaking proof that target rows were not ranking rows.
+
+    MMLU-Pro was used by a historic non-target provider-ranking campaign.  A
+    formal target replacement must therefore bind the selected target rows to
+    a source-row exclusion manifest generated from that campaign.  This is
+    intentionally fail-closed: a diagnostic v1 asset remains inspectable but
+    cannot become a formal campaign input.
+    """
+
+    proof = receipt.get("screening_case_disjointness")
+    if not isinstance(proof, Mapping):
+        return "replacement_screening_disjointness_unverified"
+    if (
+        str(receipt.get("replacement_version") or "")
+        != MMLU_PRO_SCREENING_DISJOINT_VERSION
+        or str(proof.get("status") or "") != "verified"
+        or proof.get("enforced") is not True
+        or str(proof.get("exclusion_manifest_schema") or "")
+        != MMLU_PRO_SCREENING_EXCLUSION_SCHEMA
+        or proof.get("gold_answers_used_for_exclusion") is not False
+        or proof.get("raw_case_ids_persisted") is not False
+    ):
+        return "replacement_screening_disjointness_unverified"
+    for field in (
+        "exclusion_manifest_content_sha256",
+        "screening_source_manifest_content_sha256",
+        "screening_source_raw_file_sha256",
+        "replacement_raw_file_sha256",
+        "excluded_source_row_identity_set_sha256",
+        "selected_source_row_identity_set_sha256",
+    ):
+        if not _looks_like_sha256(proof.get(field)):
+            return "replacement_screening_disjointness_unverified"
+    raw_file_sha256 = str(receipt.get("raw_file_sha256") or "")
+    if (
+        not _looks_like_sha256(raw_file_sha256)
+        or proof.get("screening_source_raw_file_sha256") != raw_file_sha256
+        or proof.get("replacement_raw_file_sha256") != raw_file_sha256
+    ):
+        return "replacement_screening_disjointness_unverified"
+    case_count = _optional_int(receipt.get("case_count"))
+    excluded_count = _optional_int(proof.get("excluded_source_row_identity_count"))
+    selected_count = _optional_int(proof.get("selected_source_row_identity_count"))
+    screening_source_count = _optional_int(proof.get("screening_mmlu_pro_source_count"))
+    overlap_count = _optional_int(proof.get("selected_overlap_count"))
+    if (
+        case_count is None
+        or case_count < 1
+        or excluded_count is None
+        or excluded_count < 1
+        or selected_count != case_count
+        or screening_source_count is None
+        or screening_source_count < 1
+        or overlap_count != 0
+    ):
+        return "replacement_screening_disjointness_unverified"
+    return ""
+
+
+def _replacement_dataset_binding_invalid_reason(
+    spec: Mapping[str, Any],
+    *,
+    dataset_path: str,
+    observed_case_count: int,
+) -> str:
+    """Bind an activated replacement receipt to the exact target artifact.
+
+    A case-disjointness proof is only meaningful when the evaluated JSONL is
+    the one whose digest and case count were recorded by the replacement
+    builder.  Missing data is reported by the normal suite readiness checks;
+    this helper handles only mismatches that would otherwise look ready.
+    """
+
+    if spec.get("replacement_active") is not True:
+        return ""
+    receipt = spec.get("replacement_receipt")
+    if not isinstance(receipt, Mapping):
+        return "replacement_dataset_receipt_binding_unverified"
+    expected_digest = str(receipt.get("file_sha256") or "")
+    expected_case_count = _optional_int(receipt.get("case_count"))
+    if not _looks_like_sha256(expected_digest) or expected_case_count is None:
+        return "replacement_dataset_receipt_binding_unverified"
+    if dataset_path and Path(dataset_path).is_file():
+        if _file_sha256(Path(dataset_path)) != expected_digest:
+            return "replacement_dataset_receipt_hash_mismatch"
+        if observed_case_count != expected_case_count:
+            return "replacement_dataset_receipt_case_count_mismatch"
+    return ""
 
 
 def _annotate_benchmark_run_identity(

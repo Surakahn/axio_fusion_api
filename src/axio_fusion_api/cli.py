@@ -18,6 +18,7 @@ from .benchmark_replacements import (
     MMLU_PRO_DEFAULT_RAW_PATH,
     MMLU_PRO_DEFAULT_RECEIPT_PATH,
     MMLU_PRO_DEFAULT_SEED,
+    build_mmlu_pro_screening_exclusion_manifest,
     build_mmlu_pro_stem_replacement,
 )
 from .baseline_screening import (
@@ -783,6 +784,32 @@ def build_parser() -> argparse.ArgumentParser:
     gpqa_acquire.add_argument("--output", default=None)
     gpqa_acquire.set_defaults(func=cmd_benchmark_acquire_gpqa_diamond)
 
+    mmlu_pro_exclusion = sub.add_parser(
+        "benchmark-build-mmlu-pro-screening-exclusion-manifest",
+        help=(
+            "Build a private source-row exclusion manifest from a pre-registered "
+            "non-target MMLU-Pro screening source manifest."
+        ),
+    )
+    mmlu_pro_exclusion.add_argument(
+        "--screening-source-manifest",
+        required=True,
+        help="Private non-target screening source manifest.",
+    )
+    mmlu_pro_exclusion.add_argument(
+        "--output",
+        required=True,
+        help="Private exclusion manifest; it contains public source-row identities.",
+    )
+    mmlu_pro_exclusion.add_argument(
+        "--safe-output",
+        default=None,
+        help="Optional safe count-and-hash receipt.",
+    )
+    mmlu_pro_exclusion.set_defaults(
+        func=cmd_benchmark_build_mmlu_pro_screening_exclusion_manifest
+    )
+
     mmlu_pro_replacement = sub.add_parser(
         "benchmark-build-mmlu-pro-stem-replacement",
         help=(
@@ -805,6 +832,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     mmlu_pro_replacement.add_argument("--per-category", type=int, default=100)
     mmlu_pro_replacement.add_argument("--seed", default=MMLU_PRO_DEFAULT_SEED)
+    mmlu_pro_replacement.add_argument(
+        "--screening-exclusion-manifest",
+        default=None,
+        help=(
+            "Private MMLU-Pro source-row exclusion manifest. Required for a "
+            "formal screening-disjoint replacement."
+        ),
+    )
+    mmlu_pro_replacement.add_argument(
+        "--replacement-version",
+        default=None,
+        help="Explicit replacement version; screening-disjoint builds require the current v2 version.",
+    )
     mmlu_pro_replacement.set_defaults(func=cmd_benchmark_build_mmlu_pro_stem_replacement)
 
     matrix = sub.add_parser("benchmark-matrix")
@@ -2232,12 +2272,32 @@ def cmd_benchmark_build_mmlu_pro_stem_replacement(args: argparse.Namespace) -> i
             replacement_dataset_manifest_path=args.replacement_manifest,
             per_category=args.per_category,
             seed=args.seed,
+            screening_exclusion_manifest_path=args.screening_exclusion_manifest,
+            replacement_version=args.replacement_version,
         )
         exit_code = 0
     except BenchmarkReplacementError as exc:
         payload = exc.safe_receipt()
         exit_code = 2
     _emit_json(payload, output=args.output)
+    return exit_code
+
+
+def cmd_benchmark_build_mmlu_pro_screening_exclusion_manifest(
+    args: argparse.Namespace,
+) -> int:
+    try:
+        payload = build_mmlu_pro_screening_exclusion_manifest(
+            screening_source_manifest_path=args.screening_source_manifest,
+            output_path=args.output,
+            safe_receipt_path=args.safe_output,
+        )
+        exit_code = 0
+    except BenchmarkReplacementError as exc:
+        payload = exc.safe_receipt()
+        exit_code = 2
+    # --output is intentionally the private manifest, never the emitted receipt.
+    _emit_json(payload)
     return exit_code
 
 
