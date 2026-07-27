@@ -131,6 +131,16 @@ If a later same-round replica returns a visible answer, that case ends
 immediately: an earlier recoverable failover remains transport telemetry, but
 does not create a second-round replay requirement.
 
+The provider transport's local `traffic_control` contract is also part of the
+frozen screening implementation binding. A shared upstream key pool treats a
+429 as a channel/profile cooldown rather than permission to sweep every key;
+the standard `Retry-After` header is honored only within the configured
+cooldown cap, and a missing or malformed header uses the fixed fallback. Gate
+waiting consumes the same per-request 90-second ceiling. A change to transport
+rate-limit, key-pool, streaming, or retry implementation invalidates an
+existing plan and requires a fresh freeze; previously collected scores are not
+merged into that new campaign.
+
 The generated private registry exposes two deliberately separate projections:
 
 - `models` contains each eligible physical profile because the provider and

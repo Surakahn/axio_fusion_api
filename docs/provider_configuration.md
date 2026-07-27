@@ -120,6 +120,45 @@ caller level. Actual wire forwarding remains profile-specific, so an
 unverified model receives no reasoning parameter even when a logical role
 budget exists.
 
+## Upstream Traffic Control
+
+`traffic_control` is a closed, local scheduling contract for a provider
+profile. It never changes the upstream request body and it stores neither an
+endpoint nor a credential. It may be declared on a provider and overridden on
+an individual model; the runtime normalizes only these fields:
+
+```json
+{
+  "traffic_control": {
+    "scope": "channel",
+    "max_in_flight": 1,
+    "min_request_interval_ms": 0,
+    "post_rate_limit_min_request_interval_ms": 1000,
+    "rate_limit_key_pool": "shared",
+    "fallback_cooldown_ms": 5000,
+    "max_cooldown_ms": 60000
+  }
+}
+```
+
+`scope: "profile"` applies to one physical provider/model profile. `scope:
+"channel"` shares a gate across models that use the same provider endpoint
+and credential environment, which is appropriate when a gateway applies a
+single account-level quota. `max_in_flight: 0` is initially unconstrained;
+after an observed `429`, that scope becomes serial unless an explicit finite
+limit was configured. The post-limit interval remains active for the process
+lifetime so a single successful retry cannot immediately recreate a burst.
+
+`rate_limit_key_pool: "shared"` is the conservative default. A `429` stops
+the current logical call from sweeping through the rest of its API-key pool;
+the next request waits for a bounded `Retry-After` value, or the configured
+fallback when the header is absent. `independent` is reserved for operators
+who know each key has an independent quota. Every gate wait is charged to the
+same per-turn 90-second deadline. If the wait cannot fit, the transport fails
+with the closed `rate_limit_cooldown_exceeded` code instead of sending a late
+request. Safe receipts retain only wait milliseconds, rate-limit event counts,
+and whether a shared-pool short circuit occurred.
+
 For a normal deployment, set `AXIO_FUSION_PROVIDER_CONFIG_FILE` to a JSON file
 such as `config/provider_configs.example.json`. The file may contain provider
 labels, environment variable names, and model aliases, but never copied endpoint

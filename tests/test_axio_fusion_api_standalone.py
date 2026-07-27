@@ -11782,6 +11782,7 @@ def test_standalone_provider_rotates_gemini_query_keys_and_sanitizes_failures(mo
             "api_format": "gemini",
             "base_url_env": "GEMINI_BASE_URL",
             "api_key_env": "GEMINI_API_KEY",
+            "traffic_control": {"rate_limit_key_pool": "independent"},
         }
     )
     request = canonicalize_payload(

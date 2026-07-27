@@ -10728,6 +10728,11 @@ def _profile_from_safe_dict(value: Mapping[str, Any]) -> ModelProfile:
             if isinstance(value.get("reasoning_transport"), Mapping)
             else {}
         ),
+        traffic_control=(
+            dict(value.get("traffic_control"))
+            if isinstance(value.get("traffic_control"), Mapping)
+            else {}
+        ),
         enabled=value.get("enabled") is not False,
         health=str(value.get("health") or "unknown"),
         source=str(value.get("source") or "route_plan"),

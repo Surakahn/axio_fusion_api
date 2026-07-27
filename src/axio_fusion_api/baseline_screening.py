@@ -31,6 +31,7 @@ from .providers import (
     HTTPProviderClient,
     ProviderExecutionError,
     ensure_strict_streaming_client,
+    provider_transport_implementation_sha256,
     profile_credential_readiness,
 )
 from .registry import load_registry
@@ -1017,9 +1018,12 @@ def _screening_source_receipt(
     adapter_implementation_sha256 = _screening_adapter_implementation_sha256(
         adapter
     )
+    provider_transport_sha256 = provider_transport_implementation_sha256()
     decoding_receipt = _safe_decoding_receipt(source.get("decoding"))
     if not _looks_like_sha256(adapter_implementation_sha256):
         blockers.append("screening_source_adapter_implementation_digest_missing")
+    if not _looks_like_sha256(provider_transport_sha256):
+        blockers.append("screening_source_provider_transport_digest_missing")
     snapshot_input = {
         "source_id": source_id,
         "source_family": source_family,
@@ -1033,6 +1037,7 @@ def _screening_source_receipt(
         "selected_case_hashes": case_hashes,
         **case_contract,
         "adapter_implementation_sha256": adapter_implementation_sha256,
+        "provider_transport_implementation_sha256": provider_transport_sha256,
     }
     source_snapshot_sha256 = sha256_text(stable_json(snapshot_input))
     declared_snapshot = str(source.get("source_snapshot_sha256") or "")
@@ -1063,6 +1068,7 @@ def _screening_source_receipt(
             "case_set_digest_sha256": sha256_text(stable_json(case_hashes)),
             **case_contract,
             "adapter_implementation_sha256": adapter_implementation_sha256,
+            "provider_transport_implementation_sha256": provider_transport_sha256,
             "case_id_hashes": case_hashes,
             "stratum_count": len({case.stratum for case in selected_cases}),
             "selection_policy": _safe_selection_policy(source.get("selection")),
@@ -2007,6 +2013,9 @@ def _screening_adapter_implementation_sha256(adapter: str) -> str:
     contract = {
         "adapter": str(adapter),
         "source_rows": source_rows,
+        "provider_transport_implementation_sha256": (
+            provider_transport_implementation_sha256()
+        ),
         "mmlu_answer_patterns": [
             pattern.pattern for pattern in _MMLU_ANSWER_PATTERNS
         ],
@@ -2424,6 +2433,10 @@ def run_non_target_screening_campaign(
             )
         ):
             blockers.append("screening_campaign_adapter_implementation_mismatch")
+        if str(receipt.get("provider_transport_implementation_sha256") or "") != str(
+            provider_transport_implementation_sha256()
+        ):
+            blockers.append("screening_campaign_provider_transport_implementation_mismatch")
         selected_cases[source_hash] = cases
 
     task_rows = [

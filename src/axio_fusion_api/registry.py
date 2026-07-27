@@ -814,6 +814,15 @@ def _profile_from_probe_row(row: Mapping[str, Any], *, status: str) -> ModelProf
             if isinstance(row.get("reasoning_transport"), Mapping)
             else {}
         ),
+        "traffic_control": (
+            dict(row.get("traffic_control"))
+            if isinstance(row.get("traffic_control"), Mapping)
+            else (
+                dict(row.get("trafficControl"))
+                if isinstance(row.get("trafficControl"), Mapping)
+                else {}
+            )
+        ),
         "privacy_tags": row.get("privacy_tags", ["external_provider"]),
         "base_url_env": row.get("base_url_env"),
         "api_key_env": row.get("api_key_env"),
@@ -1734,6 +1743,15 @@ def normalize_profile(raw: Mapping[str, Any]) -> ModelProfile:
             else (
                 dict(raw.get("reasoningTransport"))
                 if isinstance(raw.get("reasoningTransport"), Mapping)
+                else {}
+            )
+        ),
+        traffic_control=(
+            dict(raw.get("traffic_control"))
+            if isinstance(raw.get("traffic_control"), Mapping)
+            else (
+                dict(raw.get("trafficControl"))
+                if isinstance(raw.get("trafficControl"), Mapping)
                 else {}
             )
         ),
@@ -3047,6 +3065,15 @@ def provider_seed_profiles_from_env(provider_names: Sequence[str] | None = None)
                         if isinstance(config.get("reasoning_transport"), Mapping)
                         else {}
                     ),
+                    "traffic_control": (
+                        dict(config.get("traffic_control"))
+                        if isinstance(config.get("traffic_control"), Mapping)
+                        else (
+                            dict(config.get("trafficControl"))
+                            if isinstance(config.get("trafficControl"), Mapping)
+                            else {}
+                        )
+                    ),
                     "privacy_tags": config.get("privacy_tags", ["external_provider"]),
                     "source": "environment_provider_config",
                 }
@@ -3116,6 +3143,15 @@ def provider_discovery_priors_from_env(provider_names: Sequence[str] | None = No
                 dict(config.get("reasoning_transport"))
                 if isinstance(config.get("reasoning_transport"), Mapping)
                 else {}
+            ),
+            "traffic_control": (
+                dict(config.get("traffic_control"))
+                if isinstance(config.get("traffic_control"), Mapping)
+                else (
+                    dict(config.get("trafficControl"))
+                    if isinstance(config.get("trafficControl"), Mapping)
+                    else {}
+                )
             ),
             "privacy_tags": config.get("privacy_tags", ["external_provider"]),
             "model_priors": model_priors,
@@ -3200,6 +3236,12 @@ def _custom_provider_models_from_config(config: Mapping[str, Any]) -> list[dict[
                     config,
                     model_config,
                     "reasoning_transport",
+                    default={},
+                ),
+                "traffic_control": _model_config_value(
+                    config,
+                    model_config,
+                    "traffic_control",
                     default={},
                 ),
                 "privacy_tags": _model_config_value(config, model_config, "privacy_tags", default=["external_provider"]),
@@ -3509,6 +3551,11 @@ def _sanitize_provider_config(config: Mapping[str, Any]) -> dict[str, Any]:
             if isinstance(config.get("reasoning_transport"), Mapping)
             else config.get("reasoningTransport", {})
         ),
+        "traffic_control": (
+            config.get("traffic_control")
+            if isinstance(config.get("traffic_control"), Mapping)
+            else config.get("trafficControl", {})
+        ),
         "privacy_tags": config.get("privacy_tags", ["external_provider"]),
     }
 
@@ -3631,6 +3678,7 @@ def _normalize_model_config_row(row: Mapping[str, Any]) -> dict[str, Any]:
         "canonicalModel": "canonical_model",
         "canonicalIdentity": "canonical_identity",
         "reasoningTransport": "reasoning_transport",
+        "trafficControl": "traffic_control",
     }
     for source, target in alias_pairs.items():
         if target not in result and source in result:
@@ -3696,6 +3744,12 @@ def _discovery_model_priors_for_config(config: Mapping[str, Any]) -> dict[str, d
                 config,
                 model_config,
                 "reasoning_transport",
+                default={},
+            ),
+            "traffic_control": _model_config_value(
+                config,
+                model_config,
+                "traffic_control",
                 default={},
             ),
             "privacy_tags": _model_config_value(config, model_config, "privacy_tags", default=["external_provider"]),

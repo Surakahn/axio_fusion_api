@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import os
 import socket
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import replace
+from dataclasses import dataclass, replace
+from datetime import timezone
+from email.utils import parsedate_to_datetime
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -56,10 +59,34 @@ from .tool_contract import (
 
 
 class ProviderExecutionError(RuntimeError):
-    def __init__(self, message: str, *, error_code: str = "", http_status: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_code: str = "",
+        http_status: int | None = None,
+        retry_after_seconds: float | None = None,
+        traffic_control_wait_ms: float = 0.0,
+    ) -> None:
         super().__init__(message)
         self.error_code = error_code
         self.http_status = http_status
+        try:
+            retry_after = float(retry_after_seconds) if retry_after_seconds is not None else None
+        except (TypeError, ValueError):
+            retry_after = None
+        self.retry_after_seconds = (
+            retry_after
+            if retry_after is not None
+            and retry_after == retry_after
+            and 0.0 <= retry_after <= 86_400.0
+            else None
+        )
+        try:
+            wait_ms = float(traffic_control_wait_ms)
+        except (TypeError, ValueError):
+            wait_ms = 0.0
+        self.traffic_control_wait_ms = max(0.0, min(90_000.0, wait_ms))
 
 
 class ProviderCompletion:
@@ -294,6 +321,240 @@ def _text_from_value(value: Any, *, _depth: int = 0) -> str:
 _PROVIDER_KEY_ROTATION_LOCK = threading.Lock()
 _PROVIDER_KEY_ROTATION_CURSORS: dict[str, int] = {}
 _PROVIDER_REQUEST_TRACE_LOCAL = threading.local()
+_PROVIDER_TRAFFIC_GATE_CONDITION = threading.Condition(threading.Lock())
+_PROVIDER_TRAFFIC_GATES: dict[str, "_ProviderTrafficGateState"] = {}
+
+
+@dataclass
+class _ProviderTrafficGateState:
+    """Process-local pacing state for one safe, hashed upstream scope."""
+
+    in_flight: int = 0
+    next_allowed_at: float = 0.0
+    rate_limited: bool = False
+    rate_limit_event_count: int = 0
+
+
+@dataclass(frozen=True)
+class _ProviderTrafficGateLease:
+    gate_key: str
+    wait_ms: float
+    settings: Mapping[str, Any]
+
+
+def _traffic_control_settings(profile: ModelProfile) -> dict[str, Any]:
+    """Read the closed local scheduling contract from a normalized profile."""
+
+    raw = profile.traffic_control if isinstance(profile.traffic_control, Mapping) else {}
+
+    def bounded(value: Any, *, default: int, minimum: int, maximum: int) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            parsed = default
+        return max(minimum, min(maximum, parsed))
+
+    scope = str(raw.get("scope") or "profile").strip().casefold()
+    if scope not in {"profile", "channel"}:
+        scope = "profile"
+    key_pool = str(raw.get("rate_limit_key_pool") or "shared").strip().casefold()
+    if key_pool not in {"shared", "independent"}:
+        key_pool = "shared"
+    fallback_cooldown_ms = bounded(
+        raw.get("fallback_cooldown_ms"),
+        default=5_000,
+        minimum=1,
+        maximum=90_000,
+    )
+    return {
+        "scope": scope,
+        "max_in_flight": bounded(
+            raw.get("max_in_flight"), default=0, minimum=0, maximum=32
+        ),
+        "min_request_interval_ms": bounded(
+            raw.get("min_request_interval_ms"), default=0, minimum=0, maximum=90_000
+        ),
+        "post_rate_limit_min_request_interval_ms": bounded(
+            raw.get("post_rate_limit_min_request_interval_ms"),
+            default=1_000,
+            minimum=0,
+            maximum=90_000,
+        ),
+        "rate_limit_key_pool": key_pool,
+        "fallback_cooldown_ms": fallback_cooldown_ms,
+        "max_cooldown_ms": bounded(
+            raw.get("max_cooldown_ms"),
+            default=60_000,
+            minimum=fallback_cooldown_ms,
+            maximum=90_000,
+        ),
+    }
+
+
+def _provider_traffic_gate_key(
+    profile: ModelProfile,
+    *,
+    base_url: str,
+    api_key: str,
+    settings: Mapping[str, Any],
+) -> str:
+    """Return an in-memory-only traffic scope key without retaining secrets."""
+
+    key_pool = str(settings.get("rate_limit_key_pool") or "shared")
+    binding: dict[str, Any] = {
+        "provider_sha256": sha256_text(profile.provider),
+        "base_url_sha256": sha256_text(base_url),
+        "api_key_env_sha256": sha256_text(profile.api_key_env),
+        "auth_scheme": _auth_scheme(profile, key_as_query=profile.api_format == "gemini"),
+        "scope": str(settings.get("scope") or "profile"),
+        "rate_limit_key_pool": key_pool,
+    }
+    if binding["scope"] == "profile":
+        binding["profile_id_sha256"] = sha256_text(profile.profile_id)
+    if key_pool == "shared":
+        binding["api_key_pool_sha256"] = sha256_text(
+            stable_json([sha256_text(value) for value in _api_keys(profile)])
+        )
+    else:
+        binding["api_key_sha256"] = sha256_text(api_key)
+    return sha256_text(stable_json(binding))
+
+
+def _traffic_gate_wait_error(
+    *,
+    state: _ProviderTrafficGateState,
+    wait_ms: float,
+    timeout_budget: float,
+    fusion_deadline_bound: bool,
+) -> ProviderExecutionError:
+    error_code = (
+        "rate_limit_cooldown_exceeded"
+        if state.rate_limited
+        else _timeout_error_code(
+            budget=timeout_budget,
+            fusion_deadline_bound=fusion_deadline_bound,
+        )
+    )
+    return ProviderExecutionError(
+        "provider traffic control wait exceeded request deadline",
+        error_code=error_code,
+        traffic_control_wait_ms=wait_ms,
+    )
+
+
+def _acquire_provider_traffic_gate(
+    profile: ModelProfile,
+    *,
+    base_url: str,
+    api_key: str,
+    deadline_at: float,
+    timeout_budget: float,
+    fusion_deadline_bound: bool,
+) -> _ProviderTrafficGateLease:
+    """Acquire one local upstream transport slot within the caller deadline.
+
+    The gate exists only in process memory. A default ``max_in_flight=0`` is
+    deliberately unconstrained until the scope emits a 429; after that event,
+    the same scope becomes serial unless the operator explicitly configured a
+    finite concurrency. This protects shared gateway quotas without pretending
+    that alternate API keys are independent quotas.
+    """
+
+    settings = _traffic_control_settings(profile)
+    gate_key = _provider_traffic_gate_key(
+        profile,
+        base_url=base_url,
+        api_key=api_key,
+        settings=settings,
+    )
+    started_at = time.monotonic()
+    with _PROVIDER_TRAFFIC_GATE_CONDITION:
+        state = _PROVIDER_TRAFFIC_GATES.setdefault(gate_key, _ProviderTrafficGateState())
+        while True:
+            now = time.monotonic()
+            configured_limit = int(settings["max_in_flight"])
+            effective_limit = (
+                configured_limit
+                if configured_limit > 0
+                else (1 if state.rate_limited else 0)
+            )
+            capacity_blocked = effective_limit > 0 and state.in_flight >= effective_limit
+            spacing_blocked = state.next_allowed_at > now
+            if not capacity_blocked and not spacing_blocked:
+                state.in_flight += 1
+                interval_ms = (
+                    int(settings["post_rate_limit_min_request_interval_ms"])
+                    if state.rate_limited
+                    else int(settings["min_request_interval_ms"])
+                )
+                if interval_ms > 0:
+                    state.next_allowed_at = max(state.next_allowed_at, now) + (
+                        interval_ms / 1000.0
+                    )
+                return _ProviderTrafficGateLease(
+                    gate_key=gate_key,
+                    wait_ms=max(0.0, (time.monotonic() - started_at) * 1000.0),
+                    settings=settings,
+                )
+
+            remaining = float(deadline_at) - now
+            wait_seconds = (
+                max(0.0, state.next_allowed_at - now)
+                if spacing_blocked
+                else max(0.0, remaining)
+            )
+            waited_ms = max(0.0, (now - started_at) * 1000.0)
+            if remaining <= 0.001 or (
+                spacing_blocked and wait_seconds >= max(0.0, remaining - 0.001)
+            ):
+                raise _traffic_gate_wait_error(
+                    state=state,
+                    wait_ms=waited_ms,
+                    timeout_budget=timeout_budget,
+                    fusion_deadline_bound=fusion_deadline_bound,
+                )
+            _PROVIDER_TRAFFIC_GATE_CONDITION.wait(
+                timeout=max(0.001, min(wait_seconds, remaining))
+            )
+
+
+def _release_provider_traffic_gate(lease: _ProviderTrafficGateLease) -> None:
+    with _PROVIDER_TRAFFIC_GATE_CONDITION:
+        state = _PROVIDER_TRAFFIC_GATES.get(lease.gate_key)
+        if state is not None:
+            state.in_flight = max(0, state.in_flight - 1)
+        _PROVIDER_TRAFFIC_GATE_CONDITION.notify_all()
+
+
+def _record_provider_rate_limit(
+    lease: _ProviderTrafficGateLease,
+    *,
+    retry_after_seconds: float | None,
+) -> tuple[int, int]:
+    """Apply a bounded cooldown after an observed 429 and return safe metrics."""
+
+    settings = lease.settings
+    fallback_ms = int(settings["fallback_cooldown_ms"])
+    max_cooldown_ms = int(settings["max_cooldown_ms"])
+    try:
+        header_ms = float(retry_after_seconds) * 1000.0
+    except (TypeError, ValueError):
+        header_ms = -1.0
+    cooldown_ms = fallback_ms if header_ms < 0.0 else int(round(header_ms))
+    cooldown_ms = max(0, min(max_cooldown_ms, cooldown_ms))
+    with _PROVIDER_TRAFFIC_GATE_CONDITION:
+        state = _PROVIDER_TRAFFIC_GATES.setdefault(
+            lease.gate_key, _ProviderTrafficGateState()
+        )
+        state.rate_limited = True
+        state.rate_limit_event_count += 1
+        state.next_allowed_at = max(
+            state.next_allowed_at,
+            time.monotonic() + cooldown_ms / 1000.0,
+        )
+        event_count = state.rate_limit_event_count
+        _PROVIDER_TRAFFIC_GATE_CONDITION.notify_all()
+    return cooldown_ms, event_count
 
 
 def _begin_provider_request_trace() -> None:
@@ -313,6 +574,9 @@ def _record_provider_request_receipt(
     stream_content_type: str = "",
     stream_frame_count: int = 0,
     strict_streaming_requested: bool = False,
+    traffic_control_wait_ms: float = 0.0,
+    rate_limit_event_count: int = 0,
+    shared_key_pool_short_circuit: bool = False,
 ) -> None:
     receipts = getattr(_PROVIDER_REQUEST_TRACE_LOCAL, "receipts", None)
     if not isinstance(receipts, list):
@@ -330,6 +594,12 @@ def _record_provider_request_receipt(
             "stream_content_type": str(stream_content_type or "")[:120],
             "stream_frame_count": max(0, int(stream_frame_count or 0)),
             "strict_streaming_requested": bool(strict_streaming_requested),
+            "traffic_control_wait_ms": round(
+                max(0.0, min(90_000.0, float(traffic_control_wait_ms or 0.0))),
+                3,
+            ),
+            "rate_limit_event_count": max(0, int(rate_limit_event_count or 0)),
+            "shared_key_pool_short_circuit": bool(shared_key_pool_short_circuit),
         }
     )
 
@@ -377,6 +647,16 @@ def _finish_provider_request_trace() -> dict[str, Any]:
         "stream_frame_count": sum(max(0, int(row.get("stream_frame_count") or 0)) for row in rows),
         "strict_streaming_requested": any(
             row.get("strict_streaming_requested") is True for row in rows
+        ),
+        "traffic_control_wait_ms": round(
+            sum(max(0.0, float(row.get("traffic_control_wait_ms") or 0.0)) for row in rows),
+            3,
+        ),
+        "rate_limit_event_count": sum(
+            max(0, int(row.get("rate_limit_event_count") or 0)) for row in rows
+        ),
+        "shared_key_pool_short_circuit": any(
+            row.get("shared_key_pool_short_circuit") is True for row in rows
         ),
     }
 
@@ -2698,6 +2978,12 @@ def _discovered_profile_row(
             "reasoning_transport",
             getattr(seed, "reasoning_transport", {}),
         ),
+        "traffic_control": _prior_value(
+            model_prior,
+            prior,
+            "traffic_control",
+            getattr(seed, "traffic_control", {}),
+        ),
         "privacy_tags": _prior_value(model_prior, prior, "privacy_tags", list(seed.privacy_tags)),
         "source": "live_model_list",
     }
@@ -3678,7 +3964,6 @@ def _post_json(
     stream_requested = bool(payload.get("stream")) or "streamGenerateContent" in path
     key_attempts = _rotated_api_key_attempts(profile)
     api_keys = [api_key for api_key, _ in key_attempts]
-    credential_attempt_count = len(api_keys) if key_required else 0
     if base_url_readiness["configured"] is not True:
         _record_provider_request_receipt(
             status="failed",
@@ -3719,11 +4004,19 @@ def _post_json(
     attempts = []
     last_error: ProviderExecutionError | None = None
     max_attempts_per_key = _max_attempts_per_key()
-    deadline_at = time.monotonic() + _provider_timeout_budget(timeout)
+    timeout_budget = _provider_timeout_budget(timeout)
+    deadline_at = time.monotonic() + timeout_budget
     transport_attempt_count = 0
+    attempted_key_indices: set[int] = set()
     last_canonical_key_index: int | None = None
+    traffic_control_wait_ms = 0.0
+    rate_limit_event_count = 0
+    shared_key_pool_short_circuit = False
+    traffic_settings = _traffic_control_settings(profile)
+    stop_key_failover = False
     for key_attempt_index, (api_key, canonical_key_index) in enumerate(key_attempts, start=1):
-        last_canonical_key_index = canonical_key_index
+        if stop_key_failover:
+            break
         request_url = _url_with_api_key(url, api_key, key_as_query=auth_scheme == "query")
         headers = _provider_headers(content_type=True)
         if stream_requested and require_streaming:
@@ -3732,7 +4025,38 @@ def _post_json(
         if extra_headers:
             headers.update(dict(extra_headers))
         for retry_attempt_index in range(1, max_attempts_per_key + 1):
+            try:
+                lease = _acquire_provider_traffic_gate(
+                    profile,
+                    base_url=base_url,
+                    api_key=api_key,
+                    deadline_at=deadline_at,
+                    timeout_budget=timeout_budget,
+                    fusion_deadline_bound=bool(fusion_deadline_bound),
+                )
+            except ProviderExecutionError as exc:
+                last_error = exc
+                traffic_control_wait_ms += exc.traffic_control_wait_ms
+                attempts.append(
+                    _safe_attempt_receipt(
+                        transport_attempt_count,
+                        exc,
+                        key_attempt_index=key_attempt_index,
+                        retry_attempt_index=retry_attempt_index,
+                        retryable=False,
+                        transport_attempted=False,
+                    )
+                )
+                if traffic_settings["rate_limit_key_pool"] == "shared":
+                    shared_key_pool_short_circuit = True
+                    stop_key_failover = True
+                break
+
+            traffic_control_wait_ms += lease.wait_ms
             transport_attempt_count += 1
+            if canonical_key_index >= 0:
+                attempted_key_indices.add(canonical_key_index)
+                last_canonical_key_index = canonical_key_index
             request = urllib.request.Request(
                 request_url,
                 data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -3740,49 +4064,48 @@ def _post_json(
                 method="POST",
             )
             try:
-                remaining_timeout = _remaining_timeout(deadline_at)
-                stream_observed = False
-                stream_fallback_used = False
-                stream_protocol = ""
-                stream_content_type = ""
-                stream_frame_count = 0
-                if stream_requested:
-                    (
-                        result,
-                        stream_observed,
-                        stream_fallback_used,
-                        stream_protocol,
-                        stream_content_type,
-                        stream_frame_count,
-                    ) = _open_stream_json_request(
-                        request,
-                        profile=profile,
-                        api_format=_provider_adapter_format(profile.api_format),
-                        timeout=remaining_timeout,
-                        require_streaming=bool(require_streaming),
-                        fusion_deadline_bound=bool(fusion_deadline_bound),
-                    )
-                else:
-                    result = _open_json_request(
-                        request,
-                        timeout=remaining_timeout,
-                        fusion_deadline_bound=bool(fusion_deadline_bound),
-                    )
-                _advance_provider_key_rotation(profile, canonical_key_index)
-                _record_provider_request_receipt(
-                    status="success",
-                    key_attempt_count=key_attempt_index if key_required else 0,
-                    transport_attempt_count=transport_attempt_count,
-                    retry_attempt_count=max(0, transport_attempt_count - key_attempt_index),
-                    stream_requested=stream_requested,
-                    stream_observed=stream_observed,
-                    stream_fallback_used=stream_fallback_used,
-                    stream_protocol=stream_protocol,
-                    stream_content_type=stream_content_type,
-                    stream_frame_count=stream_frame_count,
-                    strict_streaming_requested=bool(require_streaming),
-                )
-                return result
+                try:
+                    remaining_timeout = _remaining_timeout(deadline_at)
+                    stream_observed = False
+                    stream_fallback_used = False
+                    stream_protocol = ""
+                    stream_content_type = ""
+                    stream_frame_count = 0
+                    if stream_requested:
+                        (
+                            result,
+                            stream_observed,
+                            stream_fallback_used,
+                            stream_protocol,
+                            stream_content_type,
+                            stream_frame_count,
+                        ) = _open_stream_json_request(
+                            request,
+                            profile=profile,
+                            api_format=_provider_adapter_format(profile.api_format),
+                            timeout=remaining_timeout,
+                            require_streaming=bool(require_streaming),
+                            fusion_deadline_bound=bool(fusion_deadline_bound),
+                        )
+                    else:
+                        result = _open_json_request(
+                            request,
+                            timeout=remaining_timeout,
+                            fusion_deadline_bound=bool(fusion_deadline_bound),
+                        )
+                except ProviderExecutionError as exc:
+                    if exc.http_status == 429:
+                        _record_provider_rate_limit(
+                            lease,
+                            retry_after_seconds=exc.retry_after_seconds,
+                        )
+                        rate_limit_event_count += 1
+                        if traffic_settings["rate_limit_key_pool"] == "shared":
+                            shared_key_pool_short_circuit = True
+                            stop_key_failover = True
+                    raise
+                finally:
+                    _release_provider_traffic_gate(lease)
             except ProviderExecutionError as exc:
                 last_error = exc
                 retryable = _provider_error_retryable(exc)
@@ -3795,30 +4118,80 @@ def _post_json(
                         retryable=retryable,
                     )
                 )
-                if retry_attempt_index >= max_attempts_per_key or not retryable or _deadline_exhausted(deadline_at):
+                if (
+                    stop_key_failover
+                    or retry_attempt_index >= max_attempts_per_key
+                    or not retryable
+                    or _deadline_exhausted(deadline_at)
+                ):
                     break
                 _sleep_before_retry(retry_attempt_index, deadline_at=deadline_at)
-    if last_canonical_key_index is not None:
+            else:
+                _advance_provider_key_rotation(profile, canonical_key_index)
+                _record_provider_request_receipt(
+                    status="success",
+                    key_attempt_count=(
+                        len(attempted_key_indices) if key_required else 0
+                    ),
+                    transport_attempt_count=transport_attempt_count,
+                    retry_attempt_count=max(
+                        0,
+                        transport_attempt_count
+                        - (
+                            len(attempted_key_indices)
+                            if key_required
+                            else min(1, transport_attempt_count)
+                        ),
+                    ),
+                    stream_requested=stream_requested,
+                    stream_observed=stream_observed,
+                    stream_fallback_used=stream_fallback_used,
+                    stream_protocol=stream_protocol,
+                    stream_content_type=stream_content_type,
+                    stream_frame_count=stream_frame_count,
+                    strict_streaming_requested=bool(require_streaming),
+                    traffic_control_wait_ms=traffic_control_wait_ms,
+                    rate_limit_event_count=rate_limit_event_count,
+                    shared_key_pool_short_circuit=shared_key_pool_short_circuit,
+                )
+                return result
+        if stop_key_failover:
+            break
+    if last_canonical_key_index is not None and not shared_key_pool_short_circuit:
         _advance_provider_key_rotation(profile, last_canonical_key_index)
+    actual_key_attempt_count = len(attempted_key_indices) if key_required else 0
     _record_provider_request_receipt(
         status="failed",
-        key_attempt_count=credential_attempt_count,
+        key_attempt_count=actual_key_attempt_count,
         transport_attempt_count=transport_attempt_count,
-        retry_attempt_count=max(0, transport_attempt_count - credential_attempt_count),
+        retry_attempt_count=max(
+            0,
+            transport_attempt_count
+            - (
+                actual_key_attempt_count
+                if key_required
+                else min(1, transport_attempt_count)
+            ),
+        ),
         stream_requested=stream_requested,
         strict_streaming_requested=bool(require_streaming),
+        traffic_control_wait_ms=traffic_control_wait_ms,
+        rate_limit_event_count=rate_limit_event_count,
+        shared_key_pool_short_circuit=shared_key_pool_short_circuit,
     )
     raise ProviderExecutionError(
         _safe_attempt_summary(
             profile=profile,
             method="POST",
             path=path,
-            attempt_count=credential_attempt_count,
+            attempt_count=actual_key_attempt_count,
             transport_attempt_count=transport_attempt_count,
             attempts=attempts,
         ),
         error_code=last_error.error_code if last_error else "provider_request_failed",
         http_status=last_error.http_status if last_error else None,
+        retry_after_seconds=(last_error.retry_after_seconds if last_error else None),
+        traffic_control_wait_ms=traffic_control_wait_ms,
     ) from last_error
 
 
@@ -3828,6 +4201,47 @@ def _extract_responses_text(result: Mapping[str, Any]) -> str:
         if direct:
             return direct
     return _text_from_value(result.get("output"))
+
+
+def _retry_after_seconds_from_headers(
+    headers: Any,
+    *,
+    now: float | None = None,
+) -> float | None:
+    """Parse only the standard, bounded `Retry-After` forms from HTTP headers."""
+
+    value = ""
+    getheader = getattr(headers, "getheader", None)
+    if callable(getheader):
+        try:
+            value = str(getheader("Retry-After") or "")
+        except Exception:  # noqa: BLE001 - foreign header objects are untrusted
+            value = ""
+    if not value:
+        getter = getattr(headers, "get", None)
+        if callable(getter):
+            try:
+                value = str(getter("Retry-After") or getter("retry-after") or "")
+            except Exception:  # noqa: BLE001 - foreign header objects are untrusted
+                value = ""
+    raw = value.strip()
+    if not raw:
+        return None
+    if raw.isascii() and raw.isdigit():
+        return float(min(86_400, int(raw)))
+    try:
+        parsed = parsedate_to_datetime(raw)
+    except (TypeError, ValueError, IndexError, OverflowError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    try:
+        seconds = parsed.timestamp() - float(time.time() if now is None else now)
+    except (OverflowError, OSError, ValueError):
+        return None
+    if seconds != seconds:
+        return None
+    return max(0.0, min(86_400.0, seconds))
 
 
 def _open_stream_json_request(
@@ -3903,11 +4317,15 @@ def _open_stream_json_request(
     except ProviderExecutionError:
         raise
     except urllib.error.HTTPError as exc:
+        retry_after_seconds = _retry_after_seconds_from_headers(
+            getattr(exc, "headers", None)
+        )
         _discard_http_error_body(exc)
         raise ProviderExecutionError(
             _safe_provider_error_message("http_error", http_status=exc.code),
             error_code="http_error",
             http_status=int(exc.code),
+            retry_after_seconds=retry_after_seconds,
         ) from exc
     except (TimeoutError, socket.timeout, urllib.error.URLError, OSError) as exc:
         raise ProviderExecutionError(
@@ -4914,11 +5332,15 @@ def _open_json_request(
         with _open_provider_url(request, timeout=timeout) as response:
             raw = response.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
+        retry_after_seconds = _retry_after_seconds_from_headers(
+            getattr(exc, "headers", None)
+        )
         _discard_http_error_body(exc)
         raise ProviderExecutionError(
             _safe_provider_error_message("http_error", http_status=exc.code),
             error_code="http_error",
             http_status=int(exc.code),
+            retry_after_seconds=retry_after_seconds,
         ) from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         error_code = _timeout_error_code(
@@ -4982,14 +5404,17 @@ def _safe_attempt_receipt(
     key_attempt_index: int,
     retry_attempt_index: int,
     retryable: bool,
+    transport_attempted: bool = True,
 ) -> dict[str, Any]:
     return {
         "attempt_index": int(attempt_index),
         "key_attempt_index": int(key_attempt_index),
         "retry_attempt_index": int(retry_attempt_index),
         "retryable": bool(retryable),
+        "transport_attempted": bool(transport_attempted),
         "error_code": exc.error_code or type(exc).__name__,
         "http_status": exc.http_status,
+        "retry_after_seconds": exc.retry_after_seconds,
         "raw_provider_body_persisted": False,
         "raw_provider_url_persisted": False,
         "secrets_persisted": False,
@@ -5029,6 +5454,51 @@ def _safe_attempt_summary(
         ]
     )
     return "; ".join(parts)
+
+
+def provider_transport_implementation_sha256() -> str:
+    """Bind baseline plans to the exact upstream transport implementation.
+
+    Baseline screening is sensitive to more than prompt and scorer code: a
+    change to streaming, retry, key-pool behavior, or local rate-limit pacing
+    can alter which provider observations are collected. The digest therefore
+    covers the narrow HTTP transport contract without exposing deployment
+    endpoints or credentials.
+    """
+
+    transport_contract = [
+        ProviderExecutionError,
+        HTTPProviderClient.complete_turn,
+        _traffic_control_settings,
+        _provider_traffic_gate_key,
+        _traffic_gate_wait_error,
+        _acquire_provider_traffic_gate,
+        _release_provider_traffic_gate,
+        _record_provider_rate_limit,
+        _post_json,
+        _retry_after_seconds_from_headers,
+        _open_stream_json_request,
+        _open_json_request,
+        _provider_error_retryable,
+        _rotated_api_key_attempts,
+        _advance_provider_key_rotation,
+        _max_attempts_per_key,
+        _provider_timeout_budget,
+        _safe_attempt_receipt,
+    ]
+    try:
+        source_rows = [inspect.getsource(value) for value in transport_contract]
+    except (OSError, TypeError):
+        return ""
+    return sha256_text(
+        stable_json(
+            {
+                "schema": "axio_fusion_api.provider_transport_implementation.v1",
+                "provider_max_response_seconds": PROVIDER_MAX_RESPONSE_SECONDS,
+                "source_rows": source_rows,
+            }
+        )
+    )
 
 
 def _safe_list_models(profile: ModelProfile, *, timeout: float) -> dict[str, Any]:
@@ -5383,6 +5853,11 @@ def _probe_profile_metadata(profile: ModelProfile) -> dict[str, Any]:
         "reasoning_transport": (
             dict(profile.reasoning_transport)
             if isinstance(profile.reasoning_transport, Mapping)
+            else {}
+        ),
+        "traffic_control": (
+            dict(profile.traffic_control)
+            if isinstance(profile.traffic_control, Mapping)
             else {}
         ),
         "privacy_tags": list(profile.privacy_tags),

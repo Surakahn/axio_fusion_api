@@ -6,6 +6,15 @@
       "base_url_env": "AXIO_NVIDIA_BASE_URL",
       "api_key_env": "AXIO_NVIDIA_API_KEYS",
       "models_env": "AXIO_NVIDIA_MODELS",
+      "traffic_control": {
+        "scope": "channel",
+        "max_in_flight": 1,
+        "min_request_interval_ms": 0,
+        "post_rate_limit_min_request_interval_ms": 1000,
+        "rate_limit_key_pool": "shared",
+        "fallback_cooldown_ms": 5000,
+        "max_cooldown_ms": 60000
+      },
       "reasoning_transport": {
         "status": "candidate",
         "transport": "chat_reasoning_effort",
@@ -19,6 +28,15 @@
       "base_url_env": "AXIO_TOKENAPIS_BASE_URL",
       "api_key_env": "AXIO_TOKENAPIS_API_KEY",
       "models_env": "AXIO_TOKENAPIS_MODELS",
+      "traffic_control": {
+        "scope": "profile",
+        "max_in_flight": 0,
+        "min_request_interval_ms": 0,
+        "post_rate_limit_min_request_interval_ms": 1000,
+        "rate_limit_key_pool": "shared",
+        "fallback_cooldown_ms": 5000,
+        "max_cooldown_ms": 60000
+      },
       "reasoning_transport": {
         "status": "candidate",
         "transport": "responses_reasoning",

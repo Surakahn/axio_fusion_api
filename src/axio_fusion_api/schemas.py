@@ -68,6 +68,21 @@ _REASONING_TRANSPORT_STATUSES = frozenset(
     {"unknown", "candidate", "verified", "unsupported"}
 )
 
+# Traffic control is deliberately a closed profile-level contract. It controls
+# local scheduling only; it cannot add provider request-body fields or expose
+# endpoint and credential values in a persisted artifact.
+_TRAFFIC_CONTROL_SCOPES = frozenset({"profile", "channel"})
+_TRAFFIC_CONTROL_KEY_POOLS = frozenset({"shared", "independent"})
+_DEFAULT_TRAFFIC_CONTROL = {
+    "scope": "profile",
+    "max_in_flight": 0,
+    "min_request_interval_ms": 0,
+    "post_rate_limit_min_request_interval_ms": 1_000,
+    "rate_limit_key_pool": "shared",
+    "fallback_cooldown_ms": 5_000,
+    "max_cooldown_ms": 60_000,
+}
+
 
 def normalize_reasoning_effort(value: Any) -> str:
     """Return one supported logical reasoning level or an empty value.
@@ -165,6 +180,79 @@ def _normalize_reasoning_transport(
         "api_format_compatible": protocol_compatible,
     }
 
+
+def _bounded_traffic_control_int(
+    value: Any,
+    *,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
+
+def _normalize_traffic_control(value: Any) -> dict[str, Any]:
+    """Normalize the local provider-scheduling contract without escape hatches."""
+
+    raw = value if isinstance(value, Mapping) else {}
+    scope = str(raw.get("scope") or _DEFAULT_TRAFFIC_CONTROL["scope"]).strip().casefold()
+    if scope not in _TRAFFIC_CONTROL_SCOPES:
+        scope = _DEFAULT_TRAFFIC_CONTROL["scope"]
+    key_pool = str(
+        raw.get("rate_limit_key_pool", raw.get("rateLimitKeyPool"))
+        or _DEFAULT_TRAFFIC_CONTROL["rate_limit_key_pool"]
+    ).strip().casefold()
+    if key_pool not in _TRAFFIC_CONTROL_KEY_POOLS:
+        key_pool = _DEFAULT_TRAFFIC_CONTROL["rate_limit_key_pool"]
+    max_in_flight = _bounded_traffic_control_int(
+        raw.get("max_in_flight", raw.get("maxInFlight")),
+        default=_DEFAULT_TRAFFIC_CONTROL["max_in_flight"],
+        minimum=0,
+        maximum=32,
+    )
+    min_interval = _bounded_traffic_control_int(
+        raw.get("min_request_interval_ms", raw.get("minRequestIntervalMs")),
+        default=_DEFAULT_TRAFFIC_CONTROL["min_request_interval_ms"],
+        minimum=0,
+        maximum=90_000,
+    )
+    post_rate_limit_interval = _bounded_traffic_control_int(
+        raw.get(
+            "post_rate_limit_min_request_interval_ms",
+            raw.get("postRateLimitMinRequestIntervalMs"),
+        ),
+        default=_DEFAULT_TRAFFIC_CONTROL[
+            "post_rate_limit_min_request_interval_ms"
+        ],
+        minimum=0,
+        maximum=90_000,
+    )
+    fallback_cooldown = _bounded_traffic_control_int(
+        raw.get("fallback_cooldown_ms", raw.get("fallbackCooldownMs")),
+        default=_DEFAULT_TRAFFIC_CONTROL["fallback_cooldown_ms"],
+        minimum=1,
+        maximum=90_000,
+    )
+    max_cooldown = _bounded_traffic_control_int(
+        raw.get("max_cooldown_ms", raw.get("maxCooldownMs")),
+        default=_DEFAULT_TRAFFIC_CONTROL["max_cooldown_ms"],
+        minimum=fallback_cooldown,
+        maximum=90_000,
+    )
+    return {
+        "scope": scope,
+        "max_in_flight": max_in_flight,
+        "min_request_interval_ms": min_interval,
+        "post_rate_limit_min_request_interval_ms": post_rate_limit_interval,
+        "rate_limit_key_pool": key_pool,
+        "fallback_cooldown_ms": fallback_cooldown,
+        "max_cooldown_ms": max_cooldown,
+    }
+
 # Provider error values cross a trust boundary.  They are useful for an
 # operator to distinguish configuration, authentication, transport, and
 # framing failures, but arbitrary gateway-provided strings must never enter a
@@ -189,6 +277,7 @@ SAFE_PROVIDER_ERROR_CODES = frozenset(
         "provider_request_timeout",
         "provider_response_timeout_exceeded_90s",
         "proxy_unavailable",
+        "rate_limit_cooldown_exceeded",
         "stream_framing_unverified",
         "TimeoutError",
         "tool_call_without_text",
@@ -232,6 +321,8 @@ def safe_provider_error_class(
     if status in {401, 403}:
         return "authentication_or_authorization"
     if status == 429:
+        return "rate_limited"
+    if code == "rate_limit_cooldown_exceeded":
         return "rate_limited"
     if status is not None and 400 <= status <= 499:
         return "provider_http_4xx"
@@ -410,6 +501,10 @@ class ModelProfile:
     # Provider reasoning controls are a narrow, declarative capability gate.
     # They never contain arbitrary request-body paths or vendor extra fields.
     reasoning_transport: Mapping[str, Any] = field(default_factory=dict)
+    # Local scheduling controls for channels with bounded/shared rate limits.
+    # This remains a closed configuration object and never changes an upstream
+    # request payload.
+    traffic_control: Mapping[str, Any] = field(default_factory=dict)
     # Runtime-only credential injection for programmatic deployments.  These
     # values are intentionally excluded from equality, repr, safe_dict(), and
     # every persisted registry/artifact.  Environment-backed deployments keep
@@ -458,6 +553,11 @@ class ModelProfile:
                 self.reasoning_transport,
                 api_format=self.api_format,
             ),
+        )
+        object.__setattr__(
+            self,
+            "traffic_control",
+            _normalize_traffic_control(self.traffic_control),
         )
 
     @property
@@ -595,6 +695,7 @@ class ModelProfile:
                 else None
             ),
             "reasoning_transport": dict(self.reasoning_transport),
+            "traffic_control": dict(self.traffic_control),
             "screening_prior_only": True,
             "canonical_model_identity_declared": bool(self.canonical_model_id),
             "canonical_model_id_sha256": (

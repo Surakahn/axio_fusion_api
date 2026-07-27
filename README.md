@@ -1491,8 +1491,9 @@ The executable replacement is the three-command baseline-screening workflow:
 explicit `--live` campaign with private raw-output units and a separate safe
 checkpoint; and `baseline-screening-to-ranking` re-scores every private output
 with the pinned scorer before producing the strict ranking input. The plan
-binds prompt, reference, case-contract, adapter implementation, provider
-catalog identity, and a seed-derived execution order. Adjacent independent
+binds prompt, reference, case-contract, adapter and upstream transport
+implementation, provider catalog identity, and a seed-derived execution order.
+Adjacent independent
 sources use reversed candidate order and execute one source per round to
 counterbalance long-campaign time drift. Wrong answers are never retried;
 only classified transport or scorer failures may resume. Transport retry is
@@ -2493,13 +2494,18 @@ Provider reliability:
 - Provider API key variables may contain a comma, semicolon, or newline
   separated key list.  The provider client tries keys in order for both
   completion calls and `/models` discovery, then falls through to the next key
-  if a gateway returns HTTP, transport, timeout, or invalid-JSON errors.
+  for authentication, transport, timeout, or invalid-JSON errors. Rate-limit
+  behavior is controlled separately because multiple keys can represent one
+  shared upstream quota.
 - Within each key, the provider client retries bounded transient failures inside
   the caller's timeout budget.  Retryable failures are network/timeout errors
-  and HTTP `408`, `409`, `425`, `500`, `502`, `503`, and `504`.  HTTP `401`,
-  `403`, and `429` are not retried on the same key; they rotate to the next key
-  when one exists or surface to the orchestrator for circuit breaking, fallback,
-  panel repair, or degraded-mode handling.
+  and HTTP `408`, `409`, `425`, `500`, `502`, `503`, and `504`. HTTP `401` and
+  `403` can fall through to another configured key. A model/channel
+  `traffic_control` contract handles HTTP `429`: the conservative `shared` pool
+  short-circuits the current logical call, applies a bounded `Retry-After` or
+  fallback cooldown, and serializes subsequent requests by default; an explicit
+  `independent` pool retains cross-key 429 failover for genuinely independent
+  quotas. Every local wait is charged to the same 90-second provider deadline.
 - Gemini-compatible providers use the same rotation policy with `key=` query
   parameters; OpenAI/Responses/Anthropic-compatible providers use a
   bearer-style `Authorization` header.

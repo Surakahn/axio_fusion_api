@@ -334,6 +334,12 @@ def _build_channel_profiles(
                 "reasoning_transport",
                 default={},
             ),
+            "traffic_control": _model_value(
+                row,
+                model_row,
+                "traffic_control",
+                default={},
+            ),
             "privacy_tags": _model_value(row, model_row, "privacy_tags", default=["external_provider"]),
             "base_url_env": base_env,
             "api_key_env": key_env,
@@ -607,6 +613,7 @@ def _model_value(
         "tool_probe_status": ("tool_probe_status", "toolProbeStatus"),
         "supports_vision": ("supports_vision", "supportsVision", "vision"),
         "reasoning_transport": ("reasoning_transport", "reasoningTransport"),
+        "traffic_control": ("traffic_control", "trafficControl"),
         "privacy_tags": ("privacy_tags", "privacyTags"),
         "models_endpoint": (
             "models_endpoint",
