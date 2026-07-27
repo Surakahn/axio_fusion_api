@@ -4,7 +4,14 @@ import json
 import time
 from typing import Any, Mapping, Sequence
 
-from .schemas import FusionPolicy, FusionRequest, FusionResponse, canonical_public_model, sha256_text
+from .schemas import (
+    FusionPolicy,
+    FusionRequest,
+    FusionResponse,
+    canonical_public_model,
+    normalize_reasoning_effort,
+    sha256_text,
+)
 from .tool_contract import (
     normalize_history_events,
     normalize_tool_definitions,
@@ -36,6 +43,7 @@ def canonicalize_payload(payload: Mapping[str, Any], *, api_format: str = "chat/
     if top_p_value in (None, ""):
         top_p_value = generation_config.get("topP")
     top_p = _optional_float(top_p_value)
+    reasoning_effort = _reasoning_effort_from_payload(payload, api_format=normalized)
     history_events: list[dict[str, Any]] = []
     if normalized == "responses":
         system = str(payload.get("instructions") or "")
@@ -68,6 +76,7 @@ def canonicalize_payload(payload: Mapping[str, Any], *, api_format: str = "chat/
         api_format=normalized,
         task_type=task_type,
         requested_capabilities=requested,
+        reasoning_effort=reasoning_effort,
         temperature=temperature,
         top_p=top_p,
         max_output_tokens=_max_output_tokens(payload, normalized),
@@ -76,6 +85,34 @@ def canonicalize_payload(payload: Mapping[str, Any], *, api_format: str = "chat/
         metadata=dict(metadata),
         policy=policy,
     )
+
+
+def _reasoning_effort_from_payload(
+    payload: Mapping[str, Any],
+    *,
+    api_format: str,
+) -> str:
+    """Read the native reasoning field before a compatibility fallback.
+
+    Chat Completions carries ``reasoning_effort`` at the top level while
+    Responses carries ``reasoning.effort``.  Accepting the other spelling as a
+    fallback makes the public gateway tolerant of clients that share one
+    request builder, but the native field always wins and no raw vendor object
+    is preserved in the internal request.
+    """
+
+    nested = payload.get("reasoning")
+    nested_effort = (
+        normalize_reasoning_effort(nested.get("effort"))
+        if isinstance(nested, Mapping)
+        else ""
+    )
+    top_level_effort = normalize_reasoning_effort(payload.get("reasoning_effort"))
+    if api_format == "responses":
+        return nested_effort or top_level_effort
+    if api_format in {"chat", "chat/completions"}:
+        return top_level_effort or nested_effort
+    return top_level_effort
 
 
 def _public_metadata(value: Any) -> dict[str, Any]:

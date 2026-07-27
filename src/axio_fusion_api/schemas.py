@@ -40,6 +40,127 @@ CAPABILITY_AXES = (
 
 TOOL_CAPABILITY_STATES = ("proven", "unproven", "failed")
 
+# Axio keeps one protocol-neutral request field and maps it only through a
+# model-level, verified transport declaration.  The set is intentionally the
+# union of current OpenAI Responses reasoning levels; an individual profile
+# still has to declare the smaller subset its upstream actually accepts.
+REASONING_EFFORT_LEVELS = (
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+)
+_REASONING_EFFORT_ORDER = {
+    effort: index for index, effort in enumerate(REASONING_EFFORT_LEVELS)
+}
+_REASONING_TRANSPORT_FORMATS = {
+    "chat_reasoning_effort": "chat",
+    "responses_reasoning": "responses",
+}
+_REASONING_TRANSPORT_STATUSES = frozenset(
+    {"unknown", "candidate", "verified", "unsupported"}
+)
+
+
+def normalize_reasoning_effort(value: Any) -> str:
+    """Return one supported logical reasoning level or an empty value.
+
+    Invalid caller input is deliberately omitted instead of being copied to an
+    upstream request.  This keeps public compatibility permissive while
+    preventing an arbitrary vendor-specific value from crossing the provider
+    boundary.
+    """
+
+    normalized = str(value or "").strip().casefold().replace("_", "-")
+    return normalized if normalized in _REASONING_EFFORT_ORDER else ""
+
+
+def _reasoning_transport_api_format(value: Any) -> str:
+    normalized = str(value or "").strip().casefold().replace("_", "-")
+    if normalized in {
+        "chat",
+        "chat/completion",
+        "chat/completions",
+        "chat-completions",
+        "openai",
+        "openai-chat",
+    }:
+        return "chat"
+    if normalized in {"responses", "response", "responses-api"}:
+        return "responses"
+    return normalized
+
+
+def _reasoning_effort_values(value: Any) -> list[str]:
+    if isinstance(value, str):
+        raw_values = value.replace(";", ",").split(",")
+    elif isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        raw_values = value
+    else:
+        raw_values = []
+    normalized: list[str] = []
+    for raw in raw_values:
+        effort = normalize_reasoning_effort(raw)
+        if effort and effort not in normalized:
+            normalized.append(effort)
+    return normalized
+
+
+def _normalize_reasoning_transport(
+    value: Any,
+    *,
+    api_format: Any,
+) -> dict[str, Any]:
+    """Normalize a declarative, profile-local wire capability declaration.
+
+    The configuration intentionally has no generic payload path or arbitrary
+    extra-body escape hatch.  A verified declaration can select only the two
+    audited transports below, and only for its matching provider protocol.
+    """
+
+    raw = value if isinstance(value, Mapping) else {}
+    status = str(raw.get("status") or "unknown").strip().casefold()
+    if status not in _REASONING_TRANSPORT_STATUSES:
+        status = "unknown"
+    transport = str(raw.get("transport") or "").strip().casefold()
+    if transport not in _REASONING_TRANSPORT_FORMATS:
+        transport = ""
+    supported_efforts = _reasoning_effort_values(
+        raw.get("supported_efforts", raw.get("supportedEfforts", ()))
+    )
+    supported_set = set(supported_efforts)
+    raw_map = raw.get("effort_map", raw.get("effortMap", {}))
+    effort_map: dict[str, str] = {}
+    if isinstance(raw_map, Mapping):
+        for source, target in raw_map.items():
+            requested = normalize_reasoning_effort(source)
+            effective = normalize_reasoning_effort(target)
+            # A transport map is only a declared downgrade.  It cannot turn a
+            # caller's upper bound into a more expensive reasoning request.
+            if (
+                requested
+                and effective
+                and effective in supported_set
+                and _REASONING_EFFORT_ORDER[effective]
+                <= _REASONING_EFFORT_ORDER[requested]
+            ):
+                effort_map[requested] = effective
+    expected_format = _REASONING_TRANSPORT_FORMATS.get(transport, "")
+    protocol_compatible = bool(
+        expected_format
+        and expected_format == _reasoning_transport_api_format(api_format)
+    )
+    return {
+        "status": status,
+        "transport": transport,
+        "supported_efforts": supported_efforts,
+        "effort_map": dict(sorted(effort_map.items())),
+        "api_format_compatible": protocol_compatible,
+    }
+
 # Provider error values cross a trust boundary.  They are useful for an
 # operator to distinguish configuration, authentication, transport, and
 # framing failures, but arbitrary gateway-provided strings must never enter a
@@ -282,6 +403,9 @@ class ModelProfile:
     screening_operational_status: str = ""
     screening_stream_reliability_score: float | None = None
     screening_latency_score: float | None = None
+    # Provider reasoning controls are a narrow, declarative capability gate.
+    # They never contain arbitrary request-body paths or vendor extra fields.
+    reasoning_transport: Mapping[str, Any] = field(default_factory=dict)
     # Runtime-only credential injection for programmatic deployments.  These
     # values are intentionally excluded from equality, repr, safe_dict(), and
     # every persisted registry/artifact.  Environment-backed deployments keep
@@ -323,6 +447,14 @@ class ModelProfile:
             endpoint = ""
         object.__setattr__(self, "models_endpoint", endpoint)
         object.__setattr__(self, "discover_models", bool(self.discover_models) and bool(endpoint))
+        object.__setattr__(
+            self,
+            "reasoning_transport",
+            _normalize_reasoning_transport(
+                self.reasoning_transport,
+                api_format=self.api_format,
+            ),
+        )
 
     @property
     def profile_id(self) -> str:
@@ -350,6 +482,44 @@ class ModelProfile:
             0.0,
             min(1.0, float(self.screening_capability_axes.get(axis, 0.0) or 0.0)),
         )
+
+    def resolve_reasoning_transport(self, requested_effort: Any) -> tuple[str, str]:
+        """Resolve one verified wire transport and its effective effort.
+
+        Unknown, candidate, unsupported, malformed, and protocol-mismatched
+        declarations always fail closed.  An unsupported caller level may be
+        sent only when the profile explicitly declares a non-escalating map.
+        """
+
+        requested = normalize_reasoning_effort(requested_effort)
+        if not requested:
+            return "", ""
+        config = self.reasoning_transport
+        if not isinstance(config, Mapping) or config.get("status") != "verified":
+            return "", ""
+        transport = str(config.get("transport") or "")
+        expected_format = _REASONING_TRANSPORT_FORMATS.get(transport, "")
+        if (
+            not expected_format
+            or expected_format != _reasoning_transport_api_format(self.api_format)
+            or config.get("api_format_compatible") is not True
+        ):
+            return "", ""
+        supported = set(_reasoning_effort_values(config.get("supported_efforts")))
+        if requested in supported:
+            return transport, requested
+        effort_map = config.get("effort_map")
+        mapped = normalize_reasoning_effort(
+            effort_map.get(requested) if isinstance(effort_map, Mapping) else ""
+        )
+        if (
+            mapped
+            and mapped in supported
+            and _REASONING_EFFORT_ORDER[mapped]
+            <= _REASONING_EFFORT_ORDER[requested]
+        ):
+            return transport, mapped
+        return "", ""
 
     def safe_dict(self) -> dict[str, Any]:
         return {
@@ -420,6 +590,7 @@ class ModelProfile:
                 if self.screening_latency_score is not None
                 else None
             ),
+            "reasoning_transport": dict(self.reasoning_transport),
             "screening_prior_only": True,
             "canonical_model_identity_declared": bool(self.canonical_model_id),
             "canonical_model_id_sha256": (
@@ -464,6 +635,9 @@ class FusionRequest:
     api_format: str = "chat/completions"
     task_type: str = "auto"
     requested_capabilities: tuple[str, ...] = ()
+    # This is a protocol-neutral desired upper bound.  Provider adapters map
+    # it only after a ModelProfile has verified the exact wire contract.
+    reasoning_effort: str = ""
     temperature: float | None = None
     top_p: float | None = None
     max_output_tokens: int | None = None
@@ -471,6 +645,13 @@ class FusionRequest:
     tools: tuple[Mapping[str, Any], ...] = ()
     metadata: Mapping[str, Any] = field(default_factory=dict)
     policy: FusionPolicy = field(default_factory=FusionPolicy)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "reasoning_effort",
+            normalize_reasoning_effort(self.reasoning_effort),
+        )
 
     @property
     def public_model(self) -> str:
@@ -488,6 +669,7 @@ class FusionRequest:
                     "api_format": self.api_format,
                     "task_type": self.task_type,
                     "requested_capabilities": list(self.requested_capabilities),
+                    "reasoning_effort": self.reasoning_effort,
                     "tools": list(self.tools),
                 }
             )
@@ -505,6 +687,7 @@ class FusionRequest:
             "history_sha256": sha256_text(stable_json(list(self.history))),
             "task_type": self.task_type,
             "requested_capabilities": list(self.requested_capabilities),
+            "reasoning_effort": self.reasoning_effort,
             "tool_count": len(self.tools),
             "metadata_keys": sorted(str(key) for key in self.metadata.keys()),
             "max_output_tokens": self.max_output_tokens,

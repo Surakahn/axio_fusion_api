@@ -2110,6 +2110,12 @@ def _discovered_profile_row(
         # The exposed provider model id is Axio's default canonical identity.
         # An explicitly attested alias can still override it in config.
         "canonical_model_id": _prior_value(model_prior, prior, "canonical_model_id", model_id),
+        "reasoning_transport": _prior_value(
+            model_prior,
+            prior,
+            "reasoning_transport",
+            getattr(seed, "reasoning_transport", {}),
+        ),
         "privacy_tags": _prior_value(model_prior, prior, "privacy_tags", list(seed.privacy_tags)),
         "source": "live_model_list",
     }
@@ -2436,6 +2442,11 @@ def _chat_payload(
         payload["top_p"] = request.top_p
     if request.stop:
         payload["stop"] = list(request.stop)
+    reasoning_transport, effective_reasoning_effort = (
+        profile.resolve_reasoning_transport(request.reasoning_effort)
+    )
+    if reasoning_transport == "chat_reasoning_effort":
+        payload["reasoning_effort"] = effective_reasoning_effort
     tools = provider_tool_declarations(request.tools, api_format="chat") if profile.tool_calling_eligible else []
     if tools:
         payload["tools"] = tools
@@ -3379,6 +3390,11 @@ def _responses_typed_payload(
         payload["max_output_tokens"] = request.max_output_tokens
     if request.top_p is not None:
         payload["top_p"] = request.top_p
+    reasoning_transport, effective_reasoning_effort = (
+        profile.resolve_reasoning_transport(request.reasoning_effort)
+    )
+    if reasoning_transport == "responses_reasoning":
+        payload["reasoning"] = {"effort": effective_reasoning_effort}
     tools = provider_tool_declarations(request.tools, api_format="responses") if profile.tool_calling_eligible else []
     if tools:
         payload["tools"] = tools
@@ -3410,6 +3426,11 @@ def _responses_text_payload(
         payload["max_output_tokens"] = request.max_output_tokens
     if request.top_p is not None:
         payload["top_p"] = request.top_p
+    reasoning_transport, effective_reasoning_effort = (
+        profile.resolve_reasoning_transport(request.reasoning_effort)
+    )
+    if reasoning_transport == "responses_reasoning":
+        payload["reasoning"] = {"effort": effective_reasoning_effort}
     # This fallback exists for gateways that only accept textual Responses
     # input.  It cannot safely carry native tool call/result blocks.
     return payload

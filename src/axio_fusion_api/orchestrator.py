@@ -15,7 +15,17 @@ from .policy_control import load_active_routing_policy
 from .latency_policy import profile_latency_eligibility
 from .providers import HTTPProviderClient, ProviderCompletion
 from .router import build_route_plan
-from .schemas import CandidateResult, FusionRequest, FusionResponse, ModelProfile, rough_token_count, sha256_text, stable_json
+from .schemas import (
+    REASONING_EFFORT_LEVELS,
+    CandidateResult,
+    FusionRequest,
+    FusionResponse,
+    ModelProfile,
+    normalize_reasoning_effort,
+    rough_token_count,
+    sha256_text,
+    stable_json,
+)
 from .tools import classify_tool, execute_tool_batch
 from .tool_contract import normalize_tool_calls, tool_call_safe_summary
 from .hermes_moa import (
@@ -3116,6 +3126,7 @@ class FusionEngine:
         provider_request = _provider_request_for_role(
             execution_request,
             role_name,
+            route_plan=route_plan,
             # Fusion stages send an Axio-assembled control packet.  The direct
             # Fast cascade deliberately opts out so adapters preserve the
             # caller's native task turn without adding orchestration context.
@@ -3914,6 +3925,7 @@ class FusionEngine:
         judge_request = _provider_request_for_role(
             judge_request_base,
             "judge",
+            route_plan=route_plan,
             prompt_is_already_assembled=True,
         )
         judge_max_tokens = hermes_stage_max_output_tokens(
@@ -4287,6 +4299,7 @@ class FusionEngine:
         judge_request = _provider_request_for_role(
             _assembled_provider_request(request, judge_prompt),
             "judge",
+            route_plan=route_plan,
             prompt_is_already_assembled=True,
         )
         judge_estimate = _estimate_provider_call_cost(
@@ -4553,6 +4566,7 @@ class FusionEngine:
             api_format=request.api_format,
             task_type=request.task_type,
             requested_capabilities=request.requested_capabilities,
+            reasoning_effort=request.reasoning_effort,
             temperature=request.temperature,
             top_p=request.top_p,
             max_output_tokens=request.max_output_tokens,
@@ -4662,6 +4676,7 @@ class FusionEngine:
             synthesis_request = _provider_request_for_role(
                 _assembled_provider_request(request, prompt),
                 "synthesizer",
+                route_plan=route_plan,
                 prompt_is_already_assembled=True,
                 allow_aggregator_tools=bool(
                     hermes_plan.get("aggregator_tools_admitted") is True
@@ -5082,10 +5097,51 @@ def _prompt_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
+def _role_reasoning_effort(
+    request: FusionRequest,
+    role: str,
+    *,
+    route_plan: Mapping[str, Any] | None,
+) -> str:
+    """Combine the caller's upper bound with the Hermes stage budget.
+
+    A direct Axio Fast cascade preserves the caller's requested level exactly.
+    Fusion stages use their role budget when Hermes is active, but an explicit
+    caller value can only lower that budget.  The resulting logical level is
+    still not a wire parameter until the selected provider profile verifies
+    the matching transport.
+    """
+
+    caller_effort = normalize_reasoning_effort(request.reasoning_effort)
+    direct_fast_route = bool(
+        isinstance(route_plan, Mapping)
+        and str(route_plan.get("strategy") or "") == "fast_direct_cascade"
+        and str(role or "") in {"primary_solver", "fallback_solver"}
+    )
+    if direct_fast_route:
+        return caller_effort
+    cognitive_budget = hermes_cognitive_budget(
+        _effective_hermes_plan(route_plan),
+        role,
+    )
+    stage_effort = normalize_reasoning_effort(
+        cognitive_budget.get("reasoning_effort")
+        if isinstance(cognitive_budget, Mapping)
+        else ""
+    )
+    if not stage_effort:
+        return caller_effort
+    if not caller_effort:
+        return stage_effort
+    order = {effort: index for index, effort in enumerate(REASONING_EFFORT_LEVELS)}
+    return min((stage_effort, caller_effort), key=lambda effort: order[effort])
+
+
 def _provider_request_for_role(
     request: FusionRequest,
     role: str,
     *,
+    route_plan: Mapping[str, Any] | None = None,
     prompt_is_already_assembled: bool = False,
     allow_aggregator_tools: bool = False,
 ) -> FusionRequest:
@@ -5125,6 +5181,11 @@ def _provider_request_for_role(
         api_format=request.api_format,
         task_type=request.task_type,
         requested_capabilities=request.requested_capabilities,
+        reasoning_effort=_role_reasoning_effort(
+            request,
+            role,
+            route_plan=route_plan,
+        ),
         temperature=request.temperature,
         top_p=request.top_p,
         max_output_tokens=request.max_output_tokens,
@@ -5152,6 +5213,7 @@ def _assembled_provider_request(request: FusionRequest, prompt: str) -> FusionRe
         api_format=request.api_format,
         task_type=request.task_type,
         requested_capabilities=request.requested_capabilities,
+        reasoning_effort=request.reasoning_effort,
         temperature=request.temperature,
         top_p=request.top_p,
         max_output_tokens=request.max_output_tokens,
@@ -10661,6 +10723,11 @@ def _profile_from_safe_dict(value: Mapping[str, Any]) -> ModelProfile:
         base_url_env=str(value.get("base_url_env") or ""),
         api_key_env=str(value.get("api_key_env") or ""),
         auth_scheme=str(value.get("auth_scheme") or "bearer"),
+        reasoning_transport=(
+            dict(value.get("reasoning_transport"))
+            if isinstance(value.get("reasoning_transport"), Mapping)
+            else {}
+        ),
         enabled=value.get("enabled") is not False,
         health=str(value.get("health") or "unknown"),
         source=str(value.get("source") or "route_plan"),

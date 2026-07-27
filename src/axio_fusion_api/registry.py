@@ -1723,6 +1723,15 @@ def normalize_profile(raw: Mapping[str, Any]) -> ModelProfile:
             raw.get("screening_latency_score"),
             raw.get("latency_score"),
         ),
+        reasoning_transport=(
+            dict(raw.get("reasoning_transport"))
+            if isinstance(raw.get("reasoning_transport"), Mapping)
+            else (
+                dict(raw.get("reasoningTransport"))
+                if isinstance(raw.get("reasoningTransport"), Mapping)
+                else {}
+            )
+        ),
     )
 
 
@@ -3172,6 +3181,12 @@ def _custom_provider_models_from_config(config: Mapping[str, Any]) -> list[dict[
                 "context_tokens": _model_config_value(config, model_config, "context_tokens"),
                 "supports_tools": _model_config_value(config, model_config, "supports_tools", default=False),
                 "supports_vision": _model_config_value(config, model_config, "supports_vision", default=False),
+                "reasoning_transport": _model_config_value(
+                    config,
+                    model_config,
+                    "reasoning_transport",
+                    default={},
+                ),
                 "privacy_tags": _model_config_value(config, model_config, "privacy_tags", default=["external_provider"]),
                 "source": "environment_provider_config",
             }
@@ -3474,6 +3489,11 @@ def _sanitize_provider_config(config: Mapping[str, Any]) -> dict[str, Any]:
         "context_tokens": config.get("context_tokens"),
         "supports_tools": config.get("supports_tools", False),
         "supports_vision": config.get("supports_vision", False),
+        "reasoning_transport": (
+            config.get("reasoning_transport")
+            if isinstance(config.get("reasoning_transport"), Mapping)
+            else config.get("reasoningTransport", {})
+        ),
         "privacy_tags": config.get("privacy_tags", ["external_provider"]),
     }
 
@@ -3595,6 +3615,7 @@ def _normalize_model_config_row(row: Mapping[str, Any]) -> dict[str, Any]:
         "canonicalModelId": "canonical_model_id",
         "canonicalModel": "canonical_model",
         "canonicalIdentity": "canonical_identity",
+        "reasoningTransport": "reasoning_transport",
     }
     for source, target in alias_pairs.items():
         if target not in result and source in result:
@@ -3656,6 +3677,12 @@ def _discovery_model_priors_for_config(config: Mapping[str, Any]) -> dict[str, d
             "context_tokens": _model_config_value(config, model_config, "context_tokens"),
             "supports_tools": _model_config_value(config, model_config, "supports_tools", default=False),
             "supports_vision": _model_config_value(config, model_config, "supports_vision", default=False),
+            "reasoning_transport": _model_config_value(
+                config,
+                model_config,
+                "reasoning_transport",
+                default={},
+            ),
             "privacy_tags": _model_config_value(config, model_config, "privacy_tags", default=["external_provider"]),
             "source": "environment_provider_config_model_prior",
         }

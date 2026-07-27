@@ -328,6 +328,12 @@ def _build_channel_profiles(
             "tool_capability_source": _model_value(row, model_row, "tool_capability_source", default=""),
             "tool_probe_status": _model_value(row, model_row, "tool_probe_status", default="not_run"),
             "supports_vision": _model_value(row, model_row, "supports_vision", default=False),
+            "reasoning_transport": _model_value(
+                row,
+                model_row,
+                "reasoning_transport",
+                default={},
+            ),
             "privacy_tags": _model_value(row, model_row, "privacy_tags", default=["external_provider"]),
             "base_url_env": base_env,
             "api_key_env": key_env,
@@ -600,6 +606,7 @@ def _model_value(
         "tool_capability_source": ("tool_capability_source", "toolCapabilitySource"),
         "tool_probe_status": ("tool_probe_status", "toolProbeStatus"),
         "supports_vision": ("supports_vision", "supportsVision", "vision"),
+        "reasoning_transport": ("reasoning_transport", "reasoningTransport"),
         "privacy_tags": ("privacy_tags", "privacyTags"),
         "models_endpoint": (
             "models_endpoint",

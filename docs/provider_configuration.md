@@ -17,6 +17,52 @@ described through environment variable *names*, never through copied endpoint
 or credential values. Supported upstream input protocols are `chat`,
 `responses`, `anthropic`, and `gemini`.
 
+## Reasoning Strength Transport
+
+`FusionRequest.reasoning_effort` is Axio's protocol-neutral logical control.
+It accepts only `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and
+`max`; invalid values are omitted. The gateway reads the native public shape
+first, then accepts the other spelling only as a compatibility fallback:
+
+- Chat Completions: top-level `reasoning_effort`.
+- Responses: `reasoning: {"effort": "..."}`.
+
+Axio does not pass a generic `extra_body`, configurable JSON path, or an
+unknown vendor field upstream. A model must carry a model-level
+`reasoning_transport` declaration before Axio can send a wire control:
+
+```json
+{
+  "model": "channel-model-alias",
+  "reasoning_transport": {
+    "status": "verified",
+    "transport": "responses_reasoning",
+    "supported_efforts": ["low", "medium", "high"],
+    "effort_map": {"xhigh": "high"}
+  }
+}
+```
+
+The only supported transports are `chat_reasoning_effort` for a Chat
+Completions model and `responses_reasoning` for a Responses model. `status`
+must be `verified`; `unknown`, `candidate`, and `unsupported` omit the field.
+An `effort_map` is optional and only permits an explicit non-escalating
+downgrade to a declared supported level. For example, it can map `xhigh` to
+`high`, but it cannot map `low` to `high`.
+
+Promotion to `verified` requires a live, fixed, non-benchmark streaming
+control request followed by one request per declared effort. Store only
+hashes, status codes, timing, and stream-framing receipts. Do not promote on a
+directory listing, a vendor claim, or a successful ordinary request alone; do
+not send `reasoning.summary` unless a separate product requirement and
+model-level verification justify retaining it.
+
+For a Hermes Fusion route, the caller's explicit level is an upper bound for a
+role's internal cognitive budget. Direct `axio-fast` cascades preserve the
+caller level. Actual wire forwarding remains profile-specific, so an
+unverified model receives no reasoning parameter even when a logical role
+budget exists.
+
 For a normal deployment, set `AXIO_FUSION_PROVIDER_CONFIG_FILE` to a JSON file
 such as `config/provider_configs.example.json`. The file may contain provider
 labels, environment variable names, and model aliases, but never copied endpoint

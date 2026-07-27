@@ -8,7 +8,12 @@
       "models": [
         {
           "model": "channel-model-alias",
-          "canonical_model_id": "vendor-model-family-version"
+          "canonical_model_id": "vendor-model-family-version",
+          "reasoning_transport": {
+            "status": "candidate",
+            "transport": "chat_reasoning_effort",
+            "supported_efforts": ["low", "medium", "high"]
+          }
         }
       ]
     },
@@ -20,7 +25,13 @@
       "models": [
         {
           "model": "channel-model-alias",
-          "canonical_model_id": "vendor-model-family-version"
+          "canonical_model_id": "vendor-model-family-version",
+          "reasoning_transport": {
+            "status": "candidate",
+            "transport": "responses_reasoning",
+            "supported_efforts": ["low", "medium", "high"],
+            "effort_map": {"xhigh": "high"}
+          }
         }
       ]
     },
