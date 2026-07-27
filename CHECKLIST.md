@@ -1,6 +1,39 @@
 # Axio Fusion API Checklist
 
-## Current Live Gate (2026-07-23, v9 calibrated handoff active)
+## Current Live Gate (2026-07-27, current cohort)
+
+- [x] Discover the current configured remote pool and retain 31 profiles from
+  126 logical entries after the strict text probe.
+- [x] Complete strict operational admission for all 31 profiles: 465
+  streaming attempts, 369 passed attempts, 72 ordinary failures, 24
+  latency-ineligible attempts, and 11 formal eligible profiles.
+- [x] Execute the new pre-registered screening plan across 11 canonical
+  candidates, two independent source families, 22 units, and 2,420 fixed
+  provider calls without `--retry-failed`.
+- [x] Reach a terminal result for all 22 units: 6 passed the transport and
+  scoring contract and 16 were rejected by transport-failure-rate or no-score
+  gates; retain all 2,420 case records, 1,444 scored responses, and 976
+  transport failures in private evidence.
+- [x] Run screening-to-ranking conversion; it correctly remains
+  `screening_conversion_ready = false` with no rank assignment.
+- [x] Re-run engineering readiness against the current registry: 678 Python
+  3.11 tests passed, all 12 public protocol cells passed, all four provider
+  input adapters passed, and the system-development receipt is ready for a
+  separate benchmark-validation stage.
+- [x] Keep provider baseline freeze and the 9-category/21-suite target
+  campaign fail-closed because the complete-pool rank-1/rank-2/rank-3
+  evidence is unavailable.
+- [ ] Register a new independent provider cohort that satisfies complete
+  source-family coverage, portfolio/verifier capacity, and provider/API
+  diversity; never select a top three from the current survivor subset.
+- [ ] After the provider baseline freeze is valid, run the independent
+  9-category/21-suite campaign with four Axio public API surfaces, paired
+  statistics, contamination audit, and 3x latency gates.
+
+The following v9 block is historical evidence and is retained for provenance;
+its unchecked items are not the current cohort's execution plan.
+
+## Historical v9 Live Gate (2026-07-23)
 
 - [x] Preserve former v6 and stopped v8 evidence as historical diagnostics;
   neither is a current serving input or a baseline-ranking source.
