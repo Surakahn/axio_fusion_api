@@ -18,6 +18,8 @@ from typing import Any, Mapping, Sequence
 from .calibration import build_registry_calibration
 from .channel_config import discover_runtime_profiles, runtime_channel_summary
 from .latency_policy import (
+    PROVIDER_MAX_RESPONSE_LATENCY_MS,
+    PROVIDER_MAX_RESPONSE_SECONDS,
     measured_stream_latency_eligibility,
     row_latency_eligibility,
     streaming_evidence_eligibility,
@@ -33,6 +35,7 @@ from .providers import (
     ensure_strict_streaming_client,
     probe_exposed_provider_models,
     probe_provider_models,
+    probe_provider_reasoning_support,
     probe_provider_tool_support,
 )
 from .registry import (
@@ -41,7 +44,13 @@ from .registry import (
     provider_configuration_source_summary,
     registry_readiness,
 )
-from .schemas import ModelProfile, is_sha256_digest, sha256_text, stable_json
+from .schemas import (
+    ModelProfile,
+    is_sha256_digest,
+    normalize_reasoning_effort,
+    sha256_text,
+    stable_json,
+)
 from .schemas import logical_model_count
 
 
@@ -62,6 +71,10 @@ def enroll_runtime_channels(
     tool_probe_timeout: float | None = None,
     tool_probe_max_models: int | None = None,
     tool_probe_max_models_per_provider: int | None = None,
+    calibrate_reasoning: bool = True,
+    reasoning_probe_timeout: float | None = None,
+    reasoning_probe_max_models: int | None = None,
+    reasoning_probe_max_models_per_provider: int | None = None,
     live: bool = True,
     client: HTTPProviderClient | None = None,
     engine_kwargs: Mapping[str, Any] | None = None,
@@ -103,6 +116,15 @@ def enroll_runtime_channels(
             300.0,
             float(tool_probe_timeout)
             if tool_probe_timeout is not None
+            else min(bounded_timeout, 20.0),
+        ),
+    )
+    bounded_reasoning_timeout = max(
+        1.0,
+        min(
+            PROVIDER_MAX_RESPONSE_SECONDS,
+            float(reasoning_probe_timeout)
+            if reasoning_probe_timeout is not None
             else min(bounded_timeout, 20.0),
         ),
     )
@@ -300,6 +322,28 @@ def enroll_runtime_channels(
             calibrated_profiles,
             [row for row in tool_probe.get("probes", []) if isinstance(row, Mapping)],
         )
+    reasoning_probe: dict[str, Any] = {}
+    if calibrate_reasoning:
+        available_profiles = [
+            profile for profile in calibrated_profiles if profile.health == "available"
+        ]
+        reasoning_probe = probe_provider_reasoning_support(
+            available_profiles,
+            timeout=bounded_reasoning_timeout,
+            client=active_client,
+            live=True,
+            max_workers=bounded_workers,
+            max_models=reasoning_probe_max_models,
+            max_models_per_provider=reasoning_probe_max_models_per_provider,
+        )
+        calibrated_profiles = _apply_runtime_reasoning_probe(
+            calibrated_profiles,
+            [
+                row
+                for row in reasoning_probe.get("probes", [])
+                if isinstance(row, Mapping)
+            ],
+        )
     serving_profiles = [
         profile for profile in calibrated_profiles if profile.health == "available"
     ]
@@ -381,6 +425,24 @@ def enroll_runtime_channels(
             if isinstance(row, Mapping)
             and str(row.get("status") or "") not in {"tool_call_supported", "text_only"}
         ),
+        "reasoning_probe_enabled": bool(calibrate_reasoning),
+        "reasoning_probe_timeout_seconds": (
+            bounded_reasoning_timeout if calibrate_reasoning else None
+        ),
+        "reasoning_probe_max_models": (
+            max(0, int(reasoning_probe_max_models))
+            if reasoning_probe_max_models is not None
+            else None
+        ),
+        "reasoning_probe_max_models_per_provider": (
+            max(0, int(reasoning_probe_max_models_per_provider))
+            if reasoning_probe_max_models_per_provider is not None
+            else None
+        ),
+        "reasoning_probe_selected_model_count": int(reasoning_probe.get("model_count") or 0),
+        "reasoning_probe_verified_count": int(reasoning_probe.get("verified_count") or 0),
+        "reasoning_probe_rejected_count": int(reasoning_probe.get("rejected_count") or 0),
+        "reasoning_probe_indeterminate_count": int(reasoning_probe.get("indeterminate_count") or 0),
         "runtime_channel_summary": runtime_channel_summary(serving_profiles),
         "profile_set_sha256": sha256_text(
             stable_json(sorted(sha256_text(profile.profile_id) for profile in serving_profiles))
@@ -743,6 +805,173 @@ def _apply_runtime_tool_probe(
     return updated
 
 
+def _apply_runtime_reasoning_probe(
+    profiles: Sequence[ModelProfile],
+    rows: Sequence[Mapping[str, Any]],
+) -> list[ModelProfile]:
+    """Promote only exact candidate profiles with complete strict evidence.
+
+    Reasoning transport is a provider-wire capability, not a model-quality
+    score. A missing row means that a bounded probe did not select the model;
+    timeouts and other indeterminate rows preserve the original candidate.
+    Only a control plus every declared level can promote to ``verified``.
+    """
+
+    rows_by_profile = {
+        str(row.get("profile_id") or ""): row
+        for row in rows
+        if str(row.get("profile_id") or "")
+    }
+    updated: list[ModelProfile] = []
+    for profile in profiles:
+        row = rows_by_profile.get(profile.profile_id)
+        if row is None:
+            updated.append(profile)
+            continue
+        config = (
+            dict(profile.reasoning_transport)
+            if isinstance(profile.reasoning_transport, Mapping)
+            else {}
+        )
+        if str(config.get("status") or "").strip().casefold() != "candidate":
+            updated.append(profile)
+            continue
+        if _reasoning_probe_row_verifies_profile(profile, row):
+            next_config = dict(config)
+            next_config["status"] = "verified"
+            updated.append(replace(profile, reasoning_transport=next_config))
+            continue
+        if _reasoning_probe_row_rejects_profile(profile, row):
+            next_config = dict(config)
+            next_config["status"] = "unsupported"
+            updated.append(replace(profile, reasoning_transport=next_config))
+            continue
+        updated.append(profile)
+    return updated
+
+
+def _reasoning_probe_row_verifies_profile(
+    profile: ModelProfile,
+    row: Mapping[str, Any],
+) -> bool:
+    config = (
+        dict(profile.reasoning_transport)
+        if isinstance(profile.reasoning_transport, Mapping)
+        else {}
+    )
+    if (
+        str(row.get("probe_kind") or "").strip().casefold() != "reasoning_transport"
+        or str(row.get("status") or "").strip().casefold() != "verified"
+        or row.get("live_probe_evidence") is not True
+        or row.get("strict_wire_shape_preserved") is not True
+        or str(row.get("transport") or "") != str(config.get("transport") or "")
+    ):
+        return False
+    declared_efforts = _normalized_reasoning_efforts(config.get("supported_efforts"))
+    row_efforts = _normalized_reasoning_efforts(row.get("declared_efforts"))
+    if not declared_efforts or row_efforts != declared_efforts:
+        return False
+    control = row.get("control") if isinstance(row.get("control"), Mapping) else {}
+    if not _strict_reasoning_probe_attempt_accepted(control):
+        return False
+    attempt_rows = (
+        row.get("effort_results")
+        if isinstance(row.get("effort_results"), list)
+        else []
+    )
+    by_effort = {
+        normalize_reasoning_effort(attempt.get("effort")): attempt
+        for attempt in attempt_rows
+        if isinstance(attempt, Mapping)
+        and normalize_reasoning_effort(attempt.get("effort"))
+    }
+    return bool(
+        row.get("all_declared_efforts_strict_streaming") is True
+        and all(
+            _strict_reasoning_probe_attempt_accepted(by_effort.get(effort, {}))
+            for effort in declared_efforts
+        )
+    )
+
+
+def _reasoning_probe_row_rejects_profile(
+    profile: ModelProfile,
+    row: Mapping[str, Any],
+) -> bool:
+    config = (
+        dict(profile.reasoning_transport)
+        if isinstance(profile.reasoning_transport, Mapping)
+        else {}
+    )
+    if (
+        str(row.get("probe_kind") or "").strip().casefold() != "reasoning_transport"
+        or str(row.get("status") or "").strip().casefold() != "rejected"
+        or row.get("live_probe_evidence") is not True
+        or str(row.get("transport") or "") != str(config.get("transport") or "")
+    ):
+        return False
+    control = row.get("control") if isinstance(row.get("control"), Mapping) else {}
+    if not _strict_reasoning_probe_attempt_accepted(control):
+        return False
+    attempts = row.get("effort_results") if isinstance(row.get("effort_results"), list) else []
+    return any(
+        isinstance(attempt, Mapping)
+        and str(attempt.get("status") or "").strip().casefold() == "rejected"
+        and 400 <= _safe_status_code(attempt.get("http_status")) < 500
+        for attempt in attempts
+    )
+
+
+def _strict_reasoning_probe_attempt_accepted(attempt: Mapping[str, Any]) -> bool:
+    if str(attempt.get("status") or "").strip().casefold() != "accepted":
+        return False
+    if attempt.get("marker_observed") is not True:
+        return False
+    if attempt.get("strict_streaming_contract_valid") is not True:
+        return False
+    if attempt.get("stream_requested") is not True:
+        return False
+    if attempt.get("strict_streaming_requested") is not True:
+        return False
+    if attempt.get("stream_observed") is not True:
+        return False
+    if attempt.get("stream_fallback_used") is True:
+        return False
+    if str(attempt.get("stream_protocol") or "").strip().casefold() not in {"sse", "ndjson"}:
+        return False
+    if _safe_nonnegative_int(attempt.get("stream_frame_count")) < 1:
+        return False
+    latency = _safe_nonnegative_float(attempt.get("latency_ms"))
+    return latency is not None and latency <= PROVIDER_MAX_RESPONSE_LATENCY_MS
+
+
+def _normalized_reasoning_efforts(value: Any) -> list[str]:
+    raw_values = value if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)) else []
+    efforts: list[str] = []
+    for raw in raw_values:
+        effort = normalize_reasoning_effort(raw)
+        if effort and effort not in efforts:
+            efforts.append(effort)
+    return efforts
+
+
+def _safe_status_code(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _safe_nonnegative_float(value: Any) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed != parsed or parsed < 0.0:
+        return None
+    return parsed
+
+
 def _safe_probe_latency(value: Any) -> int | None:
     try:
         parsed = int(round(float(value)))
@@ -767,6 +996,10 @@ def enroll_provider_channels(
     tool_probe_timeout: float | None = None,
     tool_probe_max_models: int | None = None,
     tool_probe_max_models_per_provider: int | None = None,
+    calibrate_reasoning: bool = True,
+    reasoning_probe_timeout: float | None = None,
+    reasoning_probe_max_models: int | None = None,
+    reasoning_probe_max_models_per_provider: int | None = None,
     redact_provider_identifiers: bool = False,
 ) -> dict[str, Any]:
     """Discover, probe, and operationally calibrate configured channels.
@@ -794,6 +1027,8 @@ def enroll_provider_channels(
     redacted_registry_path = output_root / "runtime_registry.safe.json"
     tool_probe_path = output_root / "provider_tool_probe.private.json"
     redacted_tool_probe_path = output_root / "provider_tool_probe.safe.json"
+    reasoning_probe_path = output_root / "provider_reasoning_probe.private.json"
+    redacted_reasoning_probe_path = output_root / "provider_reasoning_probe.safe.json"
     calibration_path = output_root / "registry_calibration.private.json"
     calibrated_registry_path = output_root / "runtime_registry.calibrated.private.json"
     receipt_path = output_root / "enrollment_receipt.safe.json"
@@ -914,10 +1149,79 @@ def enroll_provider_channels(
         else:
             stage_receipts["native_tool_probe"] = {"status": "blocked", "reason_codes": list(reason_codes)}
 
-        if not reason_codes and calibrate_tools:
+        reasoning_probe_payload: dict[str, Any] = {}
+        if not reason_codes and calibrate_reasoning:
+            profiles = load_registry(registry_path)
+            bounded_reasoning_timeout = max(
+                1.0,
+                min(
+                    PROVIDER_MAX_RESPONSE_SECONDS,
+                    float(reasoning_probe_timeout)
+                    if reasoning_probe_timeout is not None
+                    else min(
+                        max(1.0, min(PROVIDER_MAX_RESPONSE_SECONDS, float(timeout))),
+                        20.0,
+                    ),
+                ),
+            )
+            reasoning_probe_payload = probe_provider_reasoning_support(
+                profiles,
+                timeout=bounded_reasoning_timeout,
+                live=True,
+                max_workers=max(1, min(32, int(max_workers or 1))),
+                max_models=reasoning_probe_max_models,
+                max_models_per_provider=reasoning_probe_max_models_per_provider,
+                redact_provider_identifiers=False,
+            )
+            _write_json(reasoning_probe_path, reasoning_probe_payload)
+            stage_receipts["reasoning_transport_probe"] = _stage_receipt(
+                status=(
+                    "ready"
+                    if reasoning_probe_payload.get("network_calls_performed") is True
+                    or int(reasoning_probe_payload.get("model_count") or 0) == 0
+                    else "failed"
+                ),
+                path=reasoning_probe_path,
+                payload=reasoning_probe_payload,
+                count_fields=(
+                    "model_count",
+                    "verified_count",
+                    "rejected_count",
+                    "indeterminate_count",
+                ),
+                extra_counts={"timeout_seconds": bounded_reasoning_timeout},
+            )
+            if (
+                int(reasoning_probe_payload.get("candidate_model_count_before_selection") or 0) > 0
+                and int(reasoning_probe_payload.get("verified_count") or 0) < 1
+            ):
+                warning_codes.append("no_reasoning_transport_candidate_verified")
+            if redact_provider_identifiers:
+                _write_json(
+                    redacted_reasoning_probe_path,
+                    _redacted_reasoning_probe_copy(reasoning_probe_payload),
+                )
+        elif not calibrate_reasoning:
+            stage_receipts["reasoning_transport_probe"] = {
+                "status": "skipped",
+                "reason_codes": ["reasoning_calibration_disabled"],
+            }
+        else:
+            stage_receipts["reasoning_transport_probe"] = {
+                "status": "blocked",
+                "reason_codes": list(reason_codes),
+            }
+
+        calibration_enabled = bool(calibrate_tools or calibrate_reasoning)
+        if not reason_codes and calibration_enabled:
+            calibration_probe_paths: list[Path] = [probe_path]
+            if calibrate_tools:
+                calibration_probe_paths.append(tool_probe_path)
+            if calibrate_reasoning:
+                calibration_probe_paths.append(reasoning_probe_path)
             calibration_payload = build_registry_calibration(
                 registry_path=registry_path,
-                probe_paths=[probe_path, tool_probe_path],
+                probe_paths=calibration_probe_paths,
             )
             _write_json(calibration_path, calibration_payload)
             calibration_contract = calibration_payload.get("application_contract", {})
@@ -935,8 +1239,11 @@ def enroll_provider_channels(
                 )
             else:
                 _write_json(calibrated_registry_path, calibration_payload["updated_registry"])
-        elif not calibrate_tools:
-            stage_receipts["operational_calibration"] = {"status": "skipped", "reason_codes": ["tool_calibration_disabled"]}
+        elif not calibration_enabled:
+            stage_receipts["operational_calibration"] = {
+                "status": "skipped",
+                "reason_codes": ["operational_calibration_disabled"],
+            }
         else:
             stage_receipts["operational_calibration"] = {"status": "blocked", "reason_codes": list(reason_codes)}
 
@@ -961,6 +1268,8 @@ def enroll_provider_channels(
                 "registry_safe_path_sha256": _path_receipt(redacted_registry_path),
                 "tool_probe_private_path_sha256": _path_receipt(tool_probe_path),
                 "tool_probe_safe_path_sha256": _path_receipt(redacted_tool_probe_path),
+                "reasoning_probe_private_path_sha256": _path_receipt(reasoning_probe_path),
+                "reasoning_probe_safe_path_sha256": _path_receipt(redacted_reasoning_probe_path),
                 "calibration_path_sha256": _path_receipt(calibration_path),
                 "calibrated_registry_path_sha256": _path_receipt(calibrated_registry_path),
                 "serving_registry_path_sha256": _path_receipt(candidate_registry) if status == "ready" else "",
@@ -1079,3 +1388,9 @@ def _redacted_tool_probe_copy(payload: Mapping[str, Any]) -> dict[str, Any]:
     from .providers import redact_provider_tool_probe_artifact
 
     return redact_provider_tool_probe_artifact(payload)
+
+
+def _redacted_reasoning_probe_copy(payload: Mapping[str, Any]) -> dict[str, Any]:
+    from .providers import redact_provider_reasoning_probe_artifact
+
+    return redact_provider_reasoning_probe_artifact(payload)

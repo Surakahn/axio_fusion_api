@@ -10,7 +10,13 @@ from .registry import (
     load_registry,
     validate_prefusion_registry_handoff,
 )
-from .schemas import CAPABILITY_AXES, ModelProfile, sha256_text
+from .latency_policy import PROVIDER_MAX_RESPONSE_LATENCY_MS
+from .schemas import (
+    CAPABILITY_AXES,
+    ModelProfile,
+    normalize_reasoning_effort,
+    sha256_text,
+)
 
 
 # Operational calibration must remain importable by the serving process.  The
@@ -79,6 +85,7 @@ def build_registry_calibration(
     trace_rows = _load_jsonl_rows(trace_paths)
     _apply_probe_signals(signals, probe_rows)
     _apply_tool_probe_signals(signals, probe_rows)
+    _apply_reasoning_probe_signals(signals, probe_rows)
     _apply_benchmark_signals(signals, benchmark_rows)
     _apply_feedback_signals(signals, feedback_rows, hash_to_profile)
     _apply_trace_signals(signals, trace_rows, hash_to_profile)
@@ -112,6 +119,9 @@ def build_registry_calibration(
             "probe_row_count": len(probe_rows),
             "tool_probe_row_count": sum(
                 1 for row in probe_rows if _is_tool_probe_row(row)
+            ),
+            "reasoning_probe_row_count": sum(
+                1 for row in probe_rows if _is_reasoning_probe_row(row)
             ),
             "benchmark_row_count": len(benchmark_rows),
             "feedback_row_count": len(feedback_rows),
@@ -184,6 +194,12 @@ def _empty_signal(profile: ModelProfile) -> dict[str, Any]:
         "tool_probe_latencies_ms": [],
         "tool_probe_total": 0,
         "tool_call_supported_count": 0,
+        "reasoning_probe_rows": [],
+        "current_reasoning_transport": (
+            dict(profile.reasoning_transport)
+            if isinstance(profile.reasoning_transport, Mapping)
+            else {}
+        ),
         "current_capabilities": dict(profile.capabilities),
         "current_supports_tools": bool(profile.supports_tools),
         "current_tool_capability": profile.tool_capability,
@@ -194,7 +210,7 @@ def _empty_signal(profile: ModelProfile) -> dict[str, Any]:
 
 def _apply_probe_signals(signals: dict[str, dict[str, Any]], rows: Sequence[Mapping[str, Any]]) -> None:
     for row in rows:
-        if _is_tool_probe_row(row):
+        if _is_tool_probe_row(row) or _is_reasoning_probe_row(row):
             continue
         profile_id = str(row.get("profile_id") or "")
         if profile_id not in signals:
@@ -225,6 +241,19 @@ def _apply_tool_probe_signals(
         latency = _optional_float(row.get("latency_ms"))
         if latency is not None and latency > 0:
             signals[profile_id]["tool_probe_latencies_ms"].append(latency)
+
+
+def _apply_reasoning_probe_signals(
+    signals: dict[str, dict[str, Any]],
+    rows: Sequence[Mapping[str, Any]],
+) -> None:
+    for row in rows:
+        if not _is_reasoning_probe_row(row):
+            continue
+        profile_id = str(row.get("profile_id") or "")
+        if profile_id not in signals:
+            continue
+        signals[profile_id]["reasoning_probe_rows"].append(dict(row))
 
 
 def _apply_benchmark_signals(signals: dict[str, dict[str, Any]], rows: Sequence[Mapping[str, Any]]) -> None:
@@ -356,6 +385,10 @@ def _signal_to_patch(signal: Mapping[str, Any]) -> dict[str, Any]:
             if signal.get("current_supports_tools")
             else False
         )
+    reasoning_transport_patch = _reasoning_transport_patch(
+        signal.get("current_reasoning_transport"),
+        signal.get("reasoning_probe_rows"),
+    )
     return {
         "profile_id": signal["profile_id"],
         "provider": signal["provider"],
@@ -374,6 +407,7 @@ def _signal_to_patch(signal: Mapping[str, Any]) -> dict[str, Any]:
         "tool_capability_source_patch": tool_capability_source_patch,
         "tool_probe_status_patch": tool_probe_status_patch,
         "tool_support_rate": tool_support_rate,
+        "reasoning_transport_patch": reasoning_transport_patch,
         "signal_counts": {
             "probe_total": probe_total,
             "benchmark_category_count": len(benchmark_scores),
@@ -382,11 +416,123 @@ def _signal_to_patch(signal: Mapping[str, Any]) -> dict[str, Any]:
             "tool_probe_total": tool_probe_total,
             "tool_call_supported_count": tool_call_supported_count,
             "tool_probe_status_counts": dict(sorted((signal.get("tool_probe_status_counts") or {}).items())),
+            "reasoning_probe_total": len(
+                signal.get("reasoning_probe_rows", [])
+                if isinstance(signal.get("reasoning_probe_rows"), Sequence)
+                else []
+            ),
         },
         "raw_prompt_persisted": False,
         "raw_provider_output_persisted": False,
         "secrets_persisted": False,
     }
+
+
+def _reasoning_transport_patch(
+    current: Any,
+    rows: Any,
+) -> dict[str, Any] | None:
+    """Return a status-only capability promotion from strict probe evidence."""
+
+    config = dict(current) if isinstance(current, Mapping) else {}
+    if str(config.get("status") or "").strip().casefold() != "candidate":
+        return None
+    declared_efforts = _normalized_reasoning_efforts(config.get("supported_efforts"))
+    if not declared_efforts:
+        return None
+    probe_rows = [row for row in rows if isinstance(row, Mapping)] if isinstance(rows, Sequence) else []
+    exact_rows = [
+        row
+        for row in probe_rows
+        if str(row.get("probe_kind") or "").strip().casefold() == "reasoning_transport"
+        and row.get("live_probe_evidence") is True
+        and str(row.get("transport") or "") == str(config.get("transport") or "")
+        and _normalized_reasoning_efforts(row.get("declared_efforts")) == declared_efforts
+    ]
+    if not exact_rows:
+        return None
+    if any(_reasoning_probe_row_verified(row, declared_efforts) for row in exact_rows):
+        patched = dict(config)
+        patched["status"] = "verified"
+        return patched
+    if any(_reasoning_probe_row_rejected(row) for row in exact_rows):
+        patched = dict(config)
+        patched["status"] = "unsupported"
+        return patched
+    return None
+
+
+def _reasoning_probe_row_verified(
+    row: Mapping[str, Any],
+    declared_efforts: Sequence[str],
+) -> bool:
+    if (
+        str(row.get("status") or "").strip().casefold() != "verified"
+        or row.get("strict_wire_shape_preserved") is not True
+        or row.get("all_declared_efforts_strict_streaming") is not True
+    ):
+        return False
+    control = row.get("control") if isinstance(row.get("control"), Mapping) else {}
+    if not _strict_reasoning_attempt_accepted(control):
+        return False
+    attempts = row.get("effort_results") if isinstance(row.get("effort_results"), list) else []
+    by_effort = {
+        normalize_reasoning_effort(attempt.get("effort")): attempt
+        for attempt in attempts
+        if isinstance(attempt, Mapping)
+        and normalize_reasoning_effort(attempt.get("effort"))
+    }
+    return all(
+        _strict_reasoning_attempt_accepted(by_effort.get(effort, {}))
+        for effort in declared_efforts
+    )
+
+
+def _reasoning_probe_row_rejected(row: Mapping[str, Any]) -> bool:
+    if str(row.get("status") or "").strip().casefold() != "rejected":
+        return False
+    control = row.get("control") if isinstance(row.get("control"), Mapping) else {}
+    if not _strict_reasoning_attempt_accepted(control):
+        return False
+    attempts = row.get("effort_results") if isinstance(row.get("effort_results"), list) else []
+    return any(
+        isinstance(attempt, Mapping)
+        and str(attempt.get("status") or "").strip().casefold() == "rejected"
+        and 400 <= _safe_count(attempt.get("http_status")) < 500
+        for attempt in attempts
+    )
+
+
+def _strict_reasoning_attempt_accepted(row: Mapping[str, Any]) -> bool:
+    latency = _optional_float(row.get("latency_ms"))
+    return bool(
+        str(row.get("status") or "").strip().casefold() == "accepted"
+        and row.get("marker_observed") is True
+        and row.get("strict_streaming_contract_valid") is True
+        and row.get("stream_requested") is True
+        and row.get("strict_streaming_requested") is True
+        and row.get("stream_observed") is True
+        and row.get("stream_fallback_used") is not True
+        and str(row.get("stream_protocol") or "").strip().casefold()
+        in {"sse", "ndjson"}
+        and _safe_count(row.get("stream_frame_count")) >= 1
+        and latency is not None
+        and 0.0 <= latency <= PROVIDER_MAX_RESPONSE_LATENCY_MS
+    )
+
+
+def _normalized_reasoning_efforts(value: Any) -> list[str]:
+    raw_values = (
+        value
+        if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray))
+        else []
+    )
+    values: list[str] = []
+    for raw in raw_values:
+        effort = normalize_reasoning_effort(raw)
+        if effort and effort not in values:
+            values.append(effort)
+    return values
 
 
 def _dominant_tool_probe_status(counts: Mapping[str, Any]) -> str:
@@ -487,6 +633,8 @@ def _updated_registry_payload(
         ):
             if patch.get(patch_key) is not None:
                 row[row_key] = patch[patch_key]
+        if isinstance(patch.get("reasoning_transport_patch"), Mapping):
+            row["reasoning_transport"] = dict(patch["reasoning_transport_patch"])
         row["source"] = "calibrated_registry"
         row["calibration"] = {
             "profile_id_sha256": sha256_text(profile.profile_id),
@@ -495,6 +643,14 @@ def _updated_registry_payload(
             "tool_capability": patch.get("tool_capability_patch"),
             "tool_probe_status": patch.get("tool_probe_status_patch"),
             "supports_tools_updated_from_operational_probe": patch.get("supports_tools_patch") is not None,
+            "reasoning_transport_status": (
+                str(patch.get("reasoning_transport_patch", {}).get("status") or "")
+                if isinstance(patch.get("reasoning_transport_patch"), Mapping)
+                else ""
+            ),
+            "reasoning_transport_updated_from_operational_probe": isinstance(
+                patch.get("reasoning_transport_patch"), Mapping
+            ),
             "raw_prompt_persisted": False,
             "raw_provider_output_persisted": False,
         }
@@ -535,6 +691,11 @@ def _updated_registry_payload(
         "calibration_probe_file_count": max(0, int(calibration_probe_file_count)),
         "tool_probe_row_count": sum(
             int(patch.get("signal_counts", {}).get("tool_probe_total") or 0)
+            for patch in patches
+            if isinstance(patch.get("signal_counts"), Mapping)
+        ),
+        "reasoning_probe_row_count": sum(
+            int(patch.get("signal_counts", {}).get("reasoning_probe_total") or 0)
             for patch in patches
             if isinstance(patch.get("signal_counts"), Mapping)
         ),
@@ -595,6 +756,15 @@ def _load_probe_rows(paths: Sequence[str | Path]) -> list[dict[str, Any]]:
 
 def _is_tool_probe_row(row: Mapping[str, Any]) -> bool:
     return str(row.get("probe_kind") or row.get("probe_type") or "").strip().lower() == "tool_call"
+
+
+def _is_reasoning_probe_row(row: Mapping[str, Any]) -> bool:
+    return (
+        str(row.get("probe_kind") or row.get("probe_type") or "")
+        .strip()
+        .lower()
+        == "reasoning_transport"
+    )
 
 
 def _load_benchmark_rows(paths: Sequence[str | Path]) -> list[dict[str, Any]]:

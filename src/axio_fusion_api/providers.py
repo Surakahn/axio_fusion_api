@@ -37,6 +37,7 @@ from .schemas import (
     FusionRequest,
     ModelProfile,
     is_sha256_digest,
+    normalize_reasoning_effort,
     sha256_text,
     stable_json,
 )
@@ -230,10 +231,18 @@ DEFAULT_USER_AGENT = (
 PROVIDER_INPUT_ADAPTER_FORMATS = ("chat", "responses", "anthropic", "gemini")
 TOOL_PROBE_NAME = "axio_probe_echo"
 TOOL_PROBE_VALUE = "AXIO_TOOL_PROBE_OK"
+REASONING_PROBE_SCHEMA = "axio_fusion_api.provider_reasoning_probe.v1"
+REASONING_PROBE_MARKER = "AXIO_REASONING_TRANSPORT_OK"
 ROLE_PROBE_SCHEMA = "axio_fusion_api.provider_role_probe.v1"
 ROLE_PROBE_CONTRACT = "axio_fusion_api.provider_role_probe.fixed_control_packet.v1"
 ROLE_PROBE_ROLES = ("critic", "judge", "synthesizer")
 ROLE_PROBE_JUDGE_MAX_OUTPUT_TOKENS = 512
+
+_REASONING_PROBE_TRANSPORTS = {
+    "chat": "chat_reasoning_effort",
+    "responses": "responses_reasoning",
+}
+_REASONING_PROBE_TRANSIENT_HTTP_STATUSES = frozenset({401, 403, 408, 429})
 
 
 def _text_from_value(value: Any, *, _depth: int = 0) -> str:
@@ -415,7 +424,18 @@ class HTTPProviderClient:
         prompt: str,
         system: str,
         timeout: float | None = None,
+        strict_wire: bool = False,
     ) -> ProviderCompletion:
+        """Complete one turn, optionally forbidding adapter shape fallbacks.
+
+        ``strict_wire`` is for narrow provider capability calibration. In
+        particular, a Responses gateway normally may retry a typed ``input``
+        request with its text-only compatibility shape. That is useful for
+        serving, but would make a parameter probe ambiguous. A strict wire
+        probe must observe the configured request shape directly and must not
+        hide a parameterized 4xx behind an alternate request body.
+        """
+
         api_format = _provider_adapter_format(profile.api_format)
         adapter = {
             "responses": self._responses_turn,
@@ -438,13 +458,18 @@ class HTTPProviderClient:
         for attempt in range(_max_empty_response_retries() + 1):
             if attempt and _deadline_exhausted(deadline_at):
                 break
+            adapter_kwargs: dict[str, Any] = {
+                "prompt": prompt,
+                "system": system,
+                "timeout": _remaining_timeout(deadline_at),
+                "fusion_deadline_bound": fusion_deadline_bound,
+            }
+            if api_format == "responses":
+                adapter_kwargs["strict_wire"] = bool(strict_wire)
             completion = adapter(
                 profile,
                 request,
-                prompt=prompt,
-                system=system,
-                timeout=_remaining_timeout(deadline_at),
-                fusion_deadline_bound=fusion_deadline_bound,
+                **adapter_kwargs,
             )
             if completion.has_output:
                 return completion
@@ -501,7 +526,17 @@ class HTTPProviderClient:
             text = _text_from_value(result.get("output_text") or result.get("text"))
         return ProviderCompletion(text, normalize_provider_tool_calls(result, api_format="chat"))
 
-    def _responses_turn(self, profile: ModelProfile, request: FusionRequest, *, prompt: str, system: str, timeout: float | None, fusion_deadline_bound: bool = False) -> ProviderCompletion:
+    def _responses_turn(
+        self,
+        profile: ModelProfile,
+        request: FusionRequest,
+        *,
+        prompt: str,
+        system: str,
+        timeout: float | None,
+        fusion_deadline_bound: bool = False,
+        strict_wire: bool = False,
+    ) -> ProviderCompletion:
         payload = _responses_typed_payload(profile, request, prompt=prompt, system=system)
         typed_started = time.monotonic()
         try:
@@ -515,6 +550,8 @@ class HTTPProviderClient:
             )
         except ProviderExecutionError as exc:
             if (
+                strict_wire
+                or
                 not _should_try_responses_text_fallback(exc)
                 or not _responses_text_fallback_preserves_turn(request)
             ):
@@ -585,6 +622,475 @@ def ensure_strict_streaming_client(client: Any | None = None) -> Any:
     if isinstance(client, HTTPProviderClient) and not client.require_streaming:
         return HTTPProviderClient(require_streaming=True)
     return client
+
+
+def probe_provider_reasoning_support(
+    profiles: Sequence[ModelProfile],
+    *,
+    timeout: float = PROVIDER_MAX_RESPONSE_SECONDS,
+    client: HTTPProviderClient | None = None,
+    live: bool = False,
+    max_workers: int = 4,
+    profile_hashes: Sequence[str] | None = None,
+    max_models: int | None = None,
+    max_models_per_provider: int | None = None,
+    redact_provider_identifiers: bool = False,
+) -> dict[str, Any]:
+    """Verify declared reasoning transports without inferring model quality.
+
+    A provider/model profile must already declare a ``candidate`` transport and
+    the exact effort levels it intends to expose. This probe first makes a
+    strict streaming control request without any reasoning field, then makes
+    one strict request per declared effort with only that protocol's native
+    field. It never removes a rejected parameter and retries the same turn in
+    a weaker shape, so a gateway's parameter rejection cannot become a false
+    ``verified`` capability.
+    """
+
+    candidate_profiles = [
+        profile
+        for profile in _dedupe_probe_profiles(profiles)
+        if _reasoning_probe_plan(profile) is not None
+    ]
+    selected_profiles, selection_policy = _select_probe_profiles(
+        candidate_profiles,
+        profile_hashes=profile_hashes,
+        max_models=max_models,
+        max_models_per_provider=max_models_per_provider,
+    )
+    bounded_timeout = max(
+        1.0,
+        min(PROVIDER_MAX_RESPONSE_SECONDS, float(timeout)),
+    )
+    probe_client = ensure_strict_streaming_client(client)
+    if not live:
+        rows = [
+            _reasoning_probe_skipped_row(
+                profile,
+                _reasoning_probe_plan(profile) or {},
+            )
+            for profile in selected_profiles
+        ]
+    else:
+        rows = []
+        workers = max(1, min(32, int(max_workers or 1), len(selected_profiles) or 1))
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {
+                executor.submit(
+                    _probe_one_model_reasoning_support,
+                    profile,
+                    plan=_reasoning_probe_plan(profile) or {},
+                    timeout=bounded_timeout,
+                    client=probe_client,
+                ): profile
+                for profile in selected_profiles
+            }
+            for future in as_completed(futures):
+                rows.append(future.result())
+        rows.sort(key=lambda row: str(row.get("profile_id") or ""))
+
+    status_counts: dict[str, int] = {}
+    for row in rows:
+        status = str(row.get("status") or "unknown")
+        status_counts[status] = status_counts.get(status, 0) + 1
+    payload = {
+        "schema": REASONING_PROBE_SCHEMA,
+        "probe_kind": "reasoning_transport",
+        "mode": "live" if live else "dry_run",
+        "network_calls_performed": bool(live and selected_profiles),
+        "timeout_seconds": bounded_timeout,
+        "max_workers": max(1, int(max_workers or 1)),
+        "candidate_model_count_before_selection": len(candidate_profiles),
+        "model_count": len(selected_profiles),
+        "verified_count": status_counts.get("verified", 0),
+        "rejected_count": status_counts.get("rejected", 0),
+        "indeterminate_count": status_counts.get("indeterminate", 0),
+        "status_counts": dict(sorted(status_counts.items())),
+        "probes": rows,
+        "selection_policy": selection_policy,
+        "verification_contract": {
+            "requires_model_level_candidate_declaration": True,
+            "requires_protocol_local_wire_field": True,
+            "control_request_omits_reasoning_field": True,
+            "requires_control_and_every_declared_effort": True,
+            "requires_strict_sse_or_ndjson_streaming": True,
+            "strict_responses_probe_disables_text_input_fallback": True,
+            "explicit_nontransient_parameter_4xx_is_rejected": True,
+            "timeout_network_and_5xx_are_indeterminate": True,
+            "benchmark_labels_or_cases_used": False,
+            "raw_probe_prompt_persisted": False,
+            "raw_provider_output_persisted": False,
+            "raw_provider_body_persisted": False,
+        },
+        "raw_probe_prompt_persisted": False,
+        "raw_provider_output_persisted": False,
+        "raw_provider_body_persisted": False,
+        "secrets_persisted": False,
+    }
+    if redact_provider_identifiers:
+        return redact_provider_reasoning_probe_artifact(payload)
+    return payload
+
+
+def _reasoning_probe_plan(profile: ModelProfile) -> dict[str, Any] | None:
+    """Return a bounded wire-plan for an explicit model-level candidate."""
+
+    config = (
+        dict(profile.reasoning_transport)
+        if isinstance(profile.reasoning_transport, Mapping)
+        else {}
+    )
+    if str(config.get("status") or "").strip().casefold() != "candidate":
+        return None
+    api_format = _provider_adapter_format(profile.api_format)
+    expected_transport = _REASONING_PROBE_TRANSPORTS.get(api_format, "")
+    transport = str(config.get("transport") or "").strip().casefold()
+    if (
+        not expected_transport
+        or transport != expected_transport
+        or config.get("api_format_compatible") is not True
+    ):
+        return None
+    raw_efforts = config.get("supported_efforts")
+    if not isinstance(raw_efforts, Sequence) or isinstance(raw_efforts, (str, bytes, bytearray)):
+        return None
+    efforts: list[str] = []
+    for raw_effort in raw_efforts:
+        effort = normalize_reasoning_effort(raw_effort)
+        if effort and effort not in efforts:
+            efforts.append(effort)
+    if not efforts:
+        return None
+    return {
+        "transport": transport,
+        "api_format": api_format,
+        "supported_efforts": tuple(efforts),
+    }
+
+
+def _reasoning_probe_skipped_row(
+    profile: ModelProfile,
+    plan: Mapping[str, Any],
+) -> dict[str, Any]:
+    return _reasoning_probe_profile_row(
+        profile,
+        plan=plan,
+        status="skipped",
+        control=_reasoning_probe_attempt_row(
+            status="skipped",
+            reason_code="live_flag_required",
+            latency_ms=0.0,
+            request_receipt={},
+        ),
+        effort_results=[],
+        reason_codes=["live_flag_required"],
+        probe_mode="dry_run",
+    )
+
+
+def _probe_one_model_reasoning_support(
+    profile: ModelProfile,
+    *,
+    plan: Mapping[str, Any],
+    timeout: float,
+    client: Any,
+) -> dict[str, Any]:
+    control_request = FusionRequest(
+        model="axio-fast",
+        prompt=f"Return exactly {REASONING_PROBE_MARKER}.",
+        system=(
+            "You are an Axio provider reasoning transport capability probe. "
+            f"Return exactly {REASONING_PROBE_MARKER}."
+        ),
+        max_output_tokens=32,
+        temperature=0.0,
+    )
+    control = _run_reasoning_probe_attempt(
+        profile,
+        control_request,
+        timeout=timeout,
+        client=client,
+        parameterized=False,
+    )
+    if control.get("status") != "accepted":
+        return _reasoning_probe_profile_row(
+            profile,
+            plan=plan,
+            status="indeterminate",
+            control=control,
+            effort_results=[],
+            reason_codes=["control_request_not_accepted"],
+        )
+
+    transport = str(plan.get("transport") or "")
+    efforts = [
+        normalize_reasoning_effort(value)
+        for value in plan.get("supported_efforts", ())
+    ]
+    efforts = [effort for effort in efforts if effort]
+    probe_profile = replace(
+        profile,
+        reasoning_transport={
+            "status": "verified",
+            "transport": transport,
+            "supported_efforts": efforts,
+        },
+    )
+    effort_results = []
+    for effort in efforts:
+        attempt = _run_reasoning_probe_attempt(
+            probe_profile,
+            replace(control_request, reasoning_effort=effort),
+            timeout=timeout,
+            client=client,
+            parameterized=True,
+        )
+        effort_results.append({"effort": effort, **attempt})
+
+    statuses = {str(row.get("status") or "") for row in effort_results}
+    if effort_results and statuses == {"accepted"}:
+        status = "verified"
+        reason_codes: list[str] = []
+    elif "rejected" in statuses:
+        status = "rejected"
+        reason_codes = ["declared_reasoning_effort_rejected"]
+    else:
+        status = "indeterminate"
+        reason_codes = ["declared_reasoning_effort_not_fully_verified"]
+    return _reasoning_probe_profile_row(
+        profile,
+        plan=plan,
+        status=status,
+        control=control,
+        effort_results=effort_results,
+        reason_codes=reason_codes,
+    )
+
+
+def _run_reasoning_probe_attempt(
+    profile: ModelProfile,
+    request: FusionRequest,
+    *,
+    timeout: float,
+    client: Any,
+    parameterized: bool,
+) -> dict[str, Any]:
+    started = time.monotonic()
+    _begin_provider_request_trace()
+    try:
+        completion = client.complete_turn(
+            profile,
+            request,
+            prompt=request.prompt,
+            system=request.system,
+            timeout=timeout,
+            strict_wire=True,
+        )
+        request_receipt = _finish_provider_request_trace()
+        output = completion.text
+        marker_observed = REASONING_PROBE_MARKER in output
+        streaming_valid = _role_probe_streaming_is_valid(request_receipt)
+        latency_ms = (time.monotonic() - started) * 1000
+        latency_valid = latency_ms <= PROVIDER_MAX_RESPONSE_LATENCY_MS
+        if not streaming_valid:
+            return _reasoning_probe_attempt_row(
+                status="indeterminate",
+                reason_code="strict_streaming_contract_invalid",
+                latency_ms=latency_ms,
+                output=output,
+                request_receipt=request_receipt,
+                marker_observed=marker_observed,
+                strict_streaming_contract_valid=False,
+            )
+        if not marker_observed:
+            return _reasoning_probe_attempt_row(
+                status="indeterminate",
+                reason_code="control_marker_missing",
+                latency_ms=latency_ms,
+                output=output,
+                request_receipt=request_receipt,
+                marker_observed=False,
+                strict_streaming_contract_valid=True,
+            )
+        if not latency_valid:
+            return _reasoning_probe_attempt_row(
+                status="indeterminate",
+                reason_code="provider_response_latency_exceeded_90s",
+                latency_ms=latency_ms,
+                output=output,
+                request_receipt=request_receipt,
+                marker_observed=True,
+                strict_streaming_contract_valid=True,
+            )
+        return _reasoning_probe_attempt_row(
+            status="accepted",
+            reason_code="strict_streaming_parameter_accepted"
+            if parameterized
+            else "strict_streaming_control_accepted",
+            latency_ms=latency_ms,
+            output=output,
+            request_receipt=request_receipt,
+            marker_observed=True,
+            strict_streaming_contract_valid=True,
+        )
+    except ProviderExecutionError as exc:
+        request_receipt = _finish_provider_request_trace()
+        latency_ms = (time.monotonic() - started) * 1000
+        rejected = parameterized and _reasoning_probe_http_rejected(exc.http_status)
+        return _reasoning_probe_attempt_row(
+            status="rejected" if rejected else "indeterminate",
+            reason_code=(
+                "reasoning_parameter_rejected_http_4xx"
+                if rejected
+                else "reasoning_probe_provider_error"
+            ),
+            latency_ms=latency_ms,
+            output="",
+            error_type=type(exc).__name__,
+            error_code=exc.error_code or "provider_execution_error",
+            http_status=exc.http_status,
+            request_receipt=request_receipt,
+            marker_observed=False,
+            strict_streaming_contract_valid=False,
+        )
+    except Exception as exc:  # noqa: PERF203 - provider boundary
+        request_receipt = _finish_provider_request_trace()
+        return _reasoning_probe_attempt_row(
+            status="indeterminate",
+            reason_code="reasoning_probe_client_error",
+            latency_ms=(time.monotonic() - started) * 1000,
+            output="",
+            error_type=type(exc).__name__,
+            error_code=type(exc).__name__,
+            request_receipt=request_receipt,
+            marker_observed=False,
+            strict_streaming_contract_valid=False,
+        )
+
+
+def _reasoning_probe_http_rejected(http_status: int | None) -> bool:
+    try:
+        status = int(http_status or 0)
+    except (TypeError, ValueError):
+        return False
+    return 400 <= status < 500 and status not in _REASONING_PROBE_TRANSIENT_HTTP_STATUSES
+
+
+def _reasoning_probe_attempt_row(
+    *,
+    status: str,
+    reason_code: str,
+    latency_ms: float,
+    output: str = "",
+    error_type: str = "",
+    error_code: str = "",
+    http_status: int | None = None,
+    request_receipt: Mapping[str, Any] | None = None,
+    marker_observed: bool = False,
+    strict_streaming_contract_valid: bool = False,
+) -> dict[str, Any]:
+    receipt = request_receipt if isinstance(request_receipt, Mapping) else {}
+    return {
+        "status": str(status or "indeterminate")[:40],
+        "reason_code": str(reason_code or "")[:120],
+        "latency_ms": round(max(0.0, float(latency_ms or 0.0)), 3),
+        "latency_eligibility": latency_eligibility(observed_latency_ms=latency_ms),
+        "error_type": str(error_type or "")[:120],
+        "error_code": str(error_code or "")[:120],
+        "http_status": http_status,
+        "output_sha256": sha256_text(output) if output else "",
+        "marker_observed": bool(marker_observed),
+        "strict_streaming_contract_valid": bool(strict_streaming_contract_valid),
+        "stream_requested": receipt.get("stream_requested") is True,
+        "stream_observed": receipt.get("stream_observed") is True,
+        "stream_fallback_used": receipt.get("stream_fallback_used") is True,
+        "stream_protocol": str(receipt.get("stream_protocol") or "")[:32],
+        "stream_frame_count": _safe_int(receipt.get("stream_frame_count"), default=0),
+        "strict_streaming_requested": receipt.get("strict_streaming_requested") is True,
+        "provider_request_count": _safe_int(receipt.get("provider_request_count"), default=0),
+        "provider_request_success_count": _safe_int(receipt.get("provider_request_success_count"), default=0),
+        "provider_request_failure_count": _safe_int(receipt.get("provider_request_failure_count"), default=0),
+        "key_attempt_count": _safe_int(receipt.get("key_attempt_count"), default=0),
+        "transport_attempt_count": _safe_int(receipt.get("transport_attempt_count"), default=0),
+        "retry_attempt_count": _safe_int(receipt.get("retry_attempt_count"), default=0),
+        "raw_probe_prompt_persisted": False,
+        "raw_provider_output_persisted": False,
+        "raw_provider_body_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _reasoning_probe_profile_row(
+    profile: ModelProfile,
+    *,
+    plan: Mapping[str, Any],
+    status: str,
+    control: Mapping[str, Any],
+    effort_results: Sequence[Mapping[str, Any]],
+    reason_codes: Sequence[str],
+    probe_mode: str = "live",
+) -> dict[str, Any]:
+    rows = [dict(row) for row in effort_results if isinstance(row, Mapping)]
+    accepted_efforts = [
+        str(row.get("effort") or "")
+        for row in rows
+        if row.get("status") == "accepted" and str(row.get("effort") or "")
+    ]
+    rejected_efforts = [
+        str(row.get("effort") or "")
+        for row in rows
+        if row.get("status") == "rejected" and str(row.get("effort") or "")
+    ]
+    indeterminate_efforts = [
+        str(row.get("effort") or "")
+        for row in rows
+        if row.get("status") == "indeterminate" and str(row.get("effort") or "")
+    ]
+    all_attempts = [dict(control), *rows]
+    return {
+        "profile_id": profile.profile_id,
+        "provider": profile.provider,
+        "model": profile.model,
+        "api_format": profile.api_format,
+        "probe_kind": "reasoning_transport",
+        "status": str(status or "indeterminate")[:40],
+        "transport": str(plan.get("transport") or "")[:80],
+        "declared_efforts": [
+            str(value)
+            for value in plan.get("supported_efforts", ())
+            if str(value)
+        ],
+        "verified_efforts": accepted_efforts,
+        "rejected_efforts": rejected_efforts,
+        "indeterminate_efforts": indeterminate_efforts,
+        "control": dict(control),
+        "effort_results": rows,
+        "reason_codes": sorted({str(code)[:120] for code in reason_codes if str(code)}),
+        "probe_mode": str(probe_mode or "live")[:32],
+        "live_probe_evidence": str(probe_mode or "").strip().casefold() == "live",
+        "strict_wire_shape_preserved": True,
+        "all_declared_efforts_strict_streaming": bool(
+            control.get("status") == "accepted"
+            and bool(rows)
+            and all(row.get("status") == "accepted" for row in rows)
+        ),
+        "provider_request_count": sum(
+            _safe_int(row.get("provider_request_count"), default=0)
+            for row in all_attempts
+        ),
+        "provider_request_success_count": sum(
+            _safe_int(row.get("provider_request_success_count"), default=0)
+            for row in all_attempts
+        ),
+        "provider_request_failure_count": sum(
+            _safe_int(row.get("provider_request_failure_count"), default=0)
+            for row in all_attempts
+        ),
+        "raw_probe_prompt_persisted": False,
+        "raw_provider_output_persisted": False,
+        "raw_provider_body_persisted": False,
+        "secrets_persisted": False,
+    }
 
 
 def discover_provider_inventory(*, live: bool = False, timeout: float = 10.0) -> dict[str, Any]:
@@ -2737,6 +3243,194 @@ def redact_provider_tool_probe_artifact_file(path: str | os.PathLike[str]) -> di
     return redacted
 
 
+def redact_provider_reasoning_probe_artifact(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a hash-only receipt for a reasoning-transport probe."""
+
+    probes = payload.get("probes") if isinstance(payload.get("probes"), list) else []
+    redacted: dict[str, Any] = {
+        key: value
+        for key, value in dict(payload).items()
+        if key not in {"probes", "providers", "provider_reports"}
+    }
+    if isinstance(payload.get("providers"), list):
+        providers = [str(item) for item in payload.get("providers", []) if str(item)]
+        redacted["provider_hashes"] = [sha256_text(item) for item in providers]
+        redacted["provider_set_sha256"] = sha256_text(stable_json(sorted(providers)))
+        redacted["provider_count"] = len(providers)
+    redacted["probes"] = [
+        _redact_reasoning_probe_row(row)
+        for row in probes
+        if isinstance(row, Mapping)
+    ]
+    redacted["provider_identifier_redaction"] = _provider_identifier_redaction_contract()
+    redacted["raw_provider_names_persisted"] = False
+    redacted["raw_provider_model_ids_persisted"] = False
+    redacted["raw_provider_outputs_persisted"] = False
+    redacted["raw_probe_prompt_persisted"] = False
+    redacted["secrets_persisted"] = False
+    return redacted
+
+
+def redact_provider_reasoning_probe_artifact_file(
+    path: str | os.PathLike[str],
+) -> dict[str, Any]:
+    """Redact an existing reasoning probe without provider network access."""
+
+    selected = os.fspath(path)
+    try:
+        with open(selected, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("provider_reasoning_probe_artifact_unreadable") from exc
+    if not isinstance(payload, Mapping):
+        raise ValueError("provider_reasoning_probe_artifact_must_be_json_object")
+    redacted = redact_provider_reasoning_probe_artifact(payload)
+    redacted["redaction_mode"] = "offline_existing_reasoning_probe_artifact"
+    redacted["source_artifact_sha256"] = sha256_text(
+        stable_json(_reasoning_probe_redaction_source_digest_input(payload))
+    )
+    redacted["network_calls_performed_by_redaction"] = False
+    redacted["raw_source_path_persisted"] = False
+    return redacted
+
+
+def _redact_reasoning_probe_row(row: Mapping[str, Any]) -> dict[str, Any]:
+    profile_id = str(row.get("profile_id") or "")
+    provider = str(row.get("provider") or "")
+    model = str(row.get("model") or "")
+    attempts = row.get("effort_results") if isinstance(row.get("effort_results"), list) else []
+    declared_efforts = row.get("declared_efforts") if isinstance(row.get("declared_efforts"), list) else []
+    return {
+        "profile_id_sha256": sha256_text(profile_id) if profile_id else "",
+        "provider_sha256": sha256_text(provider) if provider else "",
+        "model_sha256": sha256_text(model) if model else "",
+        "api_format": str(row.get("api_format") or "")[:40],
+        "probe_kind": "reasoning_transport",
+        "status": str(row.get("status") or "")[:40],
+        "transport": str(row.get("transport") or "")[:80],
+        "declared_efforts": [
+            normalize_reasoning_effort(value)
+            for value in declared_efforts
+            if normalize_reasoning_effort(value)
+        ],
+        "verified_efforts": [
+            normalize_reasoning_effort(value)
+            for value in row.get("verified_efforts", [])
+            if normalize_reasoning_effort(value)
+        ] if isinstance(row.get("verified_efforts"), list) else [],
+        "rejected_efforts": [
+            normalize_reasoning_effort(value)
+            for value in row.get("rejected_efforts", [])
+            if normalize_reasoning_effort(value)
+        ] if isinstance(row.get("rejected_efforts"), list) else [],
+        "indeterminate_efforts": [
+            normalize_reasoning_effort(value)
+            for value in row.get("indeterminate_efforts", [])
+            if normalize_reasoning_effort(value)
+        ] if isinstance(row.get("indeterminate_efforts"), list) else [],
+        "control": _redact_reasoning_probe_attempt(
+            row.get("control") if isinstance(row.get("control"), Mapping) else {}
+        ),
+        "effort_results": [
+            {
+                "effort": normalize_reasoning_effort(item.get("effort")),
+                **_redact_reasoning_probe_attempt(item),
+            }
+            for item in attempts
+            if isinstance(item, Mapping)
+        ],
+        "reason_codes": [
+            str(value)[:120]
+            for value in row.get("reason_codes", [])
+            if str(value)
+        ] if isinstance(row.get("reason_codes"), list) else [],
+        "probe_mode": str(row.get("probe_mode") or "")[:32],
+        "live_probe_evidence": row.get("live_probe_evidence") is True,
+        "strict_wire_shape_preserved": row.get("strict_wire_shape_preserved") is True,
+        "all_declared_efforts_strict_streaming": row.get("all_declared_efforts_strict_streaming") is True,
+        "provider_request_count": _safe_int(row.get("provider_request_count"), default=0),
+        "provider_request_success_count": _safe_int(row.get("provider_request_success_count"), default=0),
+        "provider_request_failure_count": _safe_int(row.get("provider_request_failure_count"), default=0),
+        "raw_provider_names_persisted": False,
+        "raw_provider_model_ids_persisted": False,
+        "raw_provider_output_persisted": False,
+        "raw_probe_prompt_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _redact_reasoning_probe_attempt(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "status": str(row.get("status") or "")[:40],
+        "reason_code": str(row.get("reason_code") or "")[:120],
+        "latency_ms": _safe_float(row.get("latency_ms")),
+        "latency_eligibility": dict(row.get("latency_eligibility") or {})
+        if isinstance(row.get("latency_eligibility"), Mapping)
+        else {},
+        "error_type": str(row.get("error_type") or "")[:120],
+        "error_code": str(row.get("error_code") or "")[:120],
+        "http_status": row.get("http_status"),
+        "output_sha256": str(row.get("output_sha256") or "")[:128],
+        "marker_observed": row.get("marker_observed") is True,
+        "strict_streaming_contract_valid": row.get("strict_streaming_contract_valid") is True,
+        "stream_requested": row.get("stream_requested") is True,
+        "stream_observed": row.get("stream_observed") is True,
+        "stream_fallback_used": row.get("stream_fallback_used") is True,
+        "stream_protocol": str(row.get("stream_protocol") or "")[:32],
+        "stream_frame_count": _safe_int(row.get("stream_frame_count"), default=0),
+        "strict_streaming_requested": row.get("strict_streaming_requested") is True,
+        "provider_request_count": _safe_int(row.get("provider_request_count"), default=0),
+        "provider_request_success_count": _safe_int(row.get("provider_request_success_count"), default=0),
+        "provider_request_failure_count": _safe_int(row.get("provider_request_failure_count"), default=0),
+        "key_attempt_count": _safe_int(row.get("key_attempt_count"), default=0),
+        "transport_attempt_count": _safe_int(row.get("transport_attempt_count"), default=0),
+        "retry_attempt_count": _safe_int(row.get("retry_attempt_count"), default=0),
+        "raw_probe_prompt_persisted": False,
+        "raw_provider_output_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _reasoning_probe_redaction_source_digest_input(
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    probes = payload.get("probes") if isinstance(payload.get("probes"), list) else []
+    return {
+        "schema": str(payload.get("schema") or ""),
+        "probe_kind": str(payload.get("probe_kind") or ""),
+        "mode": str(payload.get("mode") or ""),
+        "network_calls_performed": payload.get("network_calls_performed") is True,
+        "probes": [
+            {
+                "profile_id_sha256": sha256_text(str(row.get("profile_id") or "")),
+                "provider_sha256": sha256_text(str(row.get("provider") or "")),
+                "model_sha256": sha256_text(str(row.get("model") or "")),
+                "api_format": str(row.get("api_format") or ""),
+                "status": str(row.get("status") or ""),
+                "transport": str(row.get("transport") or ""),
+                "declared_efforts": [
+                    normalize_reasoning_effort(value)
+                    for value in row.get("declared_efforts", [])
+                    if normalize_reasoning_effort(value)
+                ] if isinstance(row.get("declared_efforts"), list) else [],
+                "control": _redact_reasoning_probe_attempt(
+                    row.get("control") if isinstance(row.get("control"), Mapping) else {}
+                ),
+                "effort_results": [
+                    {
+                        "effort": normalize_reasoning_effort(item.get("effort")),
+                        **_redact_reasoning_probe_attempt(item),
+                    }
+                    for item in row.get("effort_results", [])
+                    if isinstance(item, Mapping)
+                ] if isinstance(row.get("effort_results"), list) else [],
+            }
+            for row in probes
+            if isinstance(row, Mapping)
+        ],
+    }
+
+
 def _redact_tool_probe_row(row: Mapping[str, Any]) -> dict[str, Any]:
     profile_id = str(row.get("profile_id") or "")
     provider = str(row.get("provider") or "")
@@ -4555,6 +5249,11 @@ def _probe_profile_metadata(profile: ModelProfile) -> dict[str, Any]:
         "tool_probe_status": profile.tool_probe_status,
         "tool_calling_eligible": profile.tool_calling_eligible,
         "supports_vision": profile.supports_vision,
+        "reasoning_transport": (
+            dict(profile.reasoning_transport)
+            if isinstance(profile.reasoning_transport, Mapping)
+            else {}
+        ),
         "privacy_tags": list(profile.privacy_tags),
         "base_url_env": profile.base_url_env,
         "api_key_env": profile.api_key_env,

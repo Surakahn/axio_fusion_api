@@ -296,3 +296,152 @@ def test_tool_probe_redaction_removes_provider_and_tool_details():
     assert "private-model" not in serialized
     assert "must-not-appear" not in serialized
     assert redacted["probes"][0]["raw_tool_arguments_persisted"] is False
+
+
+def test_reasoning_probe_calibration_promotes_only_complete_strict_profile_evidence(tmp_path):
+    profile = normalize_profile(
+        {
+            "provider": "reasoning-calibration-provider",
+            "model": "reasoning-calibration-model",
+            "api_format": "responses",
+            "reasoning_transport": {
+                "status": "candidate",
+                "transport": "responses_reasoning",
+                "supported_efforts": ["low", "medium"],
+            },
+        }
+    )
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema": "axio_fusion_api.registry.v1",
+                "models": [profile.safe_dict()],
+            }
+        ),
+        encoding="utf-8",
+    )
+    accepted = {
+        "status": "accepted",
+        "marker_observed": True,
+        "strict_streaming_contract_valid": True,
+        "stream_requested": True,
+        "strict_streaming_requested": True,
+        "stream_observed": True,
+        "stream_fallback_used": False,
+        "stream_protocol": "sse",
+        "stream_frame_count": 1,
+        "latency_ms": 12,
+    }
+    reasoning_probe_path = tmp_path / "reasoning-probe.json"
+    reasoning_probe_path.write_text(
+        json.dumps(
+            {
+                "schema": "axio_fusion_api.provider_reasoning_probe.v1",
+                "probe_kind": "reasoning_transport",
+                "probes": [
+                    {
+                        "profile_id": profile.profile_id,
+                        "status": "verified",
+                        "probe_kind": "reasoning_transport",
+                        "live_probe_evidence": True,
+                        "strict_wire_shape_preserved": True,
+                        "all_declared_efforts_strict_streaming": True,
+                        "transport": "responses_reasoning",
+                        "declared_efforts": ["low", "medium"],
+                        "control": accepted,
+                        "effort_results": [
+                            {"effort": "low", **accepted},
+                            {"effort": "medium", **accepted},
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    calibration = build_registry_calibration(
+        registry_path=registry_path,
+        probe_paths=[reasoning_probe_path],
+    )
+
+    updated = calibration["updated_registry"]["models"][0]
+    assert calibration["input_artifacts"]["reasoning_probe_row_count"] == 1
+    assert updated["reasoning_transport"]["status"] == "verified"
+    assert updated["calibration"]["reasoning_transport_updated_from_operational_probe"] is True
+
+
+def test_reasoning_probe_calibration_rejects_missing_marker_or_slow_evidence(tmp_path):
+    profile = normalize_profile(
+        {
+            "provider": "reasoning-calibration-provider",
+            "model": "reasoning-calibration-model",
+            "api_format": "responses",
+            "reasoning_transport": {
+                "status": "candidate",
+                "transport": "responses_reasoning",
+                "supported_efforts": ["low"],
+            },
+        }
+    )
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema": "axio_fusion_api.registry.v1",
+                "models": [profile.safe_dict()],
+            }
+        ),
+        encoding="utf-8",
+    )
+    accepted = {
+        "status": "accepted",
+        "marker_observed": True,
+        "strict_streaming_contract_valid": True,
+        "stream_requested": True,
+        "strict_streaming_requested": True,
+        "stream_observed": True,
+        "stream_fallback_used": False,
+        "stream_protocol": "sse",
+        "stream_frame_count": 1,
+        "latency_ms": 12,
+    }
+    cases = (
+        {"marker_observed": False},
+        {"latency_ms": 90_001},
+    )
+    for index, override in enumerate(cases):
+        invalid_attempt = {**accepted, **override}
+        probe_path = tmp_path / f"reasoning-probe-{index}.json"
+        probe_path.write_text(
+            json.dumps(
+                {
+                    "schema": "axio_fusion_api.provider_reasoning_probe.v1",
+                    "probe_kind": "reasoning_transport",
+                    "probes": [
+                        {
+                            "profile_id": profile.profile_id,
+                            "status": "verified",
+                            "probe_kind": "reasoning_transport",
+                            "live_probe_evidence": True,
+                            "strict_wire_shape_preserved": True,
+                            "all_declared_efforts_strict_streaming": True,
+                            "transport": "responses_reasoning",
+                            "declared_efforts": ["low"],
+                            "control": invalid_attempt,
+                            "effort_results": [
+                                {"effort": "low", **accepted},
+                            ],
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        calibration = build_registry_calibration(
+            registry_path=registry_path,
+            probe_paths=[probe_path],
+        )
+        updated = calibration["updated_registry"]["models"][0]
+        assert updated["reasoning_transport"]["status"] == "candidate"

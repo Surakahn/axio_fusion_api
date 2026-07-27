@@ -809,6 +809,11 @@ def _profile_from_probe_row(row: Mapping[str, Any], *, status: str) -> ModelProf
         else (0 if status == "available" else 1),
         "supports_tools": row.get("supports_tools", False),
         "supports_vision": row.get("supports_vision", False),
+        "reasoning_transport": (
+            dict(row.get("reasoning_transport"))
+            if isinstance(row.get("reasoning_transport"), Mapping)
+            else {}
+        ),
         "privacy_tags": row.get("privacy_tags", ["external_provider"]),
         "base_url_env": row.get("base_url_env"),
         "api_key_env": row.get("api_key_env"),
@@ -3037,6 +3042,11 @@ def provider_seed_profiles_from_env(provider_names: Sequence[str] | None = None)
                     "context_tokens": config.get("context_tokens"),
                     "supports_tools": config.get("supports_tools", False),
                     "supports_vision": config.get("supports_vision", False),
+                    "reasoning_transport": (
+                        dict(config.get("reasoning_transport"))
+                        if isinstance(config.get("reasoning_transport"), Mapping)
+                        else {}
+                    ),
                     "privacy_tags": config.get("privacy_tags", ["external_provider"]),
                     "source": "environment_provider_config",
                 }
@@ -3102,6 +3112,11 @@ def provider_discovery_priors_from_env(provider_names: Sequence[str] | None = No
             "context_tokens": config.get("context_tokens"),
             "supports_tools": config.get("supports_tools", False),
             "supports_vision": config.get("supports_vision", False),
+            "reasoning_transport": (
+                dict(config.get("reasoning_transport"))
+                if isinstance(config.get("reasoning_transport"), Mapping)
+                else {}
+            ),
             "privacy_tags": config.get("privacy_tags", ["external_provider"]),
             "model_priors": model_priors,
             "model_prior_count": len(model_priors),

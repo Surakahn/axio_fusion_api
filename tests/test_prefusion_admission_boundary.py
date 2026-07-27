@@ -74,3 +74,76 @@ def test_live_request_without_injected_engine_cannot_bypass_prefusion(tmp_path, 
             record_trace=False,
             record_runtime=False,
         )
+
+
+def test_production_service_cli_forwards_reasoning_calibration_controls(tmp_path, monkeypatch):
+    """Keep the production-only CLI aligned with the control-plane contract."""
+
+    config_path = tmp_path / "channels.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "providers": [
+                    {
+                        "provider": "fixture-channel",
+                        "api_format": "responses",
+                        "base_url_env": "FIXTURE_BASE_URL",
+                        "api_key_env": "FIXTURE_API_KEY",
+                        "models": ["fixture-model"],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    observed: list[dict] = []
+
+    class _FakeServer:
+        runtime_channel_enrollment_receipt = {"status": "ready"}
+
+        def serve_forever(self):
+            raise KeyboardInterrupt
+
+        def server_close(self):
+            return None
+
+    def fake_create_runtime_http_server(_manifest, **kwargs):
+        observed.append(kwargs)
+        return _FakeServer()
+
+    monkeypatch.setattr(
+        "axio_fusion_api.service_cli.create_runtime_http_server",
+        fake_create_runtime_http_server,
+    )
+
+    assert service_cli_main(
+        [
+            "--provider-config-file",
+            str(config_path),
+            "serve",
+            "--live",
+            "--enroll",
+            "--enrollment-reasoning-probe-timeout",
+            "11",
+            "--enrollment-reasoning-probe-max-models",
+            "5",
+            "--enrollment-reasoning-probe-max-models-per-provider",
+            "2",
+        ]
+    ) == 0
+    assert observed[0]["enrollment_reasoning_probe_timeout"] == 11.0
+    assert observed[0]["enrollment_reasoning_probe_max_models"] == 5
+    assert observed[0]["enrollment_reasoning_probe_max_models_per_provider"] == 2
+    assert observed[0]["enrollment_calibrate_reasoning"] is True
+
+    assert service_cli_main(
+        [
+            "--provider-config-file",
+            str(config_path),
+            "serve",
+            "--live",
+            "--enroll",
+            "--no-reasoning-calibration",
+        ]
+    ) == 0
+    assert observed[1]["enrollment_calibrate_reasoning"] is False

@@ -615,6 +615,12 @@ def test_cli_enrollment_forwards_independent_tool_probe_budget(tmp_path, monkeyp
             "9",
             "--tool-probe-max-models-per-provider",
             "3",
+            "--reasoning-probe-timeout",
+            "11",
+            "--reasoning-probe-max-models",
+            "5",
+            "--reasoning-probe-max-models-per-provider",
+            "2",
             "--output-dir",
             str(tmp_path / "enrollment"),
         ]
@@ -623,6 +629,10 @@ def test_cli_enrollment_forwards_independent_tool_probe_budget(tmp_path, monkeyp
     assert observed["tool_probe_timeout"] == 7.0
     assert observed["tool_probe_max_models"] == 9
     assert observed["tool_probe_max_models_per_provider"] == 3
+    assert observed["calibrate_reasoning"] is True
+    assert observed["reasoning_probe_timeout"] == 11.0
+    assert observed["reasoning_probe_max_models"] == 5
+    assert observed["reasoning_probe_max_models_per_provider"] == 2
 
 
 def test_provider_level_manifest_without_models_blocks_stale_default_registry(

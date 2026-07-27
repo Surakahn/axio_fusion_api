@@ -61,8 +61,12 @@ def build_parser() -> argparse.ArgumentParser:
     serve_cmd.add_argument("--enrollment-tool-probe-timeout", type=float, default=None)
     serve_cmd.add_argument("--enrollment-tool-probe-max-models", type=int, default=None)
     serve_cmd.add_argument("--enrollment-tool-probe-max-models-per-provider", type=int, default=None)
+    serve_cmd.add_argument("--enrollment-reasoning-probe-timeout", type=float, default=None)
+    serve_cmd.add_argument("--enrollment-reasoning-probe-max-models", type=int, default=None)
+    serve_cmd.add_argument("--enrollment-reasoning-probe-max-models-per-provider", type=int, default=None)
     serve_cmd.add_argument("--enrollment-min-available-models", type=int, default=1)
     serve_cmd.add_argument("--no-tool-calibration", action="store_true")
+    serve_cmd.add_argument("--no-reasoning-calibration", action="store_true")
     serve_cmd.add_argument("--prefusion-focus-manifest", default=None)
     serve_cmd.add_argument("--prefusion-source-manifest", default=None)
     serve_cmd.add_argument("--prefusion-research-agent-config", default=None)
@@ -110,10 +114,14 @@ def build_parser() -> argparse.ArgumentParser:
     enroll.add_argument("--tool-probe-timeout", type=float, default=None)
     enroll.add_argument("--tool-probe-max-models", type=int, default=None)
     enroll.add_argument("--tool-probe-max-models-per-provider", type=int, default=None)
+    enroll.add_argument("--reasoning-probe-timeout", type=float, default=None)
+    enroll.add_argument("--reasoning-probe-max-models", type=int, default=None)
+    enroll.add_argument("--reasoning-probe-max-models-per-provider", type=int, default=None)
     enroll.add_argument("--max-workers", type=int, default=4)
     enroll.add_argument("--min-available-models", type=int, default=1)
     enroll.add_argument("--include-unavailable", action="store_true")
     enroll.add_argument("--no-tool-calibration", action="store_true")
+    enroll.add_argument("--no-reasoning-calibration", action="store_true")
     enroll.add_argument("--redact-provider-identifiers", action="store_true")
     enroll.add_argument("--live", action="store_true")
     enroll.add_argument("--output-dir", required=True)
@@ -197,8 +205,12 @@ def cmd_serve(args: argparse.Namespace) -> int:
         enrollment_tool_probe_timeout=args.enrollment_tool_probe_timeout,
         enrollment_tool_probe_max_models=args.enrollment_tool_probe_max_models,
         enrollment_tool_probe_max_models_per_provider=args.enrollment_tool_probe_max_models_per_provider,
+        enrollment_reasoning_probe_timeout=args.enrollment_reasoning_probe_timeout,
+        enrollment_reasoning_probe_max_models=args.enrollment_reasoning_probe_max_models,
+        enrollment_reasoning_probe_max_models_per_provider=args.enrollment_reasoning_probe_max_models_per_provider,
         enrollment_min_available_models=args.enrollment_min_available_models,
         enrollment_calibrate_tools=not bool(args.no_tool_calibration),
+        enrollment_calibrate_reasoning=not bool(args.no_reasoning_calibration),
         require_prefusion=bool(args.enroll and not args.diagnostic_only),
         focus_manifest=args.prefusion_focus_manifest,
         source_manifest=args.prefusion_source_manifest,
@@ -272,6 +284,10 @@ def cmd_enroll_providers(args: argparse.Namespace) -> int:
         tool_probe_timeout=args.tool_probe_timeout,
         tool_probe_max_models=args.tool_probe_max_models,
         tool_probe_max_models_per_provider=args.tool_probe_max_models_per_provider,
+        calibrate_reasoning=not bool(args.no_reasoning_calibration),
+        reasoning_probe_timeout=args.reasoning_probe_timeout,
+        reasoning_probe_max_models=args.reasoning_probe_max_models,
+        reasoning_probe_max_models_per_provider=args.reasoning_probe_max_models_per_provider,
         redact_provider_identifiers=bool(args.redact_provider_identifiers),
     )
     _emit_json(payload)

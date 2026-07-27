@@ -32,6 +32,12 @@ The documented values are `low`, `medium`, and `high` for reasoning-capable
 models. Axio represents this as `chat_reasoning_effort`; it can only be
 enabled on a profile whose upstream API format is Chat Completions.
 
+The current NVIDIA candidate declaration therefore probes only that documented
+three-level subset. Once the exact model/channel passes the probe, its explicit
+non-escalating map may route Axio's logical `xhigh` and `max` roles to NVIDIA's
+highest verified native value, `high`. It must never send `xhigh` or `max` to
+NVIDIA merely because Axio understands those logical values.
+
 Source: <https://docs.api.nvidia.com/nim/reference/openai-gpt-oss-120b-infer>
 
 ### OpenAI-Compatible Responses Gateways
@@ -53,6 +59,12 @@ as `responses_reasoning`; the profile's verified subset remains authoritative.
 `reasoning.mode` and `reasoning.summary` are intentionally outside this first
 transport contract. They require separate per-model verification and product
 approval because they are not portable inference-strength controls.
+
+The current TokenAPIs declaration begins with only `low`, `medium`, and `high`
+as candidates. A verified `high` may receive an explicit logical downgrade
+from Axio `xhigh` or `max`, but native Responses levels above `high` are never
+assumed from the compatibility label alone. They require a new model-local
+candidate declaration and a successful strict probe.
 
 Source: <https://developers.openai.com/api/docs/guides/reasoning>
 
@@ -95,6 +107,35 @@ the profile remains unverified for that transport. A timeout, 5xx, or network
 failure is not evidence that the parameter itself was rejected. Serving never
 removes a reasoning field and retries the same request merely to make a 4xx
 disappear; that would silently change the caller's requested semantics.
+
+## Operational Capability Probe
+
+`reasoning-probe` is the operational control-plane command for turning a
+model-local `candidate` declaration into a serving-capable declaration. It is
+deliberately narrower than a quality benchmark:
+
+1. It selects only profiles explicitly marked `candidate`, with one of the
+   audited transports and at least one declared level.
+2. It sends a fixed non-benchmark control request with no reasoning field.
+3. It sends one request per declared level with the protocol-local wire shape.
+4. Every request requires actual SSE or NDJSON framing, a visible fixed marker,
+   and completion within the 90-second provider ceiling.
+5. A successful control plus every successful declared level promotes only
+   that exact profile to `verified`.
+
+The Responses probe disables the textual-input compatibility fallback. A
+parameterized 4xx is therefore visible as a rejection rather than being hidden
+by a second request with a different body. Explicit non-transient 4xx values
+mark the declared transport `unsupported`; 401, 403, 408, 429, 5xx, timeouts,
+network errors, malformed streams, and marker failures remain `candidate` for
+later re-probe because they do not prove the field is unsupported.
+
+The private probe receipt contains operational aliases for registry binding.
+Its safe projection, produced by `redact-reasoning-probe`, replaces profile,
+provider, and model identifiers with hashes and retains only status, level,
+latency, status code class, stream framing, and output hashes. Neither form
+stores endpoint values, credentials, raw prompts, raw outputs, or hidden
+reasoning.
 
 ## Fusion Budget Rule
 

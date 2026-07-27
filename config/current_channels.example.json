@@ -5,14 +5,26 @@
       "api_format": "chat/completions",
       "base_url_env": "AXIO_NVIDIA_BASE_URL",
       "api_key_env": "AXIO_NVIDIA_API_KEYS",
-      "models_env": "AXIO_NVIDIA_MODELS"
+      "models_env": "AXIO_NVIDIA_MODELS",
+      "reasoning_transport": {
+        "status": "candidate",
+        "transport": "chat_reasoning_effort",
+        "supported_efforts": ["low", "medium", "high"],
+        "effort_map": {"xhigh": "high", "max": "high"}
+      }
     },
     {
       "provider": "tokenapis",
       "api_format": "responses",
       "base_url_env": "AXIO_TOKENAPIS_BASE_URL",
       "api_key_env": "AXIO_TOKENAPIS_API_KEY",
-      "models_env": "AXIO_TOKENAPIS_MODELS"
+      "models_env": "AXIO_TOKENAPIS_MODELS",
+      "reasoning_transport": {
+        "status": "candidate",
+        "transport": "responses_reasoning",
+        "supported_efforts": ["low", "medium", "high"],
+        "effort_map": {"xhigh": "high", "max": "high"}
+      }
     }
   ],
   "prefusion": {

@@ -38,7 +38,7 @@ unknown vendor field upstream. A model must carry a model-level
     "status": "verified",
     "transport": "responses_reasoning",
     "supported_efforts": ["low", "medium", "high"],
-    "effort_map": {"xhigh": "high"}
+    "effort_map": {"xhigh": "high", "max": "high"}
   }
 }
 ```
@@ -48,7 +48,10 @@ Completions model and `responses_reasoning` for a Responses model. `status`
 must be `verified`; `unknown`, `candidate`, and `unsupported` omit the field.
 An `effort_map` is optional and only permits an explicit non-escalating
 downgrade to a declared supported level. For example, it can map `xhigh` to
-`high`, but it cannot map `low` to `high`.
+`high` or `max` to `high`, but it cannot map `low` to `high`. The current
+NVIDIA and TokenAPIs candidate examples use this safe map because their common
+initial probe subset is `low`/`medium`/`high`; the map becomes active only
+after that exact profile is verified.
 
 Promotion to `verified` requires a live, fixed, non-benchmark streaming
 control request followed by one request per declared effort. Store only
@@ -56,6 +59,30 @@ hashes, status codes, timing, and stream-framing receipts. Do not promote on a
 directory listing, a vendor claim, or a successful ordinary request alone; do
 not send `reasoning.summary` unless a separate product requirement and
 model-level verification justify retaining it.
+
+Use the dedicated control-plane command against a private serving registry:
+
+```bash
+axio-fusion-api-standalone \
+  --registry <PRIVATE_LIVE_REGISTRY.json> \
+  reasoning-probe --live --timeout 20 \
+  --output <PRIVATE_WORK_DIR>/provider_reasoning_probe.private.json
+```
+
+It probes only model-level `candidate` declarations. The command sends a
+strict streamed request with no reasoning field, then repeats the same fixed
+non-benchmark control request once per declared level using the exact upstream
+wire shape. `redact-reasoning-probe` creates a hash-only evidence receipt from
+an existing private artifact without making any network request. Dynamic
+runtime enrollment and file-backed `enroll-providers` run this calibration by
+default; it can be bounded with the corresponding `reasoning-probe-*` options
+or explicitly disabled with `--no-reasoning-calibration`.
+
+An explicit, non-transient parameterized 4xx after a successful control
+request records that exact profile as `unsupported`. A timeout, 5xx, network
+failure, rate limit, malformed stream, or failed control request is
+indeterminate and leaves the profile at `candidate`; it must never be
+converted into a global provider-level verdict.
 
 For a Hermes Fusion route, the caller's explicit level is an upper bound for a
 role's internal cognitive budget. Direct `axio-fast` cascades preserve the

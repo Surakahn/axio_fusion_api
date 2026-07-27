@@ -12485,6 +12485,11 @@ def test_standalone_discovered_provider_models_inherit_config_priors_into_genera
                 "context_tokens": 64000,
                 "supports_tools": True,
                 "supports_vision": True,
+                "reasoning_transport": {
+                    "status": "candidate",
+                    "transport": "responses_reasoning",
+                    "supported_efforts": ["low", "medium", "high"],
+                },
                 "privacy_tags": ["external_provider", "tenant-approved"],
             }
         ]
@@ -12547,6 +12552,11 @@ def test_standalone_discovered_provider_models_inherit_config_priors_into_genera
     assert report["probe_report"]["available_count"] == 2
     assert all(row["base_url_env"] == "CUSTOM_PRIOR_BASE_URL" for row in report["probe_report"]["probes"])
     assert all(row["api_key_env"] == "CUSTOM_PRIOR_API_KEY" for row in report["probe_report"]["probes"])
+    assert all(
+        row["reasoning_transport"]["status"] == "candidate"
+        and row["reasoning_transport"]["transport"] == "responses_reasoning"
+        for row in report["probe_report"]["probes"]
+    )
     assert registry["readiness"]["ready"] is True
     assert registry["readiness"]["api_format_counts"] == {"responses": 2}
     assert registry["readiness"]["judge_candidate_count"] == 2
@@ -12560,12 +12570,15 @@ def test_standalone_discovered_provider_models_inherit_config_priors_into_genera
     assert codex["api_key_env"] == "CUSTOM_PRIOR_API_KEY"
     assert codex["supports_tools"] is True
     assert codex["supports_vision"] is True
+    assert codex["reasoning_transport"]["status"] == "candidate"
+    assert codex["reasoning_transport"]["transport"] == "responses_reasoning"
     assert codex["context_tokens"] == 64000
     assert codex["input_cost_per_million"] == 0.11
     assert codex["output_cost_per_million"] == 0.44
     assert codex["capabilities"]["code"] >= 0.86
     assert codex["capabilities"]["agentic_tool_calling"] >= 0.72
     assert mini["capabilities"]["structured_output"] >= 0.84
+    assert mini["reasoning_transport"]["status"] == "candidate"
     assert "custom-prior-secret" not in serialized_private
     assert "https://custom-prior.example" not in serialized_private
     assert "AXIO_PROBE_OK" not in serialized_private

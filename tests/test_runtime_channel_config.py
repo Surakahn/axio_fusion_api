@@ -765,11 +765,51 @@ def test_current_channel_manifest_binds_the_three_supplied_channels_without_secr
         "responses",
     ]
     assert all("base_url" not in row and "api_key" not in row for row in manifest["providers"])
+    assert manifest["providers"][0]["reasoning_transport"]["transport"] == "chat_reasoning_effort"
+    assert manifest["providers"][1]["reasoning_transport"]["transport"] == "responses_reasoning"
+    assert all(
+        row["reasoning_transport"]["effort_map"] == {"xhigh": "high", "max": "high"}
+        for row in manifest["providers"]
+    )
+    assert all(
+        row["reasoning_transport"]["status"] == "candidate"
+        for row in manifest["providers"]
+    )
     env_example = (ROOT / "config" / "current_channels.env.example").read_text(encoding="utf-8")
     assert "https://integrate.api.nvidia.com/v1" in env_example
     assert "https://tokenapis.com/v1" in env_example
     assert "sk-" not in env_example
     assert "nvapi-" not in env_example
+
+
+def test_current_channel_reasoning_candidates_propagate_to_models_env_rows():
+    manifest_path = ROOT / "config" / "current_channels.example.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    profiles = build_runtime_profiles(
+        manifest,
+        environment={
+            "AXIO_NVIDIA_BASE_URL": "https://nvidia.fixture/v1",
+            "AXIO_NVIDIA_API_KEYS": "nvidia-fixture-key",
+            "AXIO_NVIDIA_MODELS": "candidate-chat-model",
+            "AXIO_TOKENAPIS_BASE_URL": "https://tokenapis.fixture/v1",
+            "AXIO_TOKENAPIS_API_KEY": "tokenapis-fixture-key",
+            "AXIO_TOKENAPIS_MODELS": "candidate-responses-model",
+        },
+    )
+    by_provider = {profile.provider: profile for profile in profiles}
+
+    assert by_provider["nvidia"].reasoning_transport["status"] == "candidate"
+    assert by_provider["nvidia"].reasoning_transport["transport"] == "chat_reasoning_effort"
+    assert by_provider["nvidia"].reasoning_transport["effort_map"] == {
+        "max": "high",
+        "xhigh": "high",
+    }
+    assert by_provider["tokenapis"].reasoning_transport["status"] == "candidate"
+    assert by_provider["tokenapis"].reasoning_transport["transport"] == "responses_reasoning"
+    assert by_provider["tokenapis"].reasoning_transport["effort_map"] == {
+        "max": "high",
+        "xhigh": "high",
+    }
 
 
 def test_runtime_http_server_can_enroll_discovered_four_protocol_channels():

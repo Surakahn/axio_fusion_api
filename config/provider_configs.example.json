@@ -12,7 +12,8 @@
           "reasoning_transport": {
             "status": "candidate",
             "transport": "chat_reasoning_effort",
-            "supported_efforts": ["low", "medium", "high"]
+            "supported_efforts": ["low", "medium", "high"],
+            "effort_map": {"xhigh": "high", "max": "high"}
           }
         }
       ]
@@ -30,7 +31,7 @@
             "status": "candidate",
             "transport": "responses_reasoning",
             "supported_efforts": ["low", "medium", "high"],
-            "effort_map": {"xhigh": "high"}
+            "effort_map": {"xhigh": "high", "max": "high"}
           }
         }
       ]
