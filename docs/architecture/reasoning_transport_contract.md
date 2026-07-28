@@ -70,23 +70,30 @@ Source: <https://developers.openai.com/api/docs/guides/reasoning>
 
 ### Current TokenAPIs Evidence Boundary
 
-The current TokenAPIs channel is configured as a candidate Responses channel
-because that is the operator-selected input protocol. Its public setup guide
-does document a separate OpenAI-compatible **Chat Completions** configuration
-for Grok CLI: the example names `api_backend = "chat_completions"`, enables
-`reasoning_effort`, and lists `none`, `minimal`, `low`, `medium`, `high`,
-`xhigh`, and `max` as client-facing choices. That evidence does **not** state
-the request-body contract for TokenAPIs' `/responses` endpoint, and therefore
-does not establish either `reasoning: {"effort": ...}` or top-level
-`reasoning_effort` for that endpoint.
+The public TokenAPIs setup guide documents a separate OpenAI-compatible
+**Chat Completions** configuration for Grok CLI: the example names
+`api_backend = "chat_completions"`, enables `reasoning_effort`, and lists
+`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` as client-facing
+choices. That guide alone does **not** state the request-body contract for
+TokenAPIs' `/responses` endpoint, and therefore does not establish either
+`reasoning: {"effort": ...}` or top-level `reasoning_effort` for that endpoint.
 
-Axio consequently keeps the current TokenAPIs Responses declaration at
-`candidate`. It sends no reasoning field in normal serving until the exact
-provider/model/Responses endpoint passes the strict streaming probe. A later
-operator may explicitly declare `responses_reasoning_effort` for a particular
-model only when that alternate top-level spelling is supported by channel
-documentation or an independently controlled integration contract; Axio never
-falls back from one spelling to the other after a parameter rejection.
+For this reason the checked-in TokenAPIs template remains a `candidate`
+Responses declaration. It becomes `verified` only through the exact
+endpoint-bound strict streaming probe, never through the provider name or the
+Chat Completions documentation. The current private two-channel enrollment
+completed that probe on 2026-07-28: all seven selected TokenAPIs Responses
+profiles accepted the nested `reasoning: {"effort": ...}` shape for `low`,
+`medium`, and `high` while preserving the strict stream contract. That is wire
+capability evidence only; it neither proves a semantic quality gain at each
+level nor authorizes `none`, `minimal`, `xhigh`, or `max` on the Responses
+endpoint.
+
+A later operator may explicitly declare `responses_reasoning_effort` for a
+particular model only when that alternate top-level spelling is supported by
+channel documentation or an independently controlled integration contract.
+Axio never falls back from one spelling to the other after a parameter
+rejection.
 
 Source: <https://tokenapis.com/docs/guide.html?id=grok>
 
@@ -114,6 +121,28 @@ NVIDIA, and it does not change the currently configured NVIDIA Chat or
 TokenAPIs Responses transports.
 
 Source: <https://docs.api.nvidia.com/nim/reference/openai-gpt-oss-120b-infer>
+
+### Current Two-Channel Wire Matrix
+
+The current channels are intentionally different at the request boundary:
+
+| Channel profile | Upstream API | Exact parameter | Verified native levels | Current evidence rule |
+| --- | --- | --- | --- | --- |
+| NVIDIA | Chat Completions | `reasoning_effort: "<level>"` | `low`, `medium`, `high` | Profile-local strict stream probe; 16 of 21 selected profiles verified in the 2026-07-28 enrollment, two explicitly rejected, and three remained indeterminate. |
+| TokenAPIs | Responses | `reasoning: {"effort": "<level>"}` | `low`, `medium`, `high` | Profile-local strict stream probe; all seven selected profiles verified in the same enrollment. |
+
+The NVIDIA reference documents `medium` as its default for reasoning-capable
+models. Consequently, Axio must not treat an omitted parameter as equivalent
+to native `none`: the omission means only that no verified wire control was
+sent. A client that requires an exact non-default level must use a route whose
+selected profiles carry a matching verified declaration. Likewise, the
+operator's `xhigh -> high` and `max -> high` mappings are explicit logical
+downgrades, not claims that either current endpoint accepts those native
+values.
+
+The private evidence records only endpoint hashes, profile/model bindings,
+timing, stream framing, status classes, and output hashes. It never persists a
+credential, endpoint value, raw prompt, visible output, or hidden reasoning.
 
 ## Axio Configuration Gate
 

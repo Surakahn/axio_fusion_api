@@ -61,6 +61,27 @@ NVIDIA and TokenAPIs candidate examples use this safe map because their common
 initial probe subset is `low`/`medium`/`high`; the map becomes active only
 after that exact profile is verified.
 
+For the current two-channel template, the request bodies are deliberately
+different:
+
+```jsonc
+// NVIDIA Chat Completions
+{"reasoning_effort": "high"}
+
+// TokenAPIs Responses
+{"reasoning": {"effort": "high"}}
+```
+
+Do not replace either with a provider-wide `extra_body` convention. The
+checked-in template intentionally remains `candidate`, even though the current
+private deployment has endpoint-bound live evidence for its configured
+profiles, because a copied manifest may point at a different endpoint or model
+alias. In particular, omitted NVIDIA `reasoning_effort` is not native `none`:
+the NVIDIA reference documents a default of `medium` for reasoning-capable
+models. Only a model-level verified declaration may promise a specific native
+level; unverified or unsupported profiles omit the field and cannot be used to
+claim that a caller's non-default level was enforced.
+
 Promotion to `verified` requires a live, fixed, non-benchmark streaming
 control request followed by one request per declared effort. Store only
 hashes, status codes, timing, and stream-framing receipts. Do not promote on a

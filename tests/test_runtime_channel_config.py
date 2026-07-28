@@ -195,6 +195,50 @@ def test_runtime_manifest_supports_direct_four_protocol_credentials_without_pers
         thread.join(timeout=2)
 
 
+def test_current_channel_template_keeps_reasoning_transport_protocol_local():
+    """The operator template must not conflate Chat and Responses wire fields."""
+
+    manifest = json.loads(
+        (ROOT / "config" / "current_channels.example.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    profiles = build_runtime_profiles(
+        manifest,
+        environment={
+            "AXIO_NVIDIA_BASE_URL": "https://nvidia.fixture/v1",
+            "AXIO_NVIDIA_API_KEYS": "nvidia-fixture-key",
+            "AXIO_NVIDIA_MODELS": "nvidia-fixture-model",
+            "AXIO_TOKENAPIS_BASE_URL": "https://responses.fixture/v1",
+            "AXIO_TOKENAPIS_API_KEY": "responses-fixture-key",
+            "AXIO_TOKENAPIS_MODELS": "responses-fixture-model",
+        },
+    )
+
+    by_provider = {profile.provider: profile for profile in profiles}
+    nvidia = by_provider["nvidia"]
+    tokenapis = by_provider["tokenapis"]
+
+    assert nvidia.api_format == "chat"
+    assert nvidia.reasoning_transport == {
+        "status": "candidate",
+        "transport": "chat_reasoning_effort",
+        "supported_efforts": ["low", "medium", "high"],
+        "effort_map": {"max": "high", "xhigh": "high"},
+        "api_format_compatible": True,
+    }
+    assert tokenapis.api_format == "responses"
+    assert tokenapis.reasoning_transport == {
+        "status": "candidate",
+        "transport": "responses_reasoning",
+        "supported_efforts": ["low", "medium", "high"],
+        "effort_map": {"max": "high", "xhigh": "high"},
+        "api_format_compatible": True,
+    }
+    assert nvidia.resolve_reasoning_transport("high") == ("", "")
+    assert tokenapis.resolve_reasoning_transport("high") == ("", "")
+
+
 def test_runtime_discovery_and_probe_use_direct_credentials_for_all_protocols():
     server, thread = _start_server()
     try:
