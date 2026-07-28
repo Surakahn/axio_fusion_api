@@ -96,6 +96,43 @@ The superiority gate requires both statistical and practical significance: paire
 
 Latency superiority is also claim-gated on two distribution points: both p50 and p95 case latency for each Axio tier must be present and no more than `3x` the corresponding same-suite provider baseline before a final superiority claim can pass.
 
+## Active Baseline Execution (2026-07-28, v3 isolated cohort)
+
+- Dominant phase: `execution`.
+- Route: `repair`. The former R2 cohort is retained only as a transport
+  diagnostic because unregistered same-channel diagnostics and mutable
+  per-unit concurrency made it unsuitable for ranking. No R2 answer, score,
+  survivor, or failed unit is reused.
+- Baseline object: three canonical single-model provider groups derived only
+  after complete non-target screening of the newly admitted cohort. These
+  become rank 1, rank 2, and rank 3 for comparison with `axio-pro`,
+  `axio-terra`, and `axio-fast`, respectively.
+- Source contract: the pre-registered two-family non-target source manifest
+  used by R2 remains hash-identical and declares no target-suite prompt, label,
+  output, or result use. It contributes at least 70 fixed cases per source.
+- Setup evidence: fresh `/models` discovery found 126 entries; strict serial
+  stream admission produced a 25-profile calibrated registry; fixed five-
+  workload operational admission evaluated all 25 profiles with
+  `max_workers=1` and a 90-second ceiling, leaving 12 formal-baseline-eligible
+  canonical profiles.
+- Frozen run contract: screening plan schema v3, 12 canonical candidates, two
+  independent source families, 24 source-candidate units, 2,136 estimated
+  provider calls, and plan-level `max_workers=1`. The plan digest binds the
+  registry, source/case/scorer/transport implementation, operational admission,
+  task order, and worker count.
+- Execution path: the live campaign runs in the isolated
+  `axio-screen-v3-r2` tmux session with a distinct live checkpoint and private
+  unit root. No smoke, diagnostic, benchmark, or manual provider request may
+  share the channels until it reaches a terminal state.
+- Verification target: all 24 units must reach terminal authenticated states,
+  every completed unit must pass private-artifact rescoring and the registered
+  transport-failure gate, and strict screening-to-ranking conversion must
+  produce a complete rank assignment before a top-three freeze is accepted.
+  A partial survivor subset is never a baseline.
+- Downstream trust state: `verification_incomplete`. No provider baseline is
+  currently trusted for target-suite comparison, and the 9-category/21-suite
+  campaign remains prohibited until conversion and freeze both pass.
+
 ## Revision Log
 
 - 2026-07-23: Completed a new full-pool v9 pre-Fusion cohort from the current

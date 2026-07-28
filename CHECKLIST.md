@@ -1,5 +1,47 @@
 # Axio Fusion API Checklist
 
+## Current Live Gate (2026-07-28, v3 isolated cohort)
+
+- [x] Quarantine the terminal R2 screening as diagnostic-only evidence: 30
+  planned units, 17 completed, 13 failed, `ready_for_ranking=false`; do not
+  reuse its answers, scores, failures, or survivor subset.
+- [x] Freeze screening concurrency in plan/campaign schema v3. Bind
+  `max_workers` into the plan digest, live runtime validation, checkpoint
+  resume, and ranking conversion; reject missing or mismatched values before
+  provider I/O.
+- [x] Re-enroll the current two-channel portfolio in an isolated, serial live
+  run: discover 126 entries, admit 25 strict-streaming profiles, calibrate 14
+  native-tool profiles and 16 reasoning-transport profiles, and retain the
+  complete private registry without benchmark material.
+- [x] Run fixed long-request operational admission over all 25 profiles with
+  five non-target workloads, `max_workers=1`, one repetition, and a 90-second
+  ceiling: 13 production-admitted profiles and 12 formal-baseline-eligible
+  profiles; handoff validation is ready with no raw prompt/output persistence.
+- [x] Build the hash-bound v3 non-target screening plan from the formal cohort:
+  12 canonical candidates, two independent source families, 24 units, 2,136
+  estimated calls, and frozen `max_workers=1`; zero-network preflight passes.
+- [ ] Complete all 24 v3 live screening units in the isolated
+  `axio-screen-v3-r2` session without any concurrent smoke, diagnostics, target
+  benchmark, or manual provider calls. Preserve every failed unit in the
+  denominator and never rank an interim survivor subset.
+- [ ] Verify the terminal campaign by authenticating every checkpoint/private
+  artifact and rerunning the pinned scorers; require strict
+  screening-to-ranking conversion to produce a complete assignment.
+- [ ] Freeze exactly the derived rank-1/rank-2/rank-3 canonical groups, bind
+  all replica identities and provider-probe evidence, and reject any manual
+  reorder or substitution.
+- [ ] Activate the cohort-bound Axio service and obtain current strict live
+  evidence for all three public models across Chat Completions, Responses,
+  Anthropic Messages, and Gemini-compatible streaming surfaces.
+- [ ] Execute the separate 9-category/21-suite paired campaign, official or
+  audited harness imports, contamination audit, Holm-Bonferroni family,
+  practical-effect gates, and p50/p95 3x latency gates before any superiority
+  claim.
+
+The following 2026-07-27 block is historical evidence. Its completed work
+remains useful, but its unchecked cohort-registration item is superseded by
+the v3 isolated cohort above.
+
 ## Current Live Gate (2026-07-27, current cohort)
 
 - [x] Discover the current configured remote pool and retain 31 profiles from
