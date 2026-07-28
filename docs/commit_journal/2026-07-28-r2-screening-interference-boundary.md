@@ -47,3 +47,17 @@ Before a formal provider-baseline freeze:
 
 This is an evidence-boundary correction, not a statement about model quality
 or a mechanism for selecting survivors.
+
+## Terminal Diagnostic Snapshot
+
+R2 reached its terminal state with its original v2 contract: 30 planned
+units, 17 completed units, and 13 failed units. The safe aggregate recorded
+transport-failure-rate excess for 13 units and no scoreable response for four
+units; those reason counts are not mutually exclusive. `ready_for_ranking`
+remained false.
+
+This terminal denominator is retained only for protocol and transport failure
+analysis. It does not select surviving candidates, establish a capability
+ordering, or contribute any score to a later cohort. The replacement formal
+cohort must use the v3 plan contract with a newly frozen worker limit and an
+isolated provider-traffic window.
