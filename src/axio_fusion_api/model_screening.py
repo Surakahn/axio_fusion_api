@@ -81,6 +81,9 @@ PREFUSION_RESEARCH_OUTPUT_SCHEMA = "axio_fusion_api.prefusion_research_agent_out
 PREFUSION_FOCUS_MANIFEST_SCHEMA = "axio_fusion_api.prefusion_focus_manifest.v1"
 PREFUSION_SOURCE_MANIFEST_SCHEMA = "axio_fusion_api.prefusion_source_manifest.v1"
 PREFUSION_MODEL_CATALOG_SCHEMA = "axio_fusion_api.prefusion_model_catalog.v1"
+PREFUSION_RESEARCH_RANKING_SCHEMA = (
+    "axio_fusion_api.prefusion_research_ranking_registry.v1"
+)
 PREFUSION_HANDOFF_SCHEMA = "axio_fusion_api.prefusion_fusion_handoff.v2"
 PREFUSION_FUSION_HANDOFF_SCHEMA = "axio_fusion_api.prefusion_fusion_handoff_boundary.v1"
 PREFUSION_ROLE_COVERAGE_SCHEMA = "axio_fusion_api.prefusion_role_coverage.v1"
@@ -1866,10 +1869,15 @@ def _catalog_registry_projection(value: Any) -> dict[str, Any]:
             "ranking_complete": inventory.get("ranking_complete") is True,
         },
         "ranking": {
+            "schema": PREFUSION_RESEARCH_RANKING_SCHEMA,
+            "candidate_count": len(ordered),
             "basis": str(ranking.get("basis") or "remote_research_agent_operational_prior"),
             "ordered_models": ordered,
             "ranking_prior_only": True,
             "ranking_prior_forbidden_for_final_benchmark_claims": True,
+            "raw_research_prompt_persisted": False,
+            "raw_research_output_persisted": False,
+            "secrets_persisted": False,
         },
         "operational_ranking": {
             "schema": str(
@@ -3141,7 +3149,7 @@ def _research_ranking_registry_projection(value: Any) -> dict[str, Any]:
         )
     projected.sort(key=lambda row: (int(row.get("rank") or 1_000_000), str(row.get("candidate_id") or "")))
     return {
-        "schema": "axio_fusion_api.prefusion_research_ranking_registry.v1",
+        "schema": PREFUSION_RESEARCH_RANKING_SCHEMA,
         "candidate_count": len(projected),
         "ordered_models": projected,
         "ranking_prior_only": True,

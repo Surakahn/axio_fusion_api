@@ -2051,6 +2051,11 @@ def test_prefusion_fusion_handoff_is_the_only_validated_available_model_boundary
     assert handoff["logical_model_count"] == 2
     assert handoff["physical_profile_count"] == 3
     assert handoff["ranking_complete"] is True
+    assert (
+        handoff["research_ranking"]["schema"]
+        == "axio_fusion_api.prefusion_research_ranking_registry.v1"
+    )
+    assert handoff["research_ranking"]["candidate_count"] == 2
     assert handoff["research_ranking"]["ranking_prior_only"] is True
     assert (
         handoff["research_ranking"]["ordered_models"]
