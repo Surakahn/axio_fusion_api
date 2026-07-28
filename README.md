@@ -1492,7 +1492,11 @@ explicit `--live` campaign with private raw-output units and a separate safe
 checkpoint; and `baseline-screening-to-ranking` re-scores every private output
 with the pinned scorer before producing the strict ranking input. The plan
 binds prompt, reference, case-contract, adapter and upstream transport
-implementation, provider catalog identity, and a seed-derived execution order.
+implementation, provider catalog identity, a seed-derived execution order,
+and the bounded per-unit provider-call concurrency. A run uses that frozen
+concurrency value by default and fails before provider I/O when an explicit
+override differs, so a checkpoint or ranking cannot combine observations made
+under different transport pressure.
 Adjacent independent
 sources use reversed candidate order and execute one source per round to
 counterbalance long-campaign time drift. Wrong answers are never retried;

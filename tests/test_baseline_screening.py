@@ -388,6 +388,7 @@ def test_operational_admission_filters_baseline_pool_and_is_carried_into_preflig
         source_manifest_path=manifest_path,
         private_probe_files=[probe_path],
         min_cases_per_source=4,
+        max_workers=3,
         operational_admission_path=admission_path,
     )
 
@@ -463,6 +464,7 @@ def test_admission_bound_campaign_and_ranking_keep_filtered_candidate_pool(tmp_p
         source_manifest_path=manifest_path,
         private_probe_files=[probe_path],
         min_cases_per_source=4,
+        max_workers=3,
         operational_admission_path=admission_path,
     )
     plan_path = _write_json(tmp_path / "screening_plan.safe.json", plan)
@@ -736,6 +738,31 @@ def test_plan_freezes_seeded_interleaved_counterbalanced_task_schedule(tmp_path)
         for candidate in per_source_positions[source_order[0]]
     }
     assert len(pair_sums) == 1
+
+
+def test_plan_digest_binds_frozen_worker_limit(tmp_path):
+    registry_path, probe_path, manifest_path = _screening_fixture(tmp_path)
+    serial = build_non_target_screening_plan(
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        min_cases_per_source=4,
+        max_workers=1,
+    )
+    parallel = build_non_target_screening_plan(
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        min_cases_per_source=4,
+        max_workers=2,
+    )
+
+    assert serial["ready"] is True, serial["blockers"]
+    assert parallel["ready"] is True, parallel["blockers"]
+    assert serial["max_workers"] == 1
+    assert parallel["max_workers"] == 2
+    assert serial["tasks"] == parallel["tasks"]
+    assert serial["plan_digest_sha256"] != parallel["plan_digest_sha256"]
 
 
 def test_identity_attestation_requires_exact_catalog_alias(tmp_path):
@@ -2112,6 +2139,7 @@ def test_live_preflight_failure_does_not_overwrite_existing_checkpoint(
         source_manifest_path=manifest_path,
         private_probe_files=[probe_path],
         min_cases_per_source=4,
+        max_workers=2,
     )
     plan_path = _write_json(tmp_path / "screening_plan.safe.json", plan)
     state_path = tmp_path / "campaign_state.safe.json"
@@ -2146,6 +2174,7 @@ def test_campaign_resumes_new_tasks_and_separates_private_outputs(tmp_path):
         source_manifest_path=manifest_path,
         private_probe_files=[probe_path],
         min_cases_per_source=4,
+        max_workers=2,
     )
     plan_path = _write_json(tmp_path / "screening_plan.safe.json", plan)
     state_path = tmp_path / "campaign_state.safe.json"
@@ -2220,6 +2249,124 @@ def test_campaign_resumes_new_tasks_and_separates_private_outputs(tmp_path):
     assert '"raw_provider_outputs_persisted": true' in private_serialized
 
 
+def test_live_campaign_blocks_worker_mismatch_before_network_calls(tmp_path):
+    registry_path, probe_path, manifest_path = _screening_fixture(tmp_path)
+    plan = build_non_target_screening_plan(
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        min_cases_per_source=4,
+        max_workers=1,
+    )
+    plan_path = _write_json(tmp_path / "screening_plan.safe.json", plan)
+    client = _RankedFixtureClient()
+
+    blocked = run_non_target_screening_campaign(
+        plan_path=plan_path,
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        private_root=tmp_path / "private_units",
+        live=True,
+        max_workers=2,
+        client=client,
+    )
+
+    assert blocked["status"] == "blocked"
+    assert "screening_runtime_max_workers_mismatch" in blocked["reason_codes"]
+    assert blocked["network_calls_performed"] is False
+    assert client.calls == []
+
+
+def test_live_campaign_rejects_plan_without_frozen_worker_before_calls(tmp_path):
+    registry_path, probe_path, manifest_path = _screening_fixture(tmp_path)
+    plan = build_non_target_screening_plan(
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        min_cases_per_source=4,
+        max_workers=1,
+    )
+    plan.pop("max_workers")
+    plan["plan_digest_sha256"] = sha256_text(
+        stable_json(
+            {
+                key: value
+                for key, value in plan.items()
+                if key not in {"plan_digest_sha256", "ready", "blockers"}
+            }
+        )
+    )
+    plan_path = _write_json(tmp_path / "screening_plan.safe.json", plan)
+    client = _RankedFixtureClient()
+
+    blocked = run_non_target_screening_campaign(
+        plan_path=plan_path,
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        private_root=tmp_path / "private_units",
+        live=True,
+        max_workers=1,
+        client=client,
+    )
+
+    assert blocked["status"] == "blocked"
+    assert "screening_plan_max_workers_invalid" in blocked["reason_codes"]
+    assert blocked["network_calls_performed"] is False
+    assert client.calls == []
+
+
+def test_live_campaign_blocks_resume_worker_binding_mismatch_before_calls(tmp_path):
+    registry_path, probe_path, manifest_path = _screening_fixture(tmp_path)
+    plan = build_non_target_screening_plan(
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        min_cases_per_source=4,
+        max_workers=2,
+    )
+    plan_path = _write_json(tmp_path / "screening_plan.safe.json", plan)
+    state_path = tmp_path / "campaign_state.safe.json"
+    private_root = tmp_path / "private_units"
+    first = run_non_target_screening_campaign(
+        plan_path=plan_path,
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        private_root=private_root,
+        state_path=state_path,
+        live=True,
+        max_workers=2,
+        max_tasks=1,
+        client=_RankedFixtureClient(),
+    )
+    assert first["status"] == "partial"
+
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["max_workers"] = 1
+    _rehash_campaign_state(state)
+    _write_json(state_path, state)
+    resume_client = _RankedFixtureClient()
+
+    blocked = run_non_target_screening_campaign(
+        plan_path=plan_path,
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        private_root=private_root,
+        state_path=state_path,
+        live=True,
+        max_workers=2,
+        client=resume_client,
+    )
+
+    assert blocked["status"] == "blocked"
+    assert "screening_resume_max_workers_mismatch" in blocked["reason_codes"]
+    assert blocked["network_calls_performed"] is False
+    assert resume_client.calls == []
+
+
 def test_live_campaign_rejects_preflight_checkpoint_before_network_calls(tmp_path):
     registry_path, probe_path, manifest_path = _screening_fixture(tmp_path)
     plan = build_non_target_screening_plan(
@@ -2227,6 +2374,7 @@ def test_live_campaign_rejects_preflight_checkpoint_before_network_calls(tmp_pat
         source_manifest_path=manifest_path,
         private_probe_files=[probe_path],
         min_cases_per_source=4,
+        max_workers=3,
     )
     plan_path = _write_json(tmp_path / "screening_plan.safe.json", plan)
     state_path = tmp_path / "campaign_state.safe.json"
@@ -2267,6 +2415,7 @@ def test_live_campaign_rejects_private_root_checkpoint_drift(tmp_path):
         source_manifest_path=manifest_path,
         private_probe_files=[probe_path],
         min_cases_per_source=4,
+        max_workers=3,
     )
     plan_path = _write_json(tmp_path / "screening_plan.safe.json", plan)
     state_path = tmp_path / "campaign_state.safe.json"
@@ -2325,6 +2474,7 @@ def test_live_campaign_rejects_transport_mode_checkpoint_drift(
         source_manifest_path=manifest_path,
         private_probe_files=[probe_path],
         min_cases_per_source=4,
+        max_workers=3,
     )
     plan_path = _write_json(tmp_path / "screening_plan.safe.json", plan)
     state_path = tmp_path / "campaign_state.safe.json"
@@ -2569,6 +2719,7 @@ def test_completed_campaign_converts_to_existing_strict_ranking_contract(tmp_pat
         source_manifest_path=manifest_path,
         private_probe_files=[probe_path],
         min_cases_per_source=4,
+        max_workers=3,
     )
     plan_path = _write_json(tmp_path / "screening_plan.safe.json", plan)
     state_path = tmp_path / "campaign_state.safe.json"
@@ -2623,6 +2774,7 @@ def test_ranking_rescores_private_output_after_attacker_rehashes_artifacts(tmp_p
         source_manifest_path=manifest_path,
         private_probe_files=[probe_path],
         min_cases_per_source=4,
+        max_workers=3,
     )
     plan_path = _write_json(tmp_path / "screening_plan.safe.json", plan)
     state_path = tmp_path / "campaign_state.safe.json"
@@ -2682,6 +2834,7 @@ def test_ranking_rejects_forged_safe_score_even_with_campaign_rehash(tmp_path):
         source_manifest_path=manifest_path,
         private_probe_files=[probe_path],
         min_cases_per_source=4,
+        max_workers=3,
     )
     plan_path = _write_json(tmp_path / "screening_plan.safe.json", plan)
     state_path = tmp_path / "campaign_state.safe.json"
@@ -2774,6 +2927,8 @@ def test_screening_cli_commands_are_registered():
     )
 
     assert plan_args.command == "baseline-screening-plan"
+    assert plan_args.max_workers == 1
     assert run_args.command == "baseline-screening-run"
     assert run_args.live is False
+    assert run_args.max_workers is None
     assert ranking_args.command == "baseline-screening-to-ranking"

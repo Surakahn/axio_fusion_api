@@ -141,6 +141,15 @@ rate-limit, key-pool, streaming, or retry implementation invalidates an
 existing plan and requires a fresh freeze; previously collected scores are not
 merged into that new campaign.
 
+Screening concurrency is a frozen experimental condition as well. The plan's
+`max_workers` field is the bounded per-screening-unit case fanout limit
+(`1..16`, default `1`), not a throughput hint that an operator may change
+while the campaign is running. `baseline-screening-run` uses the plan value
+when its flag is omitted and rejects an explicit mismatch before it constructs
+the provider client or sends a request. Safe checkpoints and ranking
+conversion bind the same value. Plans from the earlier schema that did not
+carry this field cannot start or resume a formal campaign.
+
 The generated private registry exposes two deliberately separate projections:
 
 - `models` contains each eligible physical profile because the provider and

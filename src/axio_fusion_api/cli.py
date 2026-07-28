@@ -638,6 +638,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     screening_plan.add_argument("--min-cases-per-source", type=int, default=100)
     screening_plan.add_argument(
+        "--max-workers",
+        type=int,
+        default=1,
+        help="Freeze the per-unit provider-call concurrency for this plan (1-16).",
+    )
+    screening_plan.add_argument(
         "--operational-admission-file",
         default=None,
         help="Private long-request admission receipt; formal baseline screening uses only its eligible profiles.",
@@ -656,7 +662,12 @@ def build_parser() -> argparse.ArgumentParser:
     screening_run.add_argument("--private-root", required=True)
     screening_run.add_argument("--state-output", required=True)
     screening_run.add_argument("--live", action="store_true")
-    screening_run.add_argument("--max-workers", type=int, default=4)
+    screening_run.add_argument(
+        "--max-workers",
+        type=int,
+        default=None,
+        help="Must equal the plan's frozen worker count; omit to use the plan value.",
+    )
     screening_run.add_argument("--max-tasks", type=int, default=None)
     screening_run.add_argument("--retry-failed", action="store_true")
     screening_run.add_argument(
@@ -2166,6 +2177,7 @@ def cmd_baseline_screening_plan(args: argparse.Namespace) -> int:
         source_manifest_path=args.source_manifest,
         private_probe_files=args.private_probe_file,
         min_cases_per_source=args.min_cases_per_source,
+        max_workers=args.max_workers,
         operational_admission_path=args.operational_admission_file,
     )
     _emit_json(payload, output=args.output)

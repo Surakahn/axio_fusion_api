@@ -49,8 +49,8 @@ from .schemas import (
 SCREENING_SOURCE_MANIFEST_SCHEMA = (
     "axio_fusion_api.non_target_screening_source_manifest.v1"
 )
-SCREENING_PLAN_SCHEMA = "axio_fusion_api.non_target_screening_plan.v2"
-SCREENING_CAMPAIGN_SCHEMA = "axio_fusion_api.non_target_screening_campaign.v2"
+SCREENING_PLAN_SCHEMA = "axio_fusion_api.non_target_screening_plan.v3"
+SCREENING_CAMPAIGN_SCHEMA = "axio_fusion_api.non_target_screening_campaign.v3"
 SCREENING_UNIT_PRIVATE_SCHEMA = (
     "axio_fusion_api.non_target_screening_unit_private.v1"
 )
@@ -63,6 +63,8 @@ SUPPORTED_SCREENING_ADAPTERS = frozenset(
     {"jsonl_multiple_choice", "mmlu_pro", "livebench_official"}
 )
 DEFAULT_MIN_CASES_PER_SOURCE = 100
+DEFAULT_SCREENING_MAX_WORKERS = 1
+MAX_SCREENING_MAX_WORKERS = 16
 DEFAULT_MAX_TRANSPORT_FAILURE_RATE = 0.02
 DEFAULT_BOOTSTRAP_RESAMPLES = 10_000
 SCREENING_EXCEPTION_RETRY_POLICY_SCHEMA = (
@@ -146,12 +148,27 @@ class ScreeningCase:
     metadata: Mapping[str, Any]
 
 
+def _bounded_screening_max_workers(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, float) and not value.is_integer():
+        return None
+    try:
+        workers = int(value)
+    except (TypeError, ValueError):
+        return None
+    if not 1 <= workers <= MAX_SCREENING_MAX_WORKERS:
+        return None
+    return workers
+
+
 def build_non_target_screening_plan(
     *,
     registry_path: str | Path,
     source_manifest_path: str | Path,
     private_probe_files: Sequence[str | Path] = (),
     min_cases_per_source: int = DEFAULT_MIN_CASES_PER_SOURCE,
+    max_workers: int = DEFAULT_SCREENING_MAX_WORKERS,
     operational_admission_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Pre-register a complete-pool, non-target provider screening matrix.
@@ -164,6 +181,9 @@ def build_non_target_screening_plan(
     registry_file = Path(registry_path)
     source_file = Path(source_manifest_path)
     blockers: list[str] = []
+    frozen_max_workers = _bounded_screening_max_workers(max_workers)
+    if frozen_max_workers is None:
+        blockers.append("screening_plan_max_workers_invalid")
     profiles = _load_registry_for_screening(registry_file, blockers)
     profiles, operational_admission = _apply_operational_admission_filter(
         profiles,
@@ -315,6 +335,7 @@ def build_non_target_screening_plan(
             EXTERNAL_PROVIDER_RANKING_MIN_INDEPENDENT_SOURCES
         ),
         "minimum_cases_per_source": minimum,
+        "max_workers": frozen_max_workers,
         "source_count": len(source_receipts),
         "source_family_count": len(source_families),
         "sources": source_receipts,
@@ -496,6 +517,8 @@ def _screening_execution_schedule_errors(
         else []
     )
     errors: list[str] = []
+    if _bounded_screening_max_workers(plan.get("max_workers")) is None:
+        errors.append("screening_plan_max_workers_invalid")
     if schedule.get("strategy") != "seeded_paired_reverse_source_interleave_v1":
         errors.append("screening_execution_schedule_strategy_invalid")
     expected_count = int(plan.get("task_count") or 0)
@@ -2319,7 +2342,7 @@ def run_non_target_screening_campaign(
     private_root: str | Path,
     state_path: str | Path | None = None,
     live: bool = False,
-    max_workers: int = 4,
+    max_workers: int | None = None,
     max_tasks: int | None = None,
     retry_failed: bool = False,
     overwrite: bool = False,
@@ -2347,12 +2370,31 @@ def run_non_target_screening_campaign(
     if plan.get("ready") is not True:
         blockers.append("screening_plan_not_ready")
     blockers.extend(_screening_execution_schedule_errors(plan))
+    planned_max_workers = _bounded_screening_max_workers(
+        plan.get("max_workers")
+    )
+    if planned_max_workers is None:
+        blockers.append("screening_plan_max_workers_invalid")
+    if max_workers is not None:
+        requested_max_workers = _bounded_screening_max_workers(max_workers)
+        if requested_max_workers is None:
+            blockers.append("screening_runtime_max_workers_invalid")
+        elif (
+            planned_max_workers is not None
+            and requested_max_workers != planned_max_workers
+        ):
+            blockers.append("screening_runtime_max_workers_mismatch")
     current_plan = build_non_target_screening_plan(
         registry_path=registry_file,
         source_manifest_path=source_file,
         private_probe_files=private_probe_files,
         min_cases_per_source=int(
             plan.get("minimum_cases_per_source") or DEFAULT_MIN_CASES_PER_SOURCE
+        ),
+        max_workers=(
+            planned_max_workers
+            if planned_max_workers is not None
+            else DEFAULT_SCREENING_MAX_WORKERS
         ),
         operational_admission_path=operational_admission_path,
     )
@@ -2502,7 +2544,7 @@ def run_non_target_screening_campaign(
         "max_new_tasks": (
             max(0, int(max_tasks)) if max_tasks is not None else None
         ),
-        "max_workers": max(1, int(max_workers)),
+        "max_workers": planned_max_workers,
         "network_calls_performed": False,
         "target_suite_calls_performed": False,
         "benchmark_outputs_used_for_training": False,
@@ -2702,7 +2744,7 @@ def run_non_target_screening_campaign(
                     replicas=replicas,
                     private_root=output_root,
                     client=active_client,
-                    max_workers=max_workers,
+                    max_workers=planned_max_workers or DEFAULT_SCREENING_MAX_WORKERS,
                     previous_unit=previous,
                 )
         units.append(unit)
@@ -2800,6 +2842,13 @@ def build_external_ranking_manifest_from_screening(
         schedule.get("task_id_sequence_sha256") or ""
     ):
         blockers.append("screening_ranking_task_sequence_binding_mismatch")
+    planned_max_workers = _bounded_screening_max_workers(
+        plan.get("max_workers")
+    )
+    if planned_max_workers is None:
+        blockers.append("screening_ranking_plan_max_workers_invalid")
+    elif state.get("max_workers") != planned_max_workers:
+        blockers.append("screening_ranking_max_workers_binding_mismatch")
     if str(state.get("registry_file_sha256") or "") != _file_sha256(
         Path(registry_path)
     ):
@@ -2822,6 +2871,11 @@ def build_external_ranking_manifest_from_screening(
         private_probe_files=private_probe_files,
         min_cases_per_source=int(
             plan.get("minimum_cases_per_source") or DEFAULT_MIN_CASES_PER_SOURCE
+        ),
+        max_workers=(
+            planned_max_workers
+            if planned_max_workers is not None
+            else DEFAULT_SCREENING_MAX_WORKERS
         ),
         operational_admission_path=operational_admission_path,
     )
@@ -4647,6 +4701,7 @@ def _screening_resume_state_errors(
         "live_credential_readiness_digest_sha256",
         "private_root_sha256",
         "planned_task_count",
+        "max_workers",
     ):
         if state.get(key) != base_state.get(key):
             errors.append(f"screening_resume_{key}_mismatch")
