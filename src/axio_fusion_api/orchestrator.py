@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextvars import ContextVar, copy_context
+import inspect
 import json
 import os
 import re
@@ -13,7 +15,7 @@ from typing import Any, Mapping, Sequence
 
 from .policy_control import load_active_routing_policy
 from .latency_policy import profile_latency_eligibility
-from .providers import HTTPProviderClient, ProviderCompletion
+from .providers import HTTPProviderClient, ProviderCompletion, ProviderStreamObserver
 from .router import build_route_plan
 from .schemas import (
     REASONING_EFFORT_LEVELS,
@@ -137,6 +139,37 @@ class FusionExecutionError(RuntimeError):
         super().__init__(message)
         self.code = code
         self.trace = dict(trace or {})
+
+
+class PublicStreamInterruptedError(FusionExecutionError):
+    """Abort a public stream once an already-visible answer can no longer continue."""
+
+    def __init__(self, *, client_cancelled: bool = False) -> None:
+        super().__init__(
+            "public_stream_cancelled" if client_cancelled else "public_stream_interrupted",
+            (
+                "The client closed the response stream."
+                if client_cancelled
+                else "The response stream ended before completion."
+            ),
+            trace={
+                "public_stream_committed": not client_cancelled,
+                "client_cancelled": bool(client_cancelled),
+                "raw_provider_output_persisted": False,
+                "secrets_persisted": False,
+            },
+        )
+        self.client_cancelled = bool(client_cancelled)
+
+
+_PUBLIC_STREAM_OBSERVER: ContextVar[ProviderStreamObserver | None] = ContextVar(
+    "axio_public_stream_observer",
+    default=None,
+)
+_PUBLIC_STREAM_CANCELLATION: ContextVar[threading.Event | None] = ContextVar(
+    "axio_public_stream_cancellation",
+    default=None,
+)
 
 
 class _CallBudget:
@@ -1890,6 +1923,51 @@ class FusionEngine:
             raise FusionExecutionError("no_eligible_model", "No eligible provider model was selected.", trace=route_plan)
         return self._complete_live(request, route_plan)
 
+    def complete_stream(
+        self,
+        request: FusionRequest,
+        *,
+        on_text_delta: Any,
+        live: bool | None = None,
+        cancellation_event: threading.Event | None = None,
+        response_id: str | None = None,
+        created: int | None = None,
+    ) -> FusionResponse:
+        """Run Fusion while exposing only the final acting model's text deltas.
+
+        Internal panel, Judge, critic, Hermes-reference, repair, and routing
+        calls remain private.  ``axio-fast`` may expose its direct acting
+        solver; the deliberative public models expose only their final
+        synthesizer.  Cache/custom-client paths retain a one-shot completion
+        fallback, which is still protocol-correct but deliberately marked by
+        the absence of provider deltas in the transport trace.
+        """
+
+        observer = ProviderStreamObserver(
+            on_text_delta,
+            cancellation_event=cancellation_event,
+        )
+        observer_token = _PUBLIC_STREAM_OBSERVER.set(observer)
+        cancellation_token = _PUBLIC_STREAM_CANCELLATION.set(cancellation_event)
+        try:
+            response = self.complete(request, live=live)
+            if cancellation_event is not None and cancellation_event.is_set():
+                raise PublicStreamInterruptedError(client_cancelled=True)
+            if response.text and not observer.emitted_text:
+                observer.emit_text_delta(response.text)
+            if cancellation_event is not None and cancellation_event.is_set():
+                raise PublicStreamInterruptedError(client_cancelled=True)
+            if response_id or created is not None:
+                response = replace(
+                    response,
+                    response_id=str(response_id or response.response_id),
+                    created=int(created if created is not None else response.created),
+                )
+            return response
+        finally:
+            _PUBLIC_STREAM_CANCELLATION.reset(cancellation_token)
+            _PUBLIC_STREAM_OBSERVER.reset(observer_token)
+
     def _complete_live(self, request: FusionRequest, route_plan: Mapping[str, Any]) -> FusionResponse:
         started = time.monotonic()
         if not isinstance(route_plan, dict):
@@ -1974,8 +2052,14 @@ class FusionEngine:
         else:
             parallel_cancel_event = threading.Event()
             executor = ThreadPoolExecutor(max_workers=max_parallel)
-            futures = {
-                executor.submit(
+            futures = {}
+            for role_index, role in enumerate(expert_roles):
+                # ThreadPoolExecutor does not inherit ContextVars. Give each
+                # role a private context copy so a public stream observer and
+                # its cancellation signal remain visible in worker threads.
+                role_context = copy_context()
+                future = executor.submit(
+                    role_context.run,
                     self._run_role,
                     request,
                     role,
@@ -1985,9 +2069,8 @@ class FusionEngine:
                     deadline_budget=deadline_budget,
                     prompt_budget=prompt_budget,
                     cancellation_event=parallel_cancel_event,
-                ): (role_index, role)
-                for role_index, role in enumerate(expert_roles)
-            }
+                )
+                futures[future] = (role_index, role)
             ordered_candidates: list[CandidateResult | None] = [
                 None for _ in expert_roles
             ]
@@ -3041,9 +3124,25 @@ class FusionEngine:
 
         direct_fast_route = bool(
             isinstance(route_plan, Mapping)
-            and str(route_plan.get("strategy") or "") == "fast_direct_cascade"
+            and str(route_plan.get("strategy") or "")
+            in {
+                "fast_direct_cascade",
+                "terra_direct",
+                "pro_direct_with_verifier_gap",
+            }
             and role_name in {"primary_solver", "fallback_solver"}
         )
+        public_stream_observer = (
+            _PUBLIC_STREAM_OBSERVER.get() if direct_fast_route else None
+        )
+        public_stream_cancellation = (
+            _PUBLIC_STREAM_CANCELLATION.get() if direct_fast_route else None
+        )
+        if (
+            public_stream_cancellation is not None
+            and public_stream_cancellation.is_set()
+        ):
+            raise PublicStreamInterruptedError(client_cancelled=True)
         provider_call_attempted = False
         provider_response_received = False
         provider_call_started_at: float | None = None
@@ -3090,13 +3189,13 @@ class FusionEngine:
                 task_execution=task_execution,
             )
         if direct_fast_route:
-            # Fast's direct cascade is the single-model baseline path.  It
-            # must preserve the caller's prompt and system message so routing
-            # metadata does not add context latency or change the model's
-            # decoding task.  The tool safety contract is the one exception:
-            # a direct tool turn still needs the structured call schema, while
-            # Fusion-specific control packets belong only to light-verify,
-            # Terra, Pro, repair, Judge, and synthesis stages.
+            # A direct public cascade must preserve the caller's prompt and
+            # system message so routing metadata does not add context latency
+            # or turn the public answer into a private candidate packet. The
+            # tool safety contract is the one exception: a direct tool turn
+            # still needs the structured call schema, while Fusion-specific
+            # control packets belong only to verify, deliberation, repair,
+            # Judge, and synthesis stages.
             prompt = request.prompt + _tool_call_prompt_fragment(request, role_name)
             system = request.system
         elif hermes_reference:
@@ -3233,6 +3332,8 @@ class FusionEngine:
                 system=system,
                 timeout=provider_timeout,
                 deadline_bound=deadline_budget is not None,
+                stream_observer=public_stream_observer,
+                cancellation_event=public_stream_cancellation,
             )
             provider_response_received = True
             self._record_success(
@@ -3320,6 +3421,13 @@ class FusionEngine:
         except Exception as exc:  # noqa: PERF203 - provider boundary
             if cost_budget is not None:
                 cost_budget.release(cost_reservation)
+            if public_stream_observer is not None and (
+                public_stream_observer.emitted_text
+                or public_stream_observer.cancellation_requested
+            ):
+                raise PublicStreamInterruptedError(
+                    client_cancelled=public_stream_observer.cancellation_requested,
+                ) from exc
             recovered = retry_same_canonical_replica(type(exc).__name__)
             if recovered is not None:
                 return recovered
@@ -3374,6 +3482,8 @@ class FusionEngine:
         system: str,
         timeout: float | None,
         deadline_bound: bool = False,
+        stream_observer: ProviderStreamObserver | None = None,
+        cancellation_event: threading.Event | None = None,
     ) -> ProviderCompletion:
         """Use native tool-call extraction when the client exposes it.
 
@@ -3389,7 +3499,22 @@ class FusionEngine:
         )
         complete_turn = getattr(self.client, "complete_turn", None)
         if callable(complete_turn):
-            value = complete_turn(profile, provider_request, prompt=prompt, system=system, timeout=timeout)
+            kwargs: dict[str, Any] = {
+                "prompt": prompt,
+                "system": system,
+                "timeout": timeout,
+            }
+            if stream_observer is not None and _callable_accepts_keyword(
+                complete_turn,
+                "stream_observer",
+            ):
+                kwargs["stream_observer"] = stream_observer
+            if cancellation_event is not None and _callable_accepts_keyword(
+                complete_turn,
+                "cancellation_event",
+            ):
+                kwargs["cancellation_event"] = cancellation_event
+            value = complete_turn(profile, provider_request, **kwargs)
             if isinstance(value, ProviderCompletion):
                 return value
             if isinstance(value, Mapping):
@@ -3416,6 +3541,8 @@ class FusionEngine:
         deadline_budget: _DeadlineBudget | None,
         prompt_budget: _PromptBudgetLedger | None,
         allow_tool_calls: bool = False,
+        stream_observer: ProviderStreamObserver | None = None,
+        cancellation_event: threading.Event | None = None,
     ) -> tuple[str | ProviderCompletion, ModelProfile, dict[str, Any], int]:
         """Execute a bounded internal stage across equivalent channel replicas.
 
@@ -3435,6 +3562,8 @@ class FusionEngine:
         provider_attempt_count = 0
         terminal_reason = "no_eligible_canonical_replica"
         for replica_index, replica in enumerate(replicas, start=1):
+            if cancellation_event is not None and cancellation_event.is_set():
+                raise PublicStreamInterruptedError(client_cancelled=True)
             if deadline_budget is not None and not deadline_budget.acquire(
                 kind=kind,
                 role=role_name,
@@ -3495,7 +3624,7 @@ class FusionEngine:
             provider_attempt_count += 1
             started = time.monotonic()
             try:
-                if allow_tool_calls:
+                if allow_tool_calls or stream_observer is not None:
                     completion = self._complete_provider_turn(
                         replica,
                         request,
@@ -3508,6 +3637,8 @@ class FusionEngine:
                             kind=kind,
                         ),
                         deadline_bound=deadline_budget is not None,
+                        stream_observer=stream_observer,
+                        cancellation_event=cancellation_event,
                     )
                     output = completion.text
                 else:
@@ -3580,6 +3711,8 @@ class FusionEngine:
                         "terminal_reason": "provider_tool_call_received",
                         "stage_attempt_receipts": attempts[:_MAX_CANONICAL_REPLICA_ATTEMPTS],
                     }, provider_attempt_count
+                if stream_observer is not None and stream_observer.emitted_text:
+                    raise PublicStreamInterruptedError()
                 attempts.append(
                     _canonical_replica_stage_attempt_receipt(
                         replica,
@@ -3608,6 +3741,13 @@ class FusionEngine:
                 )
                 terminal_reason = "same_canonical_model_replica_failed"
                 selected_profile = replica
+                if stream_observer is not None and (
+                    stream_observer.emitted_text
+                    or stream_observer.cancellation_requested
+                ):
+                    raise PublicStreamInterruptedError(
+                        client_cancelled=stream_observer.cancellation_requested,
+                    ) from exc
         return "", selected_profile, {
             **routing,
             "stage_attempt_count": provider_attempt_count,
@@ -4684,6 +4824,8 @@ class FusionEngine:
                 ),
             )
             system = _synthesizer_system(request.system)
+            public_stream_observer = _PUBLIC_STREAM_OBSERVER.get()
+            public_stream_cancellation = _PUBLIC_STREAM_CANCELLATION.get()
             stage_output, _selected_profile, replica_routing, provider_attempt_count = (
                 self._complete_stage_with_replica_failover(
                     profile,
@@ -4701,6 +4843,8 @@ class FusionEngine:
                         hermes_plan.get("aggregator_tools_admitted") is True
                         and hermes_plan.get("public_tools_declared") is True
                     ),
+                    stream_observer=public_stream_observer,
+                    cancellation_event=public_stream_cancellation,
                 )
             )
             compression_receipt = {
@@ -4756,6 +4900,20 @@ class FusionEngine:
             (),
             False,
         )
+
+
+def _callable_accepts_keyword(callback: Any, keyword: str) -> bool:
+    """Check an extension client's optional keyword without masking its errors."""
+
+    try:
+        parameters = inspect.signature(callback).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        or parameter.name == keyword
+        for parameter in parameters
+    )
 
 
 def _profile_with_runtime_telemetry(
@@ -5105,7 +5263,7 @@ def _role_reasoning_effort(
 ) -> str:
     """Combine the caller's upper bound with the Hermes stage budget.
 
-    A direct Axio Fast cascade preserves the caller's requested level exactly.
+    A direct public cascade preserves the caller's requested level exactly.
     Fusion stages use their role budget when Hermes is active, but an explicit
     caller value can only lower that budget.  The resulting logical level is
     still not a wire parameter until the selected provider profile verifies
@@ -5115,7 +5273,12 @@ def _role_reasoning_effort(
     caller_effort = normalize_reasoning_effort(request.reasoning_effort)
     direct_fast_route = bool(
         isinstance(route_plan, Mapping)
-        and str(route_plan.get("strategy") or "") == "fast_direct_cascade"
+        and str(route_plan.get("strategy") or "")
+        in {
+            "fast_direct_cascade",
+            "terra_direct",
+            "pro_direct_with_verifier_gap",
+        }
         and str(role or "") in {"primary_solver", "fallback_solver"}
     )
     if direct_fast_route:

@@ -2,17 +2,25 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 import uuid
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 from urllib.parse import unquote, urlparse
 
-from .compat import canonicalize_payload, normalize_api_format, public_route_summary, render_response, render_stream_events
+from .compat import (
+    IncrementalStreamRenderer,
+    canonicalize_payload,
+    normalize_api_format,
+    public_route_summary,
+    render_response,
+    render_stream_events,
+)
 from .latency_policy import profile_latency_eligibility
-from .orchestrator import FusionEngine, FusionExecutionError
+from .orchestrator import FusionEngine, FusionExecutionError, PublicStreamInterruptedError
 from .network import provider_proxy_runtime_summary
 from .providers import (
     HTTPProviderClient,
@@ -39,6 +47,17 @@ from .tools import execute_tool_batch
 
 API_SURFACE_PROTOCOL_FORMATS = ("chat/completions", "responses", "anthropic", "gemini")
 FUSION_DELIBERATION_SMOKE_DEFAULT_MODELS = ("axio-terra", "axio-pro")
+
+
+@dataclass(frozen=True)
+class _PreparedIncrementalStream:
+    headers_lc: Mapping[str, str]
+    payload: Mapping[str, Any]
+    endpoint: str
+    request: FusionRequest
+    active_engine: FusionEngine
+    tenant_key: str
+    live: bool
 
 
 def handle_request(
@@ -216,6 +235,197 @@ def handle_request(
     return respond(_json_response(200, rendered))
 
 
+def _http_request_asks_for_incremental_stream(
+    *,
+    method: str,
+    path: str,
+    body: bytes | str | None,
+) -> bool:
+    """Identify only well-formed public inference streams before dispatch.
+
+    Invalid JSON and non-inference routes stay on ``handle_request`` so they
+    retain the existing buffered error semantics.  Authorization and quota
+    checks deliberately happen later in the shared-equivalent preparation
+    path, not in this predicate.
+    """
+
+    if method.upper() != "POST":
+        return False
+    route = urlparse(path).path.rstrip("/") or "/"
+    endpoint = _endpoint_api_format(route)
+    if not endpoint:
+        return False
+    try:
+        payload = _decode_json(body)
+    except ValueError:
+        return False
+    return _stream_requested(route, payload, endpoint)
+
+
+def _prepare_incremental_stream_request(
+    *,
+    method: str,
+    path: str,
+    headers: Mapping[str, str] | None,
+    body: bytes | str | None,
+    engine: FusionEngine | None,
+    live: bool,
+    record_runtime: bool,
+) -> tuple[_PreparedIncrementalStream | None, tuple[int, dict[str, str], bytes] | None]:
+    """Apply the public control plane before an HTTP stream commits headers.
+
+    This mirrors the inference portion of ``handle_request`` because a stream
+    cannot call the buffered handler without losing its first-token timing.
+    Keep the boundary intentionally narrow: all non-inference routes continue
+    through the original synchronous dispatcher.
+    """
+
+    headers_lc = {str(key).lower(): str(value) for key, value in (headers or {}).items()}
+    route = urlparse(path).path.rstrip("/") or "/"
+
+    def respond(response: tuple[int, dict[str, str], bytes]) -> tuple[int, dict[str, str], bytes]:
+        return _apply_cors_headers(response, headers_lc)
+
+    if _operator_endpoint(route):
+        if not _operator_authorized(
+            headers_lc,
+            require_explicit_operator_key=_operator_endpoint_requires_explicit_key(route),
+        ):
+            return None, respond(_operator_forbidden_response())
+    elif not _authorized(headers_lc):
+        return None, respond(
+            _json_response(
+                401,
+                {"error": {"message": "Unauthorized", "code": "unauthorized"}},
+            )
+        )
+    tenant_key = tenant_key_from_headers(headers_lc)
+    if record_runtime:
+        rate = runtime_state().check_rate_limit(tenant_key)
+        if not rate["allowed"]:
+            return None, respond(
+                _json_response(
+                    429,
+                    {
+                        "error": {"message": "Rate limit exceeded", "code": "rate_limit_exceeded"},
+                        "metadata": {
+                            "rate_limit": rate,
+                            "raw_prompt_persisted": False,
+                            "secrets_persisted": False,
+                        },
+                    },
+                    extra_headers={"Retry-After": str(rate.get("retry_after_seconds") or 1)},
+                )
+            )
+    active_engine = engine or FusionEngine(load_registry(require_prefusion=bool(live)))
+    if method.upper() != "POST":
+        return None, respond(
+            _json_response(
+                405,
+                {"error": {"message": "Method not allowed", "code": "method_not_allowed"}},
+            )
+        )
+    try:
+        payload = _decode_json(body)
+    except ValueError as exc:
+        return None, respond(
+            _json_response(400, {"error": {"message": str(exc), "code": "invalid_json"}})
+        )
+    endpoint = _endpoint_api_format(route)
+    if not endpoint:
+        return None, respond(
+            _json_response(
+                404,
+                {"error": {"message": f"Unknown endpoint: {route}", "code": "not_found"}},
+            )
+        )
+    if not _stream_requested(route, payload, endpoint):
+        return None, respond(
+            _json_response(
+                400,
+                {"error": {"message": "Streaming was not requested.", "code": "stream_not_requested"}},
+            )
+        )
+    if record_runtime:
+        budget = runtime_state().check_budget(tenant_key)
+        if not budget["allowed"]:
+            return None, respond(_tenant_budget_exhausted_response(budget))
+    if endpoint == "gemini":
+        route_model = _gemini_route_model(route)
+        if route_model and "model" not in payload:
+            payload = {**payload, "model": route_model}
+    continuation: ResponseContinuation | None = None
+    if endpoint == "responses" and "previous_response_id" in payload:
+        continuation = runtime_state().get_response_continuation(
+            tenant_key,
+            str(payload.get("previous_response_id") or ""),
+        )
+        if continuation is None:
+            return None, respond(_previous_response_not_found_response())
+        payload = _inherit_responses_continuation_defaults(payload, continuation)
+    request = canonicalize_payload(payload, api_format=endpoint)
+    if continuation is not None:
+        request = _merge_responses_continuation(request, continuation)
+    return (
+        _PreparedIncrementalStream(
+            headers_lc=headers_lc,
+            payload=payload,
+            endpoint=endpoint,
+            request=request,
+            active_engine=active_engine,
+            tenant_key=tenant_key,
+            live=bool(payload.get("live", live)),
+        ),
+        None,
+    )
+
+
+def _finalize_incremental_stream_response(
+    prepared: _PreparedIncrementalStream,
+    response: FusionResponse,
+    *,
+    record_trace: bool,
+    record_runtime: bool,
+    record_response_continuations: bool,
+) -> tuple[FusionResponse, bool | None]:
+    """Apply the same post-completion accounting as the buffered dispatcher."""
+
+    responses_store: bool | None = None
+    if prepared.endpoint == "responses":
+        responses_store = False
+        if record_response_continuations and _responses_store_requested(prepared.payload):
+            responses_store = runtime_state().store_response_continuation(
+                tenant_key=prepared.tenant_key,
+                response_id=response.response_id,
+                history=_response_continuation_history(prepared.request, response),
+                model=prepared.request.model,
+                instructions=prepared.request.system,
+                tools=prepared.request.tools,
+            )
+    rendered = render_response(
+        response,
+        api_format=prepared.endpoint,
+        responses_store=responses_store,
+    )
+    if record_runtime:
+        runtime_state().record_cost(
+            prepared.tenant_key,
+            _actual_cost_from_rendered_response(rendered),
+        )
+    if record_trace:
+        record_execution_trace(response, tenant_key=prepared.tenant_key)
+    return response, responses_store
+
+
+def _incremental_stream_headers() -> dict[str, str]:
+    return {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "Transfer-Encoding": "chunked",
+    }
+
+
 def _previous_response_not_found_response() -> tuple[int, dict[str, str], bytes]:
     """Use one public error for unknown, expired, and foreign response IDs."""
 
@@ -377,6 +587,7 @@ def create_http_server(
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "AxioFusionStandalone/0.1"
+        protocol_version = "HTTP/1.1"
 
         def do_GET(self) -> None:  # noqa: N802
             self._dispatch()
@@ -395,6 +606,30 @@ def create_http_server(
             length = int(self.headers.get("Content-Length") or 0)
             body = self.rfile.read(length) if length else b""
             request_engine, _generation = runtime_handle.snapshot()
+            if _http_request_asks_for_incremental_stream(
+                method=self.command,
+                path=self.path,
+                body=body,
+            ):
+                prepared, immediate = _prepare_incremental_stream_request(
+                    method=self.command,
+                    path=self.path,
+                    headers=dict(self.headers),
+                    body=body,
+                    engine=request_engine,
+                    live=live,
+                    record_runtime=record_runtime,
+                )
+                if prepared is not None:
+                    self._dispatch_incremental_stream(
+                        prepared,
+                        record_trace=record_trace,
+                        record_runtime=record_runtime,
+                    )
+                    return
+                assert immediate is not None
+                self._write_buffered_response(*immediate)
+                return
             status, response_headers, response_body = handle_request(
                 method=self.command,
                 path=self.path,
@@ -405,11 +640,124 @@ def create_http_server(
                 record_trace=record_trace,
                 record_runtime=record_runtime,
             )
+            self._write_buffered_response(status, response_headers, response_body)
+
+        def _write_buffered_response(
+            self,
+            status: int,
+            response_headers: Mapping[str, str],
+            response_body: bytes,
+        ) -> None:
             self.send_response(status)
             for key, value in response_headers.items():
                 self.send_header(key, value)
             self.end_headers()
             self.wfile.write(response_body)
+
+        def _dispatch_incremental_stream(
+            self,
+            prepared: _PreparedIncrementalStream,
+            *,
+            record_trace: bool,
+            record_runtime: bool,
+        ) -> None:
+            cancellation_event = threading.Event()
+            response_id = f"fusion-{uuid.uuid4().hex}"
+            created = int(time.time())
+            renderer = IncrementalStreamRenderer(
+                prepared.request,
+                api_format=prepared.endpoint,
+                response_id=response_id,
+                created=created,
+                include_usage=_stream_usage_requested(
+                    prepared.payload,
+                    prepared.endpoint,
+                ),
+            )
+            response_headers = _apply_cors_headers(
+                (200, _incremental_stream_headers(), b""),
+                prepared.headers_lc,
+            )[1]
+            self.send_response(200)
+            for key, value in response_headers.items():
+                self.send_header(key, value)
+            self.end_headers()
+            if not self._write_stream_chunk(renderer.start(), cancellation_event):
+                return
+
+            def on_text_delta(text: str) -> bool:
+                return self._write_stream_chunk(
+                    renderer.text_delta(text),
+                    cancellation_event,
+                )
+
+            try:
+                response = prepared.active_engine.complete_stream(
+                    prepared.request,
+                    on_text_delta=on_text_delta,
+                    live=prepared.live,
+                    cancellation_event=cancellation_event,
+                    response_id=response_id,
+                    created=created,
+                )
+                if not cancellation_event.is_set():
+                    response, responses_store = _finalize_incremental_stream_response(
+                        prepared,
+                        response,
+                        record_trace=record_trace,
+                        record_runtime=record_runtime,
+                        record_response_continuations=True,
+                    )
+                    renderer.responses_store = responses_store
+                    self._write_stream_chunk(renderer.complete(response), cancellation_event)
+            except PublicStreamInterruptedError as exc:
+                if not cancellation_event.is_set() and not exc.client_cancelled:
+                    self._write_stream_chunk(
+                        renderer.error(code=exc.code),
+                        cancellation_event,
+                    )
+            except FusionExecutionError:
+                if not cancellation_event.is_set():
+                    self._write_stream_chunk(
+                        renderer.error(code="stream_failed"),
+                        cancellation_event,
+                    )
+            except Exception:  # noqa: BLE001 - HTTP boundary must not leak provider details
+                if not cancellation_event.is_set():
+                    self._write_stream_chunk(
+                        renderer.error(code="stream_failed"),
+                        cancellation_event,
+                    )
+            finally:
+                self._finish_stream(cancellation_event)
+
+        def _write_stream_chunk(
+            self,
+            payload: bytes,
+            cancellation_event: threading.Event,
+        ) -> bool:
+            if cancellation_event.is_set():
+                return False
+            if not payload:
+                return True
+            try:
+                self.wfile.write(f"{len(payload):X}\r\n".encode("ascii"))
+                self.wfile.write(payload)
+                self.wfile.write(b"\r\n")
+                self.wfile.flush()
+                return True
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                cancellation_event.set()
+                return False
+
+        def _finish_stream(self, cancellation_event: threading.Event) -> None:
+            if cancellation_event.is_set():
+                return
+            try:
+                self.wfile.write(b"0\r\n\r\n")
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                cancellation_event.set()
 
     server = ThreadingHTTPServer((host, int(port)), Handler)
     server.daemon_threads = True

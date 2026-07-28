@@ -269,6 +269,685 @@ def render_response(
     }
 
 
+class IncrementalStreamRenderer:
+    """Render one public response as protocol-native incremental events.
+
+    The renderer accepts only final visible text deltas.  It does not know
+    about provider events or Fusion's internal candidate/Judge traffic, which
+    makes it impossible for those private messages to leak through the public
+    API stream by accident.
+    """
+
+    def __init__(
+        self,
+        request: FusionRequest,
+        *,
+        api_format: str | None = None,
+        response_id: str,
+        created: int | None = None,
+        responses_store: bool | None = None,
+        include_usage: bool = False,
+    ) -> None:
+        self.request = request
+        self.api_format = normalize_api_format(api_format or request.api_format)
+        self.response_id = str(response_id)
+        self.created = int(created if created is not None else time.time())
+        self.responses_store = responses_store
+        self.include_usage = bool(include_usage)
+        self._started = False
+        self._completed = False
+        self._text_started = False
+        self._emitted_text_characters = 0
+        self._responses_sequence_number = 0
+        self._anthropic_next_content_index = 0
+
+    def start(self) -> bytes:
+        if self._started:
+            return b""
+        self._started = True
+        if self.api_format == "responses":
+            response = self._responses_in_progress_object()
+            return self._responses_events(
+                [
+                    (
+                        "response.created",
+                        {"type": "response.created", "response": response},
+                    ),
+                    (
+                        "response.in_progress",
+                        {"type": "response.in_progress", "response": response},
+                    ),
+                ]
+            )
+        if self.api_format == "anthropic":
+            return _sse_bytes(
+                [
+                    (
+                        "message_start",
+                        {
+                            "type": "message_start",
+                            "message": {
+                                "id": self.response_id,
+                                "type": "message",
+                                "role": "assistant",
+                                "model": self.request.public_model,
+                                "content": [],
+                                "stop_reason": None,
+                                "stop_sequence": None,
+                                "usage": {"input_tokens": 0, "output_tokens": 0},
+                                "metadata": self._pending_metadata(),
+                            },
+                        },
+                    )
+                ]
+            )
+        if self.api_format == "chat/completions":
+            return _sse_bytes(
+                [
+                    (
+                        None,
+                        {
+                            "id": self.response_id,
+                            "object": "chat.completion.chunk",
+                            "created": self.created,
+                            "model": self.request.public_model,
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "delta": {"role": "assistant"},
+                                    "finish_reason": None,
+                                }
+                            ],
+                            "metadata": self._pending_metadata(),
+                        },
+                    )
+                ]
+            )
+        return b""
+
+    def text_delta(self, value: Any) -> bytes:
+        text = str(value or "")
+        if not text or self._completed:
+            return b""
+        prefix = self.start()
+        self._text_started = True
+        self._emitted_text_characters += len(text)
+        if self.api_format == "responses":
+            events: list[tuple[str | None, Mapping[str, Any] | str]] = []
+            if self._emitted_text_characters == len(text):
+                events.extend(self._responses_text_start_events())
+            events.append(
+                (
+                    "response.output_text.delta",
+                    {
+                        "type": "response.output_text.delta",
+                        "item_id": self._responses_message_item_id,
+                        "output_index": 0,
+                        "content_index": 0,
+                        "logprobs": [],
+                        "delta": text,
+                    },
+                )
+            )
+            return prefix + self._responses_events(events)
+        if self.api_format == "anthropic":
+            events = []
+            if self._emitted_text_characters == len(text):
+                events.append(
+                    (
+                        "content_block_start",
+                        {
+                            "type": "content_block_start",
+                            "index": self._anthropic_next_content_index,
+                            "content_block": {"type": "text", "text": ""},
+                        },
+                    )
+                )
+            events.append(
+                (
+                    "content_block_delta",
+                    {
+                        "type": "content_block_delta",
+                        "index": self._anthropic_next_content_index,
+                        "delta": {"type": "text_delta", "text": text},
+                    },
+                )
+            )
+            return prefix + _sse_bytes(events)
+        if self.api_format == "gemini":
+            return prefix + _sse_bytes(
+                [
+                    (
+                        None,
+                        {
+                            "responseId": self.response_id,
+                            "modelVersion": self.request.public_model,
+                            "candidates": [
+                                {
+                                    "index": 0,
+                                    "content": {"role": "model", "parts": [{"text": text}]},
+                                }
+                            ],
+                        },
+                    )
+                ]
+            )
+        return prefix + _sse_bytes(
+            [
+                (
+                    None,
+                    {
+                        "id": self.response_id,
+                        "object": "chat.completion.chunk",
+                        "created": self.created,
+                        "model": self.request.public_model,
+                        "choices": [
+                            {"index": 0, "delta": {"content": text}, "finish_reason": None}
+                        ],
+                    },
+                )
+            ]
+        )
+
+    def complete(self, response: FusionResponse) -> bytes:
+        if self._completed:
+            return b""
+        self._completed = True
+        body = self.start()
+        remaining_text = self._remaining_final_text(response.text)
+        if remaining_text:
+            self._completed = False
+            body += self.text_delta(remaining_text)
+            self._completed = True
+        tool_calls = tuple(call for call in response.tool_calls if isinstance(call, Mapping))
+        if self.api_format == "responses":
+            body += self._complete_responses(response, tool_calls)
+        elif self.api_format == "anthropic":
+            body += self._complete_anthropic(response, tool_calls)
+        elif self.api_format == "gemini":
+            body += self._complete_gemini(response, tool_calls)
+        else:
+            body += self._complete_chat(response, tool_calls)
+        return body
+
+    def error(self, *, code: str = "stream_interrupted", message: str = "The response stream ended before completion.") -> bytes:
+        if self._completed:
+            return b""
+        self._completed = True
+        body = self.start()
+        safe_message = str(message or "The response stream ended before completion.")[:240]
+        safe_code = str(code or "stream_interrupted")[:80]
+        if self.api_format == "responses":
+            failed = {
+                **self._responses_in_progress_object(),
+                "status": "failed",
+                "error": {"code": safe_code, "message": safe_message},
+                "completed_at": int(time.time()),
+            }
+            return body + self._responses_events(
+                [
+                    (
+                        "response.failed",
+                        {"type": "response.failed", "response": failed},
+                    )
+                ]
+            )
+        if self.api_format == "anthropic":
+            return body + _sse_bytes(
+                [
+                    (
+                        "error",
+                        {
+                            "type": "error",
+                            "error": {"type": "api_error", "message": safe_message},
+                        },
+                    )
+                ]
+            )
+        if self.api_format == "gemini":
+            return body + _sse_bytes(
+                [
+                    (
+                        None,
+                        {
+                            "error": {
+                                "code": 502,
+                                "status": "UNKNOWN",
+                                "message": safe_message,
+                            }
+                        },
+                    )
+                ]
+            )
+        return body + _sse_bytes(
+            [
+                (
+                    None,
+                    {"error": {"message": safe_message, "code": safe_code}},
+                ),
+                (None, "[DONE]"),
+            ]
+        )
+
+    @property
+    def _responses_message_item_id(self) -> str:
+        return f"{self.response_id}-message"
+
+    def _pending_metadata(self) -> dict[str, Any]:
+        return {
+            "schema": "axio_fusion_api.stream_metadata.v1",
+            "external_model_name": self.request.public_model,
+            "provider_calls_recorded": False,
+            "request_fingerprint": self.request.request_fingerprint,
+            "raw_prompt_persisted": False,
+            "raw_source_text_persisted": False,
+            "secrets_persisted": False,
+        }
+
+    def _remaining_final_text(self, text: Any) -> str:
+        final_text = str(text or "")
+        if not self._text_started:
+            return final_text
+        if len(final_text) > self._emitted_text_characters:
+            return final_text[self._emitted_text_characters :]
+        return ""
+
+    def _responses_in_progress_object(self) -> dict[str, Any]:
+        metadata = self._pending_metadata()
+        if self.responses_store is not None:
+            metadata = _responses_continuation_metadata(
+                metadata,
+                stored=bool(self.responses_store),
+            )
+        response = {
+            "id": self.response_id,
+            "object": "response",
+            "created_at": self.created,
+            "background": False,
+            "model": self.request.public_model,
+            "status": "in_progress",
+            "error": None,
+            "incomplete_details": None,
+            "completed_at": None,
+            "max_output_tokens": self.request.max_output_tokens,
+            "max_tool_calls": None,
+            "parallel_tool_calls": False,
+            "previous_response_id": None,
+            "reasoning": {"effort": None, "summary": None},
+            "service_tier": "default",
+            "text": {"format": {"type": "text"}},
+            "temperature": self.request.temperature,
+            "tool_choice": "auto",
+            "tools": [],
+            "top_p": self.request.top_p,
+            "truncation": "disabled",
+            "user": None,
+            "output": [],
+            "output_text": "",
+            "usage": None,
+            "metadata": metadata,
+        }
+        if self.responses_store is not None:
+            response["store"] = bool(self.responses_store)
+        return response
+
+    def _responses_events(
+        self,
+        events: Sequence[tuple[str | None, Mapping[str, Any] | str]],
+    ) -> bytes:
+        numbered: list[tuple[str | None, Mapping[str, Any] | str]] = []
+        for event_name, payload in events:
+            if isinstance(payload, Mapping):
+                self._responses_sequence_number += 1
+                payload = {
+                    **payload,
+                    **({"response_id": self.response_id} if "response_id" not in payload else {}),
+                    "sequence_number": self._responses_sequence_number,
+                }
+            numbered.append((event_name, payload))
+        return _sse_bytes(numbered)
+
+    def _responses_text_start_events(self) -> list[tuple[str | None, Mapping[str, Any] | str]]:
+        return [
+            (
+                "response.output_item.added",
+                {
+                    "type": "response.output_item.added",
+                    "output_index": 0,
+                    "item": {
+                        "type": "message",
+                        "id": self._responses_message_item_id,
+                        "status": "in_progress",
+                        "role": "assistant",
+                        "content": [],
+                    },
+                },
+            ),
+            (
+                "response.content_part.added",
+                {
+                    "type": "response.content_part.added",
+                    "item_id": self._responses_message_item_id,
+                    "output_index": 0,
+                    "content_index": 0,
+                    "part": {"type": "output_text", "annotations": [], "text": ""},
+                },
+            ),
+        ]
+
+    def _complete_responses(
+        self,
+        response: FusionResponse,
+        tool_calls: Sequence[Mapping[str, Any]],
+    ) -> bytes:
+        events: list[tuple[str | None, Mapping[str, Any] | str]] = []
+        if self._text_started or not tool_calls:
+            if not self._text_started:
+                events.extend(self._responses_text_start_events())
+                self._text_started = True
+            final_text = str(response.text or "")
+            text_part = {"type": "output_text", "annotations": [], "text": final_text}
+            text_item = {
+                "type": "message",
+                "id": self._responses_message_item_id,
+                "status": "completed",
+                "role": "assistant",
+                "content": [text_part],
+            }
+            events.extend(
+                [
+                    (
+                        "response.output_text.done",
+                        {
+                            "type": "response.output_text.done",
+                            "item_id": self._responses_message_item_id,
+                            "output_index": 0,
+                            "content_index": 0,
+                            "logprobs": [],
+                            "text": final_text,
+                        },
+                    ),
+                    (
+                        "response.content_part.done",
+                        {
+                            "type": "response.content_part.done",
+                            "item_id": self._responses_message_item_id,
+                            "output_index": 0,
+                            "content_index": 0,
+                            "part": text_part,
+                        },
+                    ),
+                    (
+                        "response.output_item.done",
+                        {
+                            "type": "response.output_item.done",
+                            "output_index": 0,
+                            "item": text_item,
+                        },
+                    ),
+                ]
+            )
+        output_index = 1 if self._text_started else 0
+        for call in tool_calls:
+            call_item = tool_call_to_responses(call)
+            arguments = str(call_item.get("arguments") or "{}")
+            item_id = str(call_item.get("id") or "")
+            events.extend(
+                [
+                    (
+                        "response.output_item.added",
+                        {
+                            "type": "response.output_item.added",
+                            "output_index": output_index,
+                            "item": {**call_item, "status": "in_progress", "arguments": ""},
+                        },
+                    ),
+                    (
+                        "response.function_call_arguments.delta",
+                        {
+                            "type": "response.function_call_arguments.delta",
+                            "item_id": item_id,
+                            "call_id": str(call_item.get("call_id") or item_id),
+                            "output_index": output_index,
+                            "delta": arguments,
+                        },
+                    ),
+                    (
+                        "response.function_call_arguments.done",
+                        {
+                            "type": "response.function_call_arguments.done",
+                            "item_id": item_id,
+                            "call_id": str(call_item.get("call_id") or item_id),
+                            "output_index": output_index,
+                            "name": str(call_item.get("name") or ""),
+                            "arguments": arguments,
+                        },
+                    ),
+                    (
+                        "response.output_item.done",
+                        {
+                            "type": "response.output_item.done",
+                            "output_index": output_index,
+                            "item": call_item,
+                        },
+                    ),
+                ]
+            )
+            output_index += 1
+        events.append(
+            (
+                "response.completed",
+                {
+                    "type": "response.completed",
+                    "response": render_response(
+                        response,
+                        api_format="responses",
+                        responses_store=self.responses_store,
+                    ),
+                },
+            )
+        )
+        return self._responses_events(events)
+
+    def _complete_anthropic(
+        self,
+        response: FusionResponse,
+        tool_calls: Sequence[Mapping[str, Any]],
+    ) -> bytes:
+        events: list[tuple[str | None, Mapping[str, Any] | str]] = []
+        if self._text_started or not tool_calls:
+            if not self._text_started:
+                events.append(
+                    (
+                        "content_block_start",
+                        {
+                            "type": "content_block_start",
+                            "index": self._anthropic_next_content_index,
+                            "content_block": {"type": "text", "text": ""},
+                        },
+                    )
+                )
+                self._text_started = True
+            events.append(
+                (
+                    "content_block_stop",
+                    {"type": "content_block_stop", "index": self._anthropic_next_content_index},
+                )
+            )
+            self._anthropic_next_content_index += 1
+        for call in tool_calls:
+            rendered_call = tool_call_to_anthropic(call)
+            tool_input = rendered_call.get("input") if isinstance(rendered_call.get("input"), Mapping) else {}
+            events.extend(
+                [
+                    (
+                        "content_block_start",
+                        {
+                            "type": "content_block_start",
+                            "index": self._anthropic_next_content_index,
+                            "content_block": {**rendered_call, "input": {}},
+                        },
+                    ),
+                    (
+                        "content_block_delta",
+                        {
+                            "type": "content_block_delta",
+                            "index": self._anthropic_next_content_index,
+                            "delta": {
+                                "type": "input_json_delta",
+                                "partial_json": json.dumps(tool_input, ensure_ascii=False, separators=(",", ":")),
+                            },
+                        },
+                    ),
+                    (
+                        "content_block_stop",
+                        {"type": "content_block_stop", "index": self._anthropic_next_content_index},
+                    ),
+                ]
+            )
+            self._anthropic_next_content_index += 1
+        usage = response.usage()
+        events.extend(
+            [
+                (
+                    "message_delta",
+                    {
+                        "type": "message_delta",
+                        "delta": {"stop_reason": "tool_use" if tool_calls else "end_turn", "stop_sequence": None},
+                        "usage": {"output_tokens": usage["completion_tokens"]},
+                    },
+                ),
+                ("message_stop", {"type": "message_stop"}),
+            ]
+        )
+        return _sse_bytes(events)
+
+    def _complete_gemini(
+        self,
+        response: FusionResponse,
+        tool_calls: Sequence[Mapping[str, Any]],
+    ) -> bytes:
+        usage = response.usage()
+        return _sse_bytes(
+            [
+                (
+                    None,
+                    {
+                        "responseId": self.response_id,
+                        "modelVersion": self.request.public_model,
+                        "candidates": [
+                            {
+                                "index": 0,
+                                "content": {
+                                    "role": "model",
+                                    "parts": [tool_call_to_gemini_part(call) for call in tool_calls],
+                                },
+                                "finishReason": "STOP",
+                            }
+                        ],
+                        "usageMetadata": {
+                            "promptTokenCount": usage["prompt_tokens"],
+                            "candidatesTokenCount": usage["completion_tokens"],
+                            "totalTokenCount": usage["total_tokens"],
+                        },
+                        "metadata": _stream_metadata(response),
+                    },
+                )
+            ]
+        )
+
+    def _complete_chat(
+        self,
+        response: FusionResponse,
+        tool_calls: Sequence[Mapping[str, Any]],
+    ) -> bytes:
+        events: list[tuple[str | None, Mapping[str, Any] | str]] = []
+        for index, call in enumerate(tool_calls):
+            rendered_call = tool_call_to_chat(call)
+            events.extend(
+                [
+                    (
+                        None,
+                        {
+                            "id": self.response_id,
+                            "object": "chat.completion.chunk",
+                            "created": self.created,
+                            "model": self.request.public_model,
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "delta": {
+                                        "tool_calls": [
+                                            {
+                                                "index": index,
+                                                "id": rendered_call["id"],
+                                                "type": "function",
+                                                "function": {"name": rendered_call["function"]["name"], "arguments": ""},
+                                            }
+                                        ]
+                                    },
+                                    "finish_reason": None,
+                                }
+                            ],
+                        },
+                    ),
+                    (
+                        None,
+                        {
+                            "id": self.response_id,
+                            "object": "chat.completion.chunk",
+                            "created": self.created,
+                            "model": self.request.public_model,
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "delta": {
+                                        "tool_calls": [
+                                            {
+                                                "index": index,
+                                                "function": {"arguments": rendered_call["function"]["arguments"]},
+                                            }
+                                        ]
+                                    },
+                                    "finish_reason": None,
+                                }
+                            ],
+                        },
+                    ),
+                ]
+            )
+        events.append(
+            (
+                None,
+                {
+                    "id": self.response_id,
+                    "object": "chat.completion.chunk",
+                    "created": self.created,
+                    "model": self.request.public_model,
+                    "choices": [
+                        {"index": 0, "delta": {}, "finish_reason": "tool_calls" if tool_calls else "stop"}
+                    ],
+                },
+            )
+        )
+        if self.include_usage:
+            events.append(
+                (
+                    None,
+                    {
+                        "id": self.response_id,
+                        "object": "chat.completion.chunk",
+                        "created": self.created,
+                        "model": self.request.public_model,
+                        "choices": [],
+                        "usage": response.usage(),
+                    },
+                )
+            )
+        events.append((None, "[DONE]"))
+        return _sse_bytes(events)
+
+
 def render_stream_events(
     response: FusionResponse,
     *,

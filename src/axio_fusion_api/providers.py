@@ -14,7 +14,7 @@ from email.utils import parsedate_to_datetime
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Iterator, Mapping, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
 from .latency_policy import (
     PROVIDER_MAX_RESPONSE_LATENCY_MS,
@@ -105,6 +105,64 @@ class ProviderCompletion:
         """Return whether the turn contains usable text or a native tool call."""
 
         return bool(self.text or self.tool_calls)
+
+
+class ProviderStreamObserver:
+    """Forward only public, visible provider text while retaining no text copy.
+
+    The observer is intentionally narrower than a raw stream-event hook.  A
+    provider adapter may call it only with visible assistant text deltas, never
+    with reasoning tokens, provider event bodies, tool arguments, or internal
+    prompts.  It tracks commitment as counters so retry policy can stop once a
+    public response has begun without retaining a second copy of the answer.
+    """
+
+    def __init__(
+        self,
+        on_text_delta: Callable[[str], Any],
+        *,
+        cancellation_event: threading.Event | None = None,
+    ) -> None:
+        self._on_text_delta = on_text_delta
+        self._cancellation_event = cancellation_event
+        self._lock = threading.Lock()
+        self._delta_count = 0
+        self._character_count = 0
+
+    @property
+    def emitted_text(self) -> bool:
+        with self._lock:
+            return self._delta_count > 0
+
+    @property
+    def cancellation_requested(self) -> bool:
+        return bool(
+            self._cancellation_event is not None
+            and self._cancellation_event.is_set()
+        )
+
+    def emit_text_delta(self, value: Any) -> bool:
+        """Deliver one visible delta and report whether the stream can continue."""
+
+        text = _stream_text_from_value(value)
+        if not text or self.cancellation_requested:
+            return False
+        try:
+            result = self._on_text_delta(text)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            self.cancel()
+            return False
+        if result is False:
+            self.cancel()
+            return False
+        with self._lock:
+            self._delta_count += 1
+            self._character_count += len(text)
+        return not self.cancellation_requested
+
+    def cancel(self) -> None:
+        if self._cancellation_event is not None:
+            self._cancellation_event.set()
 
 
 class _StreamAccumulator:
@@ -311,6 +369,37 @@ def _text_from_value(value: Any, *, _depth: int = 0) -> str:
             if text:
                 fragments.append(text)
         return "\n".join(dict.fromkeys(fragments)).strip()
+    return ""
+
+
+def _stream_text_from_value(value: Any, *, _depth: int = 0) -> str:
+    """Extract a visible stream fragment without changing its whitespace.
+
+    ``_text_from_value`` intentionally normalizes full completions.  That is
+    unsafe for token/delta forwarding because a provider can legitimately send
+    a single separating space as its own fragment.  This projection follows
+    the same visible-text fields but preserves every character and ordering.
+    """
+
+    if _depth > 8:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, Mapping):
+        primary: list[str] = []
+        for key in ("text", "output_text", "refusal"):
+            if key in value:
+                primary.append(_stream_text_from_value(value.get(key), _depth=_depth + 1))
+        if any(primary):
+            return "".join(primary)
+        for key in ("content", "parts", "value"):
+            if key in value:
+                text = _stream_text_from_value(value.get(key), _depth=_depth + 1)
+                if text:
+                    return text
+        return ""
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return "".join(_stream_text_from_value(item, _depth=_depth + 1) for item in value)
     return ""
 
 
@@ -708,6 +797,8 @@ class HTTPProviderClient:
         system: str,
         timeout: float | None = None,
         strict_wire: bool = False,
+        stream_observer: ProviderStreamObserver | None = None,
+        cancellation_event: threading.Event | None = None,
     ) -> ProviderCompletion:
         """Complete one turn, optionally forbidding adapter shape fallbacks.
 
@@ -746,6 +837,8 @@ class HTTPProviderClient:
                 "system": system,
                 "timeout": _remaining_timeout(deadline_at),
                 "fusion_deadline_bound": fusion_deadline_bound,
+                "stream_observer": stream_observer,
+                "cancellation_event": cancellation_event,
             }
             if api_format == "responses":
                 adapter_kwargs["strict_wire"] = bool(strict_wire)
@@ -756,6 +849,8 @@ class HTTPProviderClient:
             )
             if completion.has_output:
                 return completion
+            if stream_observer is not None and stream_observer.emitted_text:
+                break
             if attempt < _max_empty_response_retries():
                 continue
         raise ProviderExecutionError(
@@ -787,7 +882,18 @@ class HTTPProviderClient:
             return completion.text
         raise ProviderExecutionError("gemini response contains no text", error_code="tool_call_without_text")
 
-    def _chat_turn(self, profile: ModelProfile, request: FusionRequest, *, prompt: str, system: str, timeout: float | None, fusion_deadline_bound: bool = False) -> ProviderCompletion:
+    def _chat_turn(
+        self,
+        profile: ModelProfile,
+        request: FusionRequest,
+        *,
+        prompt: str,
+        system: str,
+        timeout: float | None,
+        fusion_deadline_bound: bool = False,
+        stream_observer: ProviderStreamObserver | None = None,
+        cancellation_event: threading.Event | None = None,
+    ) -> ProviderCompletion:
         result = _post_json(
             profile,
             "/chat/completions",
@@ -795,6 +901,8 @@ class HTTPProviderClient:
             timeout=timeout,
             require_streaming=self.require_streaming,
             fusion_deadline_bound=fusion_deadline_bound,
+            stream_observer=stream_observer,
+            cancellation_event=cancellation_event,
         )
         choices = result.get("choices") if isinstance(result, Mapping) else []
         choice = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], Mapping) else {}
@@ -819,6 +927,8 @@ class HTTPProviderClient:
         timeout: float | None,
         fusion_deadline_bound: bool = False,
         strict_wire: bool = False,
+        stream_observer: ProviderStreamObserver | None = None,
+        cancellation_event: threading.Event | None = None,
     ) -> ProviderCompletion:
         payload = _responses_typed_payload(profile, request, prompt=prompt, system=system)
         typed_started = time.monotonic()
@@ -830,10 +940,13 @@ class HTTPProviderClient:
                 timeout=timeout,
                 require_streaming=self.require_streaming,
                 fusion_deadline_bound=fusion_deadline_bound,
+                stream_observer=stream_observer,
+                cancellation_event=cancellation_event,
             )
         except ProviderExecutionError as exc:
             if (
                 strict_wire
+                or (stream_observer is not None and stream_observer.emitted_text)
                 or
                 not _should_try_responses_text_fallback(exc)
                 or not _responses_text_fallback_preserves_turn(request)
@@ -849,10 +962,23 @@ class HTTPProviderClient:
                 timeout=fallback_timeout,
                 require_streaming=self.require_streaming,
                 fusion_deadline_bound=fusion_deadline_bound,
+                stream_observer=stream_observer,
+                cancellation_event=cancellation_event,
             )
         return ProviderCompletion(_extract_responses_text(result), normalize_provider_tool_calls(result, api_format="responses"))
 
-    def _anthropic_turn(self, profile: ModelProfile, request: FusionRequest, *, prompt: str, system: str, timeout: float | None, fusion_deadline_bound: bool = False) -> ProviderCompletion:
+    def _anthropic_turn(
+        self,
+        profile: ModelProfile,
+        request: FusionRequest,
+        *,
+        prompt: str,
+        system: str,
+        timeout: float | None,
+        fusion_deadline_bound: bool = False,
+        stream_observer: ProviderStreamObserver | None = None,
+        cancellation_event: threading.Event | None = None,
+    ) -> ProviderCompletion:
         result = _post_json(
             profile,
             "/messages",
@@ -861,6 +987,8 @@ class HTTPProviderClient:
             extra_headers={"anthropic-version": "2023-06-01"},
             require_streaming=self.require_streaming,
             fusion_deadline_bound=fusion_deadline_bound,
+            stream_observer=stream_observer,
+            cancellation_event=cancellation_event,
         )
         content = result.get("content") if isinstance(result, Mapping) else ""
         text = _text_from_value(content)
@@ -868,7 +996,18 @@ class HTTPProviderClient:
             text = _text_from_value(result.get("output_text") or result.get("text"))
         return ProviderCompletion(text, normalize_provider_tool_calls(result, api_format="anthropic"))
 
-    def _gemini_turn(self, profile: ModelProfile, request: FusionRequest, *, prompt: str, system: str, timeout: float | None, fusion_deadline_bound: bool = False) -> ProviderCompletion:
+    def _gemini_turn(
+        self,
+        profile: ModelProfile,
+        request: FusionRequest,
+        *,
+        prompt: str,
+        system: str,
+        timeout: float | None,
+        fusion_deadline_bound: bool = False,
+        stream_observer: ProviderStreamObserver | None = None,
+        cancellation_event: threading.Event | None = None,
+    ) -> ProviderCompletion:
         result = _post_json(
             profile,
             _gemini_generate_content_endpoint(profile.model, stream=True),
@@ -877,6 +1016,8 @@ class HTTPProviderClient:
             key_as_query=True,
             require_streaming=self.require_streaming,
             fusion_deadline_bound=fusion_deadline_bound,
+            stream_observer=stream_observer,
+            cancellation_event=cancellation_event,
         )
         candidates = result.get("candidates") if isinstance(result, Mapping) else []
         candidate = candidates[0] if isinstance(candidates, list) and candidates and isinstance(candidates[0], Mapping) else {}
@@ -3956,6 +4097,8 @@ def _post_json(
     key_as_query: bool = False,
     require_streaming: bool = False,
     fusion_deadline_bound: bool = False,
+    stream_observer: ProviderStreamObserver | None = None,
+    cancellation_event: threading.Event | None = None,
 ) -> Mapping[str, Any]:
     base_url = _base_url(profile)
     base_url_readiness = provider_base_url_readiness(base_url)
@@ -4086,6 +4229,8 @@ def _post_json(
                             timeout=remaining_timeout,
                             require_streaming=bool(require_streaming),
                             fusion_deadline_bound=bool(fusion_deadline_bound),
+                            stream_observer=stream_observer,
+                            cancellation_event=cancellation_event,
                         )
                     else:
                         result = _open_json_request(
@@ -4120,6 +4265,14 @@ def _post_json(
                 )
                 if (
                     stop_key_failover
+                    or (
+                        stream_observer is not None
+                        and stream_observer.emitted_text
+                    )
+                    or (
+                        cancellation_event is not None
+                        and cancellation_event.is_set()
+                    )
                     or retry_attempt_index >= max_attempts_per_key
                     or not retryable
                     or _deadline_exhausted(deadline_at)
@@ -4155,7 +4308,11 @@ def _post_json(
                     shared_key_pool_short_circuit=shared_key_pool_short_circuit,
                 )
                 return result
-        if stop_key_failover:
+        if (
+            stop_key_failover
+            or (stream_observer is not None and stream_observer.emitted_text)
+            or (cancellation_event is not None and cancellation_event.is_set())
+        ):
             break
     if last_canonical_key_index is not None and not shared_key_pool_short_circuit:
         _advance_provider_key_rotation(profile, last_canonical_key_index)
@@ -4252,6 +4409,8 @@ def _open_stream_json_request(
     timeout: float,
     require_streaming: bool = False,
     fusion_deadline_bound: bool = False,
+    stream_observer: ProviderStreamObserver | None = None,
+    cancellation_event: threading.Event | None = None,
 ) -> tuple[Mapping[str, Any], bool, bool, str, str, int]:
     """Read a provider SSE/NDJSON response incrementally and normalize it.
 
@@ -4301,13 +4460,27 @@ def _open_stream_json_request(
                 return legacy_result, False, True, "", content_type, 0
             frame_count = 0
             stream_state: dict[str, str] = {}
+            visible_text_state: dict[str, str] = {}
             for event_name, payload in _iter_stream_events(
                 response,
                 deadline_at,
                 protocol_state=stream_state,
                 timeout_error_code=timeout_error_code,
+                cancellation_event=cancellation_event,
             ):
                 frame_count += 1
+                if stream_observer is not None:
+                    text_delta = _visible_text_delta_from_stream_event(
+                        api_format=api_format,
+                        event_name=event_name,
+                        payload=payload,
+                        state=visible_text_state,
+                    )
+                    if text_delta and not stream_observer.emit_text_delta(text_delta):
+                        raise ProviderExecutionError(
+                            "public stream was cancelled by the downstream client",
+                            error_code="public_stream_cancelled",
+                        )
                 _accumulate_stream_payload(
                     accumulator,
                     api_format=api_format,
@@ -4393,6 +4566,7 @@ def _iter_stream_events(
     *,
     protocol_state: dict[str, str] | None = None,
     timeout_error_code: str = "provider_response_timeout_exceeded_90s",
+    cancellation_event: threading.Event | None = None,
 ) -> Iterator[tuple[str, Any]]:
     """Yield parsed SSE events and tolerate JSON-lines streaming gateways."""
 
@@ -4419,6 +4593,11 @@ def _iter_stream_events(
             ) from exc
 
     while True:
+        if cancellation_event is not None and cancellation_event.is_set():
+            raise ProviderExecutionError(
+                "public stream was cancelled by the downstream client",
+                error_code="public_stream_cancelled",
+            )
         if time.monotonic() >= deadline_at:
             raise ProviderExecutionError(
                 _safe_provider_error_message(timeout_error_code),
@@ -4436,6 +4615,11 @@ def _iter_stream_events(
             if item is not None:
                 yield item
             return
+        if cancellation_event is not None and cancellation_event.is_set():
+            raise ProviderExecutionError(
+                "public stream was cancelled by the downstream client",
+                error_code="public_stream_cancelled",
+            )
         if time.monotonic() >= deadline_at:
             raise ProviderExecutionError(
                 _safe_provider_error_message(timeout_error_code),
@@ -4481,6 +4665,82 @@ def _iter_stream_events(
                 "provider stream emitted invalid JSON",
                 error_code="invalid_stream_json",
             ) from exc
+
+
+def _visible_text_delta_from_stream_event(
+    *,
+    api_format: str,
+    event_name: str,
+    payload: Any,
+    state: dict[str, str],
+) -> str:
+    """Extract only visible assistant text from one native stream event.
+
+    Reasoning/thinking fields, tool fragments, usage records, and provider
+    metadata are deliberately absent from this projection.  Some compatible
+    gateways send a cumulative message snapshot instead of a true delta; the
+    small in-memory state converts a growing snapshot into its new suffix.
+    """
+
+    if not isinstance(payload, Mapping):
+        return ""
+    if api_format == "chat":
+        choices = payload.get("choices") if isinstance(payload.get("choices"), list) else []
+        choice = choices[0] if choices and isinstance(choices[0], Mapping) else {}
+        delta = choice.get("delta") if isinstance(choice.get("delta"), Mapping) else {}
+        text = _stream_text_from_value(delta.get("content"))
+        if text:
+            return text
+        message = choice.get("message") if isinstance(choice.get("message"), Mapping) else {}
+        return _stream_snapshot_suffix(
+            _stream_text_from_value(message.get("content")),
+            state=state,
+            key="chat_message_content",
+        )
+    if api_format == "responses":
+        if event_name == "response.output_text.delta":
+            return _stream_text_from_value(payload.get("delta"))
+        # ``response.output_text.done`` carries the whole item and must not
+        # replay text already emitted through the preceding delta events.
+        if event_name == "response.output_text.done":
+            return ""
+        response = payload.get("response") if isinstance(payload.get("response"), Mapping) else payload
+        return _stream_snapshot_suffix(
+            _stream_text_from_value(response.get("output_text")),
+            state=state,
+            key="responses_output_text",
+        )
+    if api_format == "anthropic":
+        delta = payload.get("delta") if isinstance(payload.get("delta"), Mapping) else {}
+        if str(delta.get("type") or "") == "text_delta":
+            return _stream_text_from_value(delta.get("text"))
+        return ""
+    candidates = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
+    candidate = candidates[0] if candidates and isinstance(candidates[0], Mapping) else {}
+    content = candidate.get("content") if isinstance(candidate.get("content"), Mapping) else {}
+    parts = content.get("parts") if isinstance(content.get("parts"), list) else []
+    text = "".join(
+        _stream_text_from_value(item.get("text"))
+        for item in parts
+        if isinstance(item, Mapping) and item.get("text") is not None
+    )
+    return _stream_snapshot_suffix(text, state=state, key="gemini_visible_text")
+
+
+def _stream_snapshot_suffix(value: Any, *, state: dict[str, str], key: str) -> str:
+    """Return only the unseen suffix for a gateway that sends text snapshots."""
+
+    text = _stream_text_from_value(value)
+    if not text:
+        return ""
+    previous = str(state.get(key) or "")
+    if text.startswith(previous):
+        state[key] = text
+        return text[len(previous):]
+    if previous.endswith(text):
+        return ""
+    state[key] = f"{previous}{text}"
+    return text
 
 
 def _accumulate_stream_payload(
