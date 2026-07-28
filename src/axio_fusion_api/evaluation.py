@@ -22,6 +22,12 @@ from .benchmark_acquisition import (
     GPQA_DEFAULT_DOWNLOAD_MANIFEST,
     audit_gpqa_authorized_artifact,
 )
+from .benchmark_policy import (
+    BENCHMARK_TARGET_REASONING_EFFORT,
+    benchmark_policy_reasoning_config_sha256,
+    benchmark_policy_receipt,
+    load_benchmark_evaluation_policy,
+)
 from .benchmark_replacements import (
     MMLU_PRO_REPLACEMENT_ID,
     MMLU_PRO_SCREENING_DISJOINT_VERSION,
@@ -50,6 +56,7 @@ from .schemas import (
     FusionRequest,
     ModelProfile,
     canonical_public_model,
+    normalize_reasoning_effort,
     rough_token_count,
     sha256_text,
     stable_json,
@@ -100,6 +107,9 @@ class BenchmarkCompletion:
     # canonical model.  Keep the execution receipt separate from the model
     # answer so score artifacts can audit failover without storing raw data.
     provider_execution: Mapping[str, Any] = field(default_factory=dict)
+    # The logical effort and the verified provider wire mapping are recorded
+    # separately from the answer so a downgrade cannot look like native max.
+    reasoning_receipt: Mapping[str, Any] = field(default_factory=dict)
 
 
 BENCHMARK_SUITES: tuple[BenchmarkSuite, ...] = (
@@ -298,6 +308,7 @@ FUSION_FAILURE_API_SURFACE_REASONS = frozenset(
         "api_surface_case_hash_sets_misaligned",
         "api_surface_prompt_protocol_misaligned",
         "api_surface_decoding_config_misaligned",
+        "api_surface_reasoning_config_misaligned",
         "api_surface_scores_missing",
         "api_surface_score_delta_above_tolerance",
         "api_surface_public_api_invocation_missing",
@@ -597,7 +608,9 @@ def benchmark_manifest() -> dict[str, Any]:
 def build_benchmark_methodology_manifest(
     *,
     dataset_manifest_path: str | Path | None = None,
+    benchmark_policy: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    benchmark_policy_safe_receipt = benchmark_policy_receipt(benchmark_policy)
     suites = [_methodology_contract_for_suite(suite) for suite in BENCHMARK_SUITES]
     replacement_specs: dict[str, Mapping[str, Any]] = {}
     if dataset_manifest_path:
@@ -666,6 +679,7 @@ def build_benchmark_methodology_manifest(
             "raw_provider_outputs_persisted": False,
         },
         "suites": suites,
+        "benchmark_policy": benchmark_policy_safe_receipt,
         "raw_dataset_content_persisted": False,
         "raw_prompts_persisted": False,
         "raw_labels_persisted": False,
@@ -3416,6 +3430,7 @@ def run_multiple_choice_benchmark(
         result = _run_one_multiple_choice_case(
             case=case,
             index=index,
+            suite_id=suite_id,
             candidate_id=safe_candidate_id,
             api_format=selected_api_format,
             profiles=active_profiles,
@@ -3439,6 +3454,11 @@ def run_multiple_choice_benchmark(
         **_benchmark_api_surface_fields(safe_candidate_id, selected_api_format),
         "prompt_protocol_sha256": _prompt_protocol_sha256_for_suite(suite_id, "multiple_choice"),
         "decoding_config_sha256": _decoding_config_sha256_for_suite(suite_id, "multiple_choice"),
+        "reasoning_receipt": _benchmark_reasoning_run_receipt(
+            {"case_results": case_results},
+            suite_id=suite_id,
+            task_format="multiple_choice",
+        ),
         "mode": "live" if live else "dry_run",
         "case_count": len(cases),
         "attempted_count": attempted_count,
@@ -3551,6 +3571,11 @@ def run_benchmark_dataset(
         "task_format": selected_format,
         "prompt_protocol_sha256": _prompt_protocol_sha256_for_suite(suite_id, selected_format),
         "decoding_config_sha256": _decoding_config_sha256_for_suite(suite_id, selected_format),
+        "reasoning_receipt": _benchmark_reasoning_run_receipt(
+            {"case_results": case_results},
+            suite_id=suite_id,
+            task_format=selected_format,
+        ),
         "mode": "live" if live else "dry_run",
         "case_count": len(cases),
         "attempted_count": len(completed),
@@ -4517,6 +4542,11 @@ def _benchmark_run_set_receipt_row(run: Mapping[str, Any]) -> dict[str, Any]:
     case_receipt = _run_case_hash_receipt(run)
     prompt_receipt = _run_prompt_protocol_receipt(run)
     decoding_receipt = _run_decoding_config_receipt(run)
+    reasoning_receipt = _benchmark_reasoning_run_receipt(
+        run,
+        suite_id=suite_id,
+        task_format=task_format,
+    )
     harness_receipt = _run_official_harness_binding_receipt(
         run,
         suite_id=suite_id,
@@ -4558,6 +4588,12 @@ def _benchmark_run_set_receipt_row(run: Mapping[str, Any]) -> dict[str, Any]:
         "decoding_config_sha256": str(decoding_receipt.get("decoding_config_sha256") or ""),
         "decoding_config_hash_count": _optional_int(decoding_receipt.get("decoding_config_hash_count")) or 0,
         "decoding_config_hash_conflict": decoding_receipt.get("decoding_config_hash_conflict") is True,
+        "requested_reasoning_effort": str(reasoning_receipt.get("requested_reasoning_effort") or ""),
+        "effective_reasoning_effort": str(reasoning_receipt.get("effective_reasoning_effort") or ""),
+        "reasoning_transport": str(reasoning_receipt.get("reasoning_transport") or ""),
+        "native_reasoning_effort_verified": reasoning_receipt.get("native_reasoning_effort_verified"),
+        "reasoning_config_sha256": str(reasoning_receipt.get("reasoning_config_sha256") or ""),
+        "reasoning_status": str(reasoning_receipt.get("status") or ""),
         "harness_binding_sha256": sha256_text(stable_json(harness_binding)),
         "harness_receipt_required": harness_receipt["harness_receipt_required"],
         "harness_receipt_present": harness_receipt["harness_receipt_present"],
@@ -5127,6 +5163,31 @@ def _api_surface_audit_row(
     )
     prompt_hashes = sorted({str(run.get("prompt_protocol_sha256") or "") for run in selected_runs if str(run.get("prompt_protocol_sha256") or "")})
     decoding_hashes = sorted({str(run.get("decoding_config_sha256") or "") for run in selected_runs if str(run.get("decoding_config_sha256") or "")})
+    reasoning_receipts = {
+        api_format: _benchmark_reasoning_run_receipt(
+            by_format[api_format][0],
+            suite_id=suite_id,
+            task_format=str(by_format[api_format][0].get("task_format") or _suite_task_format(suite_id)),
+        )
+        for api_format in AXIO_BENCHMARK_API_FORMATS
+        if api_format in by_format
+        and by_format[api_format]
+        and _run_has_benchmark_reasoning_receipt(by_format[api_format][0])
+    }
+    reasoning_hashes = sorted(
+        {
+            str(receipt.get("reasoning_config_sha256") or "")
+            for receipt in reasoning_receipts.values()
+            if str(receipt.get("reasoning_config_sha256") or "")
+        }
+    )
+    reasoning_requested_values = sorted(
+        {
+            str(receipt.get("requested_reasoning_effort") or "")
+            for receipt in reasoning_receipts.values()
+            if str(receipt.get("requested_reasoning_effort") or "")
+        }
+    )
     scores = [_run_primary_score(run) for run in selected_runs]
     scored = [float(score) for score in scores if score is not None]
     score_delta = None if not scored else round(max(scored) - min(scored), 6)
@@ -5200,6 +5261,12 @@ def _api_surface_audit_row(
         reasons.append("api_surface_prompt_protocol_misaligned")
     if len(decoding_hashes) != 1 or len(decoding_hashes) != len({str(run.get("decoding_config_sha256") or "") for run in selected_runs}):
         reasons.append("api_surface_decoding_config_misaligned")
+    if reasoning_receipts and (
+        len(reasoning_receipts) != len(AXIO_BENCHMARK_API_FORMATS)
+        or len(reasoning_hashes) != 1
+        or len(reasoning_requested_values) != 1
+    ):
+        reasons.append("api_surface_reasoning_config_misaligned")
     if len(scored) != len(selected_runs):
         reasons.append("api_surface_scores_missing")
     elif score_delta is not None and score_delta > float(score_tolerance):
@@ -5219,6 +5286,13 @@ def _api_surface_audit_row(
         "reference_case_hash_count": len(case_reference),
         "prompt_protocol_hashes_identical": len(prompt_hashes) == 1 and bool(selected_runs),
         "decoding_config_hashes_identical": len(decoding_hashes) == 1 and bool(selected_runs),
+        "reasoning_config_hashes_identical": bool(reasoning_receipts)
+        and len(reasoning_receipts) == len(AXIO_BENCHMARK_API_FORMATS)
+        and len(reasoning_hashes) == 1,
+        "reasoning_requested_efforts_identical": bool(reasoning_receipts)
+        and len(reasoning_receipts) == len(AXIO_BENCHMARK_API_FORMATS)
+        and len(reasoning_requested_values) == 1,
+        "reasoning_by_api_format": reasoning_receipts,
         "primary_scores_by_api_format": {
             api_format: _run_primary_score(by_format[api_format][0])
             for api_format in AXIO_BENCHMARK_API_FORMATS
@@ -6409,6 +6483,12 @@ def _fusion_categories_with_family(
 def _scorecard_run_receipt(run: Mapping[str, Any]) -> dict[str, Any]:
     candidate_id = str(run.get("candidate_id") or "")
     score = _run_primary_score(run)
+    task_format = str(run.get("task_format") or _suite_task_format(str(run.get("suite_id") or "")))
+    reasoning_receipt = _benchmark_reasoning_run_receipt(
+        run,
+        suite_id=str(run.get("suite_id") or ""),
+        task_format=task_format,
+    )
     return {
         "suite_id": str(run.get("suite_id") or ""),
         "candidate_id": candidate_id,
@@ -6432,7 +6512,12 @@ def _scorecard_run_receipt(run: Mapping[str, Any]) -> dict[str, Any]:
         "pricing_unknown_case_count": _optional_int(run.get("pricing_unknown_case_count")) or 0,
         "provider_call_count": _optional_int(run.get("provider_call_count")) or 0,
         "mode": str(run.get("mode") or ""),
-        "task_format": str(run.get("task_format") or _suite_task_format(str(run.get("suite_id") or ""))),
+        "task_format": task_format,
+        "requested_reasoning_effort": str(reasoning_receipt.get("requested_reasoning_effort") or ""),
+        "effective_reasoning_effort": str(reasoning_receipt.get("effective_reasoning_effort") or ""),
+        "reasoning_transport": str(reasoning_receipt.get("reasoning_transport") or ""),
+        "native_reasoning_effort_verified": reasoning_receipt.get("native_reasoning_effort_verified"),
+        "reasoning_config_sha256": str(reasoning_receipt.get("reasoning_config_sha256") or ""),
         "raw_prompt_persisted": False,
         "raw_labels_persisted": False,
         "raw_provider_outputs_persisted": False,
@@ -6525,6 +6610,53 @@ def _scorecard_axio_target_receipt(
         "raw_questions_persisted": False,
         "raw_labels_persisted": False,
         "raw_provider_outputs_persisted": False,
+    }
+
+
+def _claim_reasoning_gate(
+    run: Mapping[str, Any] | None,
+    *,
+    required_reasoning_effort: str,
+    native_max_required: bool,
+    suite_id: str,
+    task_format: str,
+) -> dict[str, Any]:
+    required = normalize_reasoning_effort(required_reasoning_effort)
+    if not native_max_required or not required:
+        return {
+            "required": False,
+            "passed": True,
+            "required_reasoning_effort": required,
+            "native_reasoning_effort_verified": None,
+            "reason_codes": [],
+        }
+    receipt = (
+        _benchmark_reasoning_run_receipt(run, suite_id=suite_id, task_format=task_format)
+        if isinstance(run, Mapping)
+        else {}
+    )
+    requested = normalize_reasoning_effort(receipt.get("requested_reasoning_effort"))
+    effective = normalize_reasoning_effort(receipt.get("effective_reasoning_effort"))
+    native_verified = receipt.get("native_reasoning_effort_verified") is True
+    reasons: list[str] = []
+    if not receipt or receipt.get("status") == "missing":
+        reasons.append("provider_baseline_reasoning_receipt_missing")
+    if requested != required:
+        reasons.append("provider_baseline_requested_reasoning_effort_mismatch")
+    if effective != required:
+        reasons.append("provider_baseline_effective_reasoning_effort_mismatch")
+    if not native_verified:
+        reasons.append("provider_baseline_native_max_unverified")
+    return {
+        "required": True,
+        "passed": not reasons,
+        "required_reasoning_effort": required,
+        "requested_reasoning_effort": requested,
+        "effective_reasoning_effort": effective,
+        "reasoning_transport": str(receipt.get("reasoning_transport") or ""),
+        "native_reasoning_effort_verified": native_verified,
+        "reasoning_status": str(receipt.get("status") or ""),
+        "reason_codes": sorted(set(reasons)),
     }
 
 
@@ -6703,6 +6835,8 @@ def build_benchmark_claim_audit(
     provider_baseline_freeze: Mapping[str, Any] | None = None,
     provider_baseline_freeze_path: str | Path | None = None,
     require_http_gateway: bool = False,
+    native_max_required: bool = False,
+    required_reasoning_effort: str = "",
 ) -> dict[str, Any]:
     if provider_baseline_freeze_path is not None:
         artifact = _load_json_artifact(Path(provider_baseline_freeze_path))
@@ -6767,6 +6901,8 @@ def build_benchmark_claim_audit(
                     baseline_rank=baseline_index + 1,
                     baseline_pre_registered=use_pre_registered_baselines,
                     expected_baseline_candidate_id_sha256=expected_candidate_hash,
+                    native_max_required=native_max_required,
+                    required_reasoning_effort=required_reasoning_effort,
                 )
             )
     comparisons, multiple_correction = _apply_claim_multiple_comparison_correction(comparisons, alpha=float(alpha))
@@ -6809,6 +6945,20 @@ def build_benchmark_claim_audit(
                 "reason_codes": list(pre_registered_baselines.get("blockers") or []),
             }
         )
+    if native_max_required:
+        unverified_comparisons = [
+            row
+            for row in comparisons
+            if "provider_baseline_native_max_unverified" in (row.get("reason_codes") or [])
+        ]
+        if unverified_comparisons:
+            missing_requirements.append(
+                {
+                    "kind": "provider_baseline_native_max_unverified",
+                    "comparison_count": len(unverified_comparisons),
+                    "required_reasoning_effort": normalize_reasoning_effort(required_reasoning_effort),
+                }
+            )
     final_claims = {
         "axio_pro_beats_strongest_single_model_on_all_required_benchmarks": by_model["axio-pro"]["all_required_suites_passed"],
         "axio_terra_beats_second_strongest_single_model_on_all_required_benchmarks": by_model["axio-terra"]["all_required_suites_passed"],
@@ -6838,6 +6988,14 @@ def build_benchmark_claim_audit(
             ),
             "pre_registered_rank_mapping_required_for_final_claim": True,
             "latency_gate": "each Axio tier must keep both p50 and p95 latency within 3x the corresponding same-suite provider baseline latency",
+            "native_max_reasoning_gate_enabled": bool(native_max_required),
+            "required_reasoning_effort": normalize_reasoning_effort(required_reasoning_effort),
+        },
+        "reasoning_contract": {
+            "native_max_required": bool(native_max_required),
+            "required_reasoning_effort": normalize_reasoning_effort(required_reasoning_effort),
+            "fail_closed": bool(native_max_required),
+            "provider_baseline_receipts_are_claim_input": bool(native_max_required),
         },
         "provider_baseline_freeze_binding": pre_registered_baselines,
         "statistical_contract": {
@@ -6907,7 +7065,11 @@ def run_benchmark_campaign(
     strict_live_preflight: bool = False,
     client: HTTPProviderClient | None = None,
     axio_gateway_url: str | None = None,
+    benchmark_policy_path: str | Path | None = None,
 ) -> dict[str, Any]:
+    benchmark_policy = load_benchmark_evaluation_policy(benchmark_policy_path)
+    benchmark_policy_safe_receipt = benchmark_policy_receipt(benchmark_policy)
+    benchmark_reasoning = benchmark_policy.get("reasoning") if isinstance(benchmark_policy.get("reasoning"), Mapping) else {}
     readiness_preflight = audit_benchmark_campaign_readiness(
         dataset_manifest_path=dataset_manifest_path,
         registry_path=registry_path,
@@ -7067,6 +7229,10 @@ def run_benchmark_campaign(
                 provider_input_adapter_receipt=strict_provider_input_adapter_receipt,
                 system_development_readiness_receipt=strict_system_development_readiness_receipt,
                 axio_http_gateway_receipt=strict_axio_http_gateway_receipt,
+                benchmark_policy_safe_receipt=benchmark_policy_safe_receipt,
+                benchmark_policy=benchmark_policy,
+                native_max_required=benchmark_reasoning.get("native_max_required") is True,
+                required_reasoning_effort=str(benchmark_reasoning.get("target_effort") or ""),
             )
     started = time.monotonic()
     runs = []
@@ -7167,9 +7333,12 @@ def run_benchmark_campaign(
         alpha=alpha,
         provider_baseline_freeze=provider_baseline_freeze,
         require_http_gateway=bool(live),
+        native_max_required=benchmark_reasoning.get("native_max_required") is True,
+        required_reasoning_effort=str(benchmark_reasoning.get("target_effort") or ""),
     )
     methodology = build_benchmark_methodology_manifest(
         dataset_manifest_path=dataset_manifest_path,
+        benchmark_policy=benchmark_policy,
     )
     methodology_receipt = _benchmark_methodology_receipt(methodology)
     runs_payload = build_benchmark_runs_payload(runs)
@@ -7215,6 +7384,7 @@ def run_benchmark_campaign(
             "final_claims": claim_audit.get("final_claims"),
             "missing_requirement_count": len(claim_audit.get("missing_requirements", [])) if isinstance(claim_audit.get("missing_requirements"), list) else None,
         },
+        "benchmark_policy": benchmark_policy_safe_receipt,
         "policy": {
             "include_provider_baselines": bool(include_provider_baselines),
             "max_provider_baselines": max_provider_baselines if max_provider_baselines is None else int(max_provider_baselines),
@@ -7226,6 +7396,9 @@ def run_benchmark_campaign(
             "alpha": float(alpha),
             "resume": bool(resume),
             "code_execution_enabled": _code_execution_enabled(),
+            "benchmark_policy_sha256": str(benchmark_policy_safe_receipt.get("policy_sha256") or ""),
+            "benchmark_target_reasoning_effort": str(benchmark_reasoning.get("target_effort") or ""),
+            "native_max_reasoning_required": benchmark_reasoning.get("native_max_required") is True,
         },
         "provider_candidate_alias_policy": {
             "schema": "axio_fusion_api.provider_candidate_alias_policy.v1",
@@ -7906,6 +8079,10 @@ def _write_strict_live_preflight_blocked_campaign(
     provider_input_adapter_receipt: Mapping[str, Any],
     system_development_readiness_receipt: Mapping[str, Any],
     axio_http_gateway_receipt: Mapping[str, Any],
+    benchmark_policy_safe_receipt: Mapping[str, Any],
+    benchmark_policy: Mapping[str, Any],
+    native_max_required: bool,
+    required_reasoning_effort: str,
 ) -> dict[str, Any]:
     started = time.monotonic()
     output.mkdir(parents=True, exist_ok=True)
@@ -7916,9 +8093,12 @@ def _write_strict_live_preflight_blocked_campaign(
         [],
         min_cases_per_suite=min_cases_per_suite,
         alpha=alpha,
+        native_max_required=native_max_required,
+        required_reasoning_effort=required_reasoning_effort,
     )
     methodology = build_benchmark_methodology_manifest(
         dataset_manifest_path=dataset_manifest_path,
+        benchmark_policy=benchmark_policy,
     )
     methodology_receipt = _benchmark_methodology_receipt(methodology)
     training_contamination_audit = _default_training_contamination_audit_for_campaign(runs_payload)
@@ -7993,6 +8173,7 @@ def _write_strict_live_preflight_blocked_campaign(
             "final_claims": claim_audit.get("final_claims"),
             "missing_requirement_count": len(claim_audit.get("missing_requirements", [])) if isinstance(claim_audit.get("missing_requirements"), list) else None,
         },
+        "benchmark_policy": dict(benchmark_policy_safe_receipt),
         "policy": {
             "include_provider_baselines": bool(include_provider_baselines),
             "max_provider_baselines": max_provider_baselines if max_provider_baselines is None else int(max_provider_baselines),
@@ -8003,6 +8184,8 @@ def _write_strict_live_preflight_blocked_campaign(
             "resume": bool(resume),
             "strict_live_preflight": True,
             "code_execution_enabled": _code_execution_enabled(),
+            "benchmark_target_reasoning_effort": str(required_reasoning_effort or ""),
+            "native_max_reasoning_required": bool(native_max_required),
         },
         "provider_candidate_alias_policy": {
             "schema": "axio_fusion_api.provider_candidate_alias_policy.v1",
@@ -26735,6 +26918,224 @@ def _looks_like_sha256(value: Any) -> bool:
     return bool(re.fullmatch(r"[0-9a-f]{64}", text))
 
 
+def _benchmark_reasoning_config_hash(suite_id: str, task_format: str) -> str:
+    return benchmark_policy_reasoning_config_sha256(
+        suite_id,
+        task_format,
+    )
+
+
+def _provider_benchmark_reasoning_receipt(
+    profile: ModelProfile,
+    *,
+    requested_effort: str = BENCHMARK_TARGET_REASONING_EFFORT,
+    suite_id: str = "",
+    task_format: str = "",
+) -> dict[str, Any]:
+    requested = normalize_reasoning_effort(requested_effort)
+    transport, effective = profile.resolve_reasoning_transport(requested)
+    config = profile.reasoning_transport if isinstance(profile.reasoning_transport, Mapping) else {}
+    transport_verified = bool(
+        requested
+        and transport
+        and str(config.get("status") or "") == "verified"
+        and effective
+    )
+    native_verified = bool(
+        transport_verified
+        and requested == BENCHMARK_TARGET_REASONING_EFFORT
+        and effective == BENCHMARK_TARGET_REASONING_EFFORT
+    )
+    return {
+        "schema": "axio_fusion_api.benchmark_reasoning_receipt.v1",
+        "requested_reasoning_effort": requested,
+        "effective_reasoning_effort": effective,
+        "reasoning_transport": transport,
+        "transport_verified": transport_verified,
+        "native_reasoning_effort_verified": native_verified,
+        "verification_scope": "calibrated_provider_profile",
+        "status": "native_verified"
+        if native_verified
+        else "verified_transport_downgrade"
+        if transport_verified
+        else "unverified_or_unsupported",
+        "reasoning_config_sha256": _benchmark_reasoning_config_hash(suite_id, task_format),
+        "raw_provider_model_id_persisted": False,
+        "raw_provider_url_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _public_benchmark_reasoning_receipt(
+    api_format: str,
+    *,
+    requested_effort: str = BENCHMARK_TARGET_REASONING_EFFORT,
+    suite_id: str = "",
+    task_format: str = "",
+) -> dict[str, Any]:
+    normalized = normalize_api_format(api_format)
+    transport = {
+        "chat/completions": "public_chat_reasoning_effort",
+        "responses": "public_responses_reasoning",
+        "anthropic": "public_compat_reasoning_effort",
+        "gemini": "public_compat_reasoning_effort",
+    }.get(normalized, "")
+    requested = normalize_reasoning_effort(requested_effort)
+    return {
+        "schema": "axio_fusion_api.benchmark_reasoning_receipt.v1",
+        "requested_reasoning_effort": requested,
+        "effective_reasoning_effort": requested,
+        "reasoning_transport": transport,
+        "transport_verified": bool(requested and transport),
+        # The public Axio boundary verifies the logical request shape.  The
+        # actual provider-native max status is audited separately per provider
+        # baseline and must not be inferred from this boundary receipt.
+        "native_reasoning_effort_verified": None,
+        "verification_scope": "public_compatibility_boundary",
+        "status": "public_request_shape_verified" if requested and transport else "unverified",
+        "reasoning_config_sha256": _benchmark_reasoning_config_hash(suite_id, task_format),
+        "raw_prompt_persisted": False,
+        "raw_provider_output_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _benchmark_reasoning_receipt_not_executed(
+    *,
+    candidate_id: str,
+    suite_id: str,
+    task_format: str,
+) -> dict[str, Any]:
+    return {
+        "schema": "axio_fusion_api.benchmark_reasoning_receipt.v1",
+        "candidate_type": "provider" if str(candidate_id).startswith("provider::") else "axio",
+        "requested_reasoning_effort": BENCHMARK_TARGET_REASONING_EFFORT,
+        "effective_reasoning_effort": "",
+        "reasoning_transport": "",
+        "transport_verified": False,
+        "native_reasoning_effort_verified": False,
+        "verification_scope": "not_executed",
+        "status": "not_executed",
+        "reasoning_config_sha256": _benchmark_reasoning_config_hash(suite_id, task_format),
+        "raw_prompt_persisted": False,
+        "raw_provider_output_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _normalize_benchmark_reasoning_receipt(
+    receipt: Mapping[str, Any] | None,
+    *,
+    candidate_id: str,
+    suite_id: str,
+    task_format: str,
+) -> dict[str, Any]:
+    source = dict(receipt) if isinstance(receipt, Mapping) else {}
+    if not source:
+        return _benchmark_reasoning_receipt_not_executed(
+            candidate_id=candidate_id,
+            suite_id=suite_id,
+            task_format=task_format,
+        )
+    normalized = dict(source)
+    normalized["schema"] = "axio_fusion_api.benchmark_reasoning_receipt.v1"
+    normalized["requested_reasoning_effort"] = normalize_reasoning_effort(
+        source.get("requested_reasoning_effort")
+    )
+    normalized["effective_reasoning_effort"] = normalize_reasoning_effort(
+        source.get("effective_reasoning_effort")
+    )
+    normalized["reasoning_transport"] = str(source.get("reasoning_transport") or "")[:80]
+    native = source.get("native_reasoning_effort_verified")
+    normalized["native_reasoning_effort_verified"] = native if isinstance(native, bool) else None
+    normalized["transport_verified"] = source.get("transport_verified") is True
+    normalized["reasoning_config_sha256"] = _benchmark_reasoning_config_hash(suite_id, task_format)
+    normalized["raw_prompt_persisted"] = False
+    normalized["raw_provider_output_persisted"] = False
+    normalized["secrets_persisted"] = False
+    return normalized
+
+
+def _benchmark_reasoning_run_receipt(
+    run: Mapping[str, Any],
+    *,
+    suite_id: str,
+    task_format: str,
+) -> dict[str, Any]:
+    rows = run.get("case_results") if isinstance(run.get("case_results"), list) else []
+    receipts = [
+        row.get("reasoning_receipt")
+        for row in rows
+        if isinstance(row, Mapping) and isinstance(row.get("reasoning_receipt"), Mapping)
+    ]
+    if not receipts and isinstance(run.get("reasoning_receipt"), Mapping):
+        receipts = [run["reasoning_receipt"]]
+    requested = sorted(
+        {
+            normalize_reasoning_effort(item.get("requested_reasoning_effort"))
+            for item in receipts
+            if isinstance(item, Mapping) and normalize_reasoning_effort(item.get("requested_reasoning_effort"))
+        }
+    )
+    effective = sorted(
+        {
+            normalize_reasoning_effort(item.get("effective_reasoning_effort"))
+            for item in receipts
+            if isinstance(item, Mapping) and normalize_reasoning_effort(item.get("effective_reasoning_effort"))
+        }
+    )
+    transports = sorted(
+        {
+            str(item.get("reasoning_transport") or "")
+            for item in receipts
+            if isinstance(item, Mapping) and str(item.get("reasoning_transport") or "")
+        }
+    )
+    native_values = [
+        item.get("native_reasoning_effort_verified")
+        for item in receipts
+        if isinstance(item, Mapping) and isinstance(item.get("native_reasoning_effort_verified"), bool)
+    ]
+    if not receipts:
+        status = "missing"
+        native_verified: bool | None = False
+    elif all(value is True for value in native_values) and len(native_values) == len(receipts):
+        status = "native_verified"
+        native_verified = True
+    elif any(value is False for value in native_values):
+        status = "native_unverified"
+        native_verified = False
+    else:
+        status = "public_boundary_only"
+        native_verified = None
+    return {
+        "schema": "axio_fusion_api.benchmark_reasoning_run_receipt.v1",
+        "requested_reasoning_effort": requested[0] if len(requested) == 1 else "",
+        "requested_reasoning_effort_values": requested,
+        "effective_reasoning_effort": effective[0] if len(effective) == 1 else "",
+        "effective_reasoning_effort_values": effective,
+        "reasoning_transport": transports[0] if len(transports) == 1 else "mixed" if transports else "",
+        "reasoning_transport_values": transports,
+        "native_reasoning_effort_verified": native_verified,
+        "status": status,
+        "case_count": len(receipts),
+        "reasoning_config_sha256": _benchmark_reasoning_config_hash(suite_id, task_format),
+        "raw_prompts_persisted": False,
+        "raw_provider_outputs_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _run_has_benchmark_reasoning_receipt(run: Mapping[str, Any]) -> bool:
+    if isinstance(run.get("reasoning_receipt"), Mapping):
+        return True
+    rows = run.get("case_results") if isinstance(run.get("case_results"), list) else []
+    return any(
+        isinstance(row, Mapping) and isinstance(row.get("reasoning_receipt"), Mapping)
+        for row in rows
+    )
+
+
 def _primary_metric_for_format(task_format: str) -> str:
     return {
         "exact_match": "exact_match",
@@ -26765,7 +27166,6 @@ def _run_one_generic_case(
     *,
     case: Mapping[str, Any],
     index: int,
-    suite_id: str,
     candidate_id: str,
     api_format: str,
     task_format: str,
@@ -26777,6 +27177,7 @@ def _run_one_generic_case(
     axio_gateway_url: str | None,
     max_latency_ms: int | None,
     provider_profiles: Sequence[ModelProfile] | None = None,
+    suite_id: str = "",
 ) -> dict[str, Any]:
     started = time.monotonic()
     prompt_case = _benchmark_prompt_case_projection(case, task_format)
@@ -26795,6 +27196,11 @@ def _run_one_generic_case(
     provider_execution = _provider_replica_execution_not_applicable(
         candidate_id,
         status="not_executed",
+    )
+    reasoning_receipt = _benchmark_reasoning_receipt_not_executed(
+        candidate_id=candidate_id,
+        suite_id=suite_id,
+        task_format=task_format,
     )
     score_row: dict[str, Any] = {"score": None, "correct": False, "prediction_sha256": ""}
     try:
@@ -26823,6 +27229,12 @@ def _run_one_generic_case(
             cost_receipt = completion.cost
             api_invocation = completion.api_invocation
             provider_execution = completion.provider_execution or provider_execution
+            reasoning_receipt = _normalize_benchmark_reasoning_receipt(
+                completion.reasoning_receipt,
+                candidate_id=candidate_id,
+                suite_id=suite_id,
+                task_format=task_format,
+            )
             score_row = _score_generic_output(
                 output=output,
                 case=case,
@@ -26863,6 +27275,7 @@ def _run_one_generic_case(
         **_case_cost_fields(cost_receipt),
         "public_api_invocation": api_invocation,
         "provider_replica_execution": provider_execution,
+        "reasoning_receipt": reasoning_receipt,
         "prompt_contract": prompt_contract,
         "output_sha256": sha256_text(output),
         "raw_input_persisted": False,
@@ -26891,7 +27304,13 @@ def _complete_benchmark_candidate(
 ) -> BenchmarkCompletion:
     if candidate_id.startswith("provider::"):
         system = _generic_system_prompt(task_type)
-        request = FusionRequest(model="axio-fast", prompt=prompt, max_output_tokens=max_output_tokens, temperature=0.0)
+        request = FusionRequest(
+            model="axio-fast",
+            prompt=prompt,
+            max_output_tokens=max_output_tokens,
+            temperature=0.0,
+            reasoning_effort=BENCHMARK_TARGET_REASONING_EFFORT,
+        )
         return _complete_provider_baseline_with_replica_failover(
             profiles=provider_profiles or profiles,
             candidate_id=candidate_id,
@@ -26905,7 +27324,13 @@ def _complete_benchmark_candidate(
     if candidate_id in {"single_low_cost_model", "single_best_model"}:
         profile = _single_baseline_profile(profiles, candidate_id)
         system = _generic_system_prompt(task_type)
-        request = FusionRequest(model="axio-fast", prompt=prompt, max_output_tokens=max_output_tokens, temperature=0.0)
+        request = FusionRequest(
+            model="axio-fast",
+            prompt=prompt,
+            max_output_tokens=max_output_tokens,
+            temperature=0.0,
+            reasoning_effort=BENCHMARK_TARGET_REASONING_EFFORT,
+        )
         output = ensure_strict_streaming_client(client).complete(
             profile,
             request,
@@ -26921,6 +27346,10 @@ def _complete_benchmark_candidate(
                 system=system,
                 output_text=output,
                 expected_output_tokens=max_output_tokens,
+            ),
+            reasoning_receipt=_provider_benchmark_reasoning_receipt(
+                profile,
+                requested_effort=request.reasoning_effort,
             ),
         )
     if candidate_id == "cheap_models_vote":
@@ -26971,6 +27400,10 @@ def _complete_benchmark_candidate(
             api_invocation=_benchmark_api_invocation_not_applicable(
                 candidate_id,
                 status="legacy_internal_baseline",
+            ),
+            reasoning_receipt=_public_benchmark_reasoning_receipt(
+                AXIO_BENCHMARK_PRIMARY_API_FORMAT,
+                requested_effort=BENCHMARK_TARGET_REASONING_EFFORT,
             ),
         )
     return _complete_public_axio_benchmark_candidate(
@@ -27038,6 +27471,10 @@ def _complete_provider_baseline_with_replica_failover(
                     selected=profile,
                     attempt_count=attempt,
                     status="completed",
+                ),
+                reasoning_receipt=_provider_benchmark_reasoning_receipt(
+                    profile,
+                    requested_effort=request.reasoning_effort,
                 ),
             )
         except Exception as exc:  # noqa: PERF203 - provider boundary
@@ -27194,6 +27631,10 @@ def _complete_public_axio_benchmark_candidate(
         text=response_text,
         cost=cost,
         tool_calls=tool_calls,
+        reasoning_receipt=_public_benchmark_reasoning_receipt(
+            normalized_format,
+            requested_effort=BENCHMARK_TARGET_REASONING_EFFORT,
+        ),
         api_invocation={
             "schema": "axio_fusion_api.benchmark_public_api_invocation.v1",
             "public_api_surface_used": True,
@@ -27236,9 +27677,11 @@ def _benchmark_public_api_payload(
     task_type: str,
     max_output_tokens: int,
     max_latency_ms: int | None = None,
+    reasoning_effort: str = BENCHMARK_TARGET_REASONING_EFFORT,
     tools: Sequence[Mapping[str, Any]] = (),
     messages: Sequence[Mapping[str, Any]] = (),
 ) -> tuple[str, dict[str, Any]]:
+    selected_reasoning_effort = normalize_reasoning_effort(reasoning_effort)
     tool_declarations = _benchmark_public_api_tool_declarations(tools, api_format)
     system_text, history_events = _benchmark_public_api_message_parts(
         prompt=prompt,
@@ -27253,6 +27696,7 @@ def _benchmark_public_api_payload(
             "task_type": task_type,
             "temperature": 0,
             "max_output_tokens": int(max_output_tokens),
+            "reasoning": {"effort": selected_reasoning_effort},
         }
         _add_benchmark_latency_bound(payload, max_latency_ms)
         if tool_declarations:
@@ -27266,6 +27710,9 @@ def _benchmark_public_api_payload(
             "task_type": task_type,
             "temperature": 0,
             "max_tokens": int(max_output_tokens),
+            # Anthropic-compatible Axio requests use the protocol-neutral
+            # logical field; provider-native translation happens later.
+            "reasoning_effort": selected_reasoning_effort,
         }
         _add_benchmark_latency_bound(payload, max_latency_ms)
         if tool_declarations:
@@ -27277,6 +27724,7 @@ def _benchmark_public_api_payload(
             "contents": _benchmark_public_api_gemini_contents(history_events),
             "task_type": task_type,
             "generationConfig": {"temperature": 0, "maxOutputTokens": int(max_output_tokens)},
+            "reasoning_effort": selected_reasoning_effort,
         }
         _add_benchmark_latency_bound(payload, max_latency_ms)
         if tool_declarations:
@@ -27291,6 +27739,7 @@ def _benchmark_public_api_payload(
         "task_type": task_type,
         "temperature": 0,
         "max_tokens": int(max_output_tokens),
+        "reasoning_effort": selected_reasoning_effort,
     }
     _add_benchmark_latency_bound(payload, max_latency_ms)
     if tool_declarations:
@@ -27751,7 +28200,13 @@ def _cheap_generic_plus_judge(
     judge_system = _generic_judge_system(task_type, task_format)
     judge_output = active_client.complete(
         judge_profile,
-        FusionRequest(model="axio-fast", prompt=judge_prompt, max_output_tokens=max_output_tokens, temperature=0.0),
+        FusionRequest(
+            model="axio-fast",
+            prompt=judge_prompt,
+            max_output_tokens=max_output_tokens,
+            temperature=0.0,
+            reasoning_effort=BENCHMARK_TARGET_REASONING_EFFORT,
+        ),
         prompt=judge_prompt,
         system=judge_system,
         timeout=60.0,
@@ -27776,7 +28231,13 @@ def _cheap_generic_plus_judge(
         synth_system = _generic_synthesizer_system(task_type, task_format)
         synth_output = active_client.complete(
             synth_profile,
-            FusionRequest(model="axio-fast", prompt=synth_prompt, max_output_tokens=max_output_tokens, temperature=0.0),
+            FusionRequest(
+                model="axio-fast",
+                prompt=synth_prompt,
+                max_output_tokens=max_output_tokens,
+                temperature=0.0,
+                reasoning_effort=BENCHMARK_TARGET_REASONING_EFFORT,
+            ),
             prompt=synth_prompt,
             system=synth_system,
             timeout=60.0,
@@ -27816,7 +28277,13 @@ def _generic_panel_outputs(
     for profile in cheap_profiles:
         output = active_client.complete(
             profile,
-            FusionRequest(model="axio-fast", prompt=prompt, max_output_tokens=max_output_tokens, temperature=0.0),
+            FusionRequest(
+                model="axio-fast",
+                prompt=prompt,
+                max_output_tokens=max_output_tokens,
+                temperature=0.0,
+                reasoning_effort=BENCHMARK_TARGET_REASONING_EFFORT,
+            ),
             prompt=prompt,
             system=system,
             timeout=60.0,
@@ -28207,8 +28674,10 @@ def _benchmark_axio_payload(
     task_type: str,
     max_output_tokens: int,
     api_format: str,
+    reasoning_effort: str = BENCHMARK_TARGET_REASONING_EFFORT,
 ) -> dict[str, Any]:
     normalized = normalize_api_format(api_format)
+    selected_reasoning_effort = normalize_reasoning_effort(reasoning_effort)
     common = {
         "model": model,
         "task_type": task_type,
@@ -28217,6 +28686,7 @@ def _benchmark_axio_payload(
     if normalized == "responses":
         return {
             **common,
+            "reasoning": {"effort": selected_reasoning_effort},
             "instructions": system,
             "max_output_tokens": max_output_tokens,
             "input": [{"role": "user", "content": prompt}],
@@ -28224,6 +28694,7 @@ def _benchmark_axio_payload(
     if normalized == "anthropic":
         return {
             **common,
+            "reasoning_effort": selected_reasoning_effort,
             "system": system,
             "max_tokens": max_output_tokens,
             "messages": [{"role": "user", "content": prompt}],
@@ -28231,6 +28702,7 @@ def _benchmark_axio_payload(
     if normalized == "gemini":
         return {
             **common,
+            "reasoning_effort": selected_reasoning_effort,
             "systemInstruction": {"parts": [{"text": system}]},
             "generationConfig": {
                 "temperature": 0.0,
@@ -28240,6 +28712,7 @@ def _benchmark_axio_payload(
         }
     return {
         **common,
+        "reasoning_effort": selected_reasoning_effort,
         "max_tokens": max_output_tokens,
         "messages": [
             {"role": "system", "content": system},
@@ -28558,6 +29031,7 @@ def _run_one_multiple_choice_case(
     axio_gateway_url: str | None,
     max_latency_ms: int | None,
     provider_profiles: Sequence[ModelProfile] | None = None,
+    suite_id: str = "",
 ) -> dict[str, Any]:
     started = time.monotonic()
     prompt_case = _benchmark_prompt_case_projection(case, "multiple_choice")
@@ -28577,6 +29051,11 @@ def _run_one_multiple_choice_case(
         candidate_id,
         status="not_executed",
     )
+    reasoning_receipt = _benchmark_reasoning_receipt_not_executed(
+        candidate_id=candidate_id,
+        suite_id=suite_id,
+        task_format="multiple_choice",
+    )
     try:
         if not live:
             prediction = ""
@@ -28591,6 +29070,7 @@ def _run_one_multiple_choice_case(
                     prompt=prompt,
                     max_output_tokens=16,
                     temperature=0.0,
+                    reasoning_effort=BENCHMARK_TARGET_REASONING_EFFORT,
                 ),
                 prompt=prompt,
                 system=system,
@@ -28601,13 +29081,26 @@ def _run_one_multiple_choice_case(
             output = completion.text
             cost_receipt = completion.cost
             provider_execution = completion.provider_execution
+            reasoning_receipt = _normalize_benchmark_reasoning_receipt(
+                completion.reasoning_receipt,
+                candidate_id=candidate_id,
+                suite_id=suite_id,
+                task_format="multiple_choice",
+            )
             prediction = _extract_choice(output)
         elif candidate_id in {"single_low_cost_model", "single_best_model"}:
             profile = _single_baseline_profile(profiles, candidate_id)
             system = _mcq_system_prompt()
+            request = FusionRequest(
+                model="axio-fast",
+                prompt=prompt,
+                max_output_tokens=16,
+                temperature=0.0,
+                reasoning_effort=BENCHMARK_TARGET_REASONING_EFFORT,
+            )
             output = ensure_strict_streaming_client(client).complete(
                 profile,
-                FusionRequest(model="axio-fast", prompt=prompt, max_output_tokens=16, temperature=0.0),
+                request,
                 prompt=prompt,
                 system=system,
                 timeout=60.0,
@@ -28618,6 +29111,15 @@ def _run_one_multiple_choice_case(
                 system=system,
                 output_text=output,
                 expected_output_tokens=16,
+            )
+            reasoning_receipt = _normalize_benchmark_reasoning_receipt(
+                _provider_benchmark_reasoning_receipt(
+                    profile,
+                    requested_effort=request.reasoning_effort,
+                ),
+                candidate_id=candidate_id,
+                suite_id=suite_id,
+                task_format="multiple_choice",
             )
             prediction = _extract_choice(output)
         elif candidate_id == "cheap_models_vote":
@@ -28655,6 +29157,15 @@ def _run_one_multiple_choice_case(
                 candidate_id,
                 status="legacy_internal_baseline",
             )
+            reasoning_receipt = _normalize_benchmark_reasoning_receipt(
+                _public_benchmark_reasoning_receipt(
+                    AXIO_BENCHMARK_PRIMARY_API_FORMAT,
+                    requested_effort=BENCHMARK_TARGET_REASONING_EFFORT,
+                ),
+                candidate_id=candidate_id,
+                suite_id=suite_id,
+                task_format="multiple_choice",
+            )
             prediction = _extract_choice(output)
         else:
             completion = _complete_public_axio_benchmark_candidate(
@@ -28671,6 +29182,12 @@ def _run_one_multiple_choice_case(
             output = completion.text
             cost_receipt = completion.cost
             api_invocation = completion.api_invocation
+            reasoning_receipt = _normalize_benchmark_reasoning_receipt(
+                completion.reasoning_receipt,
+                candidate_id=candidate_id,
+                suite_id=suite_id,
+                task_format="multiple_choice",
+            )
             prediction = _extract_choice(output)
     except Exception as exc:  # noqa: PERF203 - evaluation/provider boundary
         status = "failed"
@@ -28698,6 +29215,7 @@ def _run_one_multiple_choice_case(
         **_case_cost_fields(cost_receipt),
         "public_api_invocation": api_invocation,
         "provider_replica_execution": provider_execution,
+        "reasoning_receipt": reasoning_receipt,
         "prompt_contract": prompt_contract,
         "output_sha256": sha256_text(output),
         "raw_question_persisted": False,
@@ -28780,7 +29298,13 @@ def _cheap_vote(
     for profile in selected:
         output = active_client.complete(
             profile,
-            FusionRequest(model="axio-fast", prompt=prompt, max_output_tokens=16, temperature=0.0),
+            FusionRequest(
+                model="axio-fast",
+                prompt=prompt,
+                max_output_tokens=16,
+                temperature=0.0,
+                reasoning_effort=BENCHMARK_TARGET_REASONING_EFFORT,
+            ),
             prompt=prompt,
             system=system,
             timeout=60.0,
@@ -28823,7 +29347,13 @@ def _cheap_models_plus_judge(
     for profile in cheap_profiles:
         output = active_client.complete(
             profile,
-            FusionRequest(model="axio-fast", prompt=prompt, max_output_tokens=16, temperature=0.0),
+            FusionRequest(
+                model="axio-fast",
+                prompt=prompt,
+                max_output_tokens=16,
+                temperature=0.0,
+                reasoning_effort=BENCHMARK_TARGET_REASONING_EFFORT,
+            ),
             prompt=prompt,
             system=system,
             timeout=60.0,
@@ -28844,7 +29374,13 @@ def _cheap_models_plus_judge(
     judge_system = "You are a strict benchmark judge. Return only the best option letter."
     judge_output = active_client.complete(
         judge_profile,
-        FusionRequest(model="axio-fast", prompt=judge_prompt, max_output_tokens=16, temperature=0.0),
+        FusionRequest(
+            model="axio-fast",
+            prompt=judge_prompt,
+            max_output_tokens=16,
+            temperature=0.0,
+            reasoning_effort=BENCHMARK_TARGET_REASONING_EFFORT,
+        ),
         prompt=judge_prompt,
         system=judge_system,
         timeout=60.0,
@@ -28864,7 +29400,13 @@ def _cheap_models_plus_judge(
         synth_system = "You are a strict benchmark synthesizer. Return only the final option letter."
         synth_output = active_client.complete(
             synth_profile,
-            FusionRequest(model="axio-fast", prompt=synth_prompt, max_output_tokens=16, temperature=0.0),
+            FusionRequest(
+                model="axio-fast",
+                prompt=synth_prompt,
+                max_output_tokens=16,
+                temperature=0.0,
+                reasoning_effort=BENCHMARK_TARGET_REASONING_EFFORT,
+            ),
             prompt=synth_prompt,
             system=synth_system,
             timeout=60.0,
@@ -29281,6 +29823,8 @@ def _claim_comparison_row(
     baseline_rank: int | None = None,
     baseline_pre_registered: bool = False,
     expected_baseline_candidate_id_sha256: str = "",
+    native_max_required: bool = False,
+    required_reasoning_effort: str = "",
 ) -> dict[str, Any]:
     effective_min_cases = _effective_min_cases_for_suite(suite_id, min_cases_per_suite)
     reason_codes = []
@@ -29318,6 +29862,17 @@ def _claim_comparison_row(
     axio_primary_score = _run_primary_score(axio_run)
     baseline_primary_score = _run_primary_score(baseline_run)
     latency_gate = _claim_latency_gate(axio_run, baseline_run)
+    task_format = str(
+        (axio_run or baseline_run or {}).get("task_format")
+        or _suite_task_format(suite_id)
+    )
+    reasoning_gate = _claim_reasoning_gate(
+        baseline_run,
+        required_reasoning_effort=required_reasoning_effort,
+        native_max_required=native_max_required,
+        suite_id=suite_id,
+        task_format=task_format,
+    )
     effect_size_gate = _claim_effect_size_gate(
         paired=paired,
         axio_primary_score=axio_primary_score,
@@ -29333,6 +29888,8 @@ def _claim_comparison_row(
         reason_codes.append("effect_size_paired_net_win_rate_below_minimum")
     if latency_gate["latency_gate_passed"] is not True:
         reason_codes.extend(str(reason) for reason in latency_gate.get("reason_codes") or [] if str(reason))
+    if reasoning_gate["passed"] is not True:
+        reason_codes.extend(str(reason) for reason in reasoning_gate.get("reason_codes") or [] if str(reason))
     claim_allowed = not reason_codes
     return {
         "suite_id": suite_id,
@@ -29355,6 +29912,7 @@ def _claim_comparison_row(
         "confidence_intervals": _claim_confidence_intervals(axio_run, baseline_run),
         "effect_size_gate": effect_size_gate,
         "latency_gate": latency_gate,
+        "reasoning_gate": reasoning_gate,
         "latency_multiplier_vs_baseline": latency_gate["latency_multiplier_vs_baseline"],
         "latency_within_3x_baseline": latency_gate["latency_gate_passed"],
         "paired_case_stats": paired,

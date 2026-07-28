@@ -23,6 +23,30 @@ The mechanical-disk asset manifest is:
 As of the current manifest, 19 suites are downloaded and 2 suites are blocked by Hugging Face gated access:
 `gpqa_diamond` and `flores_translation_instruction`. They must not be replaced with unofficial mirrors.
 
+## Frozen Evaluation Policy
+
+The current formal policy records GPQA Diamond as `skipped` because authorized
+access is unavailable. The GPQA slot may use the pinned `mmlu_pro_stem`
+replacement only when its screening-disjointness receipt and source hashes are
+valid. That result must be reported as **MMLU-Pro STEM**, explicitly not as
+GPQA; the replacement identity cannot be hidden in an aggregate score.
+
+The formal reasoning target is `max`, with the ordered capability scale
+`low -> medium -> high -> xhigh -> max`. A provider `max -> high` mapping,
+an unverified transport, or a recent rate-limit failure is recorded as a
+downgrade or unavailable native capability. It cannot be silently promoted to
+native `max`, and a superiority claim is blocked until the provider receipt
+proves native `max` for the compared baseline. The Axio public adapters carry
+the same logical `max` request through their protocol-specific fields, while
+the public boundary receipt does not itself prove the upstream provider's
+native implementation.
+
+The pre-registered comparison roster is `gpt-5.6-sol` for `axio-pro`,
+`gpt-5.6-terra` for `axio-terra`, and `gpt-5.6-luna` for `axio-fast`. This is a
+target mapping, not a completed live result: the final claim still requires a
+hash-bound provider freeze, live evidence, paired runs, statistical gates, and
+the latency limit below.
+
 ## Candidate Matrix
 
 All model answers must be produced through API calls, never by local shortcuts or direct evaluator injection.
@@ -201,4 +225,3 @@ The next iteration must:
 - rerun affected smoke tests and then the full locked benchmark matrix
 
 No final capability claim may be made until the locked 21-suite comparison supports it.
-

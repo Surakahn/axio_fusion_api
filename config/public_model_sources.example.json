@@ -24,10 +24,10 @@
       "models": ["gpt-5.6-terra"]
     },
     {
-      "source_slot": "tokenapis_gpt_5_5_model_page",
-      "url": "https://artificialanalysis.ai/models/gpt-5-5",
+      "source_slot": "tokenapis_gpt_5_6_luna_model_page",
+      "url": "https://artificialanalysis.ai/models/gpt-5-6-luna",
       "title": "Artificial Analysis model page",
-      "models": ["gpt-5.5"]
+      "models": ["gpt-5.6-luna"]
     }
   ]
 }

@@ -1,0 +1,35 @@
+{
+  "schema": "axio_fusion_api.benchmark_evaluation_policy.v1",
+  "gpqa": {
+    "status": "skipped",
+    "reason": "authorized GPQA access not available"
+  },
+  "replacement": {
+    "benchmark_slot_id": "gpqa_diamond",
+    "dataset_id": "mmlu_pro_stem",
+    "explicitly_not_gpqa": true
+  },
+  "reasoning": {
+    "levels": ["low", "medium", "high", "xhigh", "max"],
+    "target_effort": "max",
+    "native_max_required": true,
+    "fail_closed": true
+  },
+  "baseline_roster": {
+    "axio-pro": {
+      "rank": 1,
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "max"
+    },
+    "axio-terra": {
+      "rank": 2,
+      "model": "gpt-5.6-terra",
+      "reasoning_effort": "max"
+    },
+    "axio-fast": {
+      "rank": 3,
+      "model": "gpt-5.6-luna",
+      "reasoning_effort": "max"
+    }
+  }
+}
