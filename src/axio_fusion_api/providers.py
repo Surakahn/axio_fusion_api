@@ -4445,6 +4445,10 @@ def _open_stream_json_request(
                         "provider returned an unframed body for a strict streaming request",
                         error_code="unframed_stream_response",
                     )
+                _set_response_read_timeout(
+                    response,
+                    max(0.001, deadline_at - time.monotonic()),
+                )
                 raw = response.read()
                 if isinstance(raw, bytes):
                     raw = raw.decode("utf-8", errors="replace")
@@ -4563,6 +4567,49 @@ def _stream_protocol_from_content_type(content_type: str) -> str:
     return ""
 
 
+def _set_response_read_timeout(response: Any, timeout: float) -> bool:
+    """Best-effort propagate the remaining stream deadline to its socket.
+
+    ``urllib`` response objects differ across direct HTTPS, HTTP CONNECT
+    proxies, and test doubles.  The outer ``urlopen(..., timeout=...)`` call
+    is not enough for all of them: a proxy may return a buffered response and
+    then leave ``readline()`` waiting after the original connection timeout.
+    Traverse the standard wrapper chain without retaining or inspecting any
+    response bytes, and update the first socket-like object that supports a
+    timeout setter.  Failure to discover one is harmless; the existing
+    deadline checks and transport exceptions remain the fallback.
+    """
+
+    try:
+        bounded_timeout = max(0.001, float(timeout))
+    except (TypeError, ValueError):
+        return False
+
+    pending = [response]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        setter = getattr(current, "settimeout", None)
+        if callable(setter):
+            try:
+                setter(bounded_timeout)
+            except (OSError, TypeError, ValueError):
+                pass
+            else:
+                return True
+        for attribute in ("fp", "raw", "_sock", "sock", "socket"):
+            try:
+                nested = getattr(current, attribute, None)
+            except (AttributeError, OSError):
+                nested = None
+            if nested is not None:
+                pending.append(nested)
+    return False
+
+
 def _iter_stream_events(
     response: Any,
     deadline_at: float,
@@ -4606,6 +4653,15 @@ def _iter_stream_events(
                 _safe_provider_error_message(timeout_error_code),
                 error_code=timeout_error_code,
             )
+        # urllib applies its timeout to connection setup, but compatible
+        # gateways and HTTP proxies can hand back a buffered response whose
+        # nested socket keeps ``readline()`` blocked indefinitely. Refresh the
+        # socket-level read deadline before every frame so the product's hard
+        # provider ceiling remains true even when no frame arrives.
+        _set_response_read_timeout(
+            response,
+            max(0.001, deadline_at - time.monotonic()),
+        )
         try:
             raw_line = response.readline()
         except (TimeoutError, socket.timeout, OSError) as exc:
@@ -5593,6 +5649,10 @@ def _open_json_request(
 ) -> Mapping[str, Any]:
     try:
         with _open_provider_url(request, timeout=timeout) as response:
+            _set_response_read_timeout(
+                response,
+                _provider_timeout_budget(timeout),
+            )
             raw = response.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         retry_after_seconds = _retry_after_seconds_from_headers(

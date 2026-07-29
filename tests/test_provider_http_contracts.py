@@ -280,6 +280,63 @@ def test_stream_timeout_classification_separates_fusion_deadline_from_provider_c
     assert expected_code in str(exc_info.value)
 
 
+def test_stream_reader_refreshes_nested_socket_read_deadline(monkeypatch) -> None:
+    class FakeSocket:
+        def __init__(self):
+            self.timeouts = []
+
+        def settimeout(self, value):
+            self.timeouts.append(float(value))
+
+    class FakeRaw:
+        def __init__(self, sock):
+            self._sock = sock
+
+    class FakeResponse:
+        headers = {"Content-Type": "text/event-stream"}
+
+        def __init__(self):
+            self.socket = FakeSocket()
+            self.fp = FakeRaw(self.socket)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            del exc_type, exc_value, traceback
+            return False
+
+        def readline(self):
+            raise TimeoutError("fixture timeout")
+
+    response = FakeResponse()
+    monkeypatch.setattr(
+        provider_module,
+        "_open_provider_url",
+        lambda request, timeout: response,
+    )
+    profile = normalize_profile(
+        {
+            "provider": "nested-timeout-fixture",
+            "model": "nested-timeout-model",
+            "api_format": "chat",
+        }
+    )
+
+    with pytest.raises(provider_module.ProviderExecutionError) as exc_info:
+        provider_module._open_stream_json_request(
+            urllib.request.Request("https://timeout.fixture/v1/chat/completions"),
+            profile=profile,
+            api_format="chat",
+            timeout=0.2,
+            require_streaming=True,
+        )
+
+    assert exc_info.value.error_code == "provider_request_timeout"
+    assert response.socket.timeouts
+    assert 0.0 < response.socket.timeouts[-1] <= 0.2
+
+
 def test_multi_sample_stream_probe_aggregates_independent_receipts(monkeypatch) -> None:
     profile = normalize_profile(
         {
