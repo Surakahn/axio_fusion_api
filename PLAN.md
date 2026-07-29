@@ -96,6 +96,37 @@ The superiority gate requires both statistical and practical significance: paire
 
 Latency superiority is also claim-gated on two distribution points: both p50 and p95 case latency for each Axio tier must be present and no more than `3x` the corresponding same-suite provider baseline before a final superiority claim can pass.
 
+## Active Baseline Execution (2026-07-29, full cohort r1)
+
+- Dominant phase: `execution`.
+- Enrollment gate: the fresh full-cohort enrollment completed with `status=ready`.
+  The serving registry contains 35 live-probed text profiles across two providers
+  and two upstream formats (`chat` and `responses`); every admitted profile has
+  strict SSE/NDJSON evidence within the 90-second ceiling. Probe, registry, and
+  redacted evidence profile-set bindings all pass.
+- Engineering evidence: the standalone regression is `769 passed`; the dry
+  provider-input adapter self-test covers all four upstream input formats, and
+  the dry public protocol self-test covers all 3 Axio models x 4 public formats
+  (`12/12` requests passed). These are system-readiness evidence only, not model
+  quality evidence.
+- Frozen screening contract: plan schema v3, 35 canonical candidates, two
+  independent non-target source families, 70 source-candidate units, 6,230
+  estimated provider calls, and plan-level `max_workers=1`. The plan digest is
+  `c6ecb07d000e65563d31dc368ded09ffd6b18501bf9e51ad7811909b7b00c173`.
+- Execution path: the complete live campaign is running in the isolated
+  `current_channel_enrollment_20260729_full_cohort_r1/screening_r1` private
+  root. It began only after the zero-network preflight passed; no old cohort
+  checkpoint, answer, score, survivor, or failed unit is reused.
+- Verification target: all 70 units must reach terminal authenticated states,
+  retain every failure in the denominator, pass private rescoring and the
+  pre-registered transport-failure gate, and then produce a complete
+  screening-to-ranking conversion before any rank-1/rank-2/rank-3 baseline is
+  frozen. No target-suite benchmark call is allowed before that freeze.
+- Downstream trust state: `verification_incomplete`. The new registry is
+  serving-admissible, but no provider baseline or Axio superiority claim is
+  trusted until screening, ranking, freeze, and the separate 21-suite campaign
+  complete.
+
 ## Active Baseline Execution (2026-07-28, v3 isolated cohort)
 
 - Dominant phase: `execution`.

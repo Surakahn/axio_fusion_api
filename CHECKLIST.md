@@ -1,5 +1,28 @@
 # Axio Fusion API Checklist
 
+## Current Live Gate (2026-07-29, full cohort r1)
+
+- [x] Complete fresh full-cohort enrollment: 35 strict-streaming text profiles
+  across two providers and two upstream formats; probe, calibrated registry,
+  and redacted evidence bindings all pass the 90-second gate.
+- [x] Complete zero-network screening preflight: 35 canonical candidates, two
+  independent source families, 70 source-candidate units, 6,230 estimated
+  provider calls, and frozen `max_workers=1`; no live or target-suite call was
+  made by preflight.
+- [x] Record engineering evidence for the cohort: 769 standalone tests pass,
+  all four provider input adapters pass, and all 12 dry public protocol cells
+  pass across the three Axio models and four public API formats.
+- [ ] Complete all 70 fresh live screening units in the isolated r1 private
+  root. Do not reuse any v3/R2 answer, score, survivor, failure, or checkpoint;
+  preserve every new failure in the denominator.
+- [ ] Verify terminal checkpoints and convert the complete campaign to a
+  deterministic external ranking; partial results cannot select a baseline.
+- [ ] Freeze exactly rank 1, rank 2, and rank 3 canonical baseline groups,
+  including all replica and provider-probe bindings.
+- [ ] Activate and live-verify `axio-fast`, `axio-terra`, and `axio-pro` on
+  Chat Completions, Responses, Anthropic Messages, and Gemini streaming
+  surfaces, then run the separate 9-category/21-suite campaign.
+
 ## Current Live Gate (2026-07-28, v3 isolated cohort)
 
 - [x] Quarantine the terminal R2 screening as diagnostic-only evidence: 30
