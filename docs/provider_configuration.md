@@ -53,6 +53,13 @@ the resulting `verified`/`passed` state into the private serving registry.
 This prevents a model-list entry or a copied vendor claim from turning a text
 endpoint into an image endpoint.
 
+The `images_api` transport uses `/images/generations` and `/images/edits`. A
+Responses-compatible image-generation tool may instead declare
+`responses_image_generation`; it uses `/responses` with a native
+`image_generation` tool and supports generation only. Editing is admitted only
+for `images_api`, so a Responses declaration cannot accidentally send a
+multipart edit request to a Responses endpoint.
+
 The public image routes are deliberately outside the four text protocol
 adapters:
 
@@ -67,6 +74,36 @@ data is returned only as the requested public image artifact; it is never
 converted into text Fusion candidates or persisted in internal traces. The
 same proxy policy, credential pool, same-model failover, and 90-second hard
 provider ceiling apply to image requests.
+
+Run the image capability control plane against the exact private registry. A
+dry run never contacts a provider; live mode must be explicit and sends only
+the fixed non-benchmark generation/edit controls declared by each profile:
+
+```bash
+axio-fusion-api-standalone \
+  --registry <PRIVATE_IMAGE_CANDIDATE_REGISTRY.json> \
+  image-probe --live --timeout 90 \
+  --output <PRIVATE_WORK_DIR>/image_probe.private.json
+```
+
+The probe records only operation status, timing, stream framing, endpoint
+hashes, and result-shape digests. `redact-image-probe` creates a hash-only
+receipt offline. Promotion is a separate exact-cohort operation; it checks the
+profile set, current endpoint binding, declared transport, and every declared
+operation before writing a new private registry:
+
+```bash
+axio-fusion-api-standalone image-probe-bind \
+  --registry-file <PRIVATE_IMAGE_CANDIDATE_REGISTRY.json> \
+  --probe-file <PRIVATE_WORK_DIR>/image_probe.private.json \
+  --output-registry <PRIVATE_IMAGE_VERIFIED_REGISTRY.json> \
+  --output <SAFE_WORK_DIR>/image_probe_binding.safe.json
+```
+
+Partial, stale, failed, transient, or endpoint-mismatched evidence blocks
+promotion and leaves the source registry unchanged. Image probe prompts and
+source image bytes are never used for benchmark calibration or Fusion prompt
+tuning.
 
 ## Reasoning Strength Transport
 

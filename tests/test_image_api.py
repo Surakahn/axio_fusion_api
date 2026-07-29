@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import urllib.error
+from pathlib import Path
 
 import pytest
 
@@ -17,6 +18,11 @@ from axio_fusion_api.image_api import (
     parse_edit_payload,
     parse_generation_payload,
 )
+from axio_fusion_api.image_probe import (
+    build_image_probe_bound_registry,
+    probe_image_capabilities,
+    redact_image_probe_artifact,
+)
 from axio_fusion_api.orchestrator import FusionEngine
 from axio_fusion_api.schemas import ModelProfile
 
@@ -29,16 +35,18 @@ def _image_profile(
     max_input_images: int = 1,
     p95_latency_ms: int | None = None,
     runtime_keys: tuple[str, ...] = (),
+    transport: str = "images_api",
+    api_format: str = "chat/completions",
 ) -> ModelProfile:
     return ModelProfile(
         provider="image-provider",
         model="gpt-image-2",
-        api_format="chat/completions",
+        api_format=api_format,
         model_kind="image",
         image_probe_status=probe_status,
         image_capabilities={
             "status": capability_status,
-            "transport": "images_api",
+            "transport": transport,
             "operations": ["generation", "editing"],
             "streaming": streaming,
             "max_input_images": max_input_images,
@@ -300,3 +308,131 @@ def test_server_returns_image_sse_with_allowlisted_event_types(monkeypatch):
     assert "event: image_generation.completed" in decoded
     assert "event: done" in decoded
     assert "provider_secret" not in decoded
+
+
+def test_responses_image_generation_uses_responses_tool_wire_and_parses_output(monkeypatch):
+    profile = _image_profile(
+        transport="responses_image_generation",
+        api_format="responses",
+        runtime_keys=("response-key",),
+    )
+    captured: dict[str, object] = {}
+
+    class Response:
+        headers = {"Content-Type": "application/json"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"created_at": 7, "output": [{"type": "image_generation_call", "result": "encoded"}]}'
+
+    def fake_open(request, *, timeout):
+        captured["url"] = request.full_url
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        return Response()
+
+    monkeypatch.setattr("axio_fusion_api.image_api._open_provider_url", fake_open)
+    result = ImageProviderClient().generate(
+        profile,
+        {"model": "axio-pro", "prompt": "blue square"},
+        timeout=5,
+    )
+
+    assert str(captured["url"]).endswith("/responses")
+    wire = captured["body"]
+    assert wire["model"] == "gpt-image-2"
+    assert wire["input"] == "blue square"
+    assert wire["tools"] == [{"type": "image_generation"}]
+    assert result.created == 7
+    assert result.data == ({"b64_json": "encoded"},)
+
+
+class _FakeImageProbeClient:
+    def __init__(self):
+        self.calls: list[str] = []
+
+    def generate(self, profile, payload, *, timeout=None):
+        self.calls.append("generation")
+        return ImageProviderResult(
+            data=({"b64_json": "generated"},),
+            created=1,
+            stream_events=({"type": "image_generation.completed", "b64_json": "generated"},)
+            if payload.get("stream")
+            else (),
+            stream_protocol="sse" if payload.get("stream") else "",
+            event_prefix="image_generation",
+        )
+
+    def edit(self, profile, fields, files, *, timeout=None):
+        self.calls.append("editing")
+        return ImageProviderResult(
+            data=({"b64_json": "edited"},),
+            created=2,
+            stream_events=({"type": "image_edit.completed", "b64_json": "edited"},)
+            if fields.get("stream")
+            else (),
+            stream_protocol="sse" if fields.get("stream") else "",
+            event_prefix="image_edit",
+        )
+
+
+def test_image_probe_requires_live_evidence_and_probes_each_declared_operation():
+    profile = _image_profile(capability_status="candidate", probe_status="not_run")
+    fake = _FakeImageProbeClient()
+
+    dry_run = probe_image_capabilities([profile], client=fake, live=False)
+    assert dry_run["status_counts"] == {"skipped": 1}
+    assert fake.calls == []
+
+    live = probe_image_capabilities([profile], client=fake, live=True)
+    assert live["status_counts"] == {"passed": 1}
+    assert live["probes"][0]["all_declared_operations_passed"] is True
+    assert {row["operation"] for row in live["probes"][0]["operation_results"]} == {
+        "generation",
+        "editing",
+    }
+    assert fake.calls == ["generation", "editing"]
+
+
+def test_image_probe_redaction_removes_private_profile_names_and_prompt_text():
+    profile = _image_profile(capability_status="candidate", probe_status="not_run")
+    payload = probe_image_capabilities([profile], client=_FakeImageProbeClient(), live=True)
+    redacted = redact_image_probe_artifact(payload)
+    encoded = json.dumps(redacted, ensure_ascii=False)
+
+    assert profile.provider not in encoded
+    assert profile.model not in encoded
+    assert "Capability control only" not in encoded
+    assert redacted["probes"][0]["profile_id_sha256"]
+    assert redacted["raw_image_bytes_persisted"] is False
+
+
+def test_image_probe_bind_promotes_only_matching_endpoint_bound_cohort(tmp_path, monkeypatch):
+    monkeypatch.setenv("AXIO_TEST_IMAGE_BASE_URL", "https://image-provider.invalid/v1")
+    profile = _image_profile(capability_status="candidate", probe_status="not_run")
+    profile = ModelProfile(
+        **{
+            **profile.__dict__,
+            "base_url_env": "AXIO_TEST_IMAGE_BASE_URL",
+        }
+    )
+    source_path = Path(tmp_path) / "source.json"
+    probe_path = Path(tmp_path) / "probe.json"
+    source_path.write_text(
+        json.dumps({"schema": "axio_fusion_api.registry.v1", "models": [profile.safe_dict()]}),
+        encoding="utf-8",
+    )
+    probe = probe_image_capabilities([profile], client=_FakeImageProbeClient(), live=True)
+    probe_path.write_text(json.dumps(probe), encoding="utf-8")
+
+    bound = build_image_probe_bound_registry(registry_path=source_path, probe_path=probe_path)
+
+    assert bound["status"] == "ready"
+    promoted = bound["registry"]["models"][0]
+    assert promoted["image_capabilities"]["status"] == "verified"
+    assert promoted["image_probe_status"] == "passed"
+    assert bound["receipt"]["promoted_profile_count"] == 1

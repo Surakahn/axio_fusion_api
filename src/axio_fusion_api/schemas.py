@@ -405,7 +405,11 @@ def _normalize_image_path(value: Any, default: str) -> str:
     # Image-compatible gateways should expose the familiar OpenAI paths.  A
     # relative /images/* extension is allowed, but arbitrary provider payload
     # paths are not part of the declarative contract.
-    return raw if raw.startswith("/images/") else default
+    if raw.startswith("/images/"):
+        return raw
+    if default == "/responses" and raw == "/responses":
+        return raw
+    return default
 
 
 def _normalize_image_capabilities(value: Any) -> dict[str, Any]:
@@ -445,13 +449,18 @@ def _normalize_image_capabilities(value: Any) -> dict[str, Any]:
         max_input_images = 1
     max_input_images = max(1, min(16, max_input_images))
     streaming = bool(raw.get("streaming", raw.get("supports_streaming", False)))
+    generation_default = (
+        "/responses"
+        if transport == "responses_image_generation"
+        else _IMAGE_DEFAULT_GENERATION_PATH
+    )
     return {
         "status": status,
         "transport": transport,
         "operations": [operation for operation in IMAGE_OPERATIONS if operation in operations],
         "generation_path": _normalize_image_path(
             raw.get("generation_path", raw.get("generationPath")),
-            _IMAGE_DEFAULT_GENERATION_PATH,
+            generation_default,
         ),
         "editing_path": _normalize_image_path(
             raw.get("editing_path", raw.get("editingPath")),

@@ -14,6 +14,12 @@ from .image_api import (
     parse_edit_payload,
     parse_generation_payload,
 )
+from .image_probe import (
+    build_image_probe_bound_registry,
+    probe_image_capabilities,
+    redact_image_probe_artifact,
+    redact_image_probe_artifact_file,
+)
 from .channel_config import (
     ChannelConfigError,
     build_runtime_profiles,
@@ -114,4 +120,8 @@ __all__ = [
     "ImageRouter",
     "parse_edit_payload",
     "parse_generation_payload",
+    "build_image_probe_bound_registry",
+    "probe_image_capabilities",
+    "redact_image_probe_artifact",
+    "redact_image_probe_artifact_file",
 ]

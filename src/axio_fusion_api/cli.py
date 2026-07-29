@@ -80,6 +80,11 @@ from .learning import (
     build_training_contamination_audit,
     write_json as write_learning_json,
 )
+from .image_probe import (
+    build_image_probe_bound_registry,
+    probe_image_capabilities,
+    redact_image_probe_artifact_file,
+)
 from .available_model_generation import (
     AvailableModelGenerationError,
     generate_available_model_set,
@@ -406,6 +411,43 @@ def build_parser() -> argparse.ArgumentParser:
     reasoning_probe.add_argument("--redact-provider-identifiers", action="store_true")
     reasoning_probe.add_argument("--output", default=None)
     reasoning_probe.set_defaults(func=cmd_reasoning_probe)
+
+    image_probe = sub.add_parser(
+        "image-probe",
+        help="Endpoint-bound probe for explicitly declared image generation/edit capabilities.",
+    )
+    image_probe.add_argument("--timeout", type=float, default=90.0)
+    image_probe.add_argument("--live", action="store_true")
+    image_probe.add_argument(
+        "--profile-hash",
+        action="append",
+        default=None,
+        help="Probe only exact SHA-256 image profile identifiers.",
+    )
+    image_probe.add_argument("--max-models", type=int, default=None)
+    image_probe.add_argument("--max-models-per-provider", type=int, default=None)
+    image_probe.add_argument("--max-workers", type=int, default=4)
+    image_probe.add_argument("--redact-provider-identifiers", action="store_true")
+    image_probe.add_argument("--output", default=None)
+    image_probe.set_defaults(func=cmd_image_probe)
+
+    redact_image_probe = sub.add_parser(
+        "redact-image-probe",
+        help="Create an offline hash-only receipt from an image probe artifact.",
+    )
+    redact_image_probe.add_argument("--probe-file", required=True)
+    redact_image_probe.add_argument("--output", required=True)
+    redact_image_probe.set_defaults(func=cmd_redact_image_probe)
+
+    image_probe_bind = sub.add_parser(
+        "image-probe-bind",
+        help="Promote a complete endpoint-bound image probe cohort into a private registry.",
+    )
+    image_probe_bind.add_argument("--registry-file", required=True)
+    image_probe_bind.add_argument("--probe-file", required=True)
+    image_probe_bind.add_argument("--output-registry", required=True)
+    image_probe_bind.add_argument("--output", default=None)
+    image_probe_bind.set_defaults(func=cmd_image_probe_bind)
 
     operational_admission = sub.add_parser(
         "operational-admission",
@@ -1883,6 +1925,40 @@ def cmd_reasoning_probe(args: argparse.Namespace) -> int:
         output=args.output,
     )
     return 0
+
+
+def cmd_image_probe(args: argparse.Namespace) -> int:
+    profiles = load_registry(args.registry, include_disabled=True)
+    live = bool(args.live or os.getenv("AXIO_FUSION_PROBE_LIVE") == "1")
+    _emit_json(
+        probe_image_capabilities(
+            profiles,
+            timeout=args.timeout,
+            live=live,
+            max_workers=args.max_workers,
+            profile_hashes=args.profile_hash,
+            max_models=args.max_models,
+            max_models_per_provider=args.max_models_per_provider,
+            redact_provider_identifiers=bool(args.redact_provider_identifiers),
+        ),
+        output=args.output,
+    )
+    return 0
+
+
+def cmd_redact_image_probe(args: argparse.Namespace) -> int:
+    _emit_json(redact_image_probe_artifact_file(args.probe_file), output=args.output)
+    return 0
+
+
+def cmd_image_probe_bind(args: argparse.Namespace) -> int:
+    payload = build_image_probe_bound_registry(
+        registry_path=args.registry_file,
+        probe_path=args.probe_file,
+    )
+    _write_json_atomic(args.output_registry, payload["registry"])
+    _emit_json(payload["receipt"], output=args.output)
+    return 0 if payload.get("status") in {"ready", "not_applicable"} else 2
 
 
 def cmd_operational_admission(args: argparse.Namespace) -> int:

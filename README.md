@@ -2570,6 +2570,28 @@ cannot make a text profile or text Fusion route appear healthy. With
 `"stream": true`, image-native partial/completed SSE events are returned; the
 gateway does not persist image payloads or mix them into benchmark text
 transcripts.
+
+An image profile may declare the standard `images_api` transport or the
+Responses-native `responses_image_generation` tool transport. The latter uses
+`/responses` for generation and is intentionally generation-only; multipart
+editing remains bound to `images_api`. Operators promote image capability only
+through the endpoint-bound control plane:
+
+```bash
+axio-fusion-api-standalone --registry <PRIVATE_REGISTRY.json> \
+  image-probe --live --timeout 90 \
+  --output <PRIVATE_WORK_DIR>/image_probe.private.json
+axio-fusion-api-standalone image-probe-bind \
+  --registry-file <PRIVATE_REGISTRY.json> \
+  --probe-file <PRIVATE_WORK_DIR>/image_probe.private.json \
+  --output-registry <PRIVATE_VERIFIED_REGISTRY.json> \
+  --output <SAFE_WORK_DIR>/image_probe_binding.safe.json
+```
+
+The bind step requires a complete matching profile cohort, current endpoint
+hashes, successful generation/edit operations, and observed streaming whenever
+it was declared. Dry-run, partial, stale, failed, and transient evidence cannot
+promote a model.
 Terminal events remain protocol-native: only Chat Completions emits
 `data: [DONE]`; Responses ends with `response.completed`, Anthropic ends with
 `message_stop` after `message_delta`, and Gemini-compatible streaming follows

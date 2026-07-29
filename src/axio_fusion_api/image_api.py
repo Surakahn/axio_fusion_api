@@ -19,14 +19,13 @@ import urllib.request
 from dataclasses import dataclass
 from email.parser import BytesParser
 from email.policy import HTTP
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 from .latency_policy import PROVIDER_MAX_RESPONSE_LATENCY_MS, PROVIDER_MAX_RESPONSE_SECONDS, profile_latency_eligibility
 from .providers import (
     ProviderExecutionError,
     _acquire_provider_traffic_gate,
     _advance_provider_key_rotation,
-    _api_keys,
     _apply_auth_headers,
     _auth_scheme,
     _base_url,
@@ -51,7 +50,7 @@ from .providers import (
     _url_with_api_key,
     provider_base_url_readiness,
 )
-from .schemas import IMAGE_OPERATIONS, ModelProfile, canonical_public_model, sha256_text, stable_json
+from .schemas import ModelProfile, canonical_public_model, sha256_text
 
 
 IMAGE_GENERATIONS_PATHS = {"/v1/images/generations", "/images/generations"}
@@ -251,6 +250,42 @@ def _coerce_bool(value: Any) -> bool:
     return bool(value)
 
 
+def _responses_image_generation_payload(
+    profile: ModelProfile,
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Build the Responses image-generation tool request.
+
+    Responses image generation is a different wire contract from
+    ``/images/generations``. Only fields documented by the image-generation
+    tool are nested into the tool declaration; the public Axio request remains
+    protocol-neutral at the gateway boundary.
+    """
+
+    tool: dict[str, Any] = {"type": "image_generation"}
+    for key in (
+        "background",
+        "moderation",
+        "output_compression",
+        "output_format",
+        "quality",
+        "size",
+        "partial_images",
+    ):
+        if key in payload:
+            tool[key] = payload[key]
+    wire: dict[str, Any] = {
+        "model": profile.model,
+        "input": str(payload.get("prompt") or ""),
+        "tools": [tool],
+        "stream": bool(payload.get("stream")),
+    }
+    # ``n`` is an Images API field. Responses image-generation calls produce
+    # one tool result, so it is intentionally not forwarded as an invented
+    # Responses parameter.
+    return wire
+
+
 class ImageProviderClient:
     """Provider client for the audited OpenAI Images API transport."""
 
@@ -261,8 +296,13 @@ class ImageProviderClient:
         *,
         timeout: float | None = None,
     ) -> ImageProviderResult:
-        wire = {key: value for key, value in payload.items() if key != "model"}
-        wire["model"] = profile.model
+        if profile.image_capabilities.get("transport") == "responses_image_generation":
+            wire = _responses_image_generation_payload(profile, payload)
+            event_prefix = "image_generation"
+        else:
+            wire = {key: value for key, value in payload.items() if key != "model"}
+            wire["model"] = profile.model
+            event_prefix = "image_generation"
         result, events, protocol = self._post(
             profile,
             str(profile.image_capabilities.get("generation_path") or "/images/generations"),
@@ -270,9 +310,9 @@ class ImageProviderClient:
             content_type="application/json",
             timeout=timeout,
             stream=bool(wire.get("stream")),
-            event_prefix="image_generation",
+            event_prefix=event_prefix,
         )
-        return _result_from_payload(result, events, protocol, event_prefix="image_generation")
+        return _result_from_payload(result, events, protocol, event_prefix=event_prefix)
 
     def edit(
         self,
@@ -483,16 +523,22 @@ def _read_image_stream(
 
 def _safe_image_event(event_name: str, payload: Mapping[str, Any], *, event_prefix: str) -> dict[str, Any]:
     kind = str(event_name or payload.get("type") or "").strip()
-    allowed = {
-        f"{event_prefix}.partial_image",
-        f"{event_prefix}.completed",
+    response_kind_map = {
+        "response.image_generation_call.partial_image": f"{event_prefix}.partial_image",
+        "response.image_generation_call.completed": f"{event_prefix}.completed",
     }
+    kind = response_kind_map.get(kind, kind)
+    allowed = {f"{event_prefix}.partial_image", f"{event_prefix}.completed"}
     if kind not in allowed:
         return {}
     result: dict[str, Any] = {"type": kind}
     for key in ("b64_json", "url", "revised_prompt", "partial_image_index", "output_format", "size"):
         if key in payload and payload.get(key) not in (None, ""):
             result[key] = payload[key]
+    if isinstance(payload.get("partial_image_b64"), str) and payload.get("partial_image_b64"):
+        result["b64_json"] = payload["partial_image_b64"]
+    if isinstance(payload.get("result"), str) and payload.get("result"):
+        result["b64_json"] = payload["result"]
     return result if len(result) > 1 else {}
 
 
@@ -509,6 +555,15 @@ def _result_from_payload(
         safe = _safe_image_item(item)
         if safe:
             rows.append(safe)
+    if not rows and isinstance(payload.get("output"), list):
+        for item in payload["output"]:
+            if not isinstance(item, Mapping):
+                continue
+            if str(item.get("type") or "") != "image_generation_call":
+                continue
+            result = item.get("result")
+            if isinstance(result, str) and result:
+                rows.append({"b64_json": result})
     if not rows:
         indexed: dict[int, dict[str, Any]] = {}
         fallback: dict[str, Any] | None = None
@@ -528,7 +583,7 @@ def _result_from_payload(
         rows = [indexed[key] for key in sorted(indexed)] if indexed else ([fallback] if fallback else [])
     if not rows:
         raise ProviderExecutionError("provider image response contained no image data", error_code="empty_provider_response")
-    created = _safe_created(payload.get("created"))
+    created = _safe_created(payload.get("created", payload.get("created_at")))
     return ImageProviderResult(
         tuple(rows),
         created,
