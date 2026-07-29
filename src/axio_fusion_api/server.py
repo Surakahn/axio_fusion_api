@@ -19,6 +19,15 @@ from .compat import (
     render_response,
     render_stream_events,
 )
+from .image_api import (
+    ImageRequestError,
+    ImageRouter,
+    image_request_timeout,
+    image_route_kind,
+    parse_edit_payload,
+    parse_generation_payload,
+    render_image_stream,
+)
 from .latency_policy import profile_latency_eligibility
 from .orchestrator import FusionEngine, FusionExecutionError, PublicStreamInterruptedError
 from .network import provider_proxy_runtime_summary
@@ -120,6 +129,20 @@ def handle_request(
         return respond(_json_response(200, runtime_state().snapshot()))
     if method.upper() != "POST":
         return respond(_json_response(405, {"error": {"message": "Method not allowed", "code": "method_not_allowed"}}))
+    image_operation = image_route_kind(route)
+    if image_operation:
+        if record_runtime:
+            budget = runtime_state().check_budget(tenant_key)
+            if not budget["allowed"]:
+                return respond(_tenant_budget_exhausted_response(budget))
+        return respond(
+            _handle_image_request(
+                operation=image_operation,
+                headers=headers_lc,
+                body=body,
+                profiles=active_engine.profiles,
+            )
+        )
     try:
         payload = _decode_json(body)
     except ValueError as exc:
@@ -3671,6 +3694,85 @@ def _endpoint_api_format(route: str) -> str:
     if ":generateContent" in route or ":streamGenerateContent" in route:
         return "gemini"
     return ""
+
+
+def _handle_image_request(
+    *,
+    operation: str,
+    headers: Mapping[str, str],
+    body: bytes | str | None,
+    profiles: Sequence[Any],
+) -> tuple[int, dict[str, str], bytes]:
+    """Dispatch the Images API outside the text Fusion protocol adapters.
+
+    Image outputs are opaque binary/base64 artifacts, so they do not pass
+    through ``FusionResponse``, text cost accounting, or any of the four text
+    renderers.  Only the request parser and the verified image capability
+    router are shared with the public gateway boundary.
+    """
+
+    try:
+        if operation == "generations":
+            payload = parse_generation_payload(body)
+            response, result, _profile = ImageRouter(profiles).generate(
+                payload,
+                timeout=image_request_timeout(),
+            )
+        else:
+            payload, files = parse_edit_payload(
+                body,
+                headers.get("content-type", ""),
+            )
+            response, result, _profile = ImageRouter(profiles).edit(
+                payload,
+                files,
+                timeout=image_request_timeout(),
+            )
+        if payload.get("stream") is True:
+            return _stream_response(
+                200,
+                render_image_stream(
+                    result,
+                    public_model=str(response.get("model") or "axio-terra"),
+                ),
+            )
+        return _json_response(200, response)
+    except ImageRequestError as exc:
+        return _json_response(
+            exc.status,
+            {
+                "error": {
+                    "message": str(exc),
+                    "code": exc.code,
+                },
+                "metadata": {
+                    "image_router": True,
+                    "text_fusion_invoked": False,
+                    "raw_prompt_persisted": False,
+                    "raw_provider_response_persisted": False,
+                    "raw_provider_model_ids_persisted": False,
+                    "secrets_persisted": False,
+                },
+            },
+        )
+    except Exception:  # noqa: BLE001 - public HTTP boundary must not leak provider details
+        return _json_response(
+            502,
+            {
+                "error": {
+                    "message": "Image provider request failed.",
+                    "code": "image_provider_unavailable",
+                },
+                "metadata": {
+                    "image_router": True,
+                    "text_fusion_invoked": False,
+                    "internal_details_redacted": True,
+                    "raw_provider_response_persisted": False,
+                    "raw_provider_model_ids_persisted": False,
+                    "secrets_persisted": False,
+                },
+            },
+        )
 
 
 def _stream_requested(route: str, payload: Mapping[str, Any], endpoint: str) -> bool:

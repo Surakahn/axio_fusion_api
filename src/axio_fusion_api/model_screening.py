@@ -327,7 +327,11 @@ def run_prefusion_model_screening(
         all_profiles = _coerce_profiles(profiles, registry_path=registry_path)
     # Keep disabled profiles available for resolving the separately configured
     # research agent. Disabled candidates themselves never enter the inventory.
-    clean_profiles = _dedupe_profiles(all_profiles)
+    clean_profiles = [
+        profile
+        for profile in _dedupe_profiles(all_profiles)
+        if profile.text_model_eligible
+    ]
     groups = _build_candidate_groups(clean_profiles, focus)
     candidate_limit = _bounded_optional_int(max_models, upper=_MAX_CANDIDATE_COUNT)
     candidate_before_limit = len(groups)

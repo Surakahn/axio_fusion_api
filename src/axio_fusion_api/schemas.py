@@ -40,6 +40,19 @@ CAPABILITY_AXES = (
 
 TOOL_CAPABILITY_STATES = ("proven", "unproven", "failed")
 
+# Image models live in the same provider registry as text models, but their
+# admission contract is deliberately separate.  A profile must explicitly
+# declare a supported image operation and its transport before the image
+# router can use it.  This prevents a model-list name such as ``gpt-image-*``
+# from accidentally entering the text Fusion pool or being treated as a
+# generic chat model.
+IMAGE_MODEL_KINDS = ("text", "multimodal", "image")
+IMAGE_OPERATIONS = ("generation", "editing")
+IMAGE_TRANSPORTS = ("images_api", "responses_image_generation")
+IMAGE_CAPABILITY_STATUSES = ("unknown", "candidate", "verified", "unsupported")
+_IMAGE_DEFAULT_GENERATION_PATH = "/images/generations"
+_IMAGE_DEFAULT_EDIT_PATH = "/images/edits"
+
 # Axio keeps one protocol-neutral request field and maps it only through a
 # model-level, verified transport declaration.  The set is intentionally the
 # union of current OpenAI Responses reasoning levels; an individual profile
@@ -367,6 +380,89 @@ def _normalized_tool_capability_state(value: Any, *, supports_tools: bool) -> st
     return state
 
 
+def _normalize_model_kind(value: Any) -> str:
+    normalized = str(value or "text").strip().casefold().replace("_", "-")
+    aliases = {
+        "language": "text",
+        "llm": "text",
+        "vision-language": "multimodal",
+        "vision-language-model": "multimodal",
+        "image-only": "image",
+        "image-model": "image",
+    }
+    normalized = aliases.get(normalized, normalized)
+    return normalized if normalized in IMAGE_MODEL_KINDS else "text"
+
+
+def _normalize_image_path(value: Any, default: str) -> str:
+    raw = str(value or default).strip()
+    if not raw:
+        return default
+    if not raw.startswith("/") or "?" in raw or "#" in raw or "://" in raw:
+        return default
+    if any(character.isspace() for character in raw) or ".." in raw.split("/"):
+        return default
+    # Image-compatible gateways should expose the familiar OpenAI paths.  A
+    # relative /images/* extension is allowed, but arbitrary provider payload
+    # paths are not part of the declarative contract.
+    return raw if raw.startswith("/images/") else default
+
+
+def _normalize_image_capabilities(value: Any) -> dict[str, Any]:
+    raw = value if isinstance(value, Mapping) else {}
+    status = str(raw.get("status") or "unknown").strip().casefold()
+    if status not in IMAGE_CAPABILITY_STATUSES:
+        status = "unknown"
+    transport = str(raw.get("transport") or "").strip().casefold().replace("-", "_")
+    if transport not in IMAGE_TRANSPORTS:
+        transport = ""
+    raw_operations = raw.get("operations", raw.get("supported_operations", ()))
+    if isinstance(raw_operations, str):
+        raw_operations = raw_operations.replace(";", ",").split(",")
+    operations: list[str] = []
+    if isinstance(raw_operations, Sequence) and not isinstance(raw_operations, (bytes, bytearray)):
+        for item in raw_operations:
+            operation = str(item or "").strip().casefold().replace("-", "_")
+            if operation == "generate":
+                operation = "generation"
+            if operation == "edit":
+                operation = "editing"
+            if operation in IMAGE_OPERATIONS and operation not in operations:
+                operations.append(operation)
+    # Boolean operation flags keep simple manifests readable while the
+    # normalized artifact remains one fixed shape.
+    if raw.get("supports_generation") is True or raw.get("generation") is True:
+        if "generation" not in operations:
+            operations.append("generation")
+    if raw.get("supports_editing") is True or raw.get("editing") is True:
+        if "editing" not in operations:
+            operations.append("editing")
+    if not transport or not operations:
+        status = "unknown" if status == "verified" else status
+    try:
+        max_input_images = int(raw.get("max_input_images", raw.get("maxInputImages", 1)))
+    except (TypeError, ValueError):
+        max_input_images = 1
+    max_input_images = max(1, min(16, max_input_images))
+    streaming = bool(raw.get("streaming", raw.get("supports_streaming", False)))
+    return {
+        "status": status,
+        "transport": transport,
+        "operations": [operation for operation in IMAGE_OPERATIONS if operation in operations],
+        "generation_path": _normalize_image_path(
+            raw.get("generation_path", raw.get("generationPath")),
+            _IMAGE_DEFAULT_GENERATION_PATH,
+        ),
+        "editing_path": _normalize_image_path(
+            raw.get("editing_path", raw.get("editingPath")),
+            _IMAGE_DEFAULT_EDIT_PATH,
+        ),
+        "max_input_images": max_input_images,
+        "streaming": streaming,
+        "raw_payload_paths_persisted": False,
+    }
+
+
 def canonical_public_model(value: str | None) -> str:
     normalized = str(value or "").strip().lower()
     if normalized in PUBLIC_MODELS:
@@ -462,6 +558,12 @@ class ModelProfile:
     tool_capability_source: str = ""
     tool_probe_status: str = "not_run"
     supports_vision: bool = False
+    # Text and image modalities share credentials but never share a Fusion
+    # candidate pool. Image eligibility is an explicit, separately probed
+    # capability rather than a model-name heuristic.
+    model_kind: str = "text"
+    image_capabilities: Mapping[str, Any] = field(default_factory=dict)
+    image_probe_status: str = "not_run"
     privacy_tags: tuple[str, ...] = ("external_provider",)
     base_url_env: str = ""
     api_key_env: str = ""
@@ -536,6 +638,13 @@ class ModelProfile:
         object.__setattr__(self, "supports_tools", supports_tools)
         object.__setattr__(self, "tool_capability", state)
         object.__setattr__(self, "tool_capability_source", source)
+        object.__setattr__(self, "model_kind", _normalize_model_kind(self.model_kind))
+        object.__setattr__(self, "image_capabilities", _normalize_image_capabilities(self.image_capabilities))
+        object.__setattr__(
+            self,
+            "image_probe_status",
+            str(self.image_probe_status or "not_run").strip().casefold() or "not_run",
+        )
         object.__setattr__(
             self,
             "tool_probe_status",
@@ -646,6 +755,9 @@ class ModelProfile:
             "tool_capability_source": self.tool_capability_source,
             "tool_probe_status": self.tool_probe_status,
             "supports_vision": self.supports_vision,
+            "model_kind": self.model_kind,
+            "image_capabilities": dict(self.image_capabilities),
+            "image_probe_status": self.image_probe_status,
             "privacy_tags": list(self.privacy_tags),
             "base_url_env": self.base_url_env,
             "api_key_env": self.api_key_env,
@@ -713,6 +825,42 @@ class ModelProfile:
         """Whether routing may spend a native-tool turn on this profile."""
 
         return bool(self.supports_tools and self.tool_capability == "proven")
+
+    @property
+    def text_model_eligible(self) -> bool:
+        """Whether this profile may enter the text Fusion candidate pool."""
+
+        return self.model_kind in {"text", "multimodal"}
+
+    @property
+    def image_operations(self) -> tuple[str, ...]:
+        operations = self.image_capabilities.get("operations", ())
+        if not isinstance(operations, Sequence) or isinstance(operations, (str, bytes, bytearray)):
+            return ()
+        operation_set = {str(item) for item in operations}
+        return tuple(operation for operation in IMAGE_OPERATIONS if operation in operation_set)
+
+    @property
+    def image_generation_eligible(self) -> bool:
+        return bool(
+            self.enabled
+            and self.model_kind in {"image", "multimodal"}
+            and self.image_capabilities.get("status") == "verified"
+            and self.image_probe_status in {"passed", "verified", "success", "ok"}
+            and self.image_capabilities.get("transport") in IMAGE_TRANSPORTS
+            and "generation" in self.image_operations
+        )
+
+    @property
+    def image_editing_eligible(self) -> bool:
+        return bool(
+            self.enabled
+            and self.model_kind in {"image", "multimodal"}
+            and self.image_capabilities.get("status") == "verified"
+            and self.image_probe_status in {"passed", "verified", "success", "ok"}
+            and self.image_capabilities.get("transport") == "images_api"
+            and "editing" in self.image_operations
+        )
 
 
 @dataclass(frozen=True)

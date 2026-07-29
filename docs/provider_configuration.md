@@ -21,6 +21,53 @@ described through environment variable *names*, never through copied endpoint
 or credential values. Supported upstream input protocols are `chat`,
 `responses`, `anthropic`, and `gemini`.
 
+## Image Capability Isolation
+
+Image models are registered beside text models but use a separate capability
+contract. A name such as `gpt-image-*` is never enough to admit a model: the
+profile must explicitly declare `model_kind: "image"` (or `"multimodal"`), an
+audited image transport, its allowed operations, and a successful image
+endpoint probe. Image profiles are excluded from the text pre-Fusion
+candidate pool, Judge, Synthesizer, and text benchmark path.
+
+The configuration shape is:
+
+```json
+{
+  "model": "gpt-image-2",
+  "model_kind": "image",
+  "image_capabilities": {
+    "status": "candidate",
+    "transport": "images_api",
+    "operations": ["generation", "editing"],
+    "streaming": true,
+    "max_input_images": 1
+  },
+  "image_probe_status": "not_run"
+}
+```
+
+The checked-in example remains `candidate`/`not_run`; it cannot serve images
+until an operator performs an endpoint-bound generation/edit probe and carries
+the resulting `verified`/`passed` state into the private serving registry.
+This prevents a model-list entry or a copied vendor claim from turning a text
+endpoint into an image endpoint.
+
+The public image routes are deliberately outside the four text protocol
+adapters:
+
+- `POST /v1/images/generations` accepts the allow-listed OpenAI Images JSON
+  fields and returns one image response with the requested Axio tier.
+- `POST /v1/images/edits` accepts `multipart/form-data` with `image`, optional
+  `mask`, and `prompt`; it enforces the admitted provider's input-image limit.
+
+`stream: true` uses image-native SSE event names such as
+`image_generation.partial_image` and `image_edit.completed`. Base64 image
+data is returned only as the requested public image artifact; it is never
+converted into text Fusion candidates or persisted in internal traces. The
+same proxy policy, credential pool, same-model failover, and 90-second hard
+provider ceiling apply to image requests.
+
 ## Reasoning Strength Transport
 
 `FusionRequest.reasoning_effort` is Axio's protocol-neutral logical control.

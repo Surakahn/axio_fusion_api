@@ -809,6 +809,13 @@ def _profile_from_probe_row(row: Mapping[str, Any], *, status: str) -> ModelProf
         else (0 if status == "available" else 1),
         "supports_tools": row.get("supports_tools", False),
         "supports_vision": row.get("supports_vision", False),
+        "model_kind": row.get("model_kind", row.get("modelKind", "text")),
+        "image_capabilities": (
+            dict(row.get("image_capabilities"))
+            if isinstance(row.get("image_capabilities"), Mapping)
+            else {}
+        ),
+        "image_probe_status": row.get("image_probe_status", "not_run"),
         "reasoning_transport": (
             dict(row.get("reasoning_transport"))
             if isinstance(row.get("reasoning_transport"), Mapping)
@@ -1661,6 +1668,27 @@ def normalize_profile(raw: Mapping[str, Any]) -> ModelProfile:
             or "not_run"
         ),
         supports_vision=_coerce_bool(raw.get("supports_vision", raw.get("vision", False))),
+        model_kind=str(
+            raw.get("model_kind")
+            or raw.get("modelKind")
+            or raw.get("modality")
+            or raw.get("model_modality")
+            or "text"
+        ),
+        image_capabilities=(
+            dict(raw.get("image_capabilities"))
+            if isinstance(raw.get("image_capabilities"), Mapping)
+            else (
+                dict(raw.get("imageCapabilities"))
+                if isinstance(raw.get("imageCapabilities"), Mapping)
+                else {}
+            )
+        ),
+        image_probe_status=str(
+            raw.get("image_probe_status")
+            or raw.get("imageProbeStatus")
+            or "not_run"
+        ),
         privacy_tags=_normalize_privacy_tags(raw.get("privacy_tags", ["external_provider"])),
         base_url_env=str(raw.get("base_url_env") or _default_base_url_env(provider)),
         api_key_env=str(raw.get("api_key_env") or _default_api_key_env(provider)),
@@ -3060,6 +3088,9 @@ def provider_seed_profiles_from_env(provider_names: Sequence[str] | None = None)
                     "context_tokens": config.get("context_tokens"),
                     "supports_tools": config.get("supports_tools", False),
                     "supports_vision": config.get("supports_vision", False),
+                    "model_kind": config.get("model_kind", config.get("modelKind", "text")),
+                    "image_capabilities": config.get("image_capabilities", config.get("imageCapabilities", {})),
+                    "image_probe_status": config.get("image_probe_status", config.get("imageProbeStatus", "not_run")),
                     "reasoning_transport": (
                         dict(config.get("reasoning_transport"))
                         if isinstance(config.get("reasoning_transport"), Mapping)
@@ -3139,6 +3170,9 @@ def provider_discovery_priors_from_env(provider_names: Sequence[str] | None = No
             "context_tokens": config.get("context_tokens"),
             "supports_tools": config.get("supports_tools", False),
             "supports_vision": config.get("supports_vision", False),
+            "model_kind": config.get("model_kind", config.get("modelKind", "text")),
+            "image_capabilities": config.get("image_capabilities", config.get("imageCapabilities", {})),
+            "image_probe_status": config.get("image_probe_status", config.get("imageProbeStatus", "not_run")),
             "reasoning_transport": (
                 dict(config.get("reasoning_transport"))
                 if isinstance(config.get("reasoning_transport"), Mapping)
@@ -3232,6 +3266,9 @@ def _custom_provider_models_from_config(config: Mapping[str, Any]) -> list[dict[
                 "context_tokens": _model_config_value(config, model_config, "context_tokens"),
                 "supports_tools": _model_config_value(config, model_config, "supports_tools", default=False),
                 "supports_vision": _model_config_value(config, model_config, "supports_vision", default=False),
+                "model_kind": _model_config_value(config, model_config, "model_kind", default="text"),
+                "image_capabilities": _model_config_value(config, model_config, "image_capabilities", default={}),
+                "image_probe_status": _model_config_value(config, model_config, "image_probe_status", default="not_run"),
                 "reasoning_transport": _model_config_value(
                     config,
                     model_config,
@@ -3546,6 +3583,13 @@ def _sanitize_provider_config(config: Mapping[str, Any]) -> dict[str, Any]:
         "context_tokens": config.get("context_tokens"),
         "supports_tools": config.get("supports_tools", False),
         "supports_vision": config.get("supports_vision", False),
+        "model_kind": config.get("model_kind", config.get("modelKind", "text")),
+        "image_capabilities": (
+            dict(config.get("image_capabilities"))
+            if isinstance(config.get("image_capabilities"), Mapping)
+            else {}
+        ),
+        "image_probe_status": config.get("image_probe_status", config.get("imageProbeStatus", "not_run")),
         "reasoning_transport": (
             config.get("reasoning_transport")
             if isinstance(config.get("reasoning_transport"), Mapping)
@@ -3673,6 +3717,10 @@ def _normalize_model_config_row(row: Mapping[str, Any]) -> dict[str, Any]:
         "contextTokens": "context_tokens",
         "supportsTools": "supports_tools",
         "supportsVision": "supports_vision",
+        "modelKind": "model_kind",
+        "modality": "model_kind",
+        "imageCapabilities": "image_capabilities",
+        "imageProbeStatus": "image_probe_status",
         "privacyTags": "privacy_tags",
         "canonicalModelId": "canonical_model_id",
         "canonicalModel": "canonical_model",
@@ -3740,6 +3788,9 @@ def _discovery_model_priors_for_config(config: Mapping[str, Any]) -> dict[str, d
             "context_tokens": _model_config_value(config, model_config, "context_tokens"),
             "supports_tools": _model_config_value(config, model_config, "supports_tools", default=False),
             "supports_vision": _model_config_value(config, model_config, "supports_vision", default=False),
+            "model_kind": _model_config_value(config, model_config, "model_kind", default="text"),
+            "image_capabilities": _model_config_value(config, model_config, "image_capabilities", default={}),
+            "image_probe_status": _model_config_value(config, model_config, "image_probe_status", default="not_run"),
             "reasoning_transport": _model_config_value(
                 config,
                 model_config,

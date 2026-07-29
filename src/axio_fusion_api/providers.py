@@ -3143,6 +3143,9 @@ def _discovered_profile_row(
         "context_tokens",
         "supports_tools",
         "supports_vision",
+        "model_kind",
+        "image_capabilities",
+        "image_probe_status",
     ):
         value = _prior_value(model_prior, prior, key, getattr(seed, key, None))
         if value not in (None, ""):
@@ -6110,6 +6113,9 @@ def _probe_profile_metadata(profile: ModelProfile) -> dict[str, Any]:
         "tool_probe_status": profile.tool_probe_status,
         "tool_calling_eligible": profile.tool_calling_eligible,
         "supports_vision": profile.supports_vision,
+        "model_kind": profile.model_kind,
+        "image_capabilities": dict(profile.image_capabilities),
+        "image_probe_status": profile.image_probe_status,
         "reasoning_transport": (
             dict(profile.reasoning_transport)
             if isinstance(profile.reasoning_transport, Mapping)
@@ -6185,6 +6191,13 @@ def _redact_probe_row(row: Mapping[str, Any]) -> dict[str, Any]:
         "tool_capability_source": str(row.get("tool_capability_source") or ""),
         "tool_probe_status": str(row.get("tool_probe_status") or "not_run"),
         "supports_vision": bool(row.get("supports_vision")),
+        "model_kind": str(row.get("model_kind") or "text")[:32],
+        "image_capabilities": (
+            dict(row.get("image_capabilities"))
+            if isinstance(row.get("image_capabilities"), Mapping)
+            else {}
+        ),
+        "image_probe_status": str(row.get("image_probe_status") or "not_run")[:32],
         "privacy_tag_count": len(privacy_tags),
         "privacy_tag_set_sha256": sha256_text(stable_json(sorted(privacy_tags))) if privacy_tags else "",
         "base_url_env_sha256": sha256_text(str(row.get("base_url_env") or "")) if row.get("base_url_env") else "",

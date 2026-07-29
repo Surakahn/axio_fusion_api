@@ -184,6 +184,7 @@ large number of provider calls automatically means better intelligence.
 | **Hermes-style constrained MoA** | Reference models receive bounded, role-specific evidence tasks. Judge and acting Synthesizer stages remain explicit, budgeted, and auditable. |
 | **Harness as configuration** | Prompt fragments, role contracts, DAG composition, and policy preferences are the adjustable Lego pieces. Runtime Python remains immutable and outside the self-improvement surface. |
 | **Four protocol surfaces** | Chat Completions, Responses, Anthropic Messages, and Gemini GenerateContent can reach the same public Axio tiers through streaming-compatible adapters. |
+| **Modality-safe image lane** | Verified `gpt-image-*` or multimodal profiles use dedicated Images generation/edit routes; image artifacts never enter text Fusion, Judge, or Synthesizer stages. |
 | **Hard operational guardrails** | Provider calls have a 90-second ceiling, Fusion routes carry a 3x single-model latency guard, and budget/deadline reservations prevent an incomplete pipeline from being reported as complete. |
 | **Evaluation boundary** | Benchmark execution is an external consumer of Axio, not a hidden routing input. Test labels, answers, and benchmark scores cannot steer production prompts or provider selection. |
 
@@ -2553,6 +2554,22 @@ Streaming is supported for all four public API families through SSE-compatible
 response bodies.  For Chat Completions, Responses, and Anthropic-compatible
 Messages, set `"stream": true`; for Gemini-compatible calls use
 `:streamGenerateContent`.
+
+Image generation and editing are a separate public capability lane. They are
+available only for profiles with explicit, endpoint-bound image verification:
+
+```text
+POST /v1/images/generations   JSON prompt -> image data
+POST /v1/images/edits         multipart image/mask/prompt -> image data
+```
+
+The image lane accepts the three Axio tier names as routing policies, not as a
+request to merge multiple image artifacts. `gpt-image-*` is therefore never
+treated as an ordinary language model, and a failed image capability probe
+cannot make a text profile or text Fusion route appear healthy. With
+`"stream": true`, image-native partial/completed SSE events are returned; the
+gateway does not persist image payloads or mix them into benchmark text
+transcripts.
 Terminal events remain protocol-native: only Chat Completions emits
 `data: [DONE]`; Responses ends with `response.completed`, Anthropic ends with
 `message_stop` after `message_delta`, and Gemini-compatible streaming follows

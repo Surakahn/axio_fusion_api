@@ -6,6 +6,14 @@ HTTP-compatible model APIs.
 """
 
 from .compat import canonicalize_payload, render_response
+from .image_api import (
+    ImageProviderClient,
+    ImageProviderResult,
+    ImageRequestError,
+    ImageRouter,
+    parse_edit_payload,
+    parse_generation_payload,
+)
 from .channel_config import (
     ChannelConfigError,
     build_runtime_profiles,
@@ -100,4 +108,10 @@ __all__ = [
     "runtime_channel_summary",
     "AtomicFusionRuntime",
     "RuntimeActivationError",
+    "ImageProviderClient",
+    "ImageProviderResult",
+    "ImageRequestError",
+    "ImageRouter",
+    "parse_edit_payload",
+    "parse_generation_payload",
 ]

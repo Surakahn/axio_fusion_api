@@ -69,6 +69,26 @@
           "canonical_model_id": "vendor-model-family-version"
         }
       ]
+    },
+    {
+      "provider": "example-image-channel",
+      "api_format": "chat/completions",
+      "base_url_env": "AXIO_EXAMPLE_IMAGE_BASE_URL",
+      "api_key_env": "AXIO_EXAMPLE_IMAGE_API_KEY",
+      "models": [
+        {
+          "model": "gpt-image-2",
+          "model_kind": "image",
+          "image_capabilities": {
+            "status": "candidate",
+            "transport": "images_api",
+            "operations": ["generation", "editing"],
+            "streaming": true,
+            "max_input_images": 1
+          },
+          "image_probe_status": "not_run"
+        }
+      ]
     }
   ]
 }
