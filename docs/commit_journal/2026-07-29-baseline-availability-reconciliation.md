@@ -3,10 +3,10 @@
 ## Decision
 
 The first formal long-request admission receipt was not used as the final
-baseline universe by itself. A later non-target screening unit established a
-monotonic transport lower bound above the frozen `0.02` failure-rate gate for
-one profile. That profile is excluded before provider ranking; its partial
-answers and scores are not reused.
+baseline universe by itself. Later non-target screening units established
+monotonic transport lower bounds above the frozen `0.02` failure-rate gate for
+three profiles. Those profiles are excluded before provider ranking; their
+partial answers and scores are not reused.
 
 ## Evidence Boundary
 
@@ -21,13 +21,13 @@ answers and scores are not reused.
 
 ## Re-registration
 
-The first subset-only admission attempt was rejected by the coverage validator
-because a private receipt must bind every enabled registry profile. The
-reconciled receipt preserves complete coverage and binds the exclusion to the
-private screening plan/task hashes and aggregate failure counts. It then
-produced a fresh r8 screening plan with 19 formal eligible logical models, 38
-source-candidate units, two independent non-target source families, and a
-frozen single-worker condition.
+The subset-only admission attempt was rejected by the coverage validator
+because a private receipt must bind every enabled registry profile. Each
+reconciled receipt therefore preserves complete coverage and binds the
+exclusion to private screening plan/task hashes and aggregate failure counts.
+After three such transport-only exclusions, the current r10 plan contains 17
+formal eligible logical models, 34 source-candidate units, two independent
+non-target source families, and a frozen single-worker condition.
 
 ## Non-Claims
 
