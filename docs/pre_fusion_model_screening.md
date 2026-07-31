@@ -75,9 +75,12 @@ the model ranking and not benchmark evidence.
 
 The stdlib streaming adapter applies the deadline to the socket and runs a
 daemon watchdog that closes the complete response/wrapper/socket chain when a
-proxy or TLS wrapper ignores the read timeout. This protects both the
-pre-Fusion control plane and serving workers from an unbounded blocked read;
-the resulting request is still recorded as failed and never admitted.
+proxy or TLS wrapper ignores the read timeout. The HTTPS connection itself
+also has a connect-stage watchdog covering proxy CONNECT and TLS handshake;
+the TLS phase receives only the time remaining from that same deadline. This
+protects both the pre-Fusion control plane and serving workers from an
+unbounded blocked read or handshake; the resulting request is still recorded
+as failed and never admitted.
 5. Bind only the eligible profile hashes to a private loadable registry. A
    blocked screening run never produces enabled serving profiles.
 

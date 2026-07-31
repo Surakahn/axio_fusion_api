@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import ssl
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -169,8 +171,38 @@ def test_https_connection_reapplies_timeout_before_and_after_tls(monkeypatch):
     )
     connection.connect()
 
-    assert raw_socket.timeouts == [1.25]
-    assert wrapped_socket.timeouts == [1.25]
+    assert len(raw_socket.timeouts) == 1
+    assert 0.0 < raw_socket.timeouts[0] <= 1.25
+    assert len(wrapped_socket.timeouts) == 1
+    assert 0.0 < wrapped_socket.timeouts[0] <= 1.25
+
+
+def test_https_connection_watchdog_closes_blocked_proxy_socket(monkeypatch):
+    closed = threading.Event()
+
+    class BlockingSocket:
+        def close(self):
+            closed.set()
+
+    def fake_http_connect(connection):
+        connection.sock = BlockingSocket()
+        if not closed.wait(1.0):
+            raise AssertionError("connect watchdog did not close the proxy socket")
+        raise OSError("proxy tunnel deadline expired")
+
+    monkeypatch.setattr(network.http.client.HTTPConnection, "connect", fake_http_connect)
+
+    connection = network._DeadlineHTTPSConnection(
+        "provider.invalid",
+        timeout=0.03,
+        context=ssl.create_default_context(),
+    )
+    started = time.monotonic()
+    with pytest.raises(OSError, match="deadline"):
+        connection.connect()
+
+    assert closed.is_set()
+    assert time.monotonic() - started < 0.5
 
 
 def test_network_opener_installs_bounded_https_handler(monkeypatch):

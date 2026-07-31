@@ -14,6 +14,8 @@ from __future__ import annotations
 import os
 import http.client
 import socket
+import threading
+import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -68,19 +70,64 @@ class _DeadlineHTTPSConnection(http.client.HTTPSConnection):
     """
 
     def connect(self) -> None:
-        # This performs DNS/TCP setup and an HTTP CONNECT when the request is
-        # routed through a proxy.  HTTPConnection already passes self.timeout
-        # to socket.create_connection and the tunnel reader.
-        http.client.HTTPConnection.connect(self)
-        _set_connection_socket_timeout(self.sock, self.timeout)
-        server_hostname = self._tunnel_host or self.host
-        self.sock = self._context.wrap_socket(
-            self.sock,
-            server_hostname=server_hostname,
-        )
-        # Some SSL wrappers reset the timeout while taking ownership of the
-        # raw socket.  Restore it on the object used by the HTTP response.
-        _set_connection_socket_timeout(self.sock, self.timeout)
+        timeout = _finite_connection_timeout(self.timeout)
+        deadline_at = time.monotonic() + timeout if timeout is not None else None
+
+        def expire_connection() -> None:
+            sock = getattr(self, "sock", None)
+            if sock is None:
+                return
+            try:
+                sock.close()
+            except Exception:
+                return
+
+        watchdog = None
+        if timeout is not None:
+            watchdog = threading.Timer(timeout, expire_connection)
+            watchdog.daemon = True
+            watchdog.start()
+        try:
+            # This performs DNS/TCP setup and an HTTP CONNECT when the request
+            # is routed through a proxy. The watchdog also covers stdlib tunnel
+            # reads when a proxy ignores the socket timeout.
+            http.client.HTTPConnection.connect(self)
+            remaining = _remaining_connection_timeout(deadline_at, timeout)
+            _set_connection_socket_timeout(self.sock, remaining)
+            server_hostname = self._tunnel_host or self.host
+            self.sock = self._context.wrap_socket(
+                self.sock,
+                server_hostname=server_hostname,
+            )
+            # Some SSL wrappers reset the timeout while taking ownership of the
+            # raw socket. Restore only the time that remains in this connect
+            # deadline so CONNECT + TLS cannot exceed the original budget.
+            _set_connection_socket_timeout(
+                self.sock,
+                _remaining_connection_timeout(deadline_at, timeout),
+            )
+        finally:
+            if watchdog is not None:
+                watchdog.cancel()
+
+
+def _finite_connection_timeout(value: Any) -> float | None:
+    if value is None or value is socket._GLOBAL_DEFAULT_TIMEOUT:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0.0 else None
+
+
+def _remaining_connection_timeout(
+    deadline_at: float | None,
+    fallback: float | None,
+) -> float | None:
+    if deadline_at is None:
+        return fallback
+    return max(0.001, deadline_at - time.monotonic())
 
 
 class _DeadlineHTTPSHandler(urllib.request.HTTPSHandler):
