@@ -190,6 +190,7 @@ _MAX_RESEARCH_BATCH_SIZE = 64
 _DEFAULT_RESEARCH_MAX_WORKERS = 4
 _MAX_RESEARCH_MAX_WORKERS = 8
 _MAX_RESEARCH_RETRIES_PER_BATCH = 1
+_MAX_RESEARCH_TRANSPORT_RETRIES_PER_BATCH = 2
 _DEFAULT_PREFUSION_STABILITY_PROBE_SAMPLES = 3
 _MAX_PREFUSION_STABILITY_PROBE_SAMPLES = 5
 _RESEARCH_RETRYABLE_ERROR_PREFIXES = (
@@ -4396,7 +4397,14 @@ def _run_research_agent_batches(
         try:
             attempts: list[dict[str, Any]] = []
             repair_reason = ""
-            for attempt in range(1, _MAX_RESEARCH_RETRIES_PER_BATCH + 2):
+            for attempt in range(
+                1,
+                max(
+                    _MAX_RESEARCH_RETRIES_PER_BATCH,
+                    _MAX_RESEARCH_TRANSPORT_RETRIES_PER_BATCH,
+                )
+                + 2,
+            ):
                 attempt_receipt: dict[str, Any] = {
                     "attempt": attempt,
                     "status": "failed",
@@ -4464,9 +4472,10 @@ def _run_research_agent_batches(
                     attempt_receipt["status"] = "failed"
                     attempt_receipt["error_code"] = exc.code
                     attempts.append(attempt_receipt)
-                    # A measured deadline violation is final for this batch.
-                    # Retrying it would turn the 90-second admission gate into
-                    # an unbounded latency escape hatch.
+                    # Schema failures keep the one-repair-round contract. A
+                    # measured latency still bounds every individual request;
+                    # transport failures are allowed one additional recovery
+                    # round below without admitting partial output.
                     retryable = (
                         exc.code.startswith(_RESEARCH_RETRYABLE_ERROR_PREFIXES)
                         or exc.code == "prefusion_research_agent_request_failed"
@@ -4558,9 +4567,10 @@ def _run_research_agent_batches(
                     attempt_receipt["status"] = "failed"
                     attempt_receipt["error_code"] = code
                     attempts.append(attempt_receipt)
-                    # Transport errors are retried once as a bounded recovery
-                    # attempt, but a second failure still blocks the ranking.
-                    if attempt > _MAX_RESEARCH_RETRIES_PER_BATCH:
+                    # Transport errors get at most two recovery rounds. Each
+                    # attempt receives the remaining provider budget and a
+                    # third failure still blocks the complete ranking.
+                    if attempt > _MAX_RESEARCH_TRANSPORT_RETRIES_PER_BATCH:
                         receipt.update(
                             {
                                 "status": "failed",
@@ -4655,6 +4665,7 @@ def _run_research_agent_batches(
         "raw_research_output_persisted": False,
         "secrets_persisted": False,
         "max_retries_per_batch": _MAX_RESEARCH_RETRIES_PER_BATCH,
+        "max_transport_retries_per_batch": _MAX_RESEARCH_TRANSPORT_RETRIES_PER_BATCH,
         "candidate_specific_evidence_forces_single_candidate_batch": True,
         "research_batch_isolation_mode": "candidate_specific_singleton_shared_batched",
     }

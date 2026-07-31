@@ -575,6 +575,12 @@ probe alone. A missing source manifest, missing research-agent credentials, an
 incomplete ranking, an ordinary JSON response advertised as streaming, or a
 latency measurement over 90 seconds leaves startup blocked.
 
+The research Agent keeps schema, role, and evidence repair to one bounded retry
+round. Clearly classified transport failures may use at most two additional
+attempts, each with the same 90-second provider ceiling; a third transport
+failure blocks the complete ranking. These retries never permit partial rows or
+a partial registry to become serving evidence.
+
 The runtime enrollment receipt contains only counts and hashes for the
 pre-Fusion handoff. The raw `available_model_list` remains in the private
 operator registry/report, while Fusion receives the physical profile objects
