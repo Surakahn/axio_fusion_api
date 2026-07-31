@@ -199,6 +199,18 @@ _RESEARCH_RETRYABLE_ERROR_PREFIXES = (
     "prefusion_research_agent_empty_output",
     "prefusion_research_agent_output_exceeds_bound",
 )
+_RESEARCH_SINGLETON_RECOVERY_ERRORS = frozenset(
+    {
+        "prefusion_research_output_not_strict_json",
+        "prefusion_research_output_not_object",
+        "prefusion_research_output_extra_keys",
+        "prefusion_research_output_row_invalid",
+        "prefusion_research_output_source_evidence_invalid",
+        "prefusion_research_output_source_evidence_scope_invalid",
+        "prefusion_research_output_source_evidence_hash_missing",
+        "prefusion_research_batch_candidate_count_mismatch",
+    }
+)
 _RESEARCH_MERGE_STRATEGY = "deterministic_research_quality_confidence_candidate_id"
 _DEFAULT_SOURCE_TIMEOUT_SECONDS = 15.0
 _MAX_SOURCE_FETCH_WORKERS = 8
@@ -4233,6 +4245,89 @@ def _run_research_agent(
     return text, latency_ms
 
 
+def _run_research_agent_singleton_recovery(
+    profile: ModelProfile,
+    *,
+    groups: Sequence[Mapping[str, Any]],
+    source_pack: Mapping[str, Any],
+    source_slots: Sequence[str],
+    source_evidence: Mapping[str, str],
+    source_scope: Mapping[str, Sequence[str]],
+    focus_manifest: Mapping[str, Any],
+    timeout: float,
+    client: Any,
+    batch_index: int,
+    batch_count: int,
+    repair_reason: str,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Recover one malformed multi-candidate shard with bounded singletons.
+
+    A model can satisfy the schema for one candidate while truncating or
+    adding prose around a larger JSON object.  This recovery is deliberately
+    candidate-local and finite: it never accepts the earlier malformed output,
+    and one failed singleton still blocks the complete ranking.
+    """
+
+    recovered_rows: list[dict[str, Any]] = []
+    singleton_receipts: list[dict[str, Any]] = []
+    for singleton_index, group in enumerate(groups, start=1):
+        candidate_ids = [str(group.get("candidate_id") or "")]
+        raw_output, latency_ms = _run_research_agent(
+            profile,
+            groups=[group],
+            source_pack=source_pack,
+            timeout=timeout,
+            client=client,
+            batch_index=batch_index,
+            batch_count=batch_count,
+            attempt=3,
+            repair_reason=repair_reason,
+        )
+        if latency_ms > PROVIDER_MAX_RESPONSE_LATENCY_MS:
+            raise ModelScreeningError("prefusion_research_agent_latency_ineligible")
+        normalized = validate_prefusion_research_output(
+            _parse_strict_json_object(raw_output),
+            groups=[group],
+            source_slots=source_slots,
+            source_evidence=source_evidence,
+            source_scope=source_scope,
+            focus_manifest=focus_manifest,
+        )
+        normalized_rows = list(normalized.get("ordered_models") or [])
+        if len(normalized_rows) != 1:
+            raise ModelScreeningError("prefusion_research_batch_candidate_count_mismatch")
+        recovered_rows.extend(
+            dict(row) for row in normalized_rows if isinstance(row, Mapping)
+        )
+        singleton_receipts.append(
+            {
+                "singleton_index": singleton_index,
+                "candidate_set_sha256": sha256_text(stable_json(candidate_ids)),
+                "status": "validated",
+                "output_sha256": sha256_text(raw_output),
+                "latency_ms": round(latency_ms, 3),
+                "normalized_rows_sha256": sha256_text(stable_json(normalized_rows)),
+                "raw_prompt_persisted": False,
+                "raw_output_persisted": False,
+                "secrets_persisted": False,
+            }
+        )
+    expected_ids = [str(group.get("candidate_id") or "") for group in groups]
+    observed_ids = [str(row.get("candidate_id") or "") for row in recovered_rows]
+    if observed_ids != expected_ids:
+        raise ModelScreeningError("prefusion_research_batch_coverage_invalid")
+    return recovered_rows, {
+        "attempt": "singleton_recovery",
+        "status": "validated",
+        "candidate_count": len(recovered_rows),
+        "candidate_rows_sha256": sha256_text(stable_json(recovered_rows)),
+        "singleton_receipts": singleton_receipts,
+        "raw_prompt_persisted": False,
+        "raw_output_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
 def _run_research_agent_batches(
     profile: ModelProfile,
     *,
@@ -4376,11 +4471,75 @@ def _run_research_agent_batches(
                         exc.code.startswith(_RESEARCH_RETRYABLE_ERROR_PREFIXES)
                         or exc.code == "prefusion_research_agent_request_failed"
                     )
-                    if (
+                    exhausted = (
                         attempt > _MAX_RESEARCH_RETRIES_PER_BATCH
                         or not retryable
                         or exc.code == "prefusion_research_agent_latency_ineligible"
-                    ):
+                    )
+                    if exhausted:
+                        if (
+                            attempt > _MAX_RESEARCH_RETRIES_PER_BATCH
+                            and len(batch_groups) > 1
+                            and exc.code in _RESEARCH_SINGLETON_RECOVERY_ERRORS
+                        ):
+                            try:
+                                recovered_rows, recovery_receipt = (
+                                    _run_research_agent_singleton_recovery(
+                                        profile,
+                                        groups=batch_groups,
+                                        source_pack=source_pack,
+                                        source_slots=source_slots,
+                                        source_evidence=source_evidence,
+                                        source_scope=source_scope,
+                                        focus_manifest=focus_manifest,
+                                        timeout=timeout,
+                                        client=client,
+                                        batch_index=batch_index,
+                                        batch_count=len(batches),
+                                        repair_reason=exc.code,
+                                    )
+                                )
+                            except (ModelScreeningError, ProviderExecutionError) as recovery_exc:
+                                receipt["singleton_recovery"] = {
+                                    "status": "failed",
+                                    "error_code": str(
+                                        getattr(
+                                            recovery_exc,
+                                            "code",
+                                            getattr(
+                                                recovery_exc,
+                                                "error_code",
+                                                "prefusion_research_agent_request_failed",
+                                            ),
+                                        )
+                                        or "prefusion_research_agent_request_failed"
+                                    )[:120],
+                                    "raw_prompt_persisted": False,
+                                    "raw_output_persisted": False,
+                                    "secrets_persisted": False,
+                                }
+                            else:
+                                recovery_rows_sha256 = sha256_text(
+                                    stable_json(recovered_rows)
+                                )
+                                receipt.update(
+                                    {
+                                        "status": "validated",
+                                        "output_sha256": recovery_rows_sha256,
+                                        "latency_ms": None,
+                                        "normalized_row_count": len(recovered_rows),
+                                        "normalized_rows_sha256": recovery_rows_sha256,
+                                        "attempt_count": attempt,
+                                        "retry_used": True,
+                                        "singleton_recovery_used": True,
+                                        "attempts": [*attempts, recovery_receipt],
+                                    }
+                                )
+                                return {
+                                    "index": batch_index,
+                                    "rows": recovered_rows,
+                                    "receipt": receipt,
+                                }
                         receipt.update(
                             {
                                 "status": "failed",

@@ -1522,6 +1522,55 @@ def test_research_batch_retries_once_then_merges_only_validated_output():
     assert [row["rank"] for row in ranking["ordered_models"]] == [1, 2, 3]
 
 
+def test_malformed_multi_candidate_batch_recovers_with_validated_singletons():
+    profiles = [
+        _profile("provider-a", f"model-{index:02d}", f"model-{index:02d}")
+        for index in range(3)
+    ]
+    groups = _groups(profiles)
+
+    class SplitRecoveryClient(_BatchResearchClient):
+        def complete_turn(self, profile, request, *, prompt, system, timeout):
+            del profile, request, system, timeout
+            self.calls.append({"prompt": prompt})
+            marker = "AUTHORITATIVE_CANDIDATE_INVENTORY\n"
+            inventory = prompt.split(marker, 1)[1].split(
+                "\n\nUNTRUSTED_SOURCE_DATA", 1
+            )[0]
+            rows = json.loads(inventory)
+            candidate_ids = [str(row["candidate_id"]) for row in rows]
+            if len(candidate_ids) > 1:
+                return ProviderCompletion("not-json")
+            return ProviderCompletion(json.dumps(_research_output(candidate_ids)))
+
+    client = SplitRecoveryClient()
+    ranking, receipt = model_screening._run_research_agent_batches(
+        _profile("nvidia", "researcher", "researcher"),
+        groups=groups,
+        source_pack={
+            "receipts": [
+                {
+                    "source_slot": "source_official",
+                    "status": "inline_source_ready",
+                    "evidence_hash": sha256_text("source"),
+                }
+            ],
+            "evidence": [],
+        },
+        timeout=10.0,
+        client=client,
+        focus_manifest=model_screening.load_prefusion_focus_manifest(),
+        batch_size=3,
+        max_workers=1,
+        merge_strategy=model_screening._RESEARCH_MERGE_STRATEGY,
+    )
+
+    assert receipt["status"] == "validated"
+    assert len(client.calls) == 5
+    assert receipt["batch_results"][0]["singleton_recovery_used"] is True
+    assert [row["rank"] for row in ranking["ordered_models"]] == [1, 2, 3]
+
+
 def test_any_failed_research_batch_blocks_before_provider_probe(monkeypatch):
     profiles = [
         _profile("provider-a", f"model-{index:02d}", f"model-{index:02d}")
