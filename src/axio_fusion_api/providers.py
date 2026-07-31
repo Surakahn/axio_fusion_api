@@ -4443,12 +4443,7 @@ def _open_stream_json_request(
             # control-plane or serving worker cannot remain blocked forever.
             def expire_response() -> None:
                 deadline_expired.set()
-                close = getattr(response, "close", None)
-                if callable(close):
-                    try:
-                        close()
-                    except Exception:
-                        pass
+                _close_response_transport(response)
 
             response_watchdog = threading.Timer(
                 max(0.001, deadline_at - time.monotonic()),
@@ -4636,6 +4631,40 @@ def _set_response_read_timeout(response: Any, timeout: float) -> bool:
             if nested is not None:
                 pending.append(nested)
     return False
+
+
+def _close_response_transport(response: Any) -> None:
+    """Close a response and its stdlib wrapper/socket chain.
+
+    ``HTTPResponse.close`` is not sufficient for every proxy and TLS wrapper:
+    some wrappers detach their file object while a blocked ``readline`` still
+    owns the nested socket. The deadline watchdog uses this best-effort
+    traversal to wake that read. It only touches objects reachable from this
+    response and never retains response bytes.
+    """
+
+    pending = [response]
+    targets: list[Any] = []
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        if callable(getattr(current, "close", None)):
+            targets.append(current)
+        for attribute in ("fp", "raw", "_sock", "sock", "socket"):
+            try:
+                nested = getattr(current, attribute, None)
+            except (AttributeError, OSError):
+                nested = None
+            if nested is not None:
+                pending.append(nested)
+    for target in reversed(targets):
+        try:
+            target.close()
+        except Exception:
+            continue
 
 
 def _iter_stream_events(

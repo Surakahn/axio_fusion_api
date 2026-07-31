@@ -339,9 +339,24 @@ def test_stream_reader_refreshes_nested_socket_read_deadline(monkeypatch) -> Non
 
 def test_stream_reader_watchdog_closes_a_response_that_ignores_socket_timeout(monkeypatch):
     closed = threading.Event()
+    socket_closed = threading.Event()
+
+    class WatchdogSocket:
+        def close(self):
+            socket_closed.set()
+
+    class WatchdogRaw:
+        def __init__(self):
+            self._sock = WatchdogSocket()
+
+        def close(self):
+            self._sock.close()
 
     class WatchdogResponse:
         headers = {"Content-Type": "text/event-stream"}
+
+        def __init__(self):
+            self.fp = WatchdogRaw()
 
         def __enter__(self):
             return self
@@ -383,6 +398,7 @@ def test_stream_reader_watchdog_closes_a_response_that_ignores_socket_timeout(mo
 
     assert exc_info.value.error_code == "provider_request_timeout"
     assert closed.is_set()
+    assert socket_closed.is_set()
 
 
 def test_multi_sample_stream_probe_aggregates_independent_receipts(monkeypatch) -> None:
