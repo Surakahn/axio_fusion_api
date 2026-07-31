@@ -1235,6 +1235,28 @@ def test_http_client_semantic_retry_shares_one_turn_deadline(monkeypatch):
     assert timeouts[1] < timeouts[0]
 
 
+@pytest.mark.parametrize(
+    "error_code",
+    [
+        "RemoteDisconnected",
+        "ConnectionResetError",
+        "ConnectionAbortedError",
+        "BrokenPipeError",
+        "IncompleteRead",
+    ],
+)
+def test_transient_peer_disconnects_are_retryable(error_code):
+    assert provider_module._provider_error_retryable(
+        provider_module.ProviderExecutionError("transport", error_code=error_code)
+    ) is True
+
+
+def test_non_transport_provider_errors_are_not_retryable():
+    assert provider_module._provider_error_retryable(
+        provider_module.ProviderExecutionError("invalid", error_code="invalid_json")
+    ) is False
+
+
 def test_responses_text_fallback_consumes_remaining_turn_deadline(monkeypatch):
     profile = normalize_profile(
         {"provider": "fixture", "model": "responses-deadline", "api_format": "responses"}

@@ -5623,7 +5623,20 @@ def _deadline_exhausted(deadline_at: float) -> bool:
 def _provider_error_retryable(exc: ProviderExecutionError) -> bool:
     if exc.error_code == "http_error":
         return exc.http_status in {408, 409, 425, 500, 502, 503, 504}
-    return exc.error_code in {"URLError", "TimeoutError", "OSError"}
+    # urllib/http.client exposes peer disconnects as their concrete exception
+    # names instead of the generic OSError code. Treat only known transient
+    # transport failures as retryable; protocol, auth, and validation errors
+    # must still fail fast and preserve the provider failover boundary.
+    return exc.error_code in {
+        "URLError",
+        "TimeoutError",
+        "OSError",
+        "RemoteDisconnected",
+        "ConnectionResetError",
+        "ConnectionAbortedError",
+        "BrokenPipeError",
+        "IncompleteRead",
+    }
 
 
 def _sleep_before_retry(retry_attempt_index: int, *, deadline_at: float) -> None:
