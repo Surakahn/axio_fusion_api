@@ -1549,6 +1549,14 @@ def test_any_failed_research_batch_blocks_before_provider_probe(monkeypatch):
     report = run_prefusion_model_screening(
         profiles=[*profiles, research_profile],
         source_manifest=_source_manifest(),
+        research_agent_config={
+            "provider": "nvidia",
+            "model": "openai/gpt-oss-120b",
+            "api_format": "chat",
+            "base_url_env": "NVIDIA_BASE_URL",
+            "api_key_env": "NVIDIA_API_KEY",
+            "ranking_prior_forbidden": True,
+        },
         live=True,
         research_client=client,
         provider_client=client,
@@ -3289,6 +3297,12 @@ def test_probe_bound_registry_rejects_profile_set_drift(tmp_path):
 
 
 def test_config_rejects_secrets_and_low_confidence_cannot_promote_judge():
+    default_config = load_prefusion_research_agent_config()
+    assert default_config["provider"] == "tokenapis"
+    assert default_config["model"] == "gpt-5.6-sol"
+    assert default_config["api_format"] == "responses"
+    assert default_config["research_max_workers"] == 1
+
     with pytest.raises(ModelScreeningError):
         load_prefusion_research_agent_config({"apiKey": "secret"})
     with pytest.raises(ModelScreeningError):

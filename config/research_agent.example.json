@@ -1,14 +1,14 @@
 {
   "schema": "axio_fusion_api.prefusion_research_agent_config.v1",
-  "provider": "nvidia",
-  "model": "openai/gpt-oss-120b",
-  "api_format": "chat",
-  "base_url_env": "AXIO_NVIDIA_BASE_URL",
-  "api_key_env": "AXIO_NVIDIA_API_KEYS",
+  "provider": "tokenapis",
+  "model": "gpt-5.6-sol",
+  "api_format": "responses",
+  "base_url_env": "AXIO_TOKENAPIS_BASE_URL",
+  "api_key_env": "AXIO_TOKENAPIS_API_KEY",
   "auth_scheme": "bearer",
-  "selection_basis": "operator_configured_remote_agent_only",
+  "selection_basis": "operator_configured_formal_model_remote_agent_only",
   "ranking_prior_forbidden": true,
   "candidate_batch_size": 4,
-  "research_max_workers": 4,
+  "research_max_workers": 1,
   "merge_strategy": "deterministic_research_quality_confidence_candidate_id"
 }

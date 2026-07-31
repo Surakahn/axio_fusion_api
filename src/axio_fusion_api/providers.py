@@ -4432,67 +4432,95 @@ def _open_stream_json_request(
         fusion_deadline_bound=fusion_deadline_bound,
     )
     accumulator = _StreamAccumulator()
+    deadline_expired = threading.Event()
     try:
         with _open_provider_url(request, timeout=budget) as response:
             content_type = _response_content_type(response)
             declared_protocol = _stream_protocol_from_content_type(content_type)
+            # A few HTTP proxy/SSL wrapper combinations do not reliably
+            # propagate a socket read timeout to ``readline``. Close the
+            # response from a daemon watchdog at the same deadline so a
+            # control-plane or serving worker cannot remain blocked forever.
+            def expire_response() -> None:
+                deadline_expired.set()
+                close = getattr(response, "close", None)
+                if callable(close):
+                    try:
+                        close()
+                    except Exception:
+                        pass
+
+            response_watchdog = threading.Timer(
+                max(0.001, deadline_at - time.monotonic()),
+                expire_response,
+            )
+            response_watchdog.daemon = True
+            response_watchdog.start()
             # Some compatible gateways accept ``stream=true`` but still return
             # one ordinary JSON object. Compatibility mode may normalize it,
             # but strict admission rejects it before it can become evidence.
-            if not callable(getattr(response, "readline", None)):
-                if require_streaming:
-                    raise ProviderExecutionError(
-                        "provider returned an unframed body for a strict streaming request",
-                        error_code="unframed_stream_response",
+            try:
+                if not callable(getattr(response, "readline", None)):
+                    if require_streaming:
+                        raise ProviderExecutionError(
+                            "provider returned an unframed body for a strict streaming request",
+                            error_code="unframed_stream_response",
+                        )
+                    _set_response_read_timeout(
+                        response,
+                        max(0.001, deadline_at - time.monotonic()),
                     )
-                _set_response_read_timeout(
+                    raw = response.read()
+                    if isinstance(raw, bytes):
+                        raw = raw.decode("utf-8", errors="replace")
+                    try:
+                        legacy_result = json.loads(str(raw or ""))
+                    except json.JSONDecodeError as exc:
+                        raise ProviderExecutionError(
+                            "provider stream emitted invalid JSON",
+                            error_code="invalid_stream_json",
+                        ) from exc
+                    if not isinstance(legacy_result, Mapping):
+                        raise ProviderExecutionError(
+                            "provider stream emitted a non-object JSON body",
+                            error_code="non_object_stream_json",
+                        )
+                    return legacy_result, False, True, "", content_type, 0
+                frame_count = 0
+                stream_state: dict[str, str] = {}
+                visible_text_state: dict[str, str] = {}
+                for event_name, payload in _iter_stream_events(
                     response,
-                    max(0.001, deadline_at - time.monotonic()),
-                )
-                raw = response.read()
-                if isinstance(raw, bytes):
-                    raw = raw.decode("utf-8", errors="replace")
-                try:
-                    legacy_result = json.loads(str(raw or ""))
-                except json.JSONDecodeError as exc:
-                    raise ProviderExecutionError(
-                        "provider stream emitted invalid JSON",
-                        error_code="invalid_stream_json",
-                    ) from exc
-                if not isinstance(legacy_result, Mapping):
-                    raise ProviderExecutionError(
-                        "provider stream emitted a non-object JSON body",
-                        error_code="non_object_stream_json",
-                    )
-                return legacy_result, False, True, "", content_type, 0
-            frame_count = 0
-            stream_state: dict[str, str] = {}
-            visible_text_state: dict[str, str] = {}
-            for event_name, payload in _iter_stream_events(
-                response,
-                deadline_at,
-                protocol_state=stream_state,
-                timeout_error_code=timeout_error_code,
-                cancellation_event=cancellation_event,
-            ):
-                frame_count += 1
-                if stream_observer is not None:
-                    text_delta = _visible_text_delta_from_stream_event(
+                    deadline_at,
+                    protocol_state=stream_state,
+                    timeout_error_code=timeout_error_code,
+                    cancellation_event=cancellation_event,
+                ):
+                    frame_count += 1
+                    if stream_observer is not None:
+                        text_delta = _visible_text_delta_from_stream_event(
+                            api_format=api_format,
+                            event_name=event_name,
+                            payload=payload,
+                            state=visible_text_state,
+                        )
+                        if text_delta and not stream_observer.emit_text_delta(text_delta):
+                            raise ProviderExecutionError(
+                                "public stream was cancelled by the downstream client",
+                                error_code="public_stream_cancelled",
+                            )
+                    _accumulate_stream_payload(
+                        accumulator,
                         api_format=api_format,
                         event_name=event_name,
                         payload=payload,
-                        state=visible_text_state,
                     )
-                    if text_delta and not stream_observer.emit_text_delta(text_delta):
-                        raise ProviderExecutionError(
-                            "public stream was cancelled by the downstream client",
-                            error_code="public_stream_cancelled",
-                        )
-                _accumulate_stream_payload(
-                    accumulator,
-                    api_format=api_format,
-                    event_name=event_name,
-                    payload=payload,
+            finally:
+                response_watchdog.cancel()
+            if deadline_expired.is_set():
+                raise ProviderExecutionError(
+                    _safe_provider_error_message(timeout_error_code),
+                    error_code=timeout_error_code,
                 )
     except ProviderExecutionError:
         raise

@@ -337,6 +337,54 @@ def test_stream_reader_refreshes_nested_socket_read_deadline(monkeypatch) -> Non
     assert 0.0 < response.socket.timeouts[-1] <= 0.2
 
 
+def test_stream_reader_watchdog_closes_a_response_that_ignores_socket_timeout(monkeypatch):
+    closed = threading.Event()
+
+    class WatchdogResponse:
+        headers = {"Content-Type": "text/event-stream"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            del exc_type, exc_value, traceback
+            self.close()
+            return False
+
+        def close(self):
+            closed.set()
+
+        def readline(self):
+            closed.wait(1.0)
+            return b""
+
+    response = WatchdogResponse()
+    monkeypatch.setattr(
+        provider_module,
+        "_open_provider_url",
+        lambda request, timeout: response,
+    )
+    profile = normalize_profile(
+        {
+            "provider": "watchdog-fixture",
+            "model": "watchdog-model",
+            "api_format": "chat",
+        }
+    )
+
+    with pytest.raises(provider_module.ProviderExecutionError) as exc_info:
+        provider_module._open_stream_json_request(
+            urllib.request.Request("https://watchdog.fixture/v1/chat/completions"),
+            profile=profile,
+            api_format="chat",
+            timeout=0.03,
+            require_streaming=True,
+        )
+
+    assert exc_info.value.error_code == "provider_request_timeout"
+    assert closed.is_set()
+
+
 def test_multi_sample_stream_probe_aggregates_independent_receipts(monkeypatch) -> None:
     profile = normalize_profile(
         {

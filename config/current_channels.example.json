@@ -51,7 +51,7 @@
     "research_agent_config": "config/research_agent.example.json",
     "min_available_models": 3,
     "candidate_batch_size": 4,
-    "research_max_workers": 4,
+    "research_max_workers": 1,
     "stream_probe_samples": 3,
     "merge_strategy": "deterministic_research_quality_confidence_candidate_id",
     "ranking_prior_forbidden": true

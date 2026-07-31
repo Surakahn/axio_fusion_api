@@ -216,16 +216,16 @@ _DEFAULT_CANDIDATE_POLICY: dict[str, Any] = {
 }
 _DEFAULT_AGENT_CONFIG: dict[str, Any] = {
     "schema": "axio_fusion_api.prefusion_research_agent_config.v1",
-    "provider": "nvidia",
-    "model": "openai/gpt-oss-120b",
-    "api_format": "chat/completions",
-    "base_url_env": "AXIO_NVIDIA_BASE_URL",
-    "api_key_env": "AXIO_NVIDIA_API_KEYS",
+    "provider": "tokenapis",
+    "model": "gpt-5.6-sol",
+    "api_format": "responses",
+    "base_url_env": "AXIO_TOKENAPIS_BASE_URL",
+    "api_key_env": "AXIO_TOKENAPIS_API_KEY",
     "auth_scheme": "bearer",
-    "selection_basis": "operator_default_research_agent_only",
+    "selection_basis": "operator_default_formal_model_research_agent_only",
     "ranking_prior_forbidden": True,
     "candidate_batch_size": _DEFAULT_RESEARCH_BATCH_SIZE,
-    "research_max_workers": _DEFAULT_RESEARCH_MAX_WORKERS,
+    "research_max_workers": 1,
     "merge_strategy": _RESEARCH_MERGE_STRATEGY,
 }
 _RESEARCH_OUTPUT_ROOT_KEYS = frozenset({"schema", "ordered_models"})

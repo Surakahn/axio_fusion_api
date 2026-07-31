@@ -35,6 +35,14 @@ The workflow has five ordered stages:
    that batch, with contiguous local ranks, bounded capability axes, explicit
    role limits, and source evidence IDs. All batches are required; a missing,
    failed, slow, or invalid batch blocks the complete ranking.
+
+The checked-in example selects the formally admitted TokenAPIs
+`gpt-5.6-sol` Responses profile as the research Agent and uses one research
+worker. This is a conservative control-plane default for a shared API
+credential: it avoids flooding a gateway while retaining the full candidate
+inventory. Operators may choose another configured profile explicitly, but the
+Agent must still pass the same strict schema, public-evidence scope, and
+per-request 90-second gate.
 3. Merge validated batches locally with the fixed deterministic policy
    `research_quality_score` descending, `confidence` descending, then
    `candidate_id` ascending, and regenerate global ranks `1..N`. The quality
@@ -521,14 +529,14 @@ are supplied only through the environment variables named by that registry.
 Then run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m axio_fusion_api.cli \
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3.11 -m axio_fusion_api.cli \
   --provider-config-file config/current_channels.example.json \
   pre-fusion-screen \
   --focus-manifest config/nvidia_focus_models.json \
   --source-manifest config/public_model_sources.example.json \
   --research-agent-config config/research_agent.example.json \
   --research-batch-size 4 \
-  --research-max-workers 4 \
+  --research-max-workers 1 \
   --live \
   --min-available-models 3 \
   --output <prefusion-screening.safe.json> \
