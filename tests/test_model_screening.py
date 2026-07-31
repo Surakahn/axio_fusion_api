@@ -604,6 +604,14 @@ def test_research_prompt_scopes_candidate_specific_source_evidence():
     assert [
         row["source_slot"] for row in rows["beta"]["candidate_source_evidence"]
     ] == ["source_shared", "source_beta"]
+    assert rows["alpha"]["allowed_source_slots"] == [
+        "source_alpha",
+        "source_shared",
+    ]
+    assert rows["beta"]["allowed_source_slots"] == [
+        "source_beta",
+        "source_shared",
+    ]
 
     packets = {
         row["candidate_id"]: [
@@ -616,6 +624,14 @@ def test_research_prompt_scopes_candidate_specific_source_evidence():
     assert [
         row["source_slot"] for row in source_data["shared_source_evidence"]
     ] == ["source_shared"]
+
+    repair_prompt = model_screening._build_research_prompt(
+        groups,
+        source_pack,
+        repair_reason="prefusion_research_output_source_evidence_invalid",
+    )
+    assert "exact allowed_source_slots array" in repair_prompt
+    assert "Do not invent, normalize, translate" in repair_prompt
 
 
 def test_source_manifest_merges_focus_locators_without_persisting_secrets():

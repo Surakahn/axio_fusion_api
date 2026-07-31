@@ -4837,6 +4837,13 @@ def _build_research_prompt(
                     }
                     for row in candidate_evidence
                 ],
+                "allowed_source_slots": sorted(
+                    {
+                        str(row.get("source_slot") or "")
+                        for row in candidate_evidence
+                        if str(row.get("source_slot") or "")
+                    }
+                ),
             }
         )
     candidate_ids = [str(row.get("candidate_id") or "") for row in candidate_rows]
@@ -4908,6 +4915,14 @@ def _build_research_prompt(
         if repair_reason
         else ""
     )
+    if repair_reason.startswith("prefusion_research_output_source_evidence"):
+        repair_instruction += (
+            "Evidence repair rule: for each candidate, source_evidence_ids must "
+            "be a non-empty subset of that candidate's exact allowed_source_slots "
+            "array in the authoritative inventory, or a source slot listed in "
+            "shared_source_evidence. Do not invent, normalize, translate, or "
+            "copy a source slot from another candidate.\n\n"
+        )
     return (
         "Prompt contract: "
         + PREFUSION_RESEARCH_PROMPT_CONTRACT
