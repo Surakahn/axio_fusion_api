@@ -785,6 +785,72 @@ def test_strict_streaming_receipt_contains_framing_evidence(monkeypatch):
     assert receipt["strict_streaming_requested"] is True
 
 
+@pytest.mark.parametrize(
+    ("api_format", "expected_path", "result"),
+    [
+        (
+            "chat/completions",
+            "/chat/completions",
+            {"choices": [{"message": {"content": "answer"}}]},
+        ),
+        (
+            "responses",
+            "/responses",
+            {"output_text": "answer"},
+        ),
+        (
+            "anthropic",
+            "/messages",
+            {"content": [{"type": "text", "text": "answer"}]},
+        ),
+        (
+            "gemini",
+            "/models/provider-model:streamGenerateContent?alt=sse",
+            {"candidates": [{"content": {"parts": [{"text": "answer"}]}}]},
+        ),
+    ],
+)
+def test_every_provider_adapter_uses_streaming_wire(
+    monkeypatch,
+    api_format,
+    expected_path,
+    result,
+):
+    calls = []
+
+    def fake_post(profile, path, payload, **kwargs):
+        calls.append((path, payload, kwargs))
+        return result
+
+    monkeypatch.setattr(provider_module, "_post_json", fake_post)
+    profile = normalize_profile(
+        {
+            "provider": "stream-contract-fixture",
+            "model": "provider-model",
+            "api_format": api_format,
+        }
+    )
+    request = FusionRequest(model="axio-fast", prompt="hello")
+
+    completion = HTTPProviderClient(require_streaming=True).complete_turn(
+        profile,
+        request,
+        prompt=request.prompt,
+        system="system",
+        timeout=1.0,
+    )
+
+    assert completion.text == "answer"
+    assert len(calls) == 1
+    path, payload, kwargs = calls[0]
+    assert path == expected_path
+    if api_format == "gemini":
+        assert "stream" not in payload
+    else:
+        assert payload["stream"] is True
+    assert kwargs["require_streaming"] is True
+
+
 def test_operational_role_probe_requires_framed_streaming_and_structured_judge():
     profile = normalize_profile(
         {
