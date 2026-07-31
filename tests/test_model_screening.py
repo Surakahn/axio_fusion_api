@@ -1600,6 +1600,63 @@ def test_research_batch_allows_two_bounded_transport_retries():
     assert [row["rank"] for row in ranking["ordered_models"]] == [1, 2]
 
 
+def test_research_transport_failure_switches_to_next_agent_profile():
+    primary = _profile("provider-a", "primary-researcher", "primary-researcher")
+    fallback = _profile("provider-b", "fallback-researcher", "fallback-researcher")
+    groups = _groups([_profile("provider-c", "candidate", "candidate")])
+
+    class FallbackClient(_BatchResearchClient):
+        def complete_turn(self, profile, request, *, prompt, system, timeout):
+            del request, system, timeout
+            self.calls.append({"profile_id": profile.profile_id, "prompt": prompt})
+            if len(self.calls) == 1:
+                raise provider_module.ProviderExecutionError(
+                    "primary unavailable",
+                    error_code="provider_request_timeout",
+                )
+            marker = "AUTHORITATIVE_CANDIDATE_INVENTORY\n"
+            inventory = prompt.split(marker, 1)[1].split(
+                "\n\nUNTRUSTED_SOURCE_DATA", 1
+            )[0]
+            candidate_ids = [
+                str(row["candidate_id"]) for row in json.loads(inventory)
+            ]
+            return ProviderCompletion(json.dumps(_research_output(candidate_ids)))
+
+    client = FallbackClient()
+    _ranking, receipt = model_screening._run_research_agent_batches(
+        primary,
+        research_profiles=(primary, fallback),
+        groups=groups,
+        source_pack={
+            "receipts": [
+                {
+                    "source_slot": "source_official",
+                    "status": "inline_source_ready",
+                    "evidence_hash": sha256_text("source"),
+                }
+            ],
+            "evidence": [],
+        },
+        timeout=10.0,
+        client=client,
+        focus_manifest=model_screening.load_prefusion_focus_manifest(),
+        batch_size=1,
+        max_workers=1,
+        merge_strategy=model_screening._RESEARCH_MERGE_STRATEGY,
+    )
+
+    assert [call["profile_id"] for call in client.calls] == [
+        primary.profile_id,
+        fallback.profile_id,
+    ]
+    assert receipt["fallback_switch_count"] == 1
+    attempts = receipt["batch_results"][0]["attempts"]
+    assert attempts[0]["agent_profile_sha256"] == sha256_text(primary.profile_id)
+    assert attempts[0]["fallback_activated"] is True
+    assert attempts[1]["agent_profile_sha256"] == sha256_text(fallback.profile_id)
+
+
 def test_malformed_multi_candidate_batch_recovers_with_validated_singletons():
     profiles = [
         _profile("provider-a", f"model-{index:02d}", f"model-{index:02d}")
@@ -3449,6 +3506,37 @@ def test_config_rejects_secrets_and_low_confidence_cannot_promote_judge():
     assert "synthesizer" in row["disallowed_roles"]
     assert "judge" not in row["allowed_roles"]
     assert "synthesizer" not in row["allowed_roles"]
+
+
+def test_research_agent_fallback_config_is_bounded_and_secret_free():
+    config = load_prefusion_research_agent_config(
+        {
+            "provider": "tokenapis",
+            "model": "gpt-5.6-sol",
+            "api_format": "responses",
+            "fallbacks": [
+                {
+                    "provider": "tokenapis",
+                    "model": "gpt-5.6-terra",
+                    "api_format": "responses",
+                    "base_url_env": "AXIO_TOKENAPIS_BASE_URL",
+                    "api_key_env": "AXIO_TOKENAPIS_API_KEY",
+                }
+            ],
+        }
+    )
+    assert len(config["fallbacks"]) == 1
+    assert config["fallbacks"][0]["model"] == "gpt-5.6-terra"
+
+    with pytest.raises(ModelScreeningError):
+        load_prefusion_research_agent_config(
+            {
+                "provider": "tokenapis",
+                "model": "gpt-5.6-sol",
+                "api_format": "responses",
+                "fallbacks": [{"api_key": "secret"}],
+            }
+        )
 
 
 def test_dry_run_report_does_not_persist_source_or_research_text():

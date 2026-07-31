@@ -43,6 +43,16 @@ credential: it avoids flooding a gateway while retaining the full candidate
 inventory. Operators may choose another configured profile explicitly, but the
 Agent must still pass the same strict schema, public-evidence scope, and
 per-request 90-second gate.
+
+The example also declares a bounded, ordered fallback chain. A fallback is
+activated only after a transport/provider failure; malformed JSON, invalid
+candidate coverage, unsupported role output, or out-of-scope evidence never
+falls through to hide a research-quality failure. Each attempt records the
+hash of the actual research profile, and the chain contains only provider/model
+identifiers, API-format declarations, and environment-variable references. It
+cannot contain a secret or arbitrary request header. The fallback is an
+availability circuit breaker for the control plane, not an additional vote in
+the model ranking and not benchmark evidence.
 3. Merge validated batches locally with the fixed deterministic policy
    `research_quality_score` descending, `confidence` descending, then
    `candidate_id` ascending, and regenerate global ranks `1..N`. The quality

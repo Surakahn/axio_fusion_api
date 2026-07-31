@@ -173,6 +173,22 @@ _RESEARCH_AGENT_ALLOWED_KEYS = frozenset(
         "candidate_batch_size",
         "research_max_workers",
         "merge_strategy",
+        "fallbacks",
+    }
+)
+_RESEARCH_AGENT_PROFILE_KEYS = frozenset(
+    {
+        "provider",
+        "model",
+        "api_format",
+        "profile_id",
+        "profile_hash",
+        "profile_id_sha256",
+        "base_url_env",
+        "api_key_env",
+        "auth_scheme",
+        "models_endpoint",
+        "discover_models",
     }
 )
 _MAX_CONFIG_BYTES = 2 * 1024 * 1024
@@ -241,6 +257,7 @@ _DEFAULT_AGENT_CONFIG: dict[str, Any] = {
     "candidate_batch_size": _DEFAULT_RESEARCH_BATCH_SIZE,
     "research_max_workers": 1,
     "merge_strategy": _RESEARCH_MERGE_STRATEGY,
+    "fallbacks": [],
 }
 _RESEARCH_OUTPUT_ROOT_KEYS = frozenset({"schema", "ordered_models"})
 _RESEARCH_OUTPUT_ROW_KEYS = frozenset(
@@ -407,8 +424,13 @@ def run_prefusion_model_screening(
         blockers.append("prefusion_public_source_fetch_empty")
 
     agent_config = load_prefusion_research_agent_config(research_agent_config)
-    agent_profile = _resolve_research_agent_profile(agent_config, all_profiles)
-    agent_receipt = _research_agent_config_receipt(agent_profile, agent_config)
+    agent_profiles = _resolve_research_agent_profiles(agent_config, all_profiles)
+    agent_profile = agent_profiles[0]
+    agent_receipt = _research_agent_config_receipt(
+        agent_profile,
+        agent_config,
+        fallback_profiles=agent_profiles[1:],
+    )
     configured_batch_size = _bounded_research_setting(
         research_batch_size
         if research_batch_size is not None
@@ -441,6 +463,10 @@ def run_prefusion_model_screening(
         "schema": "axio_fusion_api.prefusion_research_receipt.v1",
         "status": "not_run",
         "agent_profile_sha256": sha256_text(agent_profile.profile_id),
+        "agent_profile_chain_sha256": sha256_text(
+            stable_json([sha256_text(item.profile_id) for item in agent_profiles])
+        ),
+        "agent_profile_count": len(agent_profiles),
         "agent_api_format": agent_profile.api_format,
         "agent_enabled": agent_profile.enabled,
         "agent_credential_ready": profile_credential_readiness(agent_profile).get("credential_ready") is True,
@@ -476,16 +502,23 @@ def run_prefusion_model_screening(
             blockers.append(exc.code)
             research_receipt.update({"status": "failed", "error_code": exc.code})
     elif live and not blockers:
-        if profile_latency_eligibility(agent_profile).get("eligible") is False:
+        if not any(
+            profile_latency_eligibility(item).get("eligible") is True
+            for item in agent_profiles
+        ):
             blockers.append("prefusion_research_agent_latency_ineligible")
             research_receipt.update({"status": "failed", "error_code": "prefusion_research_agent_latency_ineligible"})
-        elif profile_credential_readiness(agent_profile).get("credential_ready") is not True:
+        elif not any(
+            profile_credential_readiness(item).get("credential_ready") is True
+            for item in agent_profiles
+        ):
             blockers.append("prefusion_research_agent_credentials_missing")
             research_receipt.update({"status": "failed", "error_code": "prefusion_research_agent_credentials_missing"})
         else:
             try:
                 ranking, batch_receipt = _run_research_agent_batches(
                     agent_profile,
+                    research_profiles=agent_profiles,
                     groups=groups,
                     source_pack=source_pack,
                     timeout=timeout,
@@ -1162,6 +1195,33 @@ def load_prefusion_research_agent_config(
     ).strip()
     if payload["merge_strategy"] != _RESEARCH_MERGE_STRATEGY:
         raise ModelScreeningError("prefusion_research_merge_strategy_invalid")
+    raw_fallbacks = payload.get("fallbacks", [])
+    if raw_fallbacks is None:
+        raw_fallbacks = []
+    if not isinstance(raw_fallbacks, list) or len(raw_fallbacks) > 4:
+        raise ModelScreeningError("prefusion_research_agent_fallbacks_invalid")
+    normalized_fallbacks: list[dict[str, Any]] = []
+    for raw_fallback in raw_fallbacks:
+        if not isinstance(raw_fallback, Mapping):
+            raise ModelScreeningError("prefusion_research_agent_fallback_invalid")
+        if not set(str(key) for key in raw_fallback).issubset(
+            _RESEARCH_AGENT_PROFILE_KEYS
+        ):
+            raise ModelScreeningError("prefusion_research_agent_fallback_key_not_allowed")
+        fallback = {
+            str(key): raw_fallback[key]
+            for key in raw_fallback
+        }
+        if any(
+            not str(fallback.get(key) or "").strip()
+            for key in ("provider", "model", "api_format")
+        ):
+            raise ModelScreeningError("prefusion_research_agent_fallback_identity_missing")
+        for key in ("provider", "model", "api_format", "auth_scheme"):
+            if key in fallback:
+                fallback[key] = str(fallback[key]).strip()
+        normalized_fallbacks.append(fallback)
+    payload["fallbacks"] = normalized_fallbacks
     payload["selection_basis"] = str(payload.get("selection_basis") or "operator_configured_remote_agent")[:120]
     return payload
 
@@ -4380,6 +4440,7 @@ def _run_research_agent_singleton_recovery(
 def _run_research_agent_batches(
     profile: ModelProfile,
     *,
+    research_profiles: Sequence[ModelProfile] | None = None,
     groups: Sequence[Mapping[str, Any]],
     source_pack: Mapping[str, Any],
     timeout: float,
@@ -4404,6 +4465,30 @@ def _run_research_agent_batches(
     ordered_groups = list(groups)
     if not ordered_groups:
         raise ModelScreeningError("prefusion_candidate_inventory_empty")
+    agent_profiles: tuple[ModelProfile, ...] = tuple(
+        item
+        for item in (research_profiles or (profile,))
+        if isinstance(item, ModelProfile)
+    ) or (profile,)
+    agent_state_lock = threading.Lock()
+    active_agent_index = 0
+    fallback_switch_count = 0
+
+    def active_agent_profile() -> ModelProfile:
+        with agent_state_lock:
+            return agent_profiles[active_agent_index]
+
+    def advance_agent_profile(failed_profile: ModelProfile) -> bool:
+        nonlocal active_agent_index, fallback_switch_count
+        with agent_state_lock:
+            if active_agent_index >= len(agent_profiles) - 1:
+                return False
+            if agent_profiles[active_agent_index].profile_id != failed_profile.profile_id:
+                return False
+            active_agent_index += 1
+            fallback_switch_count += 1
+            return True
+
     bounded_batch_size = _bounded_research_setting(
         batch_size,
         default=_DEFAULT_RESEARCH_BATCH_SIZE,
@@ -4464,8 +4549,17 @@ def _run_research_agent_batches(
                     "secrets_persisted": False,
                 }
                 try:
+                    selected_agent = active_agent_profile()
+                    attempt_receipt.update(
+                        {
+                            "agent_profile_sha256": sha256_text(
+                                selected_agent.profile_id
+                            ),
+                            "agent_api_format": selected_agent.api_format,
+                        }
+                    )
                     raw_output, latency_ms = _run_research_agent(
-                        profile,
+                        selected_agent,
                         groups=batch_groups,
                         source_pack=source_pack,
                         timeout=timeout,
@@ -4615,6 +4709,8 @@ def _run_research_agent_batches(
                     attempt_receipt["status"] = "failed"
                     attempt_receipt["error_code"] = code
                     attempts.append(attempt_receipt)
+                    fallback_activated = advance_agent_profile(selected_agent)
+                    attempt_receipt["fallback_activated"] = fallback_activated
                     # Transport errors get at most two recovery rounds. Each
                     # attempt receives the remaining provider budget and a
                     # third failure still blocks the complete ranking.
@@ -4716,6 +4812,11 @@ def _run_research_agent_batches(
         "max_transport_retries_per_batch": _MAX_RESEARCH_TRANSPORT_RETRIES_PER_BATCH,
         "candidate_specific_evidence_forces_single_candidate_batch": True,
         "research_batch_isolation_mode": "candidate_specific_singleton_shared_batched",
+        "agent_profile_chain_sha256": sha256_text(
+            stable_json([sha256_text(item.profile_id) for item in agent_profiles])
+        ),
+        "agent_profile_count": len(agent_profiles),
+        "fallback_switch_count": fallback_switch_count,
     }
     if failed:
         base_receipt["error_code"] = str(
@@ -5320,10 +5421,41 @@ def _resolve_research_agent_profile(
     return normalize_profile(raw)
 
 
-def _research_agent_config_receipt(profile: ModelProfile, config: Mapping[str, Any]) -> dict[str, Any]:
+def _resolve_research_agent_profiles(
+    config: Mapping[str, Any],
+    profiles: Sequence[ModelProfile],
+) -> tuple[ModelProfile, ...]:
+    """Resolve the primary research Agent and its bounded fallback chain."""
+
+    resolved: list[ModelProfile] = [
+        _resolve_research_agent_profile(config, profiles)
+    ]
+    raw_fallbacks = config.get("fallbacks", [])
+    if not isinstance(raw_fallbacks, list):
+        raw_fallbacks = []
+    for raw_fallback in raw_fallbacks:
+        if not isinstance(raw_fallback, Mapping):
+            continue
+        candidate = _resolve_research_agent_profile(raw_fallback, profiles)
+        if any(item.profile_id == candidate.profile_id for item in resolved):
+            continue
+        resolved.append(candidate)
+    return tuple(resolved)
+
+
+def _research_agent_config_receipt(
+    profile: ModelProfile,
+    config: Mapping[str, Any],
+    *,
+    fallback_profiles: Sequence[ModelProfile] = (),
+) -> dict[str, Any]:
     return {
         "schema": "axio_fusion_api.prefusion_research_agent_receipt.v1",
         "profile_id_sha256": sha256_text(profile.profile_id),
+        "fallback_profile_id_sha256": [
+            sha256_text(item.profile_id)
+            for item in fallback_profiles
+        ],
         "provider_sha256": sha256_text(profile.provider),
         "model_sha256": sha256_text(profile.model),
         "api_format": profile.api_format,
