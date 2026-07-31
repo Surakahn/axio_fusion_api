@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import ssl
 import sys
 from pathlib import Path
 
@@ -130,3 +131,55 @@ def test_invalid_explicit_mode_is_rejected_without_fallback(monkeypatch):
         network.build_network_opener()
 
     assert exc_info.value.reason_code == "network_mode_invalid"
+
+
+def test_https_connection_reapplies_timeout_before_and_after_tls(monkeypatch):
+    raw_socket = None
+    wrapped_socket = None
+
+    class FakeSocket:
+        def __init__(self):
+            self.timeouts = []
+
+        def settimeout(self, value):
+            self.timeouts.append(float(value))
+
+    class FakeContext:
+        verify_mode = ssl.CERT_NONE
+        check_hostname = False
+
+        def wrap_socket(self, sock, *, server_hostname):
+            del server_hostname
+            nonlocal wrapped_socket
+            wrapped_socket = FakeSocket()
+            assert sock is raw_socket
+            return wrapped_socket
+
+    def fake_http_connect(connection):
+        nonlocal raw_socket
+        raw_socket = FakeSocket()
+        connection.sock = raw_socket
+
+    monkeypatch.setattr(network.http.client.HTTPConnection, "connect", fake_http_connect)
+
+    connection = network._DeadlineHTTPSConnection(
+        "provider.invalid",
+        timeout=1.25,
+        context=FakeContext(),
+    )
+    connection.connect()
+
+    assert raw_socket.timeouts == [1.25]
+    assert wrapped_socket.timeouts == [1.25]
+
+
+def test_network_opener_installs_bounded_https_handler(monkeypatch):
+    monkeypatch.setenv("AXIO_FUSION_NETWORK_MODE", "off")
+    captured = _capture_opener(monkeypatch)
+
+    network.build_network_opener()
+
+    assert any(
+        isinstance(handler, network._DeadlineHTTPSHandler)
+        for handler in captured["handlers"]
+    )

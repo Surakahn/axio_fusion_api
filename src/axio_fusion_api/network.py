@@ -12,6 +12,7 @@ summaries intentionally expose state and reason codes, never the URL itself.
 from __future__ import annotations
 
 import os
+import http.client
 import socket
 import urllib.parse
 import urllib.request
@@ -27,12 +28,71 @@ _NETWORK_MODE_ENV = "AXIO_FUSION_NETWORK_MODE"
 _SYSTEM_PROXY_ENV = "AXIO_FUSION_SYSTEM_PROXY"
 
 
+def _set_connection_socket_timeout(sock: Any, timeout: Any) -> None:
+    """Best-effortly apply a finite HTTP connection timeout to a socket."""
+
+    if sock is None or timeout is None or timeout is socket._GLOBAL_DEFAULT_TIMEOUT:
+        return
+    try:
+        bounded = float(timeout)
+    except (TypeError, ValueError):
+        return
+    if bounded <= 0.0:
+        return
+    setter = getattr(sock, "settimeout", None)
+    if not callable(setter):
+        return
+    try:
+        setter(bounded)
+    except (OSError, TypeError, ValueError):
+        return
+
+
 class NetworkPolicyError(RuntimeError):
     """A safe, machine-readable outbound network policy failure."""
 
     def __init__(self, reason_code: str) -> None:
         self.reason_code = str(reason_code or "network_policy_failed")
         super().__init__(f"fusion_network_policy_failed:{self.reason_code}")
+
+
+class _DeadlineHTTPSConnection(http.client.HTTPSConnection):
+    """HTTPS connection that bounds the proxy tunnel's TLS handshake.
+
+    ``urllib`` forwards its timeout to ``HTTPSConnection``.  A few local HTTP
+    proxy and TLS combinations nevertheless leave the socket without that
+    timeout immediately before ``SSLContext.wrap_socket``.  The handshake can
+    then outlive the provider request deadline.  Reusing the stdlib HTTP
+    connection setup and explicitly refreshing the socket timeout before and
+    after TLS keeps the transport bounded without changing payload handling.
+    """
+
+    def connect(self) -> None:
+        # This performs DNS/TCP setup and an HTTP CONNECT when the request is
+        # routed through a proxy.  HTTPConnection already passes self.timeout
+        # to socket.create_connection and the tunnel reader.
+        http.client.HTTPConnection.connect(self)
+        _set_connection_socket_timeout(self.sock, self.timeout)
+        server_hostname = self._tunnel_host or self.host
+        self.sock = self._context.wrap_socket(
+            self.sock,
+            server_hostname=server_hostname,
+        )
+        # Some SSL wrappers reset the timeout while taking ownership of the
+        # raw socket.  Restore it on the object used by the HTTP response.
+        _set_connection_socket_timeout(self.sock, self.timeout)
+
+
+class _DeadlineHTTPSHandler(urllib.request.HTTPSHandler):
+    """Use the bounded HTTPS connection for every provider HTTPS request."""
+
+    def https_open(self, req):
+        return self.do_open(
+            _DeadlineHTTPSConnection,
+            req,
+            context=self._context,
+            check_hostname=self._check_hostname,
+        )
 
 
 @dataclass(frozen=True)
@@ -237,7 +297,11 @@ def build_network_opener(*handlers: Any):
         # re-read inherited proxy environment variables and violate ``off`` or
         # the direct branch of ``auto``.
         proxy_handler = urllib.request.ProxyHandler({})
-    return urllib.request.build_opener(proxy_handler, *tuple(handlers))
+    return urllib.request.build_opener(
+        proxy_handler,
+        _DeadlineHTTPSHandler(),
+        *tuple(handlers),
+    )
 
 
 def _configured_proxy_url(*, legacy_explicit: str) -> tuple[str, str]:
@@ -273,4 +337,3 @@ def _proxy_detection_timeout() -> float:
 
 def _truthy_env(name: str) -> bool:
     return os.getenv(name, "").strip().casefold() in {"1", "true", "yes", "on"}
-
