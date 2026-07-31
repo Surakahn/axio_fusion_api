@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import io
+import http.client
 import json
+import threading
+import time
 import urllib.error
 from pathlib import Path
 
 import pytest
 
 from axio_fusion_api import server
+from axio_fusion_api.channel_config import build_runtime_profiles
 from axio_fusion_api.image_api import (
     ImagePart,
     ImageProviderClient,
@@ -94,6 +98,32 @@ def test_image_profiles_are_excluded_from_text_and_text_profiles_from_images():
     assert text.image_generation_eligible is False
 
 
+def test_discovered_gpt_image_names_enter_unverified_image_lane_only():
+    profiles = build_runtime_profiles(
+        {
+            "providers": [
+                {
+                    "provider": "image-discovery-channel",
+                    "api_format": "chat/completions",
+                    "base_url": "https://image-discovery.invalid/v1",
+                    "api_key": "fixture-key",
+                    "models": ["gpt-image-2", "text-model"],
+                }
+            ]
+        }
+    )
+
+    image = next(profile for profile in profiles if profile.model == "gpt-image-2")
+    text = next(profile for profile in profiles if profile.model == "text-model")
+    assert image.model_kind == "image"
+    assert image.text_model_eligible is False
+    assert image.image_probe_status == "not_run"
+    assert image.image_capabilities["status"] == "candidate"
+    assert image.image_generation_eligible is False
+    assert text.model_kind == "text"
+    assert text.text_model_eligible is True
+
+
 def test_image_capability_requires_verified_capability_and_probe():
     assert _image_profile(capability_status="candidate").image_generation_eligible is False
     assert _image_profile(probe_status="not_run").image_generation_eligible is False
@@ -115,6 +145,14 @@ def test_generation_parser_allowlists_fields_and_parses_boolean():
 
     assert payload == {"model": "axio-pro", "prompt": "a red kite", "n": 2, "stream": False}
     assert "unknown_provider_field" not in payload
+
+
+def test_generation_parser_uses_official_partial_image_limit():
+    with pytest.raises(ImageRequestError) as error:
+        parse_generation_payload(
+            json.dumps({"model": "axio-pro", "prompt": "x", "partial_images": 4})
+        )
+    assert error.value.code == "image_field_invalid"
 
 
 def test_edit_parser_supports_mask_and_multiple_image_parts():
@@ -286,6 +324,96 @@ def test_server_returns_sanitized_image_capability_error_for_unverified_model():
     assert "image-provider.invalid" not in body.decode("utf-8")
 
 
+def test_http_server_delivers_image_event_before_provider_finishes(monkeypatch):
+    class SlowImageClient:
+        def __init__(self):
+            self.first_event_emitted = threading.Event()
+            self.release_completion = threading.Event()
+
+        def generate(self, profile, payload, *, timeout=None, stream_observer=None):
+            del profile, payload, timeout
+            assert stream_observer is not None
+            assert stream_observer(
+                {"type": "image_generation.partial_image", "b64_json": "partial"}
+            ) is True
+            self.first_event_emitted.set()
+            assert self.release_completion.wait(timeout=3)
+            assert stream_observer(
+                {"type": "image_generation.completed", "b64_json": "final"}
+            ) is True
+            return ImageProviderResult(
+                data=({"b64_json": "final"},),
+                created=1,
+                stream_events=(),
+                stream_protocol="sse",
+            )
+
+    client = SlowImageClient()
+    profile = _image_profile()
+    monkeypatch.setattr(
+        server,
+        "ImageRouter",
+        lambda profiles: ImageRouter(profiles, client=client),
+    )
+    gateway = server.create_http_server(
+        host="127.0.0.1",
+        port=0,
+        live=True,
+        engine=FusionEngine([profile]),
+        record_trace=False,
+        record_runtime=False,
+    )
+    worker = threading.Thread(target=gateway.serve_forever, daemon=True)
+    worker.start()
+    connection = http.client.HTTPConnection(
+        "127.0.0.1",
+        gateway.server_address[1],
+        timeout=5,
+    )
+    observed = bytearray()
+    try:
+        connection.request(
+            "POST",
+            "/v1/images/generations",
+            body=json.dumps(
+                {
+                    "model": "axio-fast",
+                    "prompt": "a red kite",
+                    "stream": True,
+                    "partial_images": 1,
+                }
+            ),
+            headers={"Content-Type": "application/json"},
+        )
+        response = connection.getresponse()
+        assert response.status == 200
+        assert response.getheader("Transfer-Encoding") == "chunked"
+        assert response.getheader("Content-Length") is None
+        deadline = time.monotonic() + 3
+        while b"image_generation.partial_image" not in observed and time.monotonic() < deadline:
+            chunk = response.read(1)
+            if not chunk:
+                break
+            observed.extend(chunk)
+        assert b"image_generation.partial_image" in observed
+        assert client.first_event_emitted.wait(timeout=0.5)
+        assert client.release_completion.is_set() is False
+
+        client.release_completion.set()
+        observed.extend(response.read())
+        stream = observed.decode("utf-8")
+        assert "image_generation.completed" in stream
+        assert "data: [DONE]" in stream
+    finally:
+        client.release_completion.set()
+        connection.close()
+        gateway.shutdown()
+        gateway.server_close()
+        worker.join(timeout=5)
+
+    assert worker.is_alive() is False
+
+
 def test_server_returns_image_sse_with_allowlisted_event_types(monkeypatch):
     profile = _image_profile()
     fake = _FakeImageClient()
@@ -349,6 +477,50 @@ def test_responses_image_generation_uses_responses_tool_wire_and_parses_output(m
     assert wire["tools"] == [{"type": "image_generation"}]
     assert result.created == 7
     assert result.data == ({"b64_json": "encoded"},)
+
+
+def test_responses_image_stream_promotes_final_response_completed_event(monkeypatch):
+    profile = _image_profile(
+        transport="responses_image_generation",
+        api_format="responses",
+        runtime_keys=("response-key",),
+    )
+
+    class Response:
+        headers = {"Content-Type": "text/event-stream"}
+        lines = iter(
+            [
+                b'data: {"type":"response.completed","response":{"output":[{"type":"image_generation_call","result":"final-image"}]}}\n',
+                b"\n",
+                b"data: [DONE]\n",
+                b"\n",
+            ]
+        )
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def readline(self):
+            return next(self.lines, b"")
+
+    captured: list[dict[str, object]] = []
+
+    def fake_open(request, *, timeout):
+        return Response()
+
+    monkeypatch.setattr("axio_fusion_api.image_api._open_provider_url", fake_open)
+    result = ImageProviderClient().generate(
+        profile,
+        {"model": "axio-pro", "prompt": "blue square", "stream": True},
+        timeout=5,
+        stream_observer=lambda event: captured.append(dict(event)) is None,
+    )
+
+    assert result.data == ({"b64_json": "final-image"},)
+    assert captured == [{"type": "image_generation.completed", "b64_json": "final-image"}]
 
 
 class _FakeImageProbeClient:

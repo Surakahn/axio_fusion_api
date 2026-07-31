@@ -26,6 +26,7 @@ from .image_api import (
     image_route_kind,
     parse_edit_payload,
     parse_generation_payload,
+    render_image_event,
     render_image_stream,
 )
 from .latency_policy import profile_latency_eligibility
@@ -67,6 +68,16 @@ class _PreparedIncrementalStream:
     active_engine: FusionEngine
     tenant_key: str
     live: bool
+
+
+@dataclass(frozen=True)
+class _PreparedIncrementalImageStream:
+    headers_lc: Mapping[str, str]
+    operation: str
+    payload: Mapping[str, Any]
+    files: tuple[Any, ...]
+    router: ImageRouter
+    tenant_key: str
 
 
 def handle_request(
@@ -283,6 +294,98 @@ def _http_request_asks_for_incremental_stream(
     except ValueError:
         return False
     return _stream_requested(route, payload, endpoint)
+
+
+def _http_request_asks_for_incremental_image_stream(
+    *,
+    method: str,
+    path: str,
+    headers: Mapping[str, str],
+    body: bytes | str | None,
+) -> bool:
+    if method.upper() != "POST":
+        return False
+    route = urlparse(path).path.rstrip("/") or "/"
+    operation = image_route_kind(route)
+    if not operation:
+        return False
+    headers_lc = {str(key).lower(): str(value) for key, value in headers.items()}
+    try:
+        payload = (
+            parse_generation_payload(body)
+            if operation == "generations"
+            else parse_edit_payload(body, headers_lc.get("content-type", ""))[0]
+        )
+    except ImageRequestError:
+        return False
+    return payload.get("stream") is True
+
+
+def _prepare_incremental_image_stream_request(
+    *,
+    method: str,
+    path: str,
+    headers: Mapping[str, str] | None,
+    body: bytes | str | None,
+    engine: FusionEngine,
+    live: bool,
+    record_runtime: bool,
+) -> tuple[_PreparedIncrementalImageStream | None, tuple[int, dict[str, str], bytes] | None]:
+    """Validate image streaming controls before HTTP headers are committed."""
+
+    del method, live
+    headers_lc = {str(key).lower(): str(value) for key, value in (headers or {}).items()}
+    route = urlparse(path).path.rstrip("/") or "/"
+
+    def respond(response: tuple[int, dict[str, str], bytes]) -> tuple[int, dict[str, str], bytes]:
+        return _apply_cors_headers(response, headers_lc)
+
+    if not _authorized(headers_lc):
+        return None, respond(
+            _json_response(401, {"error": {"message": "Unauthorized", "code": "unauthorized"}})
+        )
+    tenant_key = tenant_key_from_headers(headers_lc)
+    if record_runtime:
+        rate = runtime_state().check_rate_limit(tenant_key)
+        if not rate["allowed"]:
+            return None, respond(
+                _json_response(
+                    429,
+                    {"error": {"message": "Rate limit exceeded", "code": "rate_limit_exceeded"}},
+                    extra_headers={"Retry-After": str(rate.get("retry_after_seconds") or 1)},
+                )
+            )
+        budget = runtime_state().check_budget(tenant_key)
+        if not budget["allowed"]:
+            return None, respond(_tenant_budget_exhausted_response(budget))
+
+    operation = image_route_kind(route)
+    try:
+        if operation == "generations":
+            payload = parse_generation_payload(body)
+            files: tuple[Any, ...] = ()
+        else:
+            parsed_payload, parsed_files = parse_edit_payload(
+                body,
+                headers_lc.get("content-type", ""),
+            )
+            payload = parsed_payload
+            files = tuple(parsed_files)
+    except ImageRequestError as exc:
+        return None, respond(
+            _json_response(exc.status, {"error": {"message": str(exc), "code": exc.code}})
+        )
+    return (
+        _PreparedIncrementalImageStream(
+            headers_lc=headers_lc,
+            operation=operation,
+            payload=payload,
+            files=files,
+            router=ImageRouter(engine.profiles),
+            tenant_key=tenant_key,
+        ),
+        None,
+    )
 
 
 def _prepare_incremental_stream_request(
@@ -629,6 +732,30 @@ def create_http_server(
             length = int(self.headers.get("Content-Length") or 0)
             body = self.rfile.read(length) if length else b""
             request_engine, _generation = runtime_handle.snapshot()
+            if _http_request_asks_for_incremental_image_stream(
+                method=self.command,
+                path=self.path,
+                headers=dict(self.headers),
+                body=body,
+            ):
+                prepared, immediate = _prepare_incremental_image_stream_request(
+                    method=self.command,
+                    path=self.path,
+                    headers=dict(self.headers),
+                    body=body,
+                    engine=request_engine,
+                    live=live,
+                    record_runtime=record_runtime,
+                )
+                if prepared is not None:
+                    self._dispatch_incremental_image_stream(
+                        prepared,
+                        record_runtime=record_runtime,
+                    )
+                    return
+                assert immediate is not None
+                self._write_buffered_response(*immediate)
+                return
             if _http_request_asks_for_incremental_stream(
                 method=self.command,
                 path=self.path,
@@ -664,6 +791,74 @@ def create_http_server(
                 record_runtime=record_runtime,
             )
             self._write_buffered_response(status, response_headers, response_body)
+
+        def _dispatch_incremental_image_stream(
+            self,
+            prepared: _PreparedIncrementalImageStream,
+            *,
+            record_runtime: bool,
+        ) -> None:
+            cancellation_event = threading.Event()
+            public_model = str(prepared.payload.get("model") or "axio-terra")
+            emitted_events = 0
+            response_headers = _apply_cors_headers(
+                (200, _incremental_stream_headers(), b""),
+                prepared.headers_lc,
+            )[1]
+            self.send_response(200)
+            for key, value in response_headers.items():
+                self.send_header(key, value)
+            self.end_headers()
+
+            def on_event(event: Mapping[str, Any]) -> bool:
+                nonlocal emitted_events
+                chunk = render_image_event(event, public_model=public_model)
+                if not chunk:
+                    return True
+                emitted_events += 1
+                return self._write_stream_chunk(chunk, cancellation_event)
+
+            try:
+                if prepared.operation == "generations":
+                    _response, result, _profile = prepared.router.generate(
+                        prepared.payload,
+                        timeout=image_request_timeout(),
+                        stream_observer=on_event,
+                    )
+                else:
+                    _response, result, _profile = prepared.router.edit(
+                        prepared.payload,
+                        prepared.files,
+                        timeout=image_request_timeout(),
+                        stream_observer=on_event,
+                    )
+                if not cancellation_event.is_set():
+                    if emitted_events == 0:
+                        self._write_stream_chunk(
+                            render_image_stream(result, public_model=public_model),
+                            cancellation_event,
+                        )
+                    else:
+                        self._write_stream_chunk(
+                            b"event: done\ndata: [DONE]\n\n",
+                            cancellation_event,
+                        )
+                    if record_runtime:
+                        runtime_state().record_cost(prepared.tenant_key, 0.0)
+            except ImageRequestError as exc:
+                if not cancellation_event.is_set():
+                    self._write_stream_chunk(
+                        _render_image_stream_error(exc.code),
+                        cancellation_event,
+                    )
+            except Exception:  # noqa: BLE001 - streaming HTTP boundary
+                if not cancellation_event.is_set():
+                    self._write_stream_chunk(
+                        _render_image_stream_error("image_provider_unavailable"),
+                        cancellation_event,
+                    )
+            finally:
+                self._finish_stream(cancellation_event)
 
         def _write_buffered_response(
             self,
@@ -3844,6 +4039,20 @@ def _stream_response(status: int, body: bytes) -> tuple[int, dict[str, str], byt
             "Content-Length": str(len(body)),
         },
         body,
+    )
+
+
+def _render_image_stream_error(code: str) -> bytes:
+    payload = {
+        "error": {
+            "message": "Image provider request failed.",
+            "code": str(code or "image_provider_unavailable")[:80],
+        }
+    }
+    return (
+        b"event: error\n"
+        + f"data: {json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}\n\n".encode("utf-8")
+        + b"event: done\ndata: [DONE]\n\n"
     )
 
 

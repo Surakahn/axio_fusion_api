@@ -19,7 +19,7 @@ import urllib.request
 from dataclasses import dataclass
 from email.parser import BytesParser
 from email.policy import HTTP
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from .latency_policy import PROVIDER_MAX_RESPONSE_LATENCY_MS, PROVIDER_MAX_RESPONSE_SECONDS, profile_latency_eligibility
 from .providers import (
@@ -221,8 +221,8 @@ def _normalize_image_fields(value: Mapping[str, Any], *, require_prompt: bool) -
             result[key] = str(raw)
     if result.get("n", 1) < 1 or result.get("n", 1) > 4:
         raise ImageRequestError("Image n must be between 1 and 4.", code="image_field_invalid")
-    if result.get("partial_images", 0) < 0 or result.get("partial_images", 0) > 8:
-        raise ImageRequestError("partial_images must be between 0 and 8.", code="image_field_invalid")
+    if result.get("partial_images", 0) < 0 or result.get("partial_images", 0) > 3:
+        raise ImageRequestError("partial_images must be between 0 and 3.", code="image_field_invalid")
     if result.get("output_compression", 0) and not 0 <= result["output_compression"] <= 100:
         raise ImageRequestError("output_compression must be between 0 and 100.", code="image_field_invalid")
     result["stream"] = bool(result.get("stream", False))
@@ -295,6 +295,7 @@ class ImageProviderClient:
         payload: Mapping[str, Any],
         *,
         timeout: float | None = None,
+        stream_observer: Callable[[Mapping[str, Any]], bool] | None = None,
     ) -> ImageProviderResult:
         if profile.image_capabilities.get("transport") == "responses_image_generation":
             wire = _responses_image_generation_payload(profile, payload)
@@ -311,6 +312,7 @@ class ImageProviderClient:
             timeout=timeout,
             stream=bool(wire.get("stream")),
             event_prefix=event_prefix,
+            stream_observer=stream_observer,
         )
         return _result_from_payload(result, events, protocol, event_prefix=event_prefix)
 
@@ -321,6 +323,7 @@ class ImageProviderClient:
         files: Sequence[ImagePart],
         *,
         timeout: float | None = None,
+        stream_observer: Callable[[Mapping[str, Any]], bool] | None = None,
     ) -> ImageProviderResult:
         form_fields = {key: value for key, value in fields.items() if key != "model"}
         form_fields["model"] = profile.model
@@ -333,6 +336,7 @@ class ImageProviderClient:
             timeout=timeout,
             stream=bool(form_fields.get("stream")),
             event_prefix="image_edit",
+            stream_observer=stream_observer,
         )
         return _result_from_payload(result, events, protocol, event_prefix="image_edit")
 
@@ -346,6 +350,7 @@ class ImageProviderClient:
         timeout: float | None,
         stream: bool,
         event_prefix: str,
+        stream_observer: Callable[[Mapping[str, Any]], bool] | None,
     ) -> tuple[Mapping[str, Any], list[Mapping[str, Any]], str]:
         base_url = _base_url(profile)
         readiness = provider_base_url_readiness(base_url)
@@ -402,6 +407,7 @@ class ImageProviderClient:
                                 request,
                                 timeout=_remaining_timeout(deadline_at),
                                 event_prefix=event_prefix,
+                                stream_observer=stream_observer,
                             )
                         else:
                             parsed = _read_image_json(request, timeout=_remaining_timeout(deadline_at))
@@ -494,6 +500,7 @@ def _read_image_stream(
     *,
     timeout: float,
     event_prefix: str,
+    stream_observer: Callable[[Mapping[str, Any]], bool] | None = None,
 ) -> tuple[Mapping[str, Any], list[Mapping[str, Any]], str]:
     deadline_at = time.monotonic() + min(PROVIDER_MAX_RESPONSE_SECONDS, max(0.001, float(timeout)))
     events: list[Mapping[str, Any]] = []
@@ -508,6 +515,11 @@ def _read_image_stream(
                 safe = _safe_image_event(event_name, payload, event_prefix=event_prefix)
                 if safe:
                     events.append(safe)
+                    if stream_observer is not None and stream_observer(safe) is False:
+                        raise ProviderExecutionError(
+                            "public image stream was cancelled by the downstream client",
+                            error_code="public_stream_cancelled",
+                        )
     except urllib.error.HTTPError:
         raise
     except ProviderExecutionError:
@@ -526,7 +538,18 @@ def _safe_image_event(event_name: str, payload: Mapping[str, Any], *, event_pref
     response_kind_map = {
         "response.image_generation_call.partial_image": f"{event_prefix}.partial_image",
         "response.image_generation_call.completed": f"{event_prefix}.completed",
+        "response.output_item.done": f"{event_prefix}.completed",
     }
+    if kind == "response.completed":
+        response = payload.get("response") if isinstance(payload.get("response"), Mapping) else payload
+        output = response.get("output") if isinstance(response.get("output"), list) else []
+        for item in output:
+            if not isinstance(item, Mapping) or str(item.get("type") or "") != "image_generation_call":
+                continue
+            result = item.get("result")
+            if isinstance(result, str) and result:
+                return {"type": f"{event_prefix}.completed", "b64_json": result}
+        return {}
     kind = response_kind_map.get(kind, kind)
     allowed = {f"{event_prefix}.partial_image", f"{event_prefix}.completed"}
     if kind not in allowed:
@@ -652,7 +675,13 @@ class ImageRouter:
         self.profiles = tuple(profile for profile in profiles if isinstance(profile, ModelProfile))
         self.client = client or ImageProviderClient()
 
-    def generate(self, payload: Mapping[str, Any], *, timeout: float | None = None) -> tuple[dict[str, Any], ImageProviderResult, ModelProfile]:
+    def generate(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        timeout: float | None = None,
+        stream_observer: Callable[[Mapping[str, Any]], bool] | None = None,
+    ) -> tuple[dict[str, Any], ImageProviderResult, ModelProfile]:
         public_model = canonical_public_model(str(payload.get("model") or "axio-terra"))
         selected = self._select(
             public_model,
@@ -663,14 +692,38 @@ class ImageRouter:
             raise ImageRequestError("No verified image generation model is available.", code="image_capability_unavailable", status=503)
         failures: list[ProviderExecutionError] = []
         for profile in selected:
+            observed_events = False
+
+            def observe(event: Mapping[str, Any]) -> bool:
+                nonlocal observed_events
+                observed_events = True
+                return stream_observer(event) if stream_observer is not None else True
+
             try:
-                result = self.client.generate(profile, payload, timeout=timeout)
+                if stream_observer is None:
+                    result = self.client.generate(profile, payload, timeout=timeout)
+                else:
+                    result = self.client.generate(
+                        profile,
+                        payload,
+                        timeout=timeout,
+                        stream_observer=observe,
+                    )
                 return _public_image_response(public_model, result, profile), result, profile
             except ProviderExecutionError as exc:
+                if observed_events or exc.error_code == "public_stream_cancelled":
+                    raise
                 failures.append(exc)
         raise ImageRequestError("All eligible image providers failed.", code="image_provider_unavailable", status=502) from (failures[-1] if failures else None)
 
-    def edit(self, payload: Mapping[str, Any], files: Sequence[ImagePart], *, timeout: float | None = None) -> tuple[dict[str, Any], ImageProviderResult, ModelProfile]:
+    def edit(
+        self,
+        payload: Mapping[str, Any],
+        files: Sequence[ImagePart],
+        *,
+        timeout: float | None = None,
+        stream_observer: Callable[[Mapping[str, Any]], bool] | None = None,
+    ) -> tuple[dict[str, Any], ImageProviderResult, ModelProfile]:
         public_model = canonical_public_model(str(payload.get("model") or "axio-terra"))
         selected = self._select(
             public_model,
@@ -694,10 +747,28 @@ class ImageRouter:
             max_images = int(profile.image_capabilities.get("max_input_images") or 1)
             if image_count > max_images:
                 continue
+            observed_events = False
+
+            def observe(event: Mapping[str, Any]) -> bool:
+                nonlocal observed_events
+                observed_events = True
+                return stream_observer(event) if stream_observer is not None else True
+
             try:
-                result = self.client.edit(profile, payload, files, timeout=timeout)
+                if stream_observer is None:
+                    result = self.client.edit(profile, payload, files, timeout=timeout)
+                else:
+                    result = self.client.edit(
+                        profile,
+                        payload,
+                        files,
+                        timeout=timeout,
+                        stream_observer=observe,
+                    )
                 return _public_image_response(public_model, result, profile), result, profile
             except ProviderExecutionError as exc:
+                if observed_events or exc.error_code == "public_stream_cancelled":
+                    raise
                 failures.append(exc)
         raise ImageRequestError("All eligible image editing providers failed.", code="image_provider_unavailable", status=502) from (failures[-1] if failures else None)
 
@@ -769,15 +840,23 @@ def render_image_stream(
         ]
     chunks: list[bytes] = []
     for event in events:
-        payload = dict(event)
-        payload.setdefault("model", public_model)
-        event_name = str(payload.get("type") or f"{result.event_prefix}.completed")
-        if event_name not in IMAGE_STREAM_EVENT_TYPES:
-            continue
-        chunks.append(f"event: {event_name}\n".encode("utf-8"))
-        chunks.append(f"data: {json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}\n\n".encode("utf-8"))
+        chunks.append(render_image_event(event, public_model=public_model))
     chunks.append(b"event: done\ndata: [DONE]\n\n")
     return b"".join(chunks)
+
+
+def render_image_event(event: Mapping[str, Any], *, public_model: str) -> bytes:
+    """Render one already-sanitized image event for incremental SSE output."""
+
+    payload = dict(event)
+    payload.setdefault("model", public_model)
+    event_name = str(payload.get("type") or "")
+    if event_name not in IMAGE_STREAM_EVENT_TYPES:
+        return b""
+    return (
+        f"event: {event_name}\n".encode("utf-8")
+        + f"data: {json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}\n\n".encode("utf-8")
+    )
 
 
 def image_router_summary(router: ImageRouter) -> dict[str, Any]:

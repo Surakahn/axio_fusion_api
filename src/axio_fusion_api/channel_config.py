@@ -37,6 +37,7 @@ class ChannelConfigError(ValueError):
 SecretResolver = Callable[[str], Any]
 _ENVIRONMENT_VARIABLE_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _DISCOVERY_SEED_MODEL = "__axio_discovery_seed__"
+_IMAGE_MODEL_NAME_PATTERN = re.compile(r"(?:^|/)gpt-image(?:-|$)", re.IGNORECASE)
 
 
 def build_runtime_profiles(
@@ -130,6 +131,11 @@ def discover_runtime_profiles(
                     model=model_name,
                     canonical_model_id=model_name,
                     source="runtime_channel_discovery",
+                    **_auto_image_profile_fields(
+                        model_name,
+                        model_row={},
+                        channel_row=row,
+                    ),
                 )
             )
 
@@ -369,6 +375,17 @@ def _build_channel_profiles(
             "health": _model_value(row, model_row, "health", default="unknown"),
             "source": "runtime_channel_config",
         }
+        # Known image-model names are classified into the isolated image lane
+        # when a channel has not supplied a more specific modality declaration.
+        # The generated capability remains candidate/not_run, so classification
+        # can never bypass the independent image probe.
+        profile_row.update(
+            _auto_image_profile_fields(
+                model_name,
+                model_row=model_row,
+                channel_row=row,
+            )
+        )
         profile = normalize_profile(profile_row)
         profiles.append(
             replace(
@@ -378,6 +395,71 @@ def _build_channel_profiles(
             )
         )
     return profiles
+
+
+def _auto_image_profile_fields(
+    model_name: str,
+    *,
+    model_row: Mapping[str, Any],
+    channel_row: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Classify known OpenAI image names without admitting image capability.
+
+    Discovery APIs often return only opaque model IDs.  ``gpt-image-*`` is a
+    stable vendor naming family whose documented modality is image generation
+    and editing, so it must not enter the text candidate pool by default.  The
+    returned status is deliberately ``candidate``/``not_run``: only the
+    endpoint-bound image probe can promote it to a routable image profile.
+    Explicit channel/model modality fields always take precedence.
+    """
+
+    if not _IMAGE_MODEL_NAME_PATTERN.search(str(model_name or "").strip()):
+        return {}
+    declared_kind = _value(
+        model_row,
+        "model_kind",
+        "modelKind",
+        "modality",
+        "model_modality",
+    )
+    if declared_kind not in (None, ""):
+        return {}
+    declared_capabilities = _value(
+        model_row,
+        "image_capabilities",
+        "imageCapabilities",
+        "image_capability",
+    )
+    if declared_capabilities in (None, ""):
+        declared_capabilities = _value(
+            channel_row,
+            "image_capabilities",
+            "imageCapabilities",
+            "image_capability",
+        )
+    capabilities = (
+        dict(declared_capabilities)
+        if isinstance(declared_capabilities, Mapping)
+        else {}
+    )
+    if not capabilities:
+        capabilities = {
+            "status": "candidate",
+            "transport": "images_api",
+            "operations": ["generation", "editing"],
+            "streaming": False,
+            "max_input_images": 1,
+        }
+    else:
+        capabilities.setdefault("status", "candidate")
+        capabilities.setdefault("transport", "images_api")
+        capabilities.setdefault("operations", ["generation", "editing"])
+        capabilities.setdefault("streaming", False)
+        capabilities.setdefault("max_input_images", 1)
+    return {
+        "model_kind": "image",
+        "image_capabilities": capabilities,
+    }
 
 
 def _resolve_endpoint(
