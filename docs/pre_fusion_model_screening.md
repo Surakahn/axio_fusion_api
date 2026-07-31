@@ -57,6 +57,44 @@ The workflow has five ordered stages:
 5. Bind only the eligible profile hashes to a private loadable registry. A
    blocked screening run never produces enabled serving profiles.
 
+### Candidate Admission Boundary
+
+The complete `/models` inventory is not automatically the formal Fusion model
+pool. The focus manifest may contain a provider-scoped `candidate_policy` that
+is applied after text/image modality separation and before candidate grouping,
+public-source research, ranking, or streaming probes. This is the fixed shape:
+
+```json
+{
+  "schema": "axio_fusion_api.prefusion_candidate_policy.v1",
+  "default_allow_unlisted": true,
+  "provider_rules": [
+    {
+      "provider": "tokenapis",
+      "allow_models": ["gpt-5.2", "gpt-5.5", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
+      "allow_unlisted": false,
+      "excluded_unlisted_class": "auxiliary"
+    }
+  ]
+}
+```
+
+An allowlisted model matches either its exposed provider model name or its
+declared canonical identity. Provider replicas remain separate physical
+profiles and are merged into one logical candidate later. A provider without a
+rule follows `default_allow_unlisted`, preserving compatibility for future
+channels; a closed rule excludes every unlisted model before the Research
+Agent can see it. Thus tool-only helpers such as `codex-auto-review` cannot
+become formal text candidates merely because `/models` returned them. Image
+profiles are excluded by the existing modality gate and are handled by the
+independent image generation/editing lane.
+
+The report, model catalog, and Fusion handoff carry a hash-bound candidate
+filter receipt with physical/logical input, admitted, and excluded counts plus
+bounded provider/model diagnostics. It is an operational admission record,
+not a capability score or benchmark evidence. Malformed rules, duplicate
+providers/models, missing allowlists, or a missing exclusion class fail closed.
+
 ## Long-Request Operational Admission
 
 The short health probe is intentionally not treated as evidence that a model

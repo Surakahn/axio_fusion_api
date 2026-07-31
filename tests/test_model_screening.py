@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from pathlib import Path
 import urllib.error
 
 import pytest
@@ -290,6 +291,206 @@ def _research_output(candidate_ids: list[str], *, confidence: float = 0.9, overa
 def _groups(profiles):
     focus = model_screening.load_prefusion_focus_manifest()
     return model_screening._build_candidate_groups(profiles, focus)
+
+
+def _formal_tokenapis_focus() -> dict:
+    return model_screening.load_prefusion_focus_manifest(
+        {
+            "schema": model_screening.PREFUSION_FOCUS_MANIFEST_SCHEMA,
+            "selection_basis": "test_formal_candidate_boundary",
+            "ranking_prior_forbidden": True,
+            "candidate_policy": {
+                "schema": model_screening.PREFUSION_CANDIDATE_POLICY_SCHEMA,
+                "default_allow_unlisted": True,
+                "provider_rules": [
+                    {
+                        "provider": "tokenapis",
+                        "allow_models": [
+                            "gpt-5.2",
+                            "gpt-5.5",
+                            "gpt-5.6-luna",
+                            "gpt-5.6-terra",
+                            "gpt-5.6-sol",
+                        ],
+                        "allow_unlisted": False,
+                        "excluded_unlisted_class": "auxiliary",
+                    }
+                ],
+            },
+            "candidates": [],
+        }
+    )
+
+
+def test_candidate_policy_keeps_formal_tokenapis_models_and_excludes_auxiliary_models():
+    profiles = [
+        _profile("tokenapis", "gpt-5.2", "gpt-5.2"),
+        _profile("tokenapis", "gpt-5.6-sol", "gpt-5.6-sol"),
+        _profile("tokenapis", "codex-auto-review", "codex-auto-review"),
+        _profile("nvidia", "openai/gpt-oss-20b", "openai/gpt-oss-20b"),
+    ]
+    focus = _formal_tokenapis_focus()
+
+    admitted, receipt = model_screening._apply_prefusion_candidate_policy(
+        profiles,
+        focus["candidate_policy"],
+    )
+
+    assert [profile.model for profile in admitted] == [
+        "gpt-5.2",
+        "gpt-5.6-sol",
+        "openai/gpt-oss-20b",
+    ]
+    assert receipt["input_text_profile_count"] == 4
+    assert receipt["admitted_text_profile_count"] == 3
+    assert receipt["excluded_text_profile_count"] == 1
+    assert receipt["excluded_profiles"][0]["model"] == "codex-auto-review"
+    assert receipt["excluded_profiles"][0]["excluded_model_class"] == "auxiliary"
+
+
+def test_candidate_policy_matches_a_declared_canonical_identity():
+    profile = _profile("tokenapis", "provider-alias", "gpt-5.5")
+    admitted, receipt = model_screening._apply_prefusion_candidate_policy(
+        [profile],
+        _formal_tokenapis_focus()["candidate_policy"],
+    )
+
+    assert [item.model for item in admitted] == ["provider-alias"]
+    assert receipt["excluded_text_profile_count"] == 0
+
+
+def test_candidate_policy_exclusion_is_before_research_inventory():
+    profiles = [
+        _profile("tokenapis", "gpt-5.2", "gpt-5.2"),
+        _profile("tokenapis", "gpt-5.6-luna", "gpt-5.6-luna"),
+        _profile("tokenapis", "codex-auto-review", "codex-auto-review"),
+    ]
+    focus = _formal_tokenapis_focus()
+    admitted, _receipt = model_screening._apply_prefusion_candidate_policy(
+        profiles,
+        focus["candidate_policy"],
+    )
+    groups = model_screening._build_candidate_groups(admitted, focus)
+    research = _research_output([str(row["candidate_id"]) for row in groups])
+
+    report = run_prefusion_model_screening(
+        profiles=profiles,
+        focus_manifest=focus,
+        source_manifest=_source_manifest(),
+        research_output=research,
+        live=False,
+    )
+
+    assert report["workflow"]["candidate_count"] == 2
+    assert report["research_ranking"]["candidate_count"] == 2
+    assert all(
+        row["model"] != "codex-auto-review"
+        for row in report["research_ranking"]["ordered_models"]
+    )
+    assert report["candidate_filter"]["excluded_text_profile_count"] == 1
+
+
+def test_candidate_policy_without_provider_rule_preserves_open_compatibility():
+    focus = model_screening.load_prefusion_focus_manifest()
+    profile = _profile("future-provider", "future-model", "future-model")
+
+    admitted, receipt = model_screening._apply_prefusion_candidate_policy(
+        [profile],
+        focus["candidate_policy"],
+    )
+
+    assert admitted == [profile]
+    assert receipt["policy_explicit"] is False
+    assert receipt["excluded_text_profile_count"] == 0
+
+
+def test_repository_focus_manifest_declares_only_formal_tokenapis_text_models():
+    manifest_path = Path(__file__).resolve().parents[1] / "config" / "nvidia_focus_models.json"
+    focus = model_screening.load_prefusion_focus_manifest(manifest_path)
+    rules = focus["candidate_policy"]["provider_rules"]
+    tokenapis_rule = next(row for row in rules if row["provider"] == "tokenapis")
+
+    assert tokenapis_rule["allow_models"] == [
+        "gpt-5.2",
+        "gpt-5.5",
+        "gpt-5.6-luna",
+        "gpt-5.6-terra",
+        "gpt-5.6-sol",
+    ]
+    assert tokenapis_rule["allow_unlisted"] is False
+    assert tokenapis_rule["excluded_unlisted_class"] == "auxiliary"
+
+
+@pytest.mark.parametrize(
+    ("policy", "error_code"),
+    [
+        (
+            {
+                "schema": model_screening.PREFUSION_CANDIDATE_POLICY_SCHEMA,
+                "default_allow_unlisted": True,
+                "provider_rules": [{"provider": "tokenapis"}],
+            },
+            "prefusion_candidate_policy_allow_models_invalid",
+        ),
+        (
+            {
+                "schema": model_screening.PREFUSION_CANDIDATE_POLICY_SCHEMA,
+                "default_allow_unlisted": True,
+                "provider_rules": [
+                    {
+                        "provider": "tokenapis",
+                        "allow_models": ["gpt-5.5", "gpt-5.5"],
+                        "allow_unlisted": False,
+                        "excluded_unlisted_class": "auxiliary",
+                    }
+                ],
+            },
+            "prefusion_candidate_policy_model_duplicate",
+        ),
+        (
+            {
+                "schema": model_screening.PREFUSION_CANDIDATE_POLICY_SCHEMA,
+                "default_allow_unlisted": True,
+                "provider_rules": [
+                    {
+                        "provider": "tokenapis",
+                        "allow_models": ["gpt-5.5"],
+                        "allow_unlisted": False,
+                    }
+                ],
+            },
+            "prefusion_candidate_policy_excluded_class_missing",
+        ),
+    ],
+)
+def test_candidate_policy_malformed_rules_fail_closed(policy, error_code):
+    with pytest.raises(ModelScreeningError) as error:
+        model_screening.load_prefusion_focus_manifest(
+            {
+                "schema": model_screening.PREFUSION_FOCUS_MANIFEST_SCHEMA,
+                "ranking_prior_forbidden": True,
+                "candidate_policy": policy,
+                "candidates": [],
+            }
+        )
+    assert error.value.code == error_code
+
+
+def test_redacted_candidate_filter_does_not_persist_auxiliary_model_name():
+    focus = _formal_tokenapis_focus()
+    report = run_prefusion_model_screening(
+        profiles=[_profile("tokenapis", "codex-auto-review", "codex-auto-review")],
+        focus_manifest=focus,
+        source_manifest=_source_manifest(),
+        live=False,
+        redact_provider_identifiers=True,
+    )
+
+    serialized = json.dumps(report, ensure_ascii=False)
+    assert "codex-auto-review" not in serialized
+    assert report["candidate_filter"]["excluded_profiles"][0]["model"].startswith(
+        "sha256:"
+    )
 
 
 def test_research_json_parser_allows_only_one_outer_json_fence():

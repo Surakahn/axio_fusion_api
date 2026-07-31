@@ -84,6 +84,9 @@ PREFUSION_MODEL_CATALOG_SCHEMA = "axio_fusion_api.prefusion_model_catalog.v1"
 PREFUSION_RESEARCH_RANKING_SCHEMA = (
     "axio_fusion_api.prefusion_research_ranking_registry.v1"
 )
+PREFUSION_CANDIDATE_POLICY_SCHEMA = (
+    "axio_fusion_api.prefusion_candidate_policy.v1"
+)
 PREFUSION_HANDOFF_SCHEMA = "axio_fusion_api.prefusion_fusion_handoff.v2"
 PREFUSION_FUSION_HANDOFF_SCHEMA = "axio_fusion_api.prefusion_fusion_handoff_boundary.v1"
 PREFUSION_ROLE_COVERAGE_SCHEMA = "axio_fusion_api.prefusion_role_coverage.v1"
@@ -179,6 +182,9 @@ _MAX_RESEARCH_AGENT_EXCERPT_CHARS = 4_000
 _MAX_RESEARCH_PROMPT_CHARS = 350_000
 _MAX_RESEARCH_OUTPUT_CHARS = 120_000
 _MAX_CANDIDATE_COUNT = 256
+_MAX_CANDIDATE_POLICY_RULES = 64
+_MAX_CANDIDATE_POLICY_MODELS_PER_RULE = 256
+_MAX_CANDIDATE_POLICY_MODEL_CHARS = 256
 _DEFAULT_RESEARCH_BATCH_SIZE = 4
 _MAX_RESEARCH_BATCH_SIZE = 64
 _DEFAULT_RESEARCH_MAX_WORKERS = 4
@@ -197,6 +203,17 @@ _RESEARCH_MERGE_STRATEGY = "deterministic_research_quality_confidence_candidate_
 _DEFAULT_SOURCE_TIMEOUT_SECONDS = 15.0
 _MAX_SOURCE_FETCH_WORKERS = 8
 _DEFAULT_RESEARCH_TIMEOUT_SECONDS = 90.0
+_CANDIDATE_POLICY_KEYS = frozenset(
+    {"schema", "default_allow_unlisted", "provider_rules"}
+)
+_CANDIDATE_POLICY_RULE_KEYS = frozenset(
+    {"provider", "allow_models", "allow_unlisted", "excluded_unlisted_class"}
+)
+_DEFAULT_CANDIDATE_POLICY: dict[str, Any] = {
+    "schema": PREFUSION_CANDIDATE_POLICY_SCHEMA,
+    "default_allow_unlisted": True,
+    "provider_rules": [],
+}
 _DEFAULT_AGENT_CONFIG: dict[str, Any] = {
     "schema": "axio_fusion_api.prefusion_research_agent_config.v1",
     "provider": "nvidia",
@@ -327,11 +344,17 @@ def run_prefusion_model_screening(
         all_profiles = _coerce_profiles(profiles, registry_path=registry_path)
     # Keep disabled profiles available for resolving the separately configured
     # research agent. Disabled candidates themselves never enter the inventory.
-    clean_profiles = [
+    text_profiles = [
         profile
         for profile in _dedupe_profiles(all_profiles)
         if profile.text_model_eligible
     ]
+    clean_profiles, candidate_filter = _apply_prefusion_candidate_policy(
+        text_profiles,
+        focus.get("candidate_policy")
+        if isinstance(focus, Mapping)
+        else _DEFAULT_CANDIDATE_POLICY,
+    )
     groups = _build_candidate_groups(clean_profiles, focus)
     candidate_limit = _bounded_optional_int(max_models, upper=_MAX_CANDIDATE_COUNT)
     candidate_before_limit = len(groups)
@@ -580,6 +603,7 @@ def run_prefusion_model_screening(
         eligible_profiles=eligible_profiles,
         probe_payload=probe_payload,
         candidate_inventory_complete=candidate_inventory_complete,
+        candidate_filter=candidate_filter,
         screening_status="ready" if live and not blockers and eligible_profiles else "blocked",
     )
     role_coverage = _project_prefusion_role_coverage(
@@ -688,6 +712,17 @@ def run_prefusion_model_screening(
             "candidate_inventory_complete": candidate_inventory_complete,
             "candidate_limit_requested": candidate_limit,
             "partial_candidate_pool_blocks_serving": True,
+            "candidate_policy_explicit": candidate_filter["policy_explicit"],
+            "candidate_policy_schema": candidate_filter["policy_schema"],
+            "candidate_policy_input_text_profile_count": candidate_filter[
+                "input_text_profile_count"
+            ],
+            "candidate_policy_admitted_text_profile_count": candidate_filter[
+                "admitted_text_profile_count"
+            ],
+            "candidate_policy_excluded_text_profile_count": candidate_filter[
+                "excluded_text_profile_count"
+            ],
             "physical_profile_count": len(clean_profiles),
             "minimum_available_logical_models": max(1, int(min_available_models or 1)),
             "max_response_seconds": PROVIDER_MAX_RESPONSE_SECONDS,
@@ -764,6 +799,7 @@ def run_prefusion_model_screening(
         "fusion_handoff": fusion_handoff,
         "fusion_registry": fusion_registry,
         "candidate_inventory": _candidate_inventory_receipt(groups),
+        "candidate_filter": candidate_filter,
         "blockers": sorted(set(str(code) for code in blockers if str(code))),
         "secrets_persisted": False,
         "raw_source_content_persisted": False,
@@ -775,6 +811,8 @@ def run_prefusion_model_screening(
         "no_cheat_contract": {
             "public_source_ranking_is_not_benchmark_evidence": True,
             "research_agent_cannot_add_or_remove_candidates": True,
+            "candidate_policy_is_applied_before_research_agent": True,
+            "candidate_policy_cannot_admit_unlisted_closed_provider_models": True,
             "research_agent_cannot_bypass_streaming_probe": True,
             "slow_profiles_are_excluded_from_serving_and_fallback": True,
             "final_benchmark_must_call_axio_over_http": True,
@@ -873,14 +911,114 @@ def load_prefusion_focus_manifest(
             raise ModelScreeningError("prefusion_focus_manifest_ranking_prior_not_forbidden")
     if payload.get("ranking_prior_forbidden", True) is not True:
         raise ModelScreeningError("prefusion_focus_manifest_ranking_prior_not_forbidden")
+    candidate_policy = _load_prefusion_candidate_policy(
+        payload.get("candidate_policy")
+    )
     return {
         "schema": PREFUSION_FOCUS_MANIFEST_SCHEMA,
         "selection_basis": str(payload.get("selection_basis") or "operator_focus_only"),
         "ranking_prior_forbidden": payload.get("ranking_prior_forbidden", True) is True,
         "candidates": normalized,
+        "candidate_policy": candidate_policy,
         "raw_api_keys_persisted": False,
         "raw_base_urls_persisted": False,
         "secrets_persisted": False,
+    }
+
+
+def _load_prefusion_candidate_policy(value: Any) -> dict[str, Any]:
+    """Normalize the optional, provider-scoped candidate admission policy.
+
+    The policy is intentionally separate from the Research Agent's ranking.
+    It answers only whether a discovered text profile is an eligible research
+    candidate.  A provider with an explicit closed rule cannot leak an
+    unlisted auxiliary or tool-only model into the Fusion candidate universe.
+    Providers without a rule retain the historical open behavior unless the
+    operator changes ``default_allow_unlisted``.
+    """
+
+    if value is None:
+        return {
+            **_DEFAULT_CANDIDATE_POLICY,
+            "provider_rules": [],
+        }
+    if not isinstance(value, Mapping):
+        raise ModelScreeningError("prefusion_candidate_policy_invalid")
+    supplied_keys = {str(key) for key in value}
+    if not supplied_keys.issubset(_CANDIDATE_POLICY_KEYS):
+        raise ModelScreeningError("prefusion_candidate_policy_key_not_allowed")
+    if str(value.get("schema") or "") != PREFUSION_CANDIDATE_POLICY_SCHEMA:
+        raise ModelScreeningError("prefusion_candidate_policy_schema_invalid")
+    if not isinstance(value.get("default_allow_unlisted"), bool):
+        raise ModelScreeningError("prefusion_candidate_policy_default_invalid")
+    raw_rules = value.get("provider_rules")
+    if not isinstance(raw_rules, list):
+        raise ModelScreeningError("prefusion_candidate_policy_provider_rules_invalid")
+    if len(raw_rules) > _MAX_CANDIDATE_POLICY_RULES:
+        raise ModelScreeningError("prefusion_candidate_policy_provider_rules_exceed_bound")
+
+    normalized_rules: list[dict[str, Any]] = []
+    seen_providers: set[str] = set()
+    for raw_rule in raw_rules:
+        if not isinstance(raw_rule, Mapping):
+            raise ModelScreeningError("prefusion_candidate_policy_provider_rule_invalid")
+        if {str(key) for key in raw_rule} - _CANDIDATE_POLICY_RULE_KEYS:
+            raise ModelScreeningError("prefusion_candidate_policy_provider_rule_key_not_allowed")
+        provider = _normalize_candidate_provider(raw_rule.get("provider"))
+        if not provider:
+            raise ModelScreeningError("prefusion_candidate_policy_provider_missing")
+        if provider in seen_providers:
+            raise ModelScreeningError("prefusion_candidate_policy_provider_duplicate")
+        seen_providers.add(provider)
+
+        allow_models = raw_rule.get("allow_models")
+        if not isinstance(allow_models, list) or not allow_models:
+            raise ModelScreeningError("prefusion_candidate_policy_allow_models_invalid")
+        if len(allow_models) > _MAX_CANDIDATE_POLICY_MODELS_PER_RULE:
+            raise ModelScreeningError("prefusion_candidate_policy_allow_models_exceed_bound")
+        normalized_models: list[str] = []
+        seen_models: set[str] = set()
+        for raw_model in allow_models:
+            if not isinstance(raw_model, str):
+                raise ModelScreeningError("prefusion_candidate_policy_model_invalid")
+            model = raw_model.strip()
+            model_key = _normalize_candidate_identity(model)
+            if not model_key or len(model) > _MAX_CANDIDATE_POLICY_MODEL_CHARS:
+                raise ModelScreeningError("prefusion_candidate_policy_model_invalid")
+            if model_key in seen_models:
+                raise ModelScreeningError("prefusion_candidate_policy_model_duplicate")
+            seen_models.add(model_key)
+            normalized_models.append(model)
+
+        if not isinstance(raw_rule.get("allow_unlisted"), bool):
+            raise ModelScreeningError("prefusion_candidate_policy_allow_unlisted_invalid")
+        allow_unlisted = raw_rule["allow_unlisted"]
+        exclusion_class = str(raw_rule.get("excluded_unlisted_class") or "").strip()
+        if not allow_unlisted:
+            if not exclusion_class or len(exclusion_class) > 64:
+                raise ModelScreeningError(
+                    "prefusion_candidate_policy_excluded_class_missing"
+                )
+            if not re.fullmatch(r"[A-Za-z0-9_-]+", exclusion_class):
+                raise ModelScreeningError(
+                    "prefusion_candidate_policy_excluded_class_invalid"
+                )
+        elif exclusion_class and not re.fullmatch(r"[A-Za-z0-9_-]+", exclusion_class):
+            raise ModelScreeningError(
+                "prefusion_candidate_policy_excluded_class_invalid"
+            )
+        normalized_rules.append(
+            {
+                "provider": provider,
+                "allow_models": normalized_models,
+                "allow_unlisted": allow_unlisted,
+                "excluded_unlisted_class": exclusion_class,
+            }
+        )
+    return {
+        "schema": PREFUSION_CANDIDATE_POLICY_SCHEMA,
+        "default_allow_unlisted": value["default_allow_unlisted"],
+        "provider_rules": normalized_rules,
     }
 
 
@@ -1253,6 +1391,18 @@ def validate_prefusion_handoff(
     catalog_role_coverage = (
         catalog_role_coverage if isinstance(catalog_role_coverage, Mapping) else {}
     )
+    report_candidate_filter = report.get("candidate_filter")
+    report_candidate_filter = (
+        report_candidate_filter
+        if isinstance(report_candidate_filter, Mapping)
+        else {}
+    )
+    catalog_candidate_filter = catalog.get("candidate_filter")
+    catalog_candidate_filter = (
+        catalog_candidate_filter
+        if isinstance(catalog_candidate_filter, Mapping)
+        else {}
+    )
 
     if str(report.get("schema") or "") != PREFUSION_SCREENING_SCHEMA:
         issues.append("prefusion_report_schema_invalid")
@@ -1287,6 +1437,8 @@ def validate_prefusion_handoff(
         issues.append("prefusion_report_role_coverage_mismatch")
     if stable_json(registry_role_coverage) != stable_json(catalog_role_coverage):
         issues.append("prefusion_registry_role_coverage_mismatch")
+    if stable_json(report_candidate_filter) != stable_json(catalog_candidate_filter):
+        issues.append("prefusion_report_candidate_filter_mismatch")
     registry_digest = str(handoff.get("registry_content_sha256") or "").strip().lower()
     if not is_sha256_digest(registry_digest) or registry_digest != sha256_text(
         stable_json(dict(registry))
@@ -1499,6 +1651,13 @@ def build_prefusion_fusion_handoff(
         "ranking_prior_forbidden_for_final_benchmark_claims": True,
         "available_model_list": json.loads(
             json.dumps(available_projection, ensure_ascii=False, default=str)
+        ),
+        "candidate_filter": json.loads(
+            json.dumps(
+                catalog_projection.get("candidate_filter") or {},
+                ensure_ascii=False,
+                default=str,
+            )
         ),
         "available_model_list_sha256": source_list_digest,
         "logical_model_count": len(available_projection),
@@ -1858,6 +2017,10 @@ def _catalog_registry_projection(value: Any) -> dict[str, Any]:
     available = available if isinstance(available, list) else []
     excluded = payload.get("excluded_model_list")
     excluded = excluded if isinstance(excluded, list) else []
+    candidate_filter = payload.get("candidate_filter")
+    candidate_filter = (
+        dict(candidate_filter) if isinstance(candidate_filter, Mapping) else {}
+    )
     role_coverage = _project_prefusion_role_coverage(payload.get("role_coverage"))
     return {
         "schema": PREFUSION_MODEL_CATALOG_SCHEMA,
@@ -1905,6 +2068,7 @@ def _catalog_registry_projection(value: Any) -> dict[str, Any]:
         },
         "available_model_list": available,
         "excluded_model_list": excluded,
+        "candidate_filter": candidate_filter,
         "role_coverage": role_coverage,
         "latency_gate": dict(payload.get("latency_gate") or {}),
         "replica_policy": dict(payload.get("replica_policy") or {}),
@@ -2686,6 +2850,7 @@ def _build_prefusion_model_catalog(
     probe_payload: Mapping[str, Any],
     candidate_inventory_complete: bool,
     screening_status: str,
+    candidate_filter: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the fixed private handoff consumed by the Fusion control plane.
 
@@ -2916,6 +3081,7 @@ def _build_prefusion_model_catalog(
         },
         "available_model_list": available_model_list,
         "excluded_model_list": excluded_model_list,
+        "candidate_filter": dict(candidate_filter or {}),
         "latency_gate": {
             "max_response_seconds": PROVIDER_MAX_RESPONSE_SECONDS,
             "max_response_latency_ms": PROVIDER_MAX_RESPONSE_LATENCY_MS,
@@ -3028,6 +3194,168 @@ def _dedupe_profiles(profiles: Sequence[ModelProfile]) -> list[ModelProfile]:
         seen.add(profile.profile_id)
         result.append(profile)
     return result
+
+
+def _normalize_candidate_provider(value: Any) -> str:
+    return str(value or "").strip().casefold().replace("_", "-")
+
+
+def _normalize_candidate_identity(value: Any) -> str:
+    return " ".join(str(value or "").strip().casefold().split())
+
+
+def _apply_prefusion_candidate_policy(
+    profiles: Sequence[ModelProfile],
+    policy: Mapping[str, Any],
+) -> tuple[list[ModelProfile], dict[str, Any]]:
+    """Apply the closed candidate boundary before research or probing.
+
+    The returned receipt deliberately reports both physical profile counts and
+    logical canonical identities.  Provider replicas are still admitted as
+    separate transport profiles when their logical model is allowed; they are
+    collapsed only later by ``_build_candidate_groups``.
+    """
+
+    if not isinstance(policy, Mapping):
+        raise ModelScreeningError("prefusion_candidate_policy_invalid")
+    policy_schema = str(
+        policy.get("schema") or PREFUSION_CANDIDATE_POLICY_SCHEMA
+    )
+    if policy_schema != PREFUSION_CANDIDATE_POLICY_SCHEMA:
+        raise ModelScreeningError("prefusion_candidate_policy_schema_invalid")
+    default_allow_unlisted = policy.get("default_allow_unlisted")
+    if not isinstance(default_allow_unlisted, bool):
+        raise ModelScreeningError("prefusion_candidate_policy_default_invalid")
+    rules_by_provider: dict[str, Mapping[str, Any]] = {}
+    raw_rules = policy.get("provider_rules", [])
+    if not isinstance(raw_rules, list):
+        raise ModelScreeningError("prefusion_candidate_policy_provider_rules_invalid")
+    for rule in raw_rules:
+        if not isinstance(rule, Mapping):
+            raise ModelScreeningError("prefusion_candidate_policy_provider_rule_invalid")
+        provider = _normalize_candidate_provider(rule.get("provider"))
+        if not provider or provider in rules_by_provider:
+            raise ModelScreeningError("prefusion_candidate_policy_provider_duplicate")
+        rules_by_provider[provider] = rule
+
+    admitted: list[ModelProfile] = []
+    excluded_rows: list[dict[str, Any]] = []
+    for profile in profiles:
+        provider = _normalize_candidate_provider(profile.provider)
+        profile_keys = {
+            key
+            for key in {
+                _normalize_candidate_identity(profile.model),
+                _normalize_candidate_identity(profile.canonical_model_id),
+                _normalize_candidate_identity(profile.canonical_identity),
+            }
+            if key
+        }
+        rule = rules_by_provider.get(provider)
+        if rule is None:
+            allowed = default_allow_unlisted
+            reason_code = (
+                "provider_unlisted_allowed_by_default"
+                if allowed
+                else "provider_unlisted_denied_by_default"
+            )
+            excluded_class = "unlisted_provider" if not allowed else ""
+        else:
+            allow_models = {
+                _normalize_candidate_identity(model)
+                for model in rule.get("allow_models", [])
+                if str(model).strip()
+            }
+            explicitly_allowed = bool(profile_keys.intersection(allow_models))
+            allow_unlisted = rule.get("allow_unlisted") is True
+            allowed = explicitly_allowed or allow_unlisted
+            reason_code = (
+                "model_allowlisted"
+                if explicitly_allowed
+                else "provider_unlisted_allowed"
+                if allow_unlisted
+                else "model_not_allowlisted"
+            )
+            excluded_class = str(
+                rule.get("excluded_unlisted_class") or "unlisted_model"
+            )
+        if allowed:
+            admitted.append(profile)
+            continue
+        excluded_rows.append(
+            {
+                "provider": profile.provider,
+                "model": profile.model,
+                "canonical_model_id": profile.canonical_model_id or profile.model,
+                "profile_id_sha256": sha256_text(profile.profile_id),
+                "reason_code": reason_code,
+                "excluded_model_class": excluded_class,
+            }
+        )
+
+    excluded_rows.sort(
+        key=lambda row: (
+            _normalize_candidate_provider(row.get("provider")),
+            _normalize_candidate_identity(row.get("model")),
+            str(row.get("profile_id_sha256") or ""),
+        )
+    )
+    excluded_identities = {
+        _normalize_candidate_identity(row.get("canonical_model_id"))
+        for row in excluded_rows
+        if _normalize_candidate_identity(row.get("canonical_model_id"))
+    }
+    receipt = {
+        "schema": "axio_fusion_api.prefusion_candidate_filter.v1",
+        "policy_schema": PREFUSION_CANDIDATE_POLICY_SCHEMA,
+        "policy_explicit": bool(raw_rules)
+        or default_allow_unlisted is not True,
+        "default_allow_unlisted": default_allow_unlisted,
+        "provider_rule_count": len(rules_by_provider),
+        "input_text_profile_count": len(profiles),
+        "admitted_text_profile_count": len(admitted),
+        "excluded_text_profile_count": len(excluded_rows),
+        "input_logical_model_count": logical_model_count(profiles),
+        "admitted_logical_model_count": logical_model_count(admitted),
+        "excluded_logical_model_count": len(excluded_identities),
+        "excluded_profiles": excluded_rows,
+        "excluded_profile_hashes": sorted(
+            str(row.get("profile_id_sha256") or "")
+            for row in excluded_rows
+            if str(row.get("profile_id_sha256") or "")
+        ),
+        "excluded_logical_identity_sha256s": sorted(
+            sha256_text(identity) for identity in excluded_identities
+        ),
+        "policy_content_sha256": sha256_text(
+            stable_json(
+                {
+                    "schema": PREFUSION_CANDIDATE_POLICY_SCHEMA,
+                    "default_allow_unlisted": default_allow_unlisted,
+                    "provider_rules": [
+                        {
+                            "provider": _normalize_candidate_provider(
+                                rule.get("provider")
+                            ),
+                            "allow_models": sorted(
+                                _normalize_candidate_identity(model)
+                                for model in rule.get("allow_models", [])
+                            ),
+                            "allow_unlisted": rule.get("allow_unlisted") is True,
+                            "excluded_unlisted_class": str(
+                                rule.get("excluded_unlisted_class") or ""
+                            ),
+                        }
+                        for rule in raw_rules
+                        if isinstance(rule, Mapping)
+                    ],
+                }
+            )
+        ),
+        "raw_provider_output_persisted": False,
+        "secrets_persisted": False,
+    }
+    return admitted, receipt
 
 
 def _build_candidate_groups(
@@ -5737,7 +6065,7 @@ def _redact_provider_identifiers(value: Any, *, key: str = "") -> Any:
             redacted["raw_provider_names_persisted"] = False
         return redacted
     if isinstance(value, list):
-        if key in {"providers", "model_ids"}:
+        if key in {"providers", "model_ids", "allow_models"}:
             return [
                 f"sha256:{sha256_text(str(item))}"
                 for item in value
