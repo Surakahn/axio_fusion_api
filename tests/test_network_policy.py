@@ -146,6 +146,9 @@ def test_https_connection_reapplies_timeout_before_and_after_tls(monkeypatch):
         def settimeout(self, value):
             self.timeouts.append(float(value))
 
+        def setsockopt(self, *_args):
+            return None
+
     class FakeContext:
         verify_mode = ssl.CERT_NONE
         check_hostname = False
@@ -157,18 +160,13 @@ def test_https_connection_reapplies_timeout_before_and_after_tls(monkeypatch):
             assert sock is raw_socket
             return wrapped_socket
 
-    def fake_http_connect(connection):
-        nonlocal raw_socket
-        raw_socket = FakeSocket()
-        connection.sock = raw_socket
-
-    monkeypatch.setattr(network.http.client.HTTPConnection, "connect", fake_http_connect)
-
     connection = network._DeadlineHTTPSConnection(
         "provider.invalid",
         timeout=1.25,
         context=FakeContext(),
     )
+    raw_socket = FakeSocket()
+    monkeypatch.setattr(connection, "_create_connection", lambda *_args: raw_socket)
     connection.connect()
 
     assert len(raw_socket.timeouts) == 1
@@ -181,22 +179,28 @@ def test_https_connection_watchdog_closes_blocked_proxy_socket(monkeypatch):
     closed = threading.Event()
 
     class BlockingSocket:
+        def setsockopt(self, *_args):
+            return None
+
+        def settimeout(self, _value):
+            return None
+
         def close(self):
             closed.set()
 
-    def fake_http_connect(connection):
-        connection.sock = BlockingSocket()
+    def fake_tunnel():
         if not closed.wait(1.0):
             raise AssertionError("connect watchdog did not close the proxy socket")
         raise OSError("proxy tunnel deadline expired")
-
-    monkeypatch.setattr(network.http.client.HTTPConnection, "connect", fake_http_connect)
 
     connection = network._DeadlineHTTPSConnection(
         "provider.invalid",
         timeout=0.03,
         context=ssl.create_default_context(),
     )
+    monkeypatch.setattr(connection, "_create_connection", lambda *_args: BlockingSocket())
+    monkeypatch.setattr(connection, "_tunnel", fake_tunnel)
+    connection.set_tunnel("provider.invalid", 443)
     started = time.monotonic()
     with pytest.raises(OSError, match="deadline"):
         connection.connect()

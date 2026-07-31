@@ -11,8 +11,9 @@ summaries intentionally expose state and reason codes, never the URL itself.
 
 from __future__ import annotations
 
-import os
+import errno
 import http.client
+import os
 import socket
 import threading
 import time
@@ -88,10 +89,28 @@ class _DeadlineHTTPSConnection(http.client.HTTPSConnection):
             watchdog.daemon = True
             watchdog.start()
         try:
-            # This performs DNS/TCP setup and an HTTP CONNECT when the request
-            # is routed through a proxy. The watchdog also covers stdlib tunnel
-            # reads when a proxy ignores the socket timeout.
-            http.client.HTTPConnection.connect(self)
+            # Keep the socket visible to the watchdog before entering the
+            # proxy tunnel. The stdlib implementation creates the socket and
+            # enters ``_tunnel`` in one opaque call, which makes it difficult
+            # to carry one deadline across TCP, CONNECT, and TLS reliably.
+            self.sock = self._create_connection(
+                (self.host, self.port),
+                timeout,
+                self.source_address,
+            )
+            try:
+                self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            except OSError as exc:
+                if exc.errno != errno.ENOPROTOOPT:
+                    raise
+            if self._tunnel_host:
+                _set_connection_socket_timeout(
+                    self.sock,
+                    _remaining_connection_timeout(deadline_at, timeout),
+                )
+                # The tunnel reader is now bounded by both the socket timeout
+                # and the watchdog, rather than an unbounded stdlib read.
+                self._tunnel()
             remaining = _remaining_connection_timeout(deadline_at, timeout)
             _set_connection_socket_timeout(self.sock, remaining)
             server_hostname = self._tunnel_host or self.host
