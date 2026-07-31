@@ -41,6 +41,7 @@ from .latency_policy import (
     streaming_evidence_eligibility,
 )
 from .network import NetworkPolicyError, build_network_opener
+from .process_boundary import IsolatedCallError, run_isolated_call
 from .providers import (
     HTTPProviderClient,
     ProviderCompletion,
@@ -340,6 +341,7 @@ def run_prefusion_model_screening(
     provider_client: HTTPProviderClient | Any | None = None,
     research_client: HTTPProviderClient | Any | None = None,
     redact_provider_identifiers: bool = False,
+    isolate_live_network: bool = True,
 ) -> dict[str, Any]:
     """Run the fixed pre-Fusion screening workflow.
 
@@ -365,6 +367,7 @@ def run_prefusion_model_screening(
         discovery_payload = discover_provider_profiles(
             timeout=discovery_timeout,
             live=bool(live),
+            isolate_live_requests=bool(isolate_live_network),
         )
         all_profiles = [
             item
@@ -419,6 +422,7 @@ def run_prefusion_model_screening(
         sources,
         live=bool(live),
         timeout=source_timeout,
+        isolate_live_network=bool(isolate_live_network),
     )
     if live and source_pack["successful_count"] < 1:
         blockers.append("prefusion_public_source_fetch_empty")
@@ -529,6 +533,7 @@ def run_prefusion_model_screening(
                     batch_size=configured_batch_size,
                     max_workers=configured_research_workers,
                     merge_strategy=merge_strategy,
+                    isolate_live_requests=bool(isolate_live_network),
                 )
                 research_receipt.update(
                     batch_receipt
@@ -586,6 +591,7 @@ def run_prefusion_model_screening(
             max_workers=max(1, min(32, int(max_workers or 1))),
             samples_per_profile=configured_stream_probe_samples,
             role_probe_roles=_PREFUSION_OPERATIONAL_ROLE_PROBE_ROLES,
+            isolate_live_requests=bool(isolate_live_network),
         )
         eligible_profiles = _eligible_profiles_from_probe(ranked_profiles, probe_payload)
         eligible_profiles = _apply_operational_role_probe_metadata(
@@ -3696,6 +3702,7 @@ def _collect_sources(
     *,
     live: bool,
     timeout: float,
+    isolate_live_network: bool = False,
 ) -> dict[str, Any]:
     rows = manifest.get("sources", []) if isinstance(manifest, Mapping) else []
     source_rows = [
@@ -3744,10 +3751,12 @@ def _collect_sources(
             base_receipt["network_call_performed"] = True
             base_receipt["network_calls_performed"] = True
             try:
-                content, fetch_receipt = _fetch_public_source_document(
-                    url,
-                    timeout=timeout,
+                fetcher = (
+                    _fetch_public_source_document_bounded
+                    if isolate_live_network
+                    else _fetch_public_source_document
                 )
+                content, fetch_receipt = fetcher(url, timeout=timeout)
                 network_call = True
                 base_receipt["status"] = "fetched"
                 base_receipt.update(fetch_receipt)
@@ -3861,6 +3870,30 @@ def _fetch_public_source(url: str, *, timeout: float) -> str:
 
     content, _receipt = _fetch_public_source_document(url, timeout=timeout)
     return content
+
+
+def _fetch_public_source_document_bounded(
+    url: str,
+    *,
+    timeout: float,
+) -> tuple[str, dict[str, Any]]:
+    """Fetch one public source in a killable child for live screening."""
+
+    bounded_timeout = max(1.0, min(60.0, float(timeout)))
+    try:
+        return run_isolated_call(
+            _fetch_public_source_document,
+            url,
+            timeout=bounded_timeout,
+            deadline=min(300.0, bounded_timeout + 0.25),
+        )
+    except IsolatedCallError as exc:
+        code = (
+            "prefusion_source_read_timeout"
+            if exc.timed_out
+            else str(exc.code or "prefusion_source_fetch_failed")[:120]
+        )
+        raise ModelScreeningError(code) from exc
 
 
 def _fetch_public_source_document(
@@ -4354,6 +4387,62 @@ def _run_research_agent(
     return text, latency_ms
 
 
+def _run_research_agent_bounded(
+    profile: ModelProfile,
+    *,
+    groups: Sequence[Mapping[str, Any]],
+    source_pack: Mapping[str, Any],
+    timeout: float,
+    client: Any,
+    batch_index: int | None = None,
+    batch_count: int | None = None,
+    attempt: int = 1,
+    repair_reason: str = "",
+    isolate_live_requests: bool = False,
+) -> tuple[str, float]:
+    """Run the remote research Agent with a hard process deadline when live."""
+
+    if not isolate_live_requests or not isinstance(client, HTTPProviderClient):
+        return _run_research_agent(
+            profile,
+            groups=groups,
+            source_pack=source_pack,
+            timeout=timeout,
+            client=client,
+            batch_index=batch_index,
+            batch_count=batch_count,
+            attempt=attempt,
+            repair_reason=repair_reason,
+        )
+    try:
+        return run_isolated_call(
+            _run_research_agent,
+            profile,
+            groups=groups,
+            source_pack=source_pack,
+            timeout=min(PROVIDER_MAX_RESPONSE_SECONDS, max(1.0, float(timeout))),
+            client=client,
+            batch_index=batch_index,
+            batch_count=batch_count,
+            attempt=attempt,
+            repair_reason=repair_reason,
+            deadline=min(300.0, max(1.0, float(timeout)) + 0.25),
+        )
+    except IsolatedCallError as exc:
+        code = (
+            "provider_response_timeout_exceeded_90s"
+            if exc.timed_out
+            else str(exc.code or "prefusion_research_agent_request_failed")[:120]
+        )
+        if code.startswith("prefusion_"):
+            raise ModelScreeningError(code) from exc
+        raise ProviderExecutionError(
+            "prefusion research Agent transport failed",
+            error_code=code,
+            http_status=exc.http_status,
+        ) from exc
+
+
 def _run_research_agent_singleton_recovery(
     profile: ModelProfile,
     *,
@@ -4368,6 +4457,7 @@ def _run_research_agent_singleton_recovery(
     batch_index: int,
     batch_count: int,
     repair_reason: str,
+    isolate_live_requests: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Recover one malformed multi-candidate shard with bounded singletons.
 
@@ -4381,7 +4471,7 @@ def _run_research_agent_singleton_recovery(
     singleton_receipts: list[dict[str, Any]] = []
     for singleton_index, group in enumerate(groups, start=1):
         candidate_ids = [str(group.get("candidate_id") or "")]
-        raw_output, latency_ms = _run_research_agent(
+        raw_output, latency_ms = _run_research_agent_bounded(
             profile,
             groups=[group],
             source_pack=source_pack,
@@ -4391,6 +4481,7 @@ def _run_research_agent_singleton_recovery(
             batch_count=batch_count,
             attempt=3,
             repair_reason=repair_reason,
+            isolate_live_requests=isolate_live_requests,
         )
         if latency_ms > PROVIDER_MAX_RESPONSE_LATENCY_MS:
             raise ModelScreeningError("prefusion_research_agent_latency_ineligible")
@@ -4449,6 +4540,7 @@ def _run_research_agent_batches(
     batch_size: int,
     max_workers: int,
     merge_strategy: str,
+    isolate_live_requests: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Research the complete logical inventory through bounded parallel shards.
 
@@ -4558,7 +4650,7 @@ def _run_research_agent_batches(
                             "agent_api_format": selected_agent.api_format,
                         }
                     )
-                    raw_output, latency_ms = _run_research_agent(
+                    raw_output, latency_ms = _run_research_agent_bounded(
                         selected_agent,
                         groups=batch_groups,
                         source_pack=source_pack,
@@ -4568,6 +4660,7 @@ def _run_research_agent_batches(
                         batch_count=len(batches),
                         attempt=attempt,
                         repair_reason=repair_reason,
+                        isolate_live_requests=isolate_live_requests,
                     )
                     attempt_receipt.update(
                         {
@@ -4648,6 +4741,7 @@ def _run_research_agent_batches(
                                         batch_index=batch_index,
                                         batch_count=len(batches),
                                         repair_reason=exc.code,
+                                        isolate_live_requests=isolate_live_requests,
                                     )
                                 )
                             except (ModelScreeningError, ProviderExecutionError) as recovery_exc:

@@ -28,6 +28,7 @@ from .network import (
     provider_proxy_readiness,
     provider_proxy_runtime_summary,
 )
+from .process_boundary import IsolatedCallError, run_isolated_call
 
 from .registry import (
     normalize_profile,
@@ -1623,6 +1624,7 @@ def probe_provider_models(
     samples_per_profile: int = 1,
     role_probe_roles: Sequence[str] | None = None,
     redact_provider_identifiers: bool = False,
+    isolate_live_requests: bool = False,
 ) -> dict[str, Any]:
     """Probe each physical profile with bounded independent health samples.
 
@@ -1671,17 +1673,51 @@ def probe_provider_models(
     else:
         rows = []
         workers = max(1, min(int(max_workers or 1), len(selected_profiles) or 1))
+        def execute_probe(profile: ModelProfile) -> dict[str, Any]:
+            if isolate_live_requests and isinstance(probe_client, HTTPProviderClient):
+                try:
+                    return run_isolated_call(
+                        _probe_profile_samples,
+                        profile,
+                        timeout=min(PROVIDER_MAX_RESPONSE_SECONDS, max(1.0, float(timeout))),
+                        client=probe_client,
+                        samples_per_profile=bounded_samples,
+                        require_streaming=bool(require_streaming),
+                        role_probe_roles=bounded_role_probe_roles,
+                        deadline=min(
+                            300.0,
+                            max(1.0, float(timeout)) + 0.25,
+                        ),
+                    )
+                except IsolatedCallError as exc:
+                    return _isolated_probe_failure_row(
+                        profile,
+                        requested_sample_count=bounded_samples,
+                        require_streaming=bool(require_streaming),
+                        error_code=(
+                            "provider_response_timeout_exceeded_90s"
+                            if exc.timed_out
+                            else exc.code
+                        ),
+                        error_type=exc.error_type or "ProviderExecutionError",
+                        latency_ms=(
+                            PROVIDER_MAX_RESPONSE_LATENCY_MS + 1.0
+                            if exc.timed_out
+                            else 0.0
+                        ),
+                    )
+            return _probe_profile_samples(
+                profile,
+                timeout=timeout,
+                client=probe_client,
+                samples_per_profile=bounded_samples,
+                require_streaming=bool(require_streaming),
+                role_probe_roles=bounded_role_probe_roles,
+            )
+
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {
-                executor.submit(
-                    _probe_profile_samples,
-                    profile,
-                    timeout=timeout,
-                    client=probe_client,
-                    samples_per_profile=bounded_samples,
-                    require_streaming=bool(require_streaming),
-                    role_probe_roles=bounded_role_probe_roles,
-                ): profile
+                executor.submit(execute_probe, profile): profile
                 for profile in selected_profiles
             }
             for future in as_completed(futures):
@@ -2110,6 +2146,33 @@ def _probe_profile_samples(
     else:
         aggregate["role_probes"] = []
     return aggregate
+
+
+def _isolated_probe_failure_row(
+    profile: ModelProfile,
+    *,
+    requested_sample_count: int,
+    require_streaming: bool,
+    error_code: str,
+    error_type: str,
+    latency_ms: float,
+) -> dict[str, Any]:
+    """Convert a killed live probe into ordinary ineligible evidence."""
+
+    sample = _probe_row(
+        profile,
+        "latency_ineligible" if latency_ms > PROVIDER_MAX_RESPONSE_LATENCY_MS else "failed",
+        latency_ms=latency_ms,
+        error_type=error_type,
+        output="",
+    )
+    sample["error_code"] = str(error_code or "provider_probe_failed")[:120]
+    return _aggregate_probe_samples(
+        profile,
+        [sample],
+        requested_sample_count=requested_sample_count,
+        require_streaming=require_streaming,
+    )
 
 
 def _aggregate_probe_samples(
@@ -2803,6 +2866,7 @@ def discover_provider_profiles(
     providers: Sequence[str] | None = None,
     timeout: float = 15.0,
     live: bool = False,
+    isolate_live_requests: bool = False,
 ) -> dict[str, Any]:
     """Discover the complete configured provider model inventory.
 
@@ -2823,14 +2887,24 @@ def discover_provider_profiles(
     discovery_priors = provider_discovery_priors_from_env(selected)
     static_profiles = provider_configured_profiles_from_env(selected)
     bounded_timeout = max(1.0, min(60.0, float(timeout)))
-    provider_reports = (
-        [
-            _safe_list_models(seed, timeout=bounded_timeout)
-            for seed in profile_seeds
-        ]
-        if live
-        else [_dry_model_discovery_report(seed) for seed in profile_seeds]
-    )
+    if live:
+        provider_reports = []
+        for seed in profile_seeds:
+            if isolate_live_requests:
+                try:
+                    report = run_isolated_call(
+                        _safe_list_models,
+                        seed,
+                        timeout=bounded_timeout,
+                        deadline=min(300.0, bounded_timeout + 0.25),
+                    )
+                except IsolatedCallError as exc:
+                    report = _isolated_model_discovery_failure_report(seed, exc)
+            else:
+                report = _safe_list_models(seed, timeout=bounded_timeout)
+            provider_reports.append(report)
+    else:
+        provider_reports = [_dry_model_discovery_report(seed) for seed in profile_seeds]
 
     discovered_profiles: list[ModelProfile] = []
     for seed, report in zip(profile_seeds, provider_reports):
@@ -2914,6 +2988,33 @@ def discover_provider_profiles(
         "provider_reports": provider_reports,
         "raw_provider_response_persisted": False,
         "raw_provider_body_persisted": False,
+        "raw_provider_url_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _isolated_model_discovery_failure_report(
+    profile: ModelProfile,
+    error: IsolatedCallError,
+) -> dict[str, Any]:
+    """Return a safe failed /models report after child termination."""
+
+    return {
+        "provider": profile.provider,
+        "status": "failed",
+        "blockers": [
+            (
+                "provider_response_timeout_exceeded_90s"
+                if error.timed_out
+                else str(error.code or "provider_model_discovery_failed")[:120]
+            )
+        ],
+        "network_calls_performed": True,
+        "model_discovery_attempted": True,
+        "model_count": 0,
+        "model_ids": [],
+        "models_endpoint": _models_endpoint(profile),
+        "raw_provider_response_persisted": False,
         "raw_provider_url_persisted": False,
         "secrets_persisted": False,
     }
