@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
+import threading
 import urllib.error
 
 import pytest
@@ -136,6 +137,28 @@ class _FakeSourceOpener:
         if isinstance(response, BaseException):
             raise response
         return response
+
+
+def test_public_source_read_watchdog_closes_blocked_response():
+    closed = threading.Event()
+
+    class BlockingResponse:
+        headers = {"Content-Type": "text/html"}
+
+        def close(self):
+            closed.set()
+
+        def read(self, _limit: int):
+            closed.wait(1.0)
+            return b""
+
+        def geturl(self):
+            return "https://example.test/models/card"
+
+    with pytest.raises(model_screening.ModelScreeningError, match="prefusion_source_read_timeout"):
+        model_screening._read_source_response(BlockingResponse(), timeout=0.03)
+
+    assert closed.is_set()
 
 
 def test_public_source_prefers_same_origin_markdown_alternate(monkeypatch):

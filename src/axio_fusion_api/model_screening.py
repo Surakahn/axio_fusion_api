@@ -25,6 +25,7 @@ import os
 from pathlib import Path
 import re
 import socket
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -3969,10 +3970,24 @@ def _read_source_response(
     ``HTTPResponse`` objects enforce the requested byte cap themselves.
     """
 
-    _set_response_socket_timeout(response, max(0.1, float(timeout)))
+    bounded_timeout = max(0.1, float(timeout))
+    deadline_expired = threading.Event()
+
+    def expire_response() -> None:
+        deadline_expired.set()
+        _close_source_response_transport(response)
+
+    response_watchdog = threading.Timer(bounded_timeout, expire_response)
+    response_watchdog.daemon = True
+    response_watchdog.start()
     try:
+        _set_response_socket_timeout(response, bounded_timeout)
         raw = response.read(_MAX_SOURCE_BYTES + 1)
-    except socket.timeout:
+    except (socket.timeout, TimeoutError, OSError) as exc:
+        raise ModelScreeningError("prefusion_source_read_timeout") from exc
+    finally:
+        response_watchdog.cancel()
+    if deadline_expired.is_set():
         raise ModelScreeningError("prefusion_source_read_timeout")
     if isinstance(raw, str):
         raw_bytes = raw.encode("utf-8", errors="replace")
@@ -3988,22 +4003,55 @@ def _read_source_response(
 
 def _set_response_socket_timeout(response: Any, timeout: float) -> None:
     bounded_timeout = max(0.1, float(timeout))
-    candidates = [getattr(response, "_sock", None)]
-    file_pointer = getattr(response, "fp", None)
-    candidates.extend(
-        [
-            getattr(file_pointer, "_sock", None),
-            getattr(getattr(file_pointer, "raw", None), "_sock", None),
-        ]
-    )
-    for candidate in candidates:
-        setter = getattr(candidate, "settimeout", None)
+    pending = [response]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        setter = getattr(current, "settimeout", None)
         if callable(setter):
             try:
                 setter(bounded_timeout)
-            except (OSError, ValueError):
+            except (OSError, TypeError, ValueError):
                 pass
-            return
+            else:
+                return
+        for attribute in ("fp", "raw", "_sock", "sock", "socket"):
+            try:
+                nested = getattr(current, attribute, None)
+            except (AttributeError, OSError):
+                nested = None
+            if nested is not None:
+                pending.append(nested)
+
+
+def _close_source_response_transport(response: Any) -> None:
+    """Wake a blocked public-source read at its hard per-source deadline."""
+
+    pending = [response]
+    targets: list[Any] = []
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        if callable(getattr(current, "close", None)):
+            targets.append(current)
+        for attribute in ("fp", "raw", "_sock", "sock", "socket"):
+            try:
+                nested = getattr(current, attribute, None)
+            except (AttributeError, OSError):
+                nested = None
+            if nested is not None:
+                pending.append(nested)
+    for target in reversed(targets):
+        try:
+            target.close()
+        except Exception:
+            continue
 
 
 def _response_header_values(headers: Any, name: str) -> list[str]:
