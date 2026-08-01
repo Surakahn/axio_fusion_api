@@ -649,3 +649,40 @@ def test_responses_strict_wire_does_not_retry_as_text_input_after_parameterized_
     assert len(calls) == 1
     assert isinstance(calls[0]["input"], list)
     assert calls[0]["reasoning"] == {"effort": "high"}
+
+
+def test_reasoning_transport_does_not_invent_native_efforts_or_escalate_maps():
+    profile = _profile(
+        api_format="chat",
+        reasoning_transport={
+            "status": "verified",
+            "transport": "chat_reasoning_effort",
+            "supported_efforts": ["medium"],
+            "effort_map": {"low": "medium", "max": "medium"},
+        },
+    )
+
+    assert profile.resolve_reasoning_transport("medium") == (
+        "chat_reasoning_effort",
+        "medium",
+    )
+    assert profile.resolve_reasoning_transport("low") == ("", "")
+    assert profile.resolve_reasoning_transport("high") == ("", "")
+    assert profile.resolve_reasoning_transport("max") == (
+        "chat_reasoning_effort",
+        "medium",
+    )
+
+
+def test_reasoning_transport_for_wrong_protocol_is_not_sendable():
+    profile = _profile(
+        api_format="responses",
+        reasoning_transport={
+            "status": "verified",
+            "transport": "chat_reasoning_effort",
+            "supported_efforts": ["high"],
+        },
+    )
+
+    assert profile.reasoning_transport["api_format_compatible"] is False
+    assert profile.resolve_reasoning_transport("high") == ("", "")

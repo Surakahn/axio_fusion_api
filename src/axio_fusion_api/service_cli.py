@@ -75,6 +75,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve_cmd.add_argument("--prefusion-max-models", type=int, default=None)
     serve_cmd.add_argument("--prefusion-research-batch-size", type=int, default=None)
     serve_cmd.add_argument("--prefusion-research-max-workers", type=int, default=None)
+    serve_cmd.add_argument("--prefusion-total-budget-seconds", type=float, default=None)
     serve_cmd.add_argument(
         "--prefusion-stream-probe-samples",
         type=int,
@@ -221,6 +222,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         prefusion_research_batch_size=args.prefusion_research_batch_size,
         prefusion_research_max_workers=args.prefusion_research_max_workers,
         prefusion_stream_probe_samples=args.prefusion_stream_probe_samples,
+        prefusion_total_budget_seconds=args.prefusion_total_budget_seconds,
     )
     receipt = getattr(server, "runtime_channel_enrollment_receipt", {})
     if args.enrollment_receipt_output and isinstance(receipt, Mapping):

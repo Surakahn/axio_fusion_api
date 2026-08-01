@@ -48,7 +48,9 @@ from .providers import (
     ProviderExecutionError,
     discover_provider_profiles,
     probe_provider_models,
+    probe_provider_reasoning_support,
     profile_credential_readiness,
+    reasoning_transport_probe_binding,
 )
 from .prefusion_ranking import (
     PREFUSION_BROAD_CAPABILITY_AXIS_MIN_NONZERO,
@@ -73,13 +75,15 @@ from .schemas import (
     ModelProfile,
     is_sha256_digest,
     logical_model_count,
+    normalize_reasoning_effort,
+    normalize_screening_reasoning_capability,
     sha256_text,
     stable_json,
 )
 
 
 PREFUSION_SCREENING_SCHEMA = "axio_fusion_api.pre_fusion_model_screening.v1"
-PREFUSION_RESEARCH_OUTPUT_SCHEMA = "axio_fusion_api.prefusion_research_agent_output.v1"
+PREFUSION_RESEARCH_OUTPUT_SCHEMA = "axio_fusion_api.prefusion_research_agent_output.v2"
 PREFUSION_FOCUS_MANIFEST_SCHEMA = "axio_fusion_api.prefusion_focus_manifest.v1"
 PREFUSION_SOURCE_MANIFEST_SCHEMA = "axio_fusion_api.prefusion_source_manifest.v1"
 PREFUSION_MODEL_CATALOG_SCHEMA = "axio_fusion_api.prefusion_model_catalog.v1"
@@ -93,7 +97,7 @@ PREFUSION_HANDOFF_SCHEMA = "axio_fusion_api.prefusion_fusion_handoff.v2"
 PREFUSION_FUSION_HANDOFF_SCHEMA = "axio_fusion_api.prefusion_fusion_handoff_boundary.v1"
 PREFUSION_ROLE_COVERAGE_SCHEMA = "axio_fusion_api.prefusion_role_coverage.v1"
 PREFUSION_RESEARCH_PROMPT_CONTRACT = (
-    "axio_fusion_api.prefusion_research_prompt.capability_evidence_mapping.v2"
+    "axio_fusion_api.prefusion_research_prompt.capability_evidence_mapping.v3"
 )
 
 _ROLE_NAMES = frozenset(
@@ -234,6 +238,9 @@ _RESEARCH_MERGE_STRATEGY = "deterministic_research_quality_confidence_candidate_
 _DEFAULT_SOURCE_TIMEOUT_SECONDS = 15.0
 _MAX_SOURCE_FETCH_WORKERS = 8
 _DEFAULT_RESEARCH_TIMEOUT_SECONDS = 90.0
+_DEFAULT_PREFUSION_TOTAL_BUDGET_SECONDS = 1_800.0
+_MIN_PREFUSION_TOTAL_BUDGET_SECONDS = 30.0
+_MAX_PREFUSION_TOTAL_BUDGET_SECONDS = 3_600.0
 _CANDIDATE_POLICY_KEYS = frozenset(
     {"schema", "default_allow_unlisted", "provider_rules"}
 )
@@ -269,6 +276,7 @@ _RESEARCH_OUTPUT_ROW_KEYS = frozenset(
         "model",
         "canonical_model_id",
         "capability_summary",
+        "reasoning_capability",
         "allowed_roles",
         "disallowed_roles",
         "confidence",
@@ -279,6 +287,24 @@ _RESEARCH_OUTPUT_ROW_KEYS = frozenset(
 _RESEARCH_CAPABILITY_KEYS = frozenset(
     {"overall", "axes", "strengths", "limitations"}
 )
+_RESEARCH_REASONING_CAPABILITY_KEYS = frozenset(
+    {
+        "status",
+        "transport",
+        "native_efforts",
+        "effort_map",
+        "evidence_ids",
+        "confidence",
+        "token_cost_model",
+        "latency_cost_model",
+        "cost_evidence_ids",
+    }
+)
+_REASONING_TRANSPORT_API_FORMATS = {
+    "chat_reasoning_effort": "chat",
+    "responses_reasoning": "responses",
+    "responses_reasoning_effort": "responses",
+}
 
 
 class ModelScreeningError(ValueError):
@@ -328,6 +354,7 @@ def run_prefusion_model_screening(
     source_manifest: Mapping[str, Any] | str | Path | None = None,
     research_agent_config: Mapping[str, Any] | str | Path | None = None,
     research_output: Mapping[str, Any] | str | Path | None = None,
+    total_budget_seconds: float | None = None,
     live: bool = False,
     discovery_timeout: float = 15.0,
     timeout: float = PROVIDER_MAX_RESPONSE_SECONDS,
@@ -353,6 +380,42 @@ def run_prefusion_model_screening(
     """
 
     started = time.monotonic()
+    total_budget = _bounded_prefusion_total_budget(total_budget_seconds)
+    budget_deadline = started + total_budget
+    budget_stage_receipts: dict[str, Any] = {}
+
+    def budget_remaining() -> float:
+        return max(0.0, budget_deadline - time.monotonic())
+
+    def budgeted_timeout(requested: float) -> float:
+        remaining = budget_remaining()
+        if remaining < 1.0:
+            return 0.0
+        return min(max(1.0, float(requested)), remaining)
+
+    def record_budget_stage(
+        name: str,
+        stage_started: float,
+        *,
+        status: str,
+        requested_timeout: float | None = None,
+    ) -> None:
+        budget_stage_receipts[name] = {
+            "status": str(status)[:40],
+            "elapsed_ms": round((time.monotonic() - stage_started) * 1000, 3),
+            "remaining_seconds": round(budget_remaining(), 3),
+            "requested_timeout_seconds": (
+                round(max(0.0, float(requested_timeout)), 3)
+                if requested_timeout is not None
+                else None
+            ),
+        }
+
+    def mark_budget_exhausted(blockers: list[str]) -> None:
+        if live and budget_remaining() <= 0.0:
+            if "prefusion_total_budget_exhausted" not in blockers:
+                blockers.append("prefusion_total_budget_exhausted")
+
     focus = load_prefusion_focus_manifest(focus_manifest)
     sources = load_prefusion_source_manifest(source_manifest, focus_manifest=focus)
     discovery_payload: dict[str, Any] = {}
@@ -364,11 +427,32 @@ def run_prefusion_model_screening(
         # A configured provider portfolio is authoritative.  Discover its
         # complete /models inventory before the Research Agent sees any
         # candidate; a partial inventory must remain blocked.
-        discovery_payload = discover_provider_profiles(
-            timeout=discovery_timeout,
-            live=bool(live),
-            isolate_live_requests=bool(isolate_live_network),
-        )
+        stage_started = time.monotonic()
+        discovery_call_timeout = budgeted_timeout(discovery_timeout)
+        if discovery_call_timeout <= 0.0:
+            discovery_payload = {
+                "profiles": [],
+                "blockers": ["prefusion_total_budget_exhausted"],
+                "network_calls_performed": False,
+            }
+            record_budget_stage(
+                "provider_discovery",
+                stage_started,
+                status="budget_exhausted",
+                requested_timeout=discovery_timeout,
+            )
+        else:
+            discovery_payload = discover_provider_profiles(
+                timeout=discovery_call_timeout,
+                live=bool(live),
+                isolate_live_requests=bool(isolate_live_network),
+            )
+            record_budget_stage(
+                "provider_discovery",
+                stage_started,
+                status="completed",
+                requested_timeout=discovery_call_timeout,
+            )
         all_profiles = [
             item
             for item in discovery_payload.get("profiles", [])
@@ -376,6 +460,11 @@ def run_prefusion_model_screening(
         ]
     else:
         all_profiles = _coerce_profiles(profiles, registry_path=registry_path)
+        record_budget_stage(
+            "provider_discovery",
+            time.monotonic(),
+            status="skipped_explicit_profiles",
+        )
     # Keep disabled profiles available for resolving the separately configured
     # research agent. Disabled candidates themselves never enter the inventory.
     text_profiles = [
@@ -417,13 +506,24 @@ def run_prefusion_model_screening(
         blockers.append("prefusion_complete_inventory_required")
     if int(min_available_models or 0) < 1:
         blockers.append("prefusion_min_available_models_invalid")
+    mark_budget_exhausted(blockers)
 
+    source_stage_started = time.monotonic()
+    source_call_timeout = budgeted_timeout(source_timeout)
     source_pack = _collect_sources(
         sources,
-        live=bool(live),
-        timeout=source_timeout,
+        live=bool(live and source_call_timeout > 0.0),
+        timeout=source_call_timeout or 1.0,
         isolate_live_network=bool(isolate_live_network),
+        deadline=budget_deadline,
     )
+    record_budget_stage(
+        "public_sources",
+        source_stage_started,
+        status=("budget_exhausted" if source_call_timeout <= 0.0 else "completed"),
+        requested_timeout=source_call_timeout,
+    )
+    mark_budget_exhausted(blockers)
     if live and source_pack["successful_count"] < 1:
         blockers.append("prefusion_public_source_fetch_empty")
 
@@ -490,6 +590,7 @@ def run_prefusion_model_screening(
         "research_wall_latency_ms": None,
     }
 
+    research_stage_started = time.monotonic()
     supplied_research = _load_optional_mapping(research_output)
     if supplied_research:
         try:
@@ -520,12 +621,15 @@ def run_prefusion_model_screening(
             research_receipt.update({"status": "failed", "error_code": "prefusion_research_agent_credentials_missing"})
         else:
             try:
+                research_call_timeout = budgeted_timeout(timeout)
+                if research_call_timeout <= 0.0:
+                    raise ModelScreeningError("prefusion_total_budget_exhausted")
                 ranking, batch_receipt = _run_research_agent_batches(
                     agent_profile,
                     research_profiles=agent_profiles,
                     groups=groups,
                     source_pack=source_pack,
-                    timeout=timeout,
+                    timeout=research_call_timeout,
                     client=_strict_stream_client(
                         research_client or provider_client or HTTPProviderClient()
                     ),
@@ -534,6 +638,7 @@ def run_prefusion_model_screening(
                     max_workers=configured_research_workers,
                     merge_strategy=merge_strategy,
                     isolate_live_requests=bool(isolate_live_network),
+                    deadline=budget_deadline,
                 )
                 research_receipt.update(
                     batch_receipt
@@ -559,6 +664,14 @@ def run_prefusion_model_screening(
     else:
         blockers.append("prefusion_research_prerequisite_failed")
 
+    record_budget_stage(
+        "research_agent",
+        research_stage_started,
+        status=str(research_receipt.get("status") or "not_run"),
+        requested_timeout=timeout,
+    )
+    mark_budget_exhausted(blockers)
+
     if research_receipt.get("status") == "failed" and research_receipt.get("error_code"):
         # The outer reason is intentionally stable; batch-specific diagnostics
         # stay in the hash/count-only receipt and never expose raw model text.
@@ -570,12 +683,64 @@ def run_prefusion_model_screening(
         ranking_rows = list(ranking.get("ordered_models") or [])
         ranked_profiles = _apply_screening_metadata(clean_profiles, ranking_rows)
 
+    reasoning_stage_started = time.monotonic()
+    reasoning_probe_payload: dict[str, Any] = _empty_reasoning_probe_payload(
+        ranked_profiles,
+        live=live,
+    )
+    mark_budget_exhausted(blockers)
+    if ranking and live and not blockers:
+        reasoning_candidates = [
+            profile
+            for profile in ranked_profiles
+            if isinstance(profile.reasoning_transport, Mapping)
+            and str(profile.reasoning_transport.get("status") or "")
+            .strip()
+            .casefold()
+            == "candidate"
+        ]
+        reasoning_probe_payload = probe_provider_reasoning_support(
+            reasoning_candidates,
+            timeout=budgeted_timeout(
+                min(PROVIDER_MAX_RESPONSE_SECONDS, max(1.0, float(timeout)))
+            ),
+            client=provider_client or HTTPProviderClient(),
+            live=True,
+            max_workers=max(1, min(32, int(max_workers or 1))),
+            isolate_live_requests=bool(isolate_live_network),
+        )
+        if not _reasoning_probe_cohort_is_complete(
+            reasoning_candidates,
+            reasoning_probe_payload,
+        ):
+            blockers.append("prefusion_reasoning_probe_incomplete")
+        ranked_profiles = _apply_prefusion_reasoning_probe(
+            ranked_profiles,
+            reasoning_probe_payload.get("probes", [])
+            if isinstance(reasoning_probe_payload, Mapping)
+            else [],
+        )
+    elif ranking and not live:
+        blockers.append("prefusion_live_probe_required")
+    record_budget_stage(
+        "reasoning_transport_probe",
+        reasoning_stage_started,
+        status=(
+            "completed"
+            if reasoning_probe_payload.get("network_calls_performed") is True
+            else "skipped"
+        ),
+        requested_timeout=timeout,
+    )
+
+    stream_stage_started = time.monotonic()
     probe_payload: dict[str, Any] = _empty_probe_payload(
         ranked_profiles,
         live=live,
         samples_per_profile=configured_stream_probe_samples,
     )
     eligible_profiles: list[ModelProfile] = []
+    mark_budget_exhausted(blockers)
     if ranking and live and not blockers:
         probe_profiles = [
             profile
@@ -584,7 +749,9 @@ def run_prefusion_model_screening(
         ]
         probe_payload = probe_provider_models(
             probe_profiles,
-            timeout=min(PROVIDER_MAX_RESPONSE_SECONDS, max(1.0, float(timeout))),
+            timeout=budgeted_timeout(
+                min(PROVIDER_MAX_RESPONSE_SECONDS, max(1.0, float(timeout)))
+            ),
             client=provider_client or HTTPProviderClient(),
             live=True,
             require_streaming=True,
@@ -605,6 +772,17 @@ def run_prefusion_model_screening(
             blockers.append("prefusion_insufficient_streaming_eligible_models")
     elif ranking and not live:
         blockers.append("prefusion_live_probe_required")
+    record_budget_stage(
+        "streaming_probe",
+        stream_stage_started,
+        status=(
+            "completed"
+            if probe_payload.get("network_calls_performed") is True
+            else "skipped"
+        ),
+        requested_timeout=timeout,
+    )
+    mark_budget_exhausted(blockers)
 
     # A profile that was known to exceed the ceiling is represented in the
     # report, but is never sent to the serving registry or router.  Add these
@@ -732,6 +910,15 @@ def run_prefusion_model_screening(
         "role_probe_content_sha256": str(
             fusion_prefusion_binding.get("role_probe_content_sha256") or ""
         ),
+        "reasoning_probe_contract_required": int(
+            reasoning_probe_payload.get("candidate_model_count_before_selection")
+            or 0
+        )
+        > 0,
+        "reasoning_probe_content_sha256": sha256_text(
+            stable_json(reasoning_probe_payload)
+        ),
+        "reasoning_research_is_model_specific": True,
         "raw_provider_output_persisted": False,
         "secrets_persisted": False,
     }
@@ -741,10 +928,17 @@ def run_prefusion_model_screening(
         "status": "ready" if live and not blockers and eligible_profiles else "blocked",
         "workflow": {
             "mode": "live" if live else "dry_run",
+            "total_budget_seconds": total_budget,
+            "budget_remaining_seconds": round(budget_remaining(), 3),
+            "budget_exhausted": live and budget_remaining() <= 0.0,
+            "budget_shared_across_discovery_research_and_probes": True,
+            "retry_attempts_cannot_reset_budget": True,
+            "budget_stage_receipts": dict(budget_stage_receipts),
             "network_calls_performed": bool(
                 discovery_payload.get("network_calls_performed") is True
                 or source_pack["network_calls_performed"]
                 or research_receipt["status"] in {"received", "validated"}
+                or reasoning_probe_payload.get("network_calls_performed") is True
                 or probe_payload.get("network_calls_performed") is True
             ),
             "profile_inventory_source": (
@@ -792,6 +986,11 @@ def run_prefusion_model_screening(
             "research_agent_capability_axis_min_nonzero": PREFUSION_CAPABILITY_AXIS_MIN_NONZERO,
             "research_agent_broad_overall_threshold": PREFUSION_BROAD_CAPABILITY_OVERALL_THRESHOLD,
             "research_agent_broad_capability_axis_min_nonzero": PREFUSION_BROAD_CAPABILITY_AXIS_MIN_NONZERO,
+            "research_agent_must_return_model_specific_reasoning_capability": True,
+            "research_agent_reasoning_transport_is_closed_enum": True,
+            "research_agent_must_list_exact_native_efforts": True,
+            "research_agent_must_not_assume_all_effort_levels": True,
+            "research_agent_reasoning_cost_evidence_is_separate_from_wire_support": True,
             "research_agent_uses_bounded_candidate_batches": True,
             "research_candidate_batch_size": configured_batch_size,
             "research_batch_max_workers": configured_research_workers,
@@ -805,7 +1004,23 @@ def run_prefusion_model_screening(
             "stream_probe_samples_per_profile": configured_stream_probe_samples,
             "stream_probe_requires_all_samples_success": True,
             "stream_probe_requires_each_sample_within_90_seconds": True,
+            "reasoning_probe_requires_complete_candidate_cohort": True,
+            "reasoning_probe_requires_control_and_each_declared_effort": True,
+            "reasoning_probe_requires_endpoint_bound_strict_streaming": True,
+            "unverified_reasoning_is_never_forwarded": True,
             "local_model_weights_loaded": False,
+        },
+        "budget": {
+            "schema": "axio_fusion_api.prefusion_total_budget_receipt.v1",
+            "configured_seconds": total_budget,
+            "elapsed_ms": round((time.monotonic() - started) * 1000, 3),
+            "remaining_seconds": round(budget_remaining(), 3),
+            "exhausted": live and budget_remaining() <= 0.0,
+            "shared_deadline": True,
+            "retry_attempts_share_deadline": True,
+            "stage_receipts": dict(budget_stage_receipts),
+            "raw_provider_output_persisted": False,
+            "secrets_persisted": False,
         },
         "research_ranking": {
             "schema": "axio_fusion_api.prefusion_research_ranking.v1",
@@ -845,6 +1060,7 @@ def run_prefusion_model_screening(
                 "requires_all_samples_success": True,
             },
         },
+        "reasoning_probe": reasoning_probe_payload,
         "fusion_eligible_models": _eligible_model_rows(eligible_profiles, ranking_rows, probe_payload),
         "available_model_list": available_model_list,
         "available_logical_model_count": len(available_model_list),
@@ -867,6 +1083,8 @@ def run_prefusion_model_screening(
             "candidate_policy_is_applied_before_research_agent": True,
             "candidate_policy_cannot_admit_unlisted_closed_provider_models": True,
             "research_agent_cannot_bypass_streaming_probe": True,
+            "research_agent_cannot_promote_reasoning_wire_support": True,
+            "unverified_reasoning_transport_is_not_serving_evidence": True,
             "slow_profiles_are_excluded_from_serving_and_fallback": True,
             "final_benchmark_must_call_axio_over_http": True,
         },
@@ -1232,6 +1450,110 @@ def load_prefusion_research_agent_config(
     return payload
 
 
+def _normalize_research_reasoning_capability(
+    value: Any,
+    *,
+    group: Mapping[str, Any],
+    successful_slots: set[str],
+    source_scope: Mapping[str, Sequence[str]] | None,
+) -> dict[str, Any]:
+    """Validate one model's researched reasoning capability declaration.
+
+    The Agent may identify a candidate wire shape and the model's native
+    effort subset, but it cannot promote that declaration.  Promotion happens
+    only after the endpoint-bound strict probe.  Evidence is kept candidate
+    scoped so one model's documentation cannot grant another model a
+    reasoning control.
+    """
+
+    if not isinstance(value, Mapping):
+        raise ModelScreeningError(
+            "prefusion_research_output_reasoning_capability_invalid"
+        )
+    if not set(str(key) for key in value).issubset(
+        _RESEARCH_REASONING_CAPABILITY_KEYS
+    ):
+        raise ModelScreeningError(
+            "prefusion_research_output_reasoning_capability_extra_keys"
+        )
+    api_format = _normalize_research_api_format(group.get("api_format"))
+    raw_transport = str(value.get("transport") or "").strip().casefold()
+    normalized = normalize_screening_reasoning_capability(
+        value,
+        api_format=api_format,
+    )
+    status = str(normalized.get("status") or "unknown")
+    transport = str(normalized.get("transport") or "")
+    native_efforts = list(normalized.get("native_efforts") or [])
+    effort_map = normalized.get("effort_map")
+    effort_map = effort_map if isinstance(effort_map, Mapping) else {}
+    valid_empty_transport = raw_transport in {"", "none", "unknown", "unsupported"}
+    if status == "candidate":
+        if not transport or not normalized.get("api_format_compatible"):
+            raise ModelScreeningError(
+                "prefusion_research_reasoning_transport_format_invalid"
+            )
+        if not native_efforts:
+            raise ModelScreeningError(
+                "prefusion_research_reasoning_native_efforts_missing"
+            )
+    else:
+        if not valid_empty_transport or transport or native_efforts or effort_map:
+            raise ModelScreeningError(
+                "prefusion_research_reasoning_non_candidate_declaration_invalid"
+            )
+    if raw_transport and raw_transport not in {
+        *set(_REASONING_TRANSPORT_API_FORMATS),
+        "none",
+        "unknown",
+        "unsupported",
+    }:
+        raise ModelScreeningError(
+            "prefusion_research_reasoning_transport_invalid"
+        )
+    reasoning_evidence = [
+        str(item)
+        for item in normalized.get("evidence_ids", [])
+        if str(item)
+    ]
+    if not reasoning_evidence or not set(reasoning_evidence).issubset(
+        successful_slots
+    ):
+        raise ModelScreeningError(
+            "prefusion_research_output_reasoning_evidence_invalid"
+        )
+    candidate_id = str(group.get("candidate_id") or "")
+    if source_scope is not None:
+        scoped_slots = {
+            str(item or "")
+            for item in source_scope.get(candidate_id, ())
+            if str(item or "")
+        }
+        if not scoped_slots or not set(reasoning_evidence).issubset(scoped_slots):
+            raise ModelScreeningError(
+                "prefusion_research_output_reasoning_evidence_scope_invalid"
+            )
+    normalized["evidence_ids"] = reasoning_evidence
+    cost_evidence = [
+        str(item)
+        for item in normalized.get("cost_evidence_ids", [])
+        if str(item)
+    ]
+    if not set(cost_evidence).issubset(set(reasoning_evidence)):
+        raise ModelScreeningError(
+            "prefusion_research_output_reasoning_cost_evidence_invalid"
+        )
+    if (
+        normalized.get("token_cost_model") == "provider_documented"
+        or normalized.get("latency_cost_model") == "provider_documented"
+    ) and not cost_evidence:
+        raise ModelScreeningError(
+            "prefusion_research_output_reasoning_cost_evidence_missing"
+        )
+    normalized["cost_evidence_ids"] = cost_evidence
+    return normalized
+
+
 def validate_prefusion_research_output(
     payload: Mapping[str, Any],
     *,
@@ -1321,6 +1643,18 @@ def validate_prefusion_research_output(
                 )
         if evidence_hashes and any(not evidence_hashes.get(source_id) for source_id in evidence_ids):
             raise ModelScreeningError("prefusion_research_output_source_evidence_hash_missing")
+        reasoning_capability = _normalize_research_reasoning_capability(
+            row.get("reasoning_capability"),
+            group=group,
+            successful_slots=successful_slots,
+            source_scope=source_scope,
+        )
+        if not set(reasoning_capability.get("evidence_ids", [])).issubset(
+            set(evidence_ids)
+        ):
+            raise ModelScreeningError(
+                "prefusion_research_output_reasoning_evidence_not_in_row_evidence"
+            )
         allowed = _normalize_roles(row.get("allowed_roles", ()))
         disallowed = _normalize_roles(row.get("disallowed_roles", ()))
         if not set(allowed).issubset(_ROLE_NAMES) or not set(disallowed).issubset(_ROLE_NAMES):
@@ -1350,6 +1684,7 @@ def validate_prefusion_research_output(
                 "replica_count": len(group.get("replicas") or []),
                 "capability_summary": capability_summary,
                 "capability_axis_coverage": axis_coverage,
+                "reasoning_capability": reasoning_capability,
                 "allowed_roles": list(role_admission["effective_allowed_roles"]),
                 "disallowed_roles": list(role_admission["effective_disallowed_roles"]),
                 "agent_allowed_roles": allowed,
@@ -1619,6 +1954,14 @@ def validate_prefusion_handoff(
         require_ready=require_ready,
     )
     issues.extend(str(code) for code in role_validation.get("reason_codes") or [])
+    reasoning_validation = _validate_prefusion_reasoning_handoff(
+        report,
+        handoff=handoff,
+        require_ready=require_ready,
+    )
+    issues.extend(
+        str(code) for code in reasoning_validation.get("reason_codes") or []
+    )
 
     return {
         "schema": "axio_fusion_api.prefusion_handoff_validation.v1",
@@ -1634,6 +1977,118 @@ def validate_prefusion_handoff(
         "secrets_persisted": False,
         "role_coverage": role_validation,
         "role_probe_contract_required": role_probe_required,
+        "reasoning_probe": reasoning_validation,
+    }
+
+
+def _validate_prefusion_reasoning_handoff(
+    report: Mapping[str, Any],
+    *,
+    handoff: Mapping[str, Any],
+    require_ready: bool,
+) -> dict[str, Any]:
+    """Validate the model-level reasoning research/probe join."""
+
+    issues: list[str] = []
+    research = report.get("research_ranking")
+    research = research if isinstance(research, Mapping) else {}
+    rows = research.get("ordered_models")
+    rows = rows if isinstance(rows, list) else []
+    candidate_rows = [
+        row
+        for row in rows
+        if isinstance(row, Mapping)
+        and isinstance(row.get("reasoning_capability"), Mapping)
+        and str(row["reasoning_capability"].get("status") or "")
+        .strip()
+        .casefold()
+        == "candidate"
+    ]
+    missing_reasoning_rows = [
+        row
+        for row in rows
+        if not isinstance(row, Mapping)
+        or not isinstance(row.get("reasoning_capability"), Mapping)
+    ]
+    if require_ready and missing_reasoning_rows:
+        issues.append("prefusion_reasoning_research_rows_incomplete")
+    probe = report.get("reasoning_probe")
+    probe = probe if isinstance(probe, Mapping) else {}
+    expected_candidate_profile_hashes = {
+        str(replica.get("profile_id_sha256") or "").strip().lower()
+        for row in candidate_rows
+        for replica in (
+            row.get("replicas") if isinstance(row.get("replicas"), list) else []
+        )
+        if isinstance(replica, Mapping)
+        and is_sha256_digest(replica.get("profile_id_sha256"))
+    }
+    probe_rows = probe.get("probes")
+    probe_rows = probe_rows if isinstance(probe_rows, list) else []
+    observed_profile_hashes = {
+        sha256_text(str(row.get("profile_id") or "")).lower()
+        for row in probe_rows
+        if isinstance(row, Mapping) and str(row.get("profile_id") or "")
+    }
+    if require_ready:
+        if str(probe.get("schema") or "") != "axio_fusion_api.provider_reasoning_probe.v1":
+            issues.append("prefusion_reasoning_probe_schema_invalid")
+        if str(probe.get("probe_kind") or "").strip().casefold() != "reasoning_transport":
+            issues.append("prefusion_reasoning_probe_kind_invalid")
+        if str(probe.get("mode") or "").strip().casefold() != "live":
+            issues.append("prefusion_reasoning_probe_not_live")
+        if _safe_nonnegative_int(probe.get("candidate_model_count_before_selection")) != len(
+            expected_candidate_profile_hashes
+        ):
+            issues.append("prefusion_reasoning_probe_candidate_count_invalid")
+        if _safe_nonnegative_int(probe.get("model_count")) != len(
+            expected_candidate_profile_hashes
+        ):
+            issues.append("prefusion_reasoning_probe_model_count_invalid")
+        if expected_candidate_profile_hashes and (
+            observed_profile_hashes != expected_candidate_profile_hashes
+        ):
+            issues.append("prefusion_reasoning_probe_profile_set_mismatch")
+        for row in probe_rows:
+            if not isinstance(row, Mapping) or row.get("live_probe_evidence") is not True:
+                issues.append("prefusion_reasoning_probe_live_evidence_missing")
+                break
+            if str(row.get("status") or "").strip().casefold() not in {
+                "verified",
+                "rejected",
+                "indeterminate",
+            }:
+                issues.append("prefusion_reasoning_probe_status_invalid")
+                break
+    required_flag = len(expected_candidate_profile_hashes) > 0
+    if handoff.get("reasoning_probe_contract_required") is not required_flag:
+        issues.append("prefusion_handoff_reasoning_probe_requirement_mismatch")
+    probe_digest = str(handoff.get("reasoning_probe_content_sha256") or "").strip().lower()
+    if require_ready and (
+        not is_sha256_digest(probe_digest)
+        or probe_digest != sha256_text(stable_json(dict(probe))).lower()
+    ):
+        issues.append("prefusion_handoff_reasoning_probe_hash_invalid")
+    contract = probe.get("verification_contract")
+    contract = contract if isinstance(contract, Mapping) else {}
+    if require_ready and required_flag and (
+        contract.get("requires_model_level_candidate_declaration") is not True
+        or contract.get("requires_protocol_local_wire_field") is not True
+        or contract.get("requires_control_and_every_declared_effort") is not True
+        or contract.get("requires_strict_sse_or_ndjson_streaming") is not True
+    ):
+        issues.append("prefusion_reasoning_probe_contract_invalid")
+    return {
+        "schema": "axio_fusion_api.prefusion_reasoning_handoff_validation.v1",
+        "valid": not issues,
+        "reason_codes": sorted(set(issues)),
+        "require_ready": bool(require_ready),
+        "researched_candidate_profile_count": len(expected_candidate_profile_hashes),
+        "probe_row_count": len(probe_rows),
+        "unverified_reasoning_is_not_forwarded": True,
+        "raw_probe_prompt_persisted": False,
+        "raw_provider_output_persisted": False,
+        "secrets_persisted": False,
     }
 
 
@@ -2297,6 +2752,9 @@ def _available_logical_model_list(
                     axis: representative.screening_capability(axis)
                     for axis in CAPABILITY_AXES
                 },
+                "reasoning_capability": _project_screening_reasoning_capability(
+                    representative.screening_reasoning_capability
+                ),
                 "fastest_observed_latency_ms": fastest_observed_latency_ms,
                 "slowest_observed_latency_ms": slowest_observed_latency_ms,
                 # Compatibility aliases for consumers of the v1 catalog.
@@ -3010,6 +3468,9 @@ def _build_prefusion_model_catalog(
                     "limitations": list(capability.get("limitations") or [])[:8],
                 },
                 "capability_axis_coverage": capability_axis_coverage(capability),
+                "reasoning_capability": _project_screening_reasoning_capability(
+                    row.get("reasoning_capability")
+                ),
                 "allowed_roles": list(row.get("allowed_roles") or []),
                 "disallowed_roles": list(row.get("disallowed_roles") or []),
                 "role_admission": _project_prefusion_role_admission(
@@ -3542,6 +4003,9 @@ def _research_ranking_registry_projection(value: Any) -> dict[str, Any]:
                     axis: _bounded_optional_float(axes.get(axis))
                     for axis in CAPABILITY_AXES
                 },
+                "reasoning_capability": _project_screening_reasoning_capability(
+                    row.get("reasoning_capability")
+                ),
                 "allowed_roles": list(_normalize_roles(row.get("allowed_roles", ()))),
                 "disallowed_roles": list(_normalize_roles(row.get("disallowed_roles", ()))),
                 "role_admission": _project_prefusion_role_admission(
@@ -3703,6 +4167,7 @@ def _collect_sources(
     live: bool,
     timeout: float,
     isolate_live_network: bool = False,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     rows = manifest.get("sources", []) if isinstance(manifest, Mapping) else []
     source_rows = [
@@ -3751,12 +4216,20 @@ def _collect_sources(
             base_receipt["network_call_performed"] = True
             base_receipt["network_calls_performed"] = True
             try:
+                effective_timeout = max(1.0, float(timeout))
+                if deadline is not None:
+                    remaining = float(deadline) - time.monotonic()
+                    if remaining < 1.0:
+                        raise ModelScreeningError(
+                            "prefusion_total_budget_exhausted"
+                        )
+                    effective_timeout = min(effective_timeout, remaining)
                 fetcher = (
                     _fetch_public_source_document_bounded
                     if isolate_live_network
                     else _fetch_public_source_document
                 )
-                content, fetch_receipt = fetcher(url, timeout=timeout)
+                content, fetch_receipt = fetcher(url, timeout=effective_timeout)
                 network_call = True
                 base_receipt["status"] = "fetched"
                 base_receipt.update(fetch_receipt)
@@ -4458,6 +4931,7 @@ def _run_research_agent_singleton_recovery(
     batch_count: int,
     repair_reason: str,
     isolate_live_requests: bool = False,
+    deadline: float | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Recover one malformed multi-candidate shard with bounded singletons.
 
@@ -4470,12 +4944,18 @@ def _run_research_agent_singleton_recovery(
     recovered_rows: list[dict[str, Any]] = []
     singleton_receipts: list[dict[str, Any]] = []
     for singleton_index, group in enumerate(groups, start=1):
+        singleton_timeout = max(1.0, float(timeout))
+        if deadline is not None:
+            remaining = float(deadline) - time.monotonic()
+            if remaining < 1.0:
+                raise ModelScreeningError("prefusion_total_budget_exhausted")
+            singleton_timeout = min(singleton_timeout, remaining)
         candidate_ids = [str(group.get("candidate_id") or "")]
         raw_output, latency_ms = _run_research_agent_bounded(
             profile,
             groups=[group],
             source_pack=source_pack,
-            timeout=timeout,
+            timeout=singleton_timeout,
             client=client,
             batch_index=batch_index,
             batch_count=batch_count,
@@ -4541,6 +5021,7 @@ def _run_research_agent_batches(
     max_workers: int,
     merge_strategy: str,
     isolate_live_requests: bool = False,
+    deadline: float | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Research the complete logical inventory through bounded parallel shards.
 
@@ -4641,6 +5122,27 @@ def _run_research_agent_batches(
                     "secrets_persisted": False,
                 }
                 try:
+                    attempt_timeout = max(1.0, float(timeout))
+                    if deadline is not None:
+                        remaining = float(deadline) - time.monotonic()
+                        if remaining < 1.0:
+                            attempt_receipt["error_code"] = (
+                                "prefusion_total_budget_exhausted"
+                            )
+                            attempts.append(attempt_receipt)
+                            receipt.update(
+                                {
+                                    "status": "failed",
+                                    "error_code": "prefusion_total_budget_exhausted",
+                                    "attempt_count": attempt,
+                                    "retry_used": attempt > 1,
+                                    "attempts": attempts,
+                                }
+                            )
+                            raise _ResearchBatchFailure(
+                                "prefusion_total_budget_exhausted", receipt
+                            )
+                        attempt_timeout = min(attempt_timeout, remaining)
                     selected_agent = active_agent_profile()
                     attempt_receipt.update(
                         {
@@ -4654,7 +5156,7 @@ def _run_research_agent_batches(
                         selected_agent,
                         groups=batch_groups,
                         source_pack=source_pack,
-                        timeout=timeout,
+                        timeout=attempt_timeout,
                         client=client,
                         batch_index=batch_index,
                         batch_count=len(batches),
@@ -4742,6 +5244,7 @@ def _run_research_agent_batches(
                                         batch_count=len(batches),
                                         repair_reason=exc.code,
                                         isolate_live_requests=isolate_live_requests,
+                                        deadline=deadline,
                                     )
                                 )
                             except (ModelScreeningError, ProviderExecutionError) as recovery_exc:
@@ -5301,6 +5804,19 @@ def _build_research_prompt(
                     "strengths": ["one concise evidence-grounded strength"],
                     "limitations": ["one concise evidence-grounded limitation"],
                 },
+                "reasoning_capability": {
+                    "status": "unknown",
+                    "transport": "",
+                    "native_efforts": [],
+                    "effort_map": {},
+                    "evidence_ids": (
+                        candidate_source_slots.get(candidate_id) or source_ids
+                    )[:1],
+                    "confidence": 0.0,
+                    "token_cost_model": "unknown",
+                    "latency_cost_model": "unknown",
+                    "cost_evidence_ids": [],
+                },
                 # Empty role lists are deliberate.  The research agent must
                 # make an evidence-based decision per candidate; copying a
                 # template role would poison the Fusion router's stage gate.
@@ -5421,6 +5937,35 @@ def _build_research_prompt(
         "axis.\n"
         "Parameter count, GPU requirements, price, throughput, release date, and "
         "API protocol are not capability evidence by themselves.\n\n"
+        "Reasoning-transport research rule: reasoning capability is model- and "
+        "endpoint-specific. Do not copy a provider-wide setting to every model, "
+        "and do not infer support from a model name, a generic compatibility "
+        "label, or another model's documentation. For each candidate, inspect "
+        "the candidate-scoped evidence and return exactly one reasoning_capability "
+        "object. Use status=candidate only when the evidence identifies a "
+        "specific protocol-local transport and one or more native effort levels; "
+        "use status=unsupported only for explicit evidence that the model or "
+        "endpoint does not expose reasoning control; otherwise use status=unknown. "
+        "The only allowed candidate transports are chat_reasoning_effort for Chat "
+        "Completions, responses_reasoning for nested Responses reasoning.effort, "
+        "and responses_reasoning_effort for a top-level Responses reasoning_effort "
+        "field. The transport name is a closed enum, not a place to write an "
+        "arbitrary JSON path. native_efforts must list only the exact native "
+        "values supported by this model at this endpoint, in increasing order; "
+        "do not fill low, medium, high, xhigh, or max unless the evidence supports "
+        "each one. An effort_map is optional and must contain only explicit, "
+        "non-escalating logical-to-native downgrades whose targets are in "
+        "native_efforts. Never manufacture a map merely to fill the template. "
+        "For Anthropic or Gemini candidates, use unknown or unsupported unless "
+        "this contract is extended with a separately audited transport; do not "
+        "pretend that an OpenAI field works there. reasoning_capability.evidence_ids "
+        "must cite only this candidate's allowed source slots.\n\n"
+        "Reasoning cost rule: report token_cost_model and latency_cost_model as "
+        "provider_documented only when the cited source states a cost relationship; "
+        "otherwise use unknown. The runtime may apply a separate monotonic effort "
+        "budget policy, but that policy is not evidence that the provider supports "
+        "a missing native level. Higher requested effort must never silently become "
+        "a stronger unsupported provider value.\n\n"
         "Role rule: role fields are evidence decisions, not boilerplate. The "
         "empty role lists in the example are placeholders and must not be copied "
         "for every candidate. Select every role that the supplied evidence "
@@ -5887,6 +6432,43 @@ def _project_prefusion_role_admission(value: Any) -> dict[str, Any]:
     }
 
 
+def _project_screening_reasoning_capability(value: Any) -> dict[str, Any]:
+    """Project the model-local reasoning research receipt without prose."""
+
+    capability = normalize_screening_reasoning_capability(value)
+    return {
+        "status": str(capability.get("status") or "unknown"),
+        "transport": str(capability.get("transport") or ""),
+        "api_format": str(capability.get("api_format") or ""),
+        "api_format_compatible": capability.get("api_format_compatible") is True,
+        "native_efforts": [
+            str(item)
+            for item in capability.get("native_efforts", [])
+            if str(item)
+        ],
+        "effort_map": dict(
+            sorted(
+                (str(key), str(value))
+                for key, value in (
+                    capability.get("effort_map")
+                    if isinstance(capability.get("effort_map"), Mapping)
+                    else {}
+                ).items()
+                if str(key) and str(value)
+            )
+        ),
+        "evidence_ids": _normalize_source_ids(capability.get("evidence_ids")),
+        "confidence": _bounded_optional_float(capability.get("confidence")),
+        "token_cost_model": str(capability.get("token_cost_model") or "unknown"),
+        "latency_cost_model": str(
+            capability.get("latency_cost_model") or "unknown"
+        ),
+        "cost_evidence_ids": _normalize_source_ids(
+            capability.get("cost_evidence_ids")
+        ),
+    }
+
+
 def _candidate_id_from_identity(row: Mapping[str, Any], groups: Mapping[str, Mapping[str, Any]]) -> str:
     provider = str(row.get("provider") or "")
     model = str(row.get("model") or "")
@@ -5918,6 +6500,16 @@ def _apply_screening_metadata(
         row = by_canonical.get(profile.canonical_identity)
         if not row:
             continue
+        reasoning_capability = row.get("reasoning_capability")
+        reasoning_capability = (
+            dict(reasoning_capability)
+            if isinstance(reasoning_capability, Mapping)
+            else {}
+        )
+        reasoning_transport = _reasoning_transport_from_research(
+            profile,
+            reasoning_capability,
+        )
         result.append(
             replace(
                 profile,
@@ -5939,10 +6531,59 @@ def _apply_screening_metadata(
                 screening_role_admission=_project_prefusion_role_admission(
                     row.get("role_admission")
                 ),
+                screening_reasoning_capability=reasoning_capability,
+                reasoning_transport=reasoning_transport,
                 source="prefusion_screened",
             )
         )
     return result
+
+
+def _reasoning_transport_from_research(
+    profile: ModelProfile,
+    capability: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Convert a validated research row into a probe-only wire candidate."""
+
+    status = str(capability.get("status") or "unknown").strip().casefold()
+    transport = str(capability.get("transport") or "").strip().casefold()
+    native_efforts = [
+        str(item)
+        for item in capability.get("native_efforts", [])
+        if str(item)
+    ] if isinstance(capability.get("native_efforts"), list) else []
+    effort_map = (
+        dict(capability.get("effort_map"))
+        if isinstance(capability.get("effort_map"), Mapping)
+        else {}
+    )
+    if status != "candidate":
+        return {
+            "status": status if status in {"unknown", "unsupported"} else "unknown",
+            "transport": "",
+            "supported_efforts": [],
+            "effort_map": {},
+            "api_format_compatible": False,
+        }
+    expected = {
+        "chat": "chat_reasoning_effort",
+        "responses": transport,
+    }.get(_normalize_research_api_format(profile.api_format), "")
+    if not transport or expected != transport or not native_efforts:
+        return {
+            "status": "unknown",
+            "transport": "",
+            "supported_efforts": [],
+            "effort_map": {},
+            "api_format_compatible": False,
+        }
+    return {
+        "status": "candidate",
+        "transport": transport,
+        "supported_efforts": native_efforts,
+        "effort_map": effort_map,
+        "api_format_compatible": True,
+    }
 
 
 def apply_prefusion_handoff_metadata(
@@ -5989,6 +6630,18 @@ def apply_prefusion_handoff_metadata(
     operationalized = _apply_operational_metadata(screened, operational_rows)
     if len(operationalized) != len(profiles):
         return []
+    # The report already contains the endpoint-bound reasoning probe used to
+    # build the ready registry. Reapply that exact receipt to the in-memory
+    # profiles so dynamic enrollment does not silently fall back to a second,
+    # potentially different network probe.
+    reasoning_probe = report.get("reasoning_probe")
+    reasoning_probe = reasoning_probe if isinstance(reasoning_probe, Mapping) else {}
+    reasoning_rows = reasoning_probe.get("probes")
+    reasoning_rows = reasoning_rows if isinstance(reasoning_rows, list) else []
+    operationalized = _apply_prefusion_reasoning_probe(
+        operationalized,
+        [row for row in reasoning_rows if isinstance(row, Mapping)],
+    )
     return operationalized
 
 
@@ -6206,6 +6859,9 @@ def _eligible_model_rows(
                 "screening_capability_axes": {
                     axis: profile.screening_capability(axis) for axis in CAPABILITY_AXES
                 },
+                "screening_reasoning_capability": _project_screening_reasoning_capability(
+                    profile.screening_reasoning_capability
+                ),
                 "screening_research_quality_score": profile.screening_research_quality_score,
                 "operational_rank": profile.screening_operational_rank,
                 "operational_score": profile.screening_operational_score,
@@ -6220,6 +6876,241 @@ def _eligible_model_rows(
         )
     output.sort(key=lambda row: (int(row.get("rank") or 1_000_000), str(row.get("profile_id_sha256") or "")))
     return output
+
+
+def _empty_reasoning_probe_payload(
+    profiles: Sequence[ModelProfile],
+    *,
+    live: bool,
+) -> dict[str, Any]:
+    candidate_count = sum(
+        1
+        for profile in profiles
+        if isinstance(profile.reasoning_transport, Mapping)
+        and str(profile.reasoning_transport.get("status") or "")
+        .strip()
+        .casefold()
+        == "candidate"
+    )
+    return {
+        "schema": "axio_fusion_api.provider_reasoning_probe.v1",
+        "probe_kind": "reasoning_transport",
+        "mode": "live" if live else "dry_run",
+        "network_calls_performed": False,
+        "candidate_model_count_before_selection": candidate_count,
+        "model_count": 0,
+        "verified_count": 0,
+        "rejected_count": 0,
+        "indeterminate_count": 0,
+        "probes": [],
+        "verification_contract": {
+            "requires_model_level_candidate_declaration": True,
+            "requires_protocol_local_wire_field": True,
+            "requires_control_and_every_declared_effort": True,
+            "requires_strict_sse_or_ndjson_streaming": True,
+            "benchmark_labels_or_cases_used": False,
+        },
+        "raw_probe_prompt_persisted": False,
+        "raw_provider_output_persisted": False,
+        "raw_provider_body_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _reasoning_probe_cohort_is_complete(
+    profiles: Sequence[ModelProfile],
+    payload: Mapping[str, Any],
+) -> bool:
+    """Require a live result for every researched candidate declaration."""
+
+    if not isinstance(payload, Mapping):
+        return False
+    if str(payload.get("mode") or "").strip().casefold() != "live":
+        return False
+    expected = {profile.profile_id for profile in profiles}
+    rows = payload.get("probes")
+    rows = rows if isinstance(rows, list) else []
+    observed = {
+        str(row.get("profile_id") or "")
+        for row in rows
+        if isinstance(row, Mapping) and str(row.get("profile_id") or "")
+    }
+    if observed != expected or len(observed) != len(rows):
+        return False
+    if int(payload.get("candidate_model_count_before_selection") or 0) != len(expected):
+        return False
+    if int(payload.get("model_count") or 0) != len(expected):
+        return False
+    return all(
+        isinstance(row, Mapping)
+        and row.get("live_probe_evidence") is True
+        and str(row.get("status") or "").strip().casefold()
+        in {"verified", "rejected", "indeterminate"}
+        for row in rows
+    )
+
+
+def _apply_prefusion_reasoning_probe(
+    profiles: Sequence[ModelProfile],
+    rows: Sequence[Mapping[str, Any]],
+) -> list[ModelProfile]:
+    """Promote only endpoint-bound, complete model-level reasoning evidence."""
+
+    by_profile = {
+        str(row.get("profile_id") or ""): row
+        for row in rows
+        if isinstance(row, Mapping) and str(row.get("profile_id") or "")
+    }
+    updated: list[ModelProfile] = []
+    for profile in profiles:
+        config = (
+            dict(profile.reasoning_transport)
+            if isinstance(profile.reasoning_transport, Mapping)
+            else {}
+        )
+        row = by_profile.get(profile.profile_id)
+        if (
+            row is None
+            or str(config.get("status") or "").strip().casefold() != "candidate"
+        ):
+            updated.append(profile)
+            continue
+        next_config = dict(config)
+        if _prefusion_reasoning_probe_verified(profile, row):
+            next_config["status"] = "verified"
+        elif _prefusion_reasoning_probe_rejected(profile, row):
+            next_config["status"] = "unsupported"
+        updated.append(replace(profile, reasoning_transport=next_config))
+    return updated
+
+
+def _prefusion_reasoning_probe_verified(
+    profile: ModelProfile,
+    row: Mapping[str, Any],
+) -> bool:
+    if not _reasoning_probe_binding_matches(profile, row):
+        return False
+    if (
+        str(row.get("status") or "").strip().casefold() != "verified"
+        or row.get("live_probe_evidence") is not True
+        or row.get("strict_wire_shape_preserved") is not True
+        or row.get("all_declared_efforts_strict_streaming") is not True
+    ):
+        return False
+    config = profile.reasoning_transport
+    declared = _normalized_reasoning_efforts(config.get("supported_efforts"))
+    observed = _normalized_reasoning_efforts(row.get("declared_efforts"))
+    if not declared or declared != observed:
+        return False
+    control = row.get("control") if isinstance(row.get("control"), Mapping) else {}
+    if not _prefusion_reasoning_attempt_accepted(control):
+        return False
+    attempts = row.get("effort_results")
+    attempts = attempts if isinstance(attempts, list) else []
+    by_effort = {
+        normalize_reasoning_effort(item.get("effort")): item
+        for item in attempts
+        if isinstance(item, Mapping) and normalize_reasoning_effort(item.get("effort"))
+    }
+    return all(
+        _prefusion_reasoning_attempt_accepted(by_effort.get(effort, {}))
+        for effort in declared
+    )
+
+
+def _normalized_reasoning_efforts(value: Any) -> list[str]:
+    values = value if isinstance(value, Sequence) and not isinstance(
+        value, (str, bytes, bytearray)
+    ) else []
+    normalized: list[str] = []
+    for item in values:
+        effort = normalize_reasoning_effort(item)
+        if effort and effort not in normalized:
+            normalized.append(effort)
+    return normalized
+
+
+def _prefusion_reasoning_probe_rejected(
+    profile: ModelProfile,
+    row: Mapping[str, Any],
+) -> bool:
+    if not _reasoning_probe_binding_matches(profile, row):
+        return False
+    if (
+        str(row.get("status") or "").strip().casefold() != "rejected"
+        or row.get("live_probe_evidence") is not True
+    ):
+        return False
+    control = row.get("control") if isinstance(row.get("control"), Mapping) else {}
+    if not _prefusion_reasoning_attempt_accepted(control):
+        return False
+    attempts = row.get("effort_results")
+    return bool(
+        isinstance(attempts, list)
+        and any(
+            isinstance(item, Mapping)
+            and str(item.get("status") or "").strip().casefold() == "rejected"
+            and 400 <= _safe_nonnegative_int(item.get("http_status")) < 500
+            for item in attempts
+        )
+    )
+
+
+def _reasoning_probe_binding_matches(
+    profile: ModelProfile,
+    row: Mapping[str, Any],
+) -> bool:
+    observed = row.get("reasoning_transport_binding")
+    observed = observed if isinstance(observed, Mapping) else {}
+    expected = reasoning_transport_probe_binding(profile)
+    if observed.get("schema") != expected.get("schema"):
+        return False
+    digest = sha256_text(
+        stable_json(
+            {
+                key: value
+                for key, value in observed.items()
+                if key != "binding_sha256"
+            }
+        )
+    )
+    return bool(
+        observed.get("binding_sha256")
+        and digest == str(observed.get("binding_sha256"))
+        and observed.get("binding_sha256") == expected.get("binding_sha256")
+    )
+
+
+def _prefusion_reasoning_attempt_accepted(attempt: Mapping[str, Any]) -> bool:
+    try:
+        latency_ms = float(attempt.get("latency_ms"))
+    except (TypeError, ValueError):
+        return False
+    return bool(
+        str(attempt.get("status") or "").strip().casefold() == "accepted"
+        and attempt.get("marker_observed") is True
+        and attempt.get("strict_streaming_contract_valid") is True
+        and attempt.get("stream_requested") is True
+        and attempt.get("strict_streaming_requested") is True
+        and attempt.get("stream_observed") is True
+        and attempt.get("stream_fallback_used") is not True
+        and str(attempt.get("stream_protocol") or "").strip().casefold()
+        in {"sse", "ndjson"}
+        and _safe_nonnegative_int(attempt.get("stream_frame_count")) > 0
+        and 0.0 <= latency_ms <= PROVIDER_MAX_RESPONSE_LATENCY_MS
+    )
+
+
+def _safe_nonnegative_int(value: Any) -> int:
+    """Parse count/status fields without allowing malformed evidence to pass."""
+
+    if isinstance(value, bool):
+        return 0
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, parsed)
 
 
 def _empty_probe_payload(
@@ -6437,6 +7328,22 @@ def _bounded_optional_int(value: Any, *, upper: int = 1_000_000) -> int | None:
 
 def _bounded_optional_int_or_none(value: Any) -> int | None:
     return _bounded_optional_int(value)
+
+
+def _bounded_prefusion_total_budget(value: Any) -> float:
+    """Normalize the shared live pre-Fusion wall-clock budget."""
+
+    if value in (None, ""):
+        return _DEFAULT_PREFUSION_TOTAL_BUDGET_SECONDS
+    if isinstance(value, bool):
+        raise ModelScreeningError("prefusion_total_budget_invalid")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        raise ModelScreeningError("prefusion_total_budget_invalid")
+    if not math.isfinite(parsed) or parsed < _MIN_PREFUSION_TOTAL_BUDGET_SECONDS:
+        raise ModelScreeningError("prefusion_total_budget_invalid")
+    return min(_MAX_PREFUSION_TOTAL_BUDGET_SECONDS, parsed)
 
 
 def _bounded_research_setting(

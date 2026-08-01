@@ -29,6 +29,11 @@ from .network import (
     provider_proxy_runtime_summary,
 )
 from .process_boundary import IsolatedCallError, run_isolated_call
+from .content_contract import (
+    ContentContractError,
+    render_content_parts,
+    structured_output_wire_fields,
+)
 
 from .registry import (
     normalize_profile,
@@ -843,11 +848,14 @@ class HTTPProviderClient:
             }
             if api_format == "responses":
                 adapter_kwargs["strict_wire"] = bool(strict_wire)
-            completion = adapter(
-                profile,
-                request,
-                **adapter_kwargs,
-            )
+            try:
+                completion = adapter(
+                    profile,
+                    request,
+                    **adapter_kwargs,
+                )
+            except ContentContractError as exc:
+                raise ProviderExecutionError(str(exc), error_code=exc.code) from exc
             if completion.has_output:
                 return completion
             if stream_observer is not None and stream_observer.emitted_text:
@@ -1060,6 +1068,7 @@ def probe_provider_reasoning_support(
     max_models: int | None = None,
     max_models_per_provider: int | None = None,
     redact_provider_identifiers: bool = False,
+    isolate_live_requests: bool = False,
 ) -> dict[str, Any]:
     """Verify declared reasoning transports without inferring model quality.
 
@@ -1107,6 +1116,7 @@ def probe_provider_reasoning_support(
                     plan=_reasoning_probe_plan(profile) or {},
                     timeout=bounded_timeout,
                     client=probe_client,
+                    isolate_live_requests=bool(isolate_live_requests),
                 ): profile
                 for profile in selected_profiles
             }
@@ -1143,6 +1153,9 @@ def probe_provider_reasoning_support(
             "strict_responses_probe_disables_text_input_fallback": True,
             "explicit_nontransient_parameter_4xx_is_rejected": True,
             "timeout_network_and_5xx_are_indeterminate": True,
+            "live_http_requests_use_killable_process_boundary": bool(
+                isolate_live_requests
+            ),
             "benchmark_labels_or_cases_used": False,
             "raw_probe_prompt_persisted": False,
             "raw_provider_output_persisted": False,
@@ -1221,7 +1234,45 @@ def _probe_one_model_reasoning_support(
     plan: Mapping[str, Any],
     timeout: float,
     client: Any,
+    isolate_live_requests: bool = False,
 ) -> dict[str, Any]:
+    if isolate_live_requests and isinstance(client, HTTPProviderClient):
+        try:
+            return run_isolated_call(
+                _probe_one_model_reasoning_support,
+                profile,
+                plan=plan,
+                timeout=timeout,
+                client=client,
+                isolate_live_requests=False,
+                deadline=min(300.0, max(1.0, float(timeout)) + 0.25),
+            )
+        except IsolatedCallError as exc:
+            binding = reasoning_transport_probe_binding(profile)
+            attempt = _reasoning_probe_attempt_row(
+                status="indeterminate",
+                reason_code=(
+                    "provider_response_timeout_exceeded_90s"
+                    if exc.timed_out
+                    else "reasoning_probe_isolated_call_failed"
+                ),
+                latency_ms=min(
+                    PROVIDER_MAX_RESPONSE_LATENCY_MS,
+                    max(0.0, float(timeout) * 1000.0),
+                ),
+                error_type=exc.error_type,
+                error_code=exc.code,
+                http_status=exc.http_status,
+            )
+            return _reasoning_probe_profile_row(
+                profile,
+                plan=plan,
+                status="indeterminate",
+                control=attempt,
+                effort_results=[],
+                reason_codes=[attempt["reason_code"]],
+                transport_binding=binding,
+            )
     # Capture the resolved endpoint binding before the first network request.
     # A channel environment variable can be retargeted while a long probe is
     # in progress; the evidence must describe the endpoint actually selected
@@ -3538,7 +3589,11 @@ def _chat_payload(
     messages = _chat_history_messages(request.history)
     provider_prompt = _provider_prompt_for_injection(request, prompt)
     if _should_include_provider_prompt(request, provider_prompt):
-        _append_chat_control_prompt(messages, provider_prompt)
+        _append_chat_control_prompt(
+            messages,
+            provider_prompt,
+            content_parts=_direct_prompt_content_parts(request, prompt),
+        )
     payload = {
         "model": profile.model,
         "messages": [
@@ -3555,6 +3610,7 @@ def _chat_payload(
         payload["top_p"] = request.top_p
     if request.stop:
         payload["stop"] = list(request.stop)
+    payload.update(structured_output_wire_fields(request.structured_output, target_format="chat"))
     reasoning_transport, effective_reasoning_effort = (
         profile.resolve_reasoning_transport(request.reasoning_effort)
     )
@@ -5093,7 +5149,11 @@ def _responses_typed_payload(
     input_rows = _responses_history_items(request.history)
     provider_prompt = _provider_prompt_for_injection(request, prompt)
     if _should_include_provider_prompt(request, provider_prompt):
-        _append_responses_control_prompt(input_rows, provider_prompt)
+        _append_responses_control_prompt(
+            input_rows,
+            provider_prompt,
+            content_parts=_direct_prompt_content_parts(request, prompt),
+        )
     payload = {
         "model": profile.model,
         "instructions": system,
@@ -5106,6 +5166,7 @@ def _responses_typed_payload(
         payload["max_output_tokens"] = request.max_output_tokens
     if request.top_p is not None:
         payload["top_p"] = request.top_p
+    payload.update(structured_output_wire_fields(request.structured_output, target_format="responses"))
     reasoning_transport, effective_reasoning_effort = (
         profile.resolve_reasoning_transport(request.reasoning_effort)
     )
@@ -5151,6 +5212,7 @@ def _responses_text_payload(
         payload["reasoning"] = {"effort": effective_reasoning_effort}
     elif reasoning_transport == "responses_reasoning_effort":
         payload["reasoning_effort"] = effective_reasoning_effort
+    payload.update(structured_output_wire_fields(request.structured_output, target_format="responses"))
     # This fallback exists for gateways that only accept textual Responses
     # input.  It cannot safely carry native tool call/result blocks.
     return payload
@@ -5166,7 +5228,11 @@ def _anthropic_payload(
     messages = _anthropic_history_messages(request.history)
     provider_prompt = _provider_prompt_for_injection(request, prompt)
     if _should_include_provider_prompt(request, provider_prompt):
-        _append_anthropic_control_prompt(messages, provider_prompt)
+        _append_anthropic_control_prompt(
+            messages,
+            provider_prompt,
+            content_parts=_direct_prompt_content_parts(request, prompt),
+        )
     payload = {
         "model": profile.model,
         "system": system,
@@ -5180,6 +5246,7 @@ def _anthropic_payload(
         payload["top_p"] = request.top_p
     if request.stop:
         payload["stop_sequences"] = list(request.stop)
+    payload.update(structured_output_wire_fields(request.structured_output, target_format="anthropic"))
     tools = provider_tool_declarations(request.tools, api_format="anthropic") if profile.tool_calling_eligible else []
     if tools:
         payload["tools"] = tools
@@ -5196,7 +5263,11 @@ def _gemini_payload(
     contents = _gemini_history_contents(request.history)
     provider_prompt = _provider_prompt_for_injection(request, prompt)
     if _should_include_provider_prompt(request, provider_prompt):
-        _append_gemini_control_prompt(contents, provider_prompt)
+        _append_gemini_control_prompt(
+            contents,
+            provider_prompt,
+            content_parts=_direct_prompt_content_parts(request, prompt),
+        )
     payload = {
         "systemInstruction": {"parts": [{"text": system}]},
         "contents": contents,
@@ -5210,6 +5281,11 @@ def _gemini_payload(
         payload["generationConfig"]["topP"] = request.top_p
     if request.stop:
         payload["generationConfig"]["stopSequences"] = list(request.stop)
+    structured_fields = structured_output_wire_fields(
+        request.structured_output,
+        target_format="gemini",
+    )
+    payload["generationConfig"].update(structured_fields.get("generationConfig", {}))
     tools = provider_tool_declarations(request.tools, api_format="gemini") if profile.tool_calling_eligible else []
     if tools:
         payload["tools"] = tools
@@ -5226,13 +5302,25 @@ def _chat_history_messages(history: Sequence[Mapping[str, Any]]) -> list[dict[st
             continue
         calls = event.get("tool_calls") if isinstance(event.get("tool_calls"), list) else []
         if calls:
-            row: dict[str, Any] = {"role": "assistant", "content": str(event.get("content") or "") or None}
+            content_parts = event.get("content_parts")
+            content = (
+                render_content_parts(content_parts, target_format="chat")
+                if isinstance(content_parts, Sequence) and not isinstance(content_parts, (str, bytes))
+                else str(event.get("content") or "")
+            )
+            row: dict[str, Any] = {"role": "assistant", "content": content or None}
             row["tool_calls"] = [tool_call_to_chat(call) for call in calls if isinstance(call, Mapping)]
             messages.append(row)
             continue
         role = str(event.get("role") or "")
         if role in {"user", "assistant"}:
-            messages.append({"role": role, "content": str(event.get("content") or "")})
+            content_parts = event.get("content_parts")
+            content = (
+                render_content_parts(content_parts, target_format="chat")
+                if isinstance(content_parts, Sequence) and not isinstance(content_parts, (str, bytes))
+                else str(event.get("content") or "")
+            )
+            messages.append({"role": role, "content": content})
     return messages
 
 
@@ -5250,10 +5338,16 @@ def _responses_history_items(history: Sequence[Mapping[str, Any]]) -> list[dict[
             continue
         role = str(event.get("role") or "")
         if role in {"user", "assistant"}:
+            content_parts = event.get("content_parts")
+            content = (
+                render_content_parts(content_parts, target_format="responses")
+                if isinstance(content_parts, Sequence) and not isinstance(content_parts, (str, bytes))
+                else [{"type": "input_text", "text": str(event.get("content") or "")}]
+            )
             input_rows.append(
                 {
                     "role": role,
-                    "content": [{"type": "input_text", "text": str(event.get("content") or "")}],
+                    "content": content,
                 }
             )
     return input_rows
@@ -5269,15 +5363,26 @@ def _anthropic_history_messages(history: Sequence[Mapping[str, Any]]) -> list[di
             continue
         calls = event.get("tool_calls") if isinstance(event.get("tool_calls"), list) else []
         if calls:
-            content = []
-            if event.get("content"):
+            content_parts = event.get("content_parts")
+            content = (
+                list(render_content_parts(content_parts, target_format="anthropic"))
+                if isinstance(content_parts, Sequence) and not isinstance(content_parts, (str, bytes))
+                else []
+            )
+            if not content and event.get("content"):
                 content.append({"type": "text", "text": str(event.get("content") or "")})
             content.extend(tool_call_to_anthropic(call) for call in calls if isinstance(call, Mapping))
             messages.append({"role": "assistant", "content": content})
             continue
         role = str(event.get("role") or "")
         if role in {"user", "assistant"}:
-            messages.append({"role": role, "content": str(event.get("content") or "")})
+            content_parts = event.get("content_parts")
+            content = (
+                render_content_parts(content_parts, target_format="anthropic")
+                if isinstance(content_parts, Sequence) and not isinstance(content_parts, (str, bytes))
+                else str(event.get("content") or "")
+            )
+            messages.append({"role": role, "content": content})
     return messages
 
 
@@ -5291,18 +5396,29 @@ def _gemini_history_contents(history: Sequence[Mapping[str, Any]]) -> list[dict[
             continue
         calls = event.get("tool_calls") if isinstance(event.get("tool_calls"), list) else []
         if calls:
-            parts = []
-            if event.get("content"):
+            content_parts = event.get("content_parts")
+            parts = (
+                list(render_content_parts(content_parts, target_format="gemini"))
+                if isinstance(content_parts, Sequence) and not isinstance(content_parts, (str, bytes))
+                else []
+            )
+            if not parts and event.get("content"):
                 parts.append({"text": str(event.get("content") or "")})
             parts.extend(tool_call_to_gemini_part(call) for call in calls if isinstance(call, Mapping))
             contents.append({"role": "model", "parts": parts})
             continue
         role = str(event.get("role") or "")
         if role in {"user", "assistant"}:
+            content_parts = event.get("content_parts")
+            parts = (
+                render_content_parts(content_parts, target_format="gemini")
+                if isinstance(content_parts, Sequence) and not isinstance(content_parts, (str, bytes))
+                else [{"text": str(event.get("content") or "")}]
+            )
             contents.append(
                 {
                     "role": "model" if role == "assistant" else "user",
-                    "parts": [{"text": str(event.get("content") or "")}],
+                    "parts": parts,
                 }
             )
     return contents
@@ -5363,49 +5479,123 @@ def _provider_prompt_for_injection(request: FusionRequest, prompt: str) -> str:
     )
 
 
-def _append_chat_control_prompt(messages: list[dict[str, Any]], prompt: str) -> None:
+def _direct_prompt_content_parts(
+    request: FusionRequest,
+    prompt: str,
+) -> tuple[Mapping[str, Any], ...]:
+    metadata = request.metadata if isinstance(request.metadata, Mapping) else {}
+    if metadata.get("_axio_control_prompt_can_reuse_history_task") is True:
+        return ()
+    if not _history_contains_current_prompt(request):
+        return tuple(
+            dict(item)
+            for item in request.content_parts
+            if isinstance(item, Mapping)
+        )
+    return ()
+
+
+def _append_chat_control_prompt(
+    messages: list[dict[str, Any]],
+    prompt: str,
+    *,
+    content_parts: Sequence[Mapping[str, Any]] = (),
+) -> None:
     """Attach a control packet without duplicating an ordinary user turn."""
 
+    native_content = (
+        render_content_parts(content_parts, target_format="chat")
+        if content_parts
+        else prompt
+    )
     if messages and str(messages[-1].get("role") or "") == "user":
-        messages[-1]["content"] = _append_text_content(messages[-1].get("content"), prompt)
+        existing = messages[-1].get("content")
+        if isinstance(native_content, list):
+            existing_parts = (
+                [dict(item) for item in existing if isinstance(item, Mapping)]
+                if isinstance(existing, list)
+                else ([{"type": "text", "text": str(existing)}] if existing else [])
+            )
+            messages[-1]["content"] = [*existing_parts, *native_content]
+        else:
+            messages[-1]["content"] = _append_text_content(existing, str(native_content))
         return
-    messages.append({"role": "user", "content": prompt})
+    messages.append({"role": "user", "content": native_content})
 
 
-def _append_responses_control_prompt(input_rows: list[dict[str, Any]], prompt: str) -> None:
+def _append_responses_control_prompt(
+    input_rows: list[dict[str, Any]],
+    prompt: str,
+    *,
+    content_parts: Sequence[Mapping[str, Any]] = (),
+) -> None:
+    native_content = (
+        render_content_parts(content_parts, target_format="responses")
+        if content_parts
+        else [{"type": "input_text", "text": prompt}]
+    )
     if input_rows and str(input_rows[-1].get("role") or "") == "user":
         content = input_rows[-1].get("content")
         if isinstance(content, list):
             updated = [dict(item) for item in content if isinstance(item, Mapping)]
-            updated.append({"type": "input_text", "text": prompt})
-            input_rows[-1]["content"] = updated
+            input_rows[-1]["content"] = [*updated, *native_content]
             return
-        input_rows[-1]["content"] = _append_text_content(content, prompt)
+        input_rows[-1]["content"] = [
+            {"type": "input_text", "text": str(content or "")},
+            *native_content,
+        ]
         return
-    input_rows.append({"role": "user", "content": [{"type": "input_text", "text": prompt}]})
+    input_rows.append({"role": "user", "content": native_content})
 
 
-def _append_anthropic_control_prompt(messages: list[dict[str, Any]], prompt: str) -> None:
+def _append_anthropic_control_prompt(
+    messages: list[dict[str, Any]],
+    prompt: str,
+    *,
+    content_parts: Sequence[Mapping[str, Any]] = (),
+) -> None:
+    native_content = (
+        render_content_parts(content_parts, target_format="anthropic")
+        if content_parts
+        else prompt
+    )
     if messages and str(messages[-1].get("role") or "") == "user":
         content = messages[-1].get("content")
+        if isinstance(native_content, list):
+            existing = (
+                [dict(item) for item in content if isinstance(item, Mapping)]
+                if isinstance(content, list)
+                else ([{"type": "text", "text": str(content)}] if content else [])
+            )
+            messages[-1]["content"] = [*existing, *native_content]
+            return
         if isinstance(content, list):
             updated = [dict(item) for item in content if isinstance(item, Mapping)]
-            updated.append({"type": "text", "text": prompt})
+            updated.append({"type": "text", "text": str(native_content)})
             messages[-1]["content"] = updated
             return
-        messages[-1]["content"] = _append_text_content(content, prompt)
+        messages[-1]["content"] = _append_text_content(content, str(native_content))
         return
-    messages.append({"role": "user", "content": prompt})
+    messages.append({"role": "user", "content": native_content})
 
 
-def _append_gemini_control_prompt(contents: list[dict[str, Any]], prompt: str) -> None:
+def _append_gemini_control_prompt(
+    contents: list[dict[str, Any]],
+    prompt: str,
+    *,
+    content_parts: Sequence[Mapping[str, Any]] = (),
+) -> None:
+    native_parts = (
+        render_content_parts(content_parts, target_format="gemini")
+        if content_parts
+        else [{"text": prompt}]
+    )
     if contents and str(contents[-1].get("role") or "") == "user":
         parts = contents[-1].get("parts")
         updated = [dict(item) for item in parts if isinstance(item, Mapping)] if isinstance(parts, list) else []
-        updated.append({"text": prompt})
-        contents[-1]["parts"] = updated
+        contents[-1]["parts"] = [*updated, *native_parts]
         return
-    contents.append({"role": "user", "parts": [{"text": prompt}]})
+    contents.append({"role": "user", "parts": native_parts})
 
 
 def _append_text_content(value: Any, prompt: str) -> str:
@@ -5440,6 +5630,8 @@ def _responses_text_fallback_preserves_turn(request: FusionRequest) -> bool:
     """
 
     if request.tools:
+        return False
+    if request.has_non_text_input:
         return False
     for event in request.history:
         if not isinstance(event, Mapping):
@@ -6350,6 +6542,11 @@ def _probe_profile_metadata(profile: ModelProfile) -> dict[str, Any]:
         "reasoning_transport": (
             dict(profile.reasoning_transport)
             if isinstance(profile.reasoning_transport, Mapping)
+            else {}
+        ),
+        "screening_reasoning_capability": (
+            dict(profile.screening_reasoning_capability)
+            if isinstance(profile.screening_reasoning_capability, Mapping)
             else {}
         ),
         "traffic_control": (

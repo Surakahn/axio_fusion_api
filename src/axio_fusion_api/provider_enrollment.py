@@ -90,6 +90,7 @@ def enroll_runtime_channels(
     prefusion_research_batch_size: int | None = None,
     prefusion_research_max_workers: int | None = None,
     prefusion_stream_probe_samples: int | None = None,
+    prefusion_total_budget_seconds: float | None = None,
 ) -> dict[str, Any]:
     """Discover and enroll arbitrary direct-credential channels in memory.
 
@@ -184,6 +185,16 @@ def enroll_runtime_channels(
             "probe_samples",
         )
     ) or 3
+    configured_total_budget_seconds = (
+        prefusion_total_budget_seconds
+        if prefusion_total_budget_seconds is not None
+        else _prefusion_value(
+            prefusion_config,
+            "total_budget_seconds",
+            "budget_seconds",
+            "wall_clock_budget_seconds",
+        )
+    )
     prefusion_min_available_models = _optional_positive_int(
         _prefusion_value(prefusion_config, "min_available_models")
     ) or max(1, int(min_available_models))
@@ -237,6 +248,8 @@ def enroll_runtime_channels(
     ] if isinstance(discovery.get("warning_codes"), list) else []
     prefusion_report: dict[str, Any] = {}
     prefusion_summary = _empty_prefusion_summary(required=prefusion_required)
+    reasoning_probe: dict[str, Any] = {}
+    reasoning_probe_source = "not_run"
     if prefusion_required:
         prefusion_report = run_prefusion_model_screening(
             profiles=discovered_profiles,
@@ -253,6 +266,7 @@ def enroll_runtime_channels(
             research_batch_size=configured_research_batch_size,
             research_max_workers=configured_research_max_workers,
             stream_probe_samples=configured_stream_probe_samples,
+            total_budget_seconds=configured_total_budget_seconds,
             provider_client=active_client,
             research_client=active_client,
         )
@@ -288,6 +302,8 @@ def enroll_runtime_channels(
             prefusion_report,
         )
         probe = _prefusion_probe_payload(prefusion_report)
+        reasoning_probe = _prefusion_reasoning_probe_payload(prefusion_report)
+        reasoning_probe_source = "prefusion_screening"
         probe_rows = [row for row in probe.get("probes", []) if isinstance(row, Mapping)]
         calibrated_profiles = [
             replace(profile, health="available", source="prefusion_stream_probe")
@@ -324,8 +340,7 @@ def enroll_runtime_channels(
             calibrated_profiles,
             [row for row in tool_probe.get("probes", []) if isinstance(row, Mapping)],
         )
-    reasoning_probe: dict[str, Any] = {}
-    if calibrate_reasoning:
+    if calibrate_reasoning and not prefusion_required:
         available_profiles = [
             profile for profile in calibrated_profiles if profile.health == "available"
         ]
@@ -346,6 +361,7 @@ def enroll_runtime_channels(
                 if isinstance(row, Mapping)
             ],
         )
+        reasoning_probe_source = "runtime_diagnostic"
     serving_profiles = [
         profile for profile in calibrated_profiles if profile.health == "available"
     ]
@@ -428,6 +444,8 @@ def enroll_runtime_channels(
             and str(row.get("status") or "") not in {"tool_call_supported", "text_only"}
         ),
         "reasoning_probe_enabled": bool(calibrate_reasoning),
+        "reasoning_probe_source": reasoning_probe_source,
+        "reasoning_probe_reused_from_prefusion": reasoning_probe_source == "prefusion_screening",
         "reasoning_probe_timeout_seconds": (
             bounded_reasoning_timeout if calibrate_reasoning else None
         ),
@@ -549,6 +567,13 @@ def _empty_prefusion_summary(*, required: bool) -> dict[str, Any]:
 
 def _prefusion_probe_payload(report: Mapping[str, Any]) -> dict[str, Any]:
     payload = report.get("streaming_probe") if isinstance(report, Mapping) else {}
+    return dict(payload) if isinstance(payload, Mapping) else {}
+
+
+def _prefusion_reasoning_probe_payload(report: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the reasoning receipt already produced by pre-Fusion screening."""
+
+    payload = report.get("reasoning_probe") if isinstance(report, Mapping) else {}
     return dict(payload) if isinstance(payload, Mapping) else {}
 
 

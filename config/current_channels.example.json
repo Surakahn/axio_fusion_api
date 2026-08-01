@@ -53,6 +53,7 @@
     "candidate_batch_size": 4,
     "research_max_workers": 1,
     "stream_probe_samples": 3,
+    "total_budget_seconds": 1800,
     "merge_strategy": "deterministic_research_quality_confidence_candidate_id",
     "ranking_prior_forbidden": true
   }

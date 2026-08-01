@@ -4,6 +4,7 @@ import math
 from itertools import combinations
 from typing import Any, Mapping, Sequence
 
+from .content_contract import content_parts_supported_by_format
 from .hermes_moa import build_process_plan, safe_plan
 from .latency_policy import profile_latency_eligibility
 from .policy_control import resolve_routing_policy
@@ -104,6 +105,7 @@ def analyze_request(request: FusionRequest) -> dict[str, Any]:
     complexity += min(0.24, len(request.prompt) / 6000.0)
     complexity += 0.10 * max(0, len(domains) - 1)
     complexity += 0.10 if request.history else 0.0
+    complexity += 0.08 if request.has_visual_input else 0.0
     complexity += 0.16 if non_fusion_tools_declared else 0.0
     complexity += 0.10 if fusion_plugin_requested else 0.0
     complexity += 0.08 * quality_pressure
@@ -139,6 +141,8 @@ def analyze_request(request: FusionRequest) -> dict[str, Any]:
         "uncertainty": round(max(0.0, min(1.0, uncertainty)), 4),
         "needs_current_information": needs_current,
         "needs_tools": bool(non_fusion_tools_declared),
+        "has_visual_input": request.has_visual_input,
+        "structured_output_requested": bool(request.structured_output),
         "factuality_signal": factuality_signal,
         "vertical_domain_signals": list(dict.fromkeys(vertical_domain_signals)),
         "fusion_plugin_requested": fusion_plugin_requested,
@@ -5924,7 +5928,6 @@ def _apply_privacy_filter(
     profiles: Sequence[ModelProfile],
     analysis: Mapping[str, Any],
 ) -> tuple[list[ModelProfile], dict[str, Any]]:
-    del request
     level = str(analysis.get("privacy_level") or "public")
     allowed_tags = _allowed_privacy_tags(level)
     eligible = []
@@ -5943,6 +5946,25 @@ def _apply_privacy_filter(
         if profile_latency_eligibility(profile).get("eligible") is False:
             blocked_counts["provider_response_latency_exceeded_90s"] = (
                 blocked_counts.get("provider_response_latency_exceeded_90s", 0) + 1
+            )
+            continue
+        if request.has_non_text_input:
+            if request.has_visual_input and profile.supports_vision is not True:
+                blocked_counts["vision_capability_required"] = (
+                    blocked_counts.get("vision_capability_required", 0) + 1
+                )
+                continue
+            if not content_parts_supported_by_format(
+                _request_content_parts(request),
+                target_format=profile.api_format,
+            ):
+                blocked_counts["content_not_representable_by_provider_protocol"] = (
+                    blocked_counts.get("content_not_representable_by_provider_protocol", 0) + 1
+                )
+                continue
+        if request.structured_output and profile.capability("structured_output") < 0.50:
+            blocked_counts["structured_output_capability_floor"] = (
+                blocked_counts.get("structured_output_capability_floor", 0) + 1
             )
             continue
         tags = {str(tag).strip().lower() for tag in profile.privacy_tags}
@@ -5964,6 +5986,25 @@ def _apply_privacy_filter(
         "raw_prompt_persisted": False,
         "secrets_persisted": False,
     }
+
+
+def _request_content_parts(request: FusionRequest) -> list[Mapping[str, Any]]:
+    parts: list[Mapping[str, Any]] = [
+        dict(item)
+        for item in request.content_parts
+        if isinstance(item, Mapping)
+    ]
+    for event in request.history:
+        if not isinstance(event, Mapping):
+            continue
+        event_parts = event.get("content_parts")
+        if isinstance(event_parts, Sequence) and not isinstance(event_parts, (str, bytes)):
+            parts.extend(
+                dict(item)
+                for item in event_parts
+                if isinstance(item, Mapping)
+            )
+    return parts
 
 
 def _allowed_privacy_tags(level: str) -> set[str]:

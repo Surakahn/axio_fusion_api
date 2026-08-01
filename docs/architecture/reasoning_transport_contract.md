@@ -13,6 +13,41 @@ The design avoids two failure modes:
 2. Treating a model directory listing or a vendor claim as proof that a
    reasoning setting is accepted by the exact channel and model being served.
 
+## Research Prior Versus Wire Evidence
+
+The remote pre-Fusion Research Agent emits a model-local
+`reasoning_capability` object in
+`axio_fusion_api.prefusion_research_agent_output.v2`. It is an evidence-bound
+prior, not permission to write a provider field:
+
+```json
+{
+  "status": "candidate",
+  "transport": "responses_reasoning",
+  "native_efforts": ["low", "medium", "high"],
+  "effort_map": {"xhigh": "high", "max": "high"},
+  "evidence_ids": ["source_official"],
+  "confidence": 0.9,
+  "token_cost_model": "provider_documented",
+  "latency_cost_model": "monotonic_effort_policy",
+  "cost_evidence_ids": ["source_official"]
+}
+```
+
+The serving profile stores that prior as `screening_reasoning_capability` and
+stores the independent endpoint probe as `reasoning_transport`. Only the
+latter can be `verified`. A model that declares only `medium` does not acquire
+`low`, `high`, `xhigh`, or `max` by interpolation. An `effort_map` is accepted
+only when it is explicit, maps to a declared native level, and does not raise
+the caller's requested intensity. The research evidence must be visible to
+the same candidate; a source attached to another model cannot be reused.
+
+Chat Completions, Responses, Anthropic Messages, and Gemini are separate
+transport contracts. A Chat `reasoning_effort` claim cannot authorize a
+Responses `reasoning` object, and neither OpenAI field is inferred for
+Anthropic or Gemini. The protocol adapter therefore omits unverified controls
+instead of guessing a vendor-specific field.
+
 ## Verified Wire Shapes
 
 ### NVIDIA NIM Chat Completions
@@ -221,6 +256,13 @@ registry calibration also verifies that binding against the endpoint currently
 resolved for the profile; a stale or legacy probe cannot promote a transport
 after a gateway retarget. That local check does not replace the full-cohort
 cross-registry reconciliation below.
+
+The live pre-Fusion workflow requires a complete candidate cohort. If one
+researched candidate has no probe row, or a row has a malformed count/status,
+the screening handoff is blocked. `verified`, `rejected`, and `indeterminate`
+are distinct outcomes: a non-transient parameter 4xx can produce
+`unsupported`, while a timeout, 5xx, malformed stream, or missing row remains
+unverified and is never forwarded to a provider.
 
 ## Endpoint-Bound Reconciliation
 

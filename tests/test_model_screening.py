@@ -4,6 +4,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 import threading
+import time
 import urllib.error
 
 import pytest
@@ -290,6 +291,17 @@ def _research_output(candidate_ids: list[str], *, confidence: float = 0.9, overa
                     "axes": {axis: overall for axis in CAPABILITY_AXES},
                     "strengths": ["evidence-backed general capability"],
                     "limitations": ["remote channel latency can vary"],
+                },
+                "reasoning_capability": {
+                    "status": "unknown",
+                    "transport": "",
+                    "native_efforts": [],
+                    "effort_map": {},
+                    "evidence_ids": ["source_official"],
+                    "confidence": 0.0,
+                    "token_cost_model": "unknown",
+                    "latency_cost_model": "unknown",
+                    "cost_evidence_ids": [],
                 },
                 "allowed_roles": [
                     "primary_solver",
@@ -1425,6 +1437,17 @@ def test_research_batch_merge_uses_quality_score_not_overall_only():
                             "strengths": ["evidence-backed capability"],
                             "limitations": ["prior is not benchmark evidence"],
                         },
+                        "reasoning_capability": {
+                            "status": "unknown",
+                            "transport": "",
+                            "native_efforts": [],
+                            "effort_map": {},
+                            "evidence_ids": ["source_official"],
+                            "confidence": 0.0,
+                            "token_cost_model": "unknown",
+                            "latency_cost_model": "unknown",
+                            "cost_evidence_ids": [],
+                        },
                         "allowed_roles": ["primary_solver"],
                         "disallowed_roles": ["judge", "synthesizer"],
                         "confidence": 0.90,
@@ -1508,6 +1531,37 @@ def test_research_batches_cover_full_inventory_and_merge_deterministically():
     assert [row["rank"] for row in ranking["ordered_models"]] == list(range(1, 6))
     assert all(item["status"] == "validated" for item in receipt["batch_results"])
     assert receipt["aggregate_output_sha256"]
+
+
+def test_research_retries_share_one_deadline_and_do_not_restart_after_expiry():
+    profile = _profile("provider-a", "model-00", "model-00")
+    groups = _groups([profile])
+    client = _BatchResearchClient()
+
+    with pytest.raises(ModelScreeningError, match="prefusion_total_budget_exhausted"):
+        model_screening._run_research_agent_batches(
+            _profile("nvidia", "researcher", "researcher"),
+            groups=groups,
+            source_pack={
+                "receipts": [
+                    {
+                        "source_slot": "source_official",
+                        "status": "inline_source_ready",
+                        "evidence_hash": sha256_text("source"),
+                    }
+                ],
+                "evidence": [],
+            },
+            timeout=10.0,
+            client=client,
+            focus_manifest=model_screening.load_prefusion_focus_manifest(),
+            batch_size=1,
+            max_workers=1,
+            merge_strategy=model_screening._RESEARCH_MERGE_STRATEGY,
+            deadline=time.monotonic() - 1.0,
+        )
+
+    assert client.calls == []
 
 
 def test_research_batch_retries_once_then_merges_only_validated_output():
@@ -2137,6 +2191,17 @@ def test_reasoning_reconciliation_preserves_loadable_prefusion_handoff(monkeypat
     monkeypatch.setenv("PROVIDER_A_API_KEY", "fixture-key")
     groups = _groups([profile])
     research = _research_output([str(groups[0]["candidate_id"])])
+    research["ordered_models"][0]["reasoning_capability"] = {
+        "status": "candidate",
+        "transport": "chat_reasoning_effort",
+        "native_efforts": ["low"],
+        "effort_map": {},
+        "evidence_ids": ["source_official"],
+        "confidence": 0.9,
+        "token_cost_model": "unknown",
+        "latency_cost_model": "unknown",
+        "cost_evidence_ids": [],
+    }
 
     def fake_probe(probe_profiles, **_kwargs):
         return {
@@ -2160,6 +2225,57 @@ def test_reasoning_reconciliation_preserves_loadable_prefusion_handoff(monkeypat
         }
 
     monkeypatch.setattr(model_screening, "probe_provider_models", fake_probe)
+
+    def fake_reasoning_probe(probe_profiles, **_kwargs):
+        accepted = {
+            "status": "accepted",
+            "marker_observed": True,
+            "strict_streaming_contract_valid": True,
+            "stream_requested": True,
+            "strict_streaming_requested": True,
+            "stream_observed": True,
+            "stream_fallback_used": False,
+            "stream_protocol": "sse",
+            "stream_frame_count": 2,
+            "latency_ms": 12,
+        }
+        rows = [
+            {
+                "profile_id": item.profile_id,
+                "provider": item.provider,
+                "model": item.model,
+                "api_format": item.api_format,
+                "probe_kind": "reasoning_transport",
+                "probe_mode": "live",
+                "live_probe_evidence": True,
+                "status": "indeterminate",
+                "strict_wire_shape_preserved": True,
+                "all_declared_efforts_strict_streaming": False,
+                "transport": "chat_reasoning_effort",
+                "declared_efforts": ["low"],
+                "control": accepted,
+                "effort_results": [{"effort": "low", **accepted}],
+                "reasoning_transport_binding": reasoning_transport_probe_binding(item),
+            }
+            for item in probe_profiles
+        ]
+        return {
+            "schema": "axio_fusion_api.provider_reasoning_probe.v1",
+            "probe_kind": "reasoning_transport",
+            "mode": "live",
+            "network_calls_performed": True,
+            "candidate_model_count_before_selection": len(rows),
+            "model_count": len(rows),
+            "probes": rows,
+            "verification_contract": {
+                "requires_model_level_candidate_declaration": True,
+                "requires_protocol_local_wire_field": True,
+                "requires_control_and_every_declared_effort": True,
+                "requires_strict_sse_or_ndjson_streaming": True,
+            },
+        }
+
+    monkeypatch.setattr(model_screening, "probe_provider_reasoning_support", fake_reasoning_probe)
     report = run_prefusion_model_screening(
         profiles=[profile],
         source_manifest=_source_manifest(),
@@ -3681,3 +3797,98 @@ def test_blocked_screening_registry_cannot_become_routable_by_editing_models(tmp
     path = tmp_path / "blocked-registry.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
     assert model_screening.load_registry(path) == []
+
+
+def test_reasoning_probe_cohort_rejects_missing_or_malformed_candidate_receipts():
+    profiles = [
+        normalize_profile(
+            {
+                "provider": "fixture-a",
+                "model": "model-a",
+                "api_format": "chat",
+                "reasoning_transport": {
+                    "status": "candidate",
+                    "transport": "chat_reasoning_effort",
+                    "supported_efforts": ["medium"],
+                },
+            }
+        ),
+        normalize_profile(
+            {
+                "provider": "fixture-b",
+                "model": "model-b",
+                "api_format": "responses",
+                "reasoning_transport": {
+                    "status": "candidate",
+                    "transport": "responses_reasoning",
+                    "supported_efforts": ["high"],
+                },
+            }
+        ),
+    ]
+
+    assert model_screening._reasoning_probe_cohort_is_complete(
+        profiles,
+        {
+            "mode": "live",
+            "candidate_model_count_before_selection": "malformed",
+            "model_count": 1,
+            "probes": [],
+        },
+    ) is False
+
+
+def test_reasoning_evidence_cannot_be_reused_across_candidate_scopes():
+    profiles = [
+        _profile("fixture-a", "model-a", "canonical-a"),
+        _profile("fixture-b", "model-b", "canonical-b"),
+    ]
+    groups = _groups(profiles)
+    candidate_a, candidate_b = [str(group["candidate_id"]) for group in groups]
+    source_pack = {
+        "receipts": [
+            {"source_slot": "source_a", "status": "inline_source_ready", "evidence_hash": "hash-a"},
+            {"source_slot": "source_b", "status": "inline_source_ready", "evidence_hash": "hash-b"},
+        ],
+        "evidence": [
+            {
+                "source_slot": "source_a",
+                "evidence_hash": "hash-a",
+                "excerpt": "Candidate A evidence",
+                "model_references": ["model-a"],
+            },
+            {
+                "source_slot": "source_b",
+                "evidence_hash": "hash-b",
+                "excerpt": "Candidate B evidence",
+                "model_references": ["model-b"],
+            },
+        ],
+    }
+    source_scope = model_screening._successful_source_scope_map(groups, source_pack)
+    payload = _research_output([candidate_a, candidate_b])
+    payload["ordered_models"][0]["source_evidence_ids"] = ["source_a"]
+    payload["ordered_models"][0]["reasoning_capability"] = {
+        "status": "candidate",
+        "transport": "chat_reasoning_effort",
+        "native_efforts": ["low"],
+        "effort_map": {},
+        "evidence_ids": ["source_b"],
+        "confidence": 0.9,
+        "token_cost_model": "unknown",
+        "latency_cost_model": "unknown",
+        "cost_evidence_ids": [],
+    }
+
+    with pytest.raises(
+        ModelScreeningError,
+        match="prefusion_research_output_reasoning_evidence_scope_invalid",
+    ):
+        validate_prefusion_research_output(
+            payload,
+            groups=groups,
+            source_slots=["source_a", "source_b"],
+            source_evidence={"source_a": "hash-a", "source_b": "hash-b"},
+            source_scope=source_scope,
+            focus_manifest=model_screening.load_prefusion_focus_manifest(),
+        )

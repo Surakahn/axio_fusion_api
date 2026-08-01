@@ -262,6 +262,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Strict streaming health samples per physical profile; production requires at least two.",
     )
     serve_cmd.add_argument(
+        "--prefusion-total-budget-seconds",
+        type=float,
+        default=None,
+        help="Shared wall-clock budget for live pre-Fusion screening and all bounded retries.",
+    )
+    serve_cmd.add_argument(
         "--enrollment-receipt-output",
         default=None,
         help="Optional safe JSON path for the in-memory enrollment receipt.",
@@ -534,6 +540,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pre_fusion.add_argument("--timeout", type=float, default=90.0)
     pre_fusion.add_argument("--source-timeout", type=float, default=15.0)
+    pre_fusion.add_argument(
+        "--total-budget-seconds",
+        type=float,
+        default=None,
+        help="Shared wall-clock budget for discovery, research, retries, and live probes.",
+    )
     pre_fusion.add_argument("--max-workers", type=int, default=4)
     pre_fusion.add_argument("--max-models", type=int, default=None)
     pre_fusion.add_argument(
@@ -582,6 +594,7 @@ def build_parser() -> argparse.ArgumentParser:
     available_models.add_argument("--discovery-timeout", type=float, default=15.0)
     available_models.add_argument("--timeout", type=float, default=90.0)
     available_models.add_argument("--source-timeout", type=float, default=15.0)
+    available_models.add_argument("--total-budget-seconds", type=float, default=None)
     available_models.add_argument("--max-workers", type=int, default=4)
     available_models.add_argument("--max-models", type=int, default=None)
     available_models.add_argument("--stream-probe-samples", type=int, default=3)
@@ -1636,6 +1649,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         prefusion_research_batch_size=args.prefusion_research_batch_size,
         prefusion_research_max_workers=args.prefusion_research_max_workers,
         prefusion_stream_probe_samples=args.prefusion_stream_probe_samples,
+        prefusion_total_budget_seconds=args.prefusion_total_budget_seconds,
     )
     receipt = getattr(server, "runtime_channel_enrollment_receipt", {})
     if args.enrollment_receipt_output and isinstance(receipt, dict):
@@ -2041,6 +2055,7 @@ def cmd_pre_fusion_screen(args: argparse.Namespace) -> int:
             research_batch_size=args.research_batch_size,
             research_max_workers=args.research_max_workers,
             stream_probe_samples=args.stream_probe_samples,
+            total_budget_seconds=args.total_budget_seconds,
             redact_provider_identifiers=bool(args.redact_provider_identifiers),
         )
     except ModelScreeningError as exc:
@@ -2112,6 +2127,7 @@ def cmd_generate_available_models(args: argparse.Namespace) -> int:
             research_batch_size=args.research_batch_size,
             research_max_workers=args.research_max_workers,
             stream_probe_samples=args.stream_probe_samples,
+            total_budget_seconds=args.total_budget_seconds,
             redact_provider_identifiers=bool(args.redact_provider_identifiers),
         )
     except (ModelScreeningError, AvailableModelGenerationError) as exc:

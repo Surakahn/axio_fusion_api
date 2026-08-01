@@ -12,6 +12,7 @@ orchestration code without turning tool schemas into operational artifacts.
 import json
 from typing import Any, Mapping, Sequence
 
+from .content_contract import content_text, normalize_content_parts
 from .schemas import sha256_text, stable_json
 
 
@@ -368,7 +369,15 @@ def _chat_history_events(item: Mapping[str, Any], *, row_index: int) -> list[dic
     if role == "tool":
         return [_tool_result_event(item, source_format="chat", index=row_index)]
     calls = normalize_tool_calls(item.get("tool_calls"), source_format="chat") if role == "assistant" else ()
-    return [_message_event(role=role, content=_content_text(item.get("content")), tool_calls=calls)]
+    parts = normalize_content_parts(item.get("content"), source_format="chat")
+    return [
+        _message_event(
+            role=role,
+            content=content_text(parts),
+            content_parts=parts,
+            tool_calls=calls,
+        )
+    ]
 
 
 def _responses_history_events(item: Mapping[str, Any], *, row_index: int) -> list[dict[str, Any]]:
@@ -378,18 +387,24 @@ def _responses_history_events(item: Mapping[str, Any], *, row_index: int) -> lis
         return [_message_event(role="assistant", content="", tool_calls=calls)] if calls else []
     if item_type == "function_call_output":
         return [_tool_result_event(item, source_format="responses", index=row_index)]
+    if item_type in {"input_text", "input_image", "input_file"}:
+        parts = normalize_content_parts([item], source_format="responses")
+        return [_message_event(role="user", content=content_text(parts), content_parts=parts)] if parts else []
     role = str(item.get("role") or "user").strip().lower()
-    content = _content_text(item.get("content") if "content" in item else item.get("input"))
-    return [_message_event(role=role, content=content)]
+    parts = normalize_content_parts(
+        item.get("content") if "content" in item else item.get("input"),
+        source_format="responses",
+    )
+    return [_message_event(role=role, content=content_text(parts), content_parts=parts)]
 
 
 def _anthropic_history_events(item: Mapping[str, Any], *, row_index: int) -> list[dict[str, Any]]:
     role = str(item.get("role") or "user").strip().lower()
     content = item.get("content")
-    blocks = content if _is_sequence(content) else []
-    text_parts = []
+    parts = normalize_content_parts(content, source_format="anthropic")
     calls: list[dict[str, Any]] = []
     results: list[dict[str, Any]] = []
+    blocks = content if _is_sequence(content) else []
     for block_index, block in enumerate(blocks):
         if not isinstance(block, Mapping):
             continue
@@ -398,17 +413,16 @@ def _anthropic_history_events(item: Mapping[str, Any], *, row_index: int) -> lis
             calls.extend(normalize_tool_calls(block, source_format="anthropic"))
         elif block_type == "tool_result":
             results.append(_tool_result_event(block, source_format="anthropic", index=row_index * 1000 + block_index))
-        else:
-            text = _content_text(block)
-            if text:
-                text_parts.append(text)
-    if not blocks:
-        text = _content_text(content)
-        if text:
-            text_parts.append(text)
     events = []
-    if text_parts or calls:
-        events.append(_message_event(role=role, content="\n".join(text_parts), tool_calls=tuple(calls)))
+    if parts or calls:
+        events.append(
+            _message_event(
+                role=role,
+                content=content_text(parts),
+                content_parts=parts,
+                tool_calls=tuple(calls),
+            )
+        )
     events.extend(result for result in results if result)
     return events
 
@@ -417,7 +431,7 @@ def _gemini_history_events(item: Mapping[str, Any], *, row_index: int) -> list[d
     raw_role = str(item.get("role") or "user").strip().lower()
     role = "assistant" if raw_role == "model" else raw_role
     parts = item.get("parts") if _is_sequence(item.get("parts")) else item.get("content") if _is_sequence(item.get("content")) else []
-    text_parts = []
+    content_parts = normalize_content_parts(parts, source_format="gemini")
     calls: list[dict[str, Any]] = []
     results: list[dict[str, Any]] = []
     for part_index, part in enumerate(parts):
@@ -427,19 +441,30 @@ def _gemini_history_events(item: Mapping[str, Any], *, row_index: int) -> list[d
             calls.extend(normalize_tool_calls(part["functionCall"], source_format="gemini"))
         elif isinstance(part.get("functionResponse"), Mapping):
             results.append(_tool_result_event(part["functionResponse"], source_format="gemini", index=row_index * 1000 + part_index))
-        else:
-            text = _content_text(part)
-            if text:
-                text_parts.append(text)
     events = []
-    if text_parts or calls:
-        events.append(_message_event(role=role, content="\n".join(text_parts), tool_calls=tuple(calls)))
+    if content_parts or calls:
+        events.append(
+            _message_event(
+                role=role,
+                content=content_text(content_parts),
+                content_parts=content_parts,
+                tool_calls=tuple(calls),
+            )
+        )
     events.extend(result for result in results if result)
     return events
 
 
-def _message_event(*, role: str, content: str, tool_calls: Sequence[Mapping[str, Any]] = ()) -> dict[str, Any]:
+def _message_event(
+    *,
+    role: str,
+    content: str,
+    content_parts: Sequence[Mapping[str, Any]] = (),
+    tool_calls: Sequence[Mapping[str, Any]] = (),
+) -> dict[str, Any]:
     event: dict[str, Any] = {"role": role if role in {"system", "user", "assistant"} else "user", "content": content}
+    if any(str(part.get("type") or "") != "text" for part in content_parts if isinstance(part, Mapping)):
+        event["content_parts"] = [dict(part) for part in content_parts if isinstance(part, Mapping)]
     if tool_calls:
         event["tool_calls"] = [dict(call) for call in tool_calls if isinstance(call, Mapping)]
     return event
@@ -617,13 +642,7 @@ def _tool_result_text(value: Any) -> str:
 
 
 def _content_text(value: Any) -> str:
-    if isinstance(value, str):
-        return value
-    if isinstance(value, Mapping):
-        return str(value.get("text") or value.get("input_text") or value.get("output_text") or "")
-    if _is_sequence(value):
-        return "\n".join(text for text in (_content_text(item) for item in value) if text)
-    return ""
+    return content_text(normalize_content_parts(value, source_format="chat"))
 
 
 def _json_object(value: Mapping[str, Any]) -> dict[str, Any]:

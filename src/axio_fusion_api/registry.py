@@ -821,6 +821,11 @@ def _profile_from_probe_row(row: Mapping[str, Any], *, status: str) -> ModelProf
             if isinstance(row.get("reasoning_transport"), Mapping)
             else {}
         ),
+        "screening_reasoning_capability": (
+            dict(row.get("screening_reasoning_capability"))
+            if isinstance(row.get("screening_reasoning_capability"), Mapping)
+            else {}
+        ),
         "traffic_control": (
             dict(row.get("traffic_control"))
             if isinstance(row.get("traffic_control"), Mapping)
@@ -1771,6 +1776,15 @@ def normalize_profile(raw: Mapping[str, Any]) -> ModelProfile:
             else (
                 dict(raw.get("reasoningTransport"))
                 if isinstance(raw.get("reasoningTransport"), Mapping)
+                else {}
+            )
+        ),
+        screening_reasoning_capability=(
+            dict(raw.get("screening_reasoning_capability"))
+            if isinstance(raw.get("screening_reasoning_capability"), Mapping)
+            else (
+                dict(raw.get("screeningReasoningCapability"))
+                if isinstance(raw.get("screeningReasoningCapability"), Mapping)
                 else {}
             )
         ),

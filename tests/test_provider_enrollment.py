@@ -852,6 +852,17 @@ def _prefusion_research_output():
                     "strengths": ["bounded fixture evidence"],
                     "limitations": ["operational prior only"],
                 },
+                "reasoning_capability": {
+                    "status": "unknown",
+                    "transport": "",
+                    "native_efforts": [],
+                    "effort_map": {},
+                    "evidence_ids": ["source_fixture"],
+                    "confidence": 0.0,
+                    "token_cost_model": "unknown",
+                    "latency_cost_model": "unknown",
+                    "cost_evidence_ids": [],
+                },
                 "allowed_roles": ["primary_solver", "structured_extraction"],
                 "disallowed_roles": [],
                 "confidence": 0.9,
@@ -981,6 +992,92 @@ def test_runtime_prefusion_gate_hands_only_bound_streaming_profiles_to_engine(mo
     serialized = json.dumps(result["receipt"], ensure_ascii=False)
     assert "prefusion-runtime" not in serialized
     assert "prefusion-model" not in serialized
+
+
+def test_runtime_prefusion_reuses_reasoning_receipt_without_second_probe(monkeypatch):
+    profile = _prefusion_runtime_profile()
+    monkeypatch.setattr(
+        "axio_fusion_api.provider_enrollment.discover_runtime_profiles",
+        lambda *args, **kwargs: {
+            "status": "ready",
+            "profiles": [profile],
+            "provider_count": 1,
+            "successful_provider_count": 1,
+            "failed_provider_count": 0,
+            "skipped_provider_count": 0,
+            "empty_success_provider_count": 0,
+            "report_status_counts": {"ok": 1},
+            "warning_codes": [],
+        },
+    )
+    calls: list[object] = []
+
+    def unexpected_second_probe(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("prefusion reasoning evidence must be reused")
+
+    monkeypatch.setattr(
+        "axio_fusion_api.provider_enrollment.probe_provider_reasoning_support",
+        unexpected_second_probe,
+    )
+
+    def fake_text_probe(profiles, **_kwargs):
+        return {
+            "schema": "axio_fusion_api.provider_probe.v1",
+            "mode": "live",
+            "network_calls_performed": True,
+            "model_count": len(profiles),
+            "available_count": len(profiles),
+            "stream_requested_count": len(profiles),
+            "stream_observed_count": len(profiles),
+            "stream_fallback_count": 0,
+            "stability_contract": {
+                "schema": "axio_fusion_api.provider_probe_stability_contract.v1",
+                "samples_per_profile": 1,
+            },
+            "probes": [
+                {
+                    "profile_id": item.profile_id,
+                    "provider": item.provider,
+                    "model": item.model,
+                    "status": "available",
+                    "latency_ms": 123,
+                    "probe_mode": "live",
+                    "live_probe_evidence": True,
+                    "stream_requested": True,
+                    "stream_observed": True,
+                    "stream_fallback_used": False,
+                    "stream_protocol": "sse",
+                    "stream_frame_count": 2,
+                    "strict_streaming_requested": True,
+                    "output_sha256": sha256_text("fixture-stream"),
+                }
+                for item in profiles
+            ],
+        }
+
+    monkeypatch.setattr(model_screening, "probe_provider_models", fake_text_probe)
+    result = enroll_runtime_channels(
+        {"providers": []},
+        live=True,
+        require_prefusion=True,
+        source_manifest={
+            "schema": model_screening.PREFUSION_SOURCE_MANIFEST_SCHEMA,
+            "sources": [
+                {
+                    "source_slot": "source_fixture",
+                    "content": "A bounded public-source fixture.",
+                }
+            ],
+        },
+        research_output=_prefusion_research_output(),
+        calibrate_tools=False,
+    )
+
+    assert result["status"] == "ready"
+    assert calls == []
+    assert result["receipt"]["reasoning_probe_source"] == "prefusion_screening"
+    assert result["receipt"]["reasoning_probe_reused_from_prefusion"] is True
 
 
 def test_full_standalone_pytest_command_is_accepted_by_code_test_receipt():

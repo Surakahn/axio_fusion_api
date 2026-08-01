@@ -8,6 +8,15 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
+from .content_contract import (
+    content_parts_safe_summary,
+    has_non_text_content,
+    has_visual_content,
+    normalize_content_parts,
+    normalize_structured_output,
+    structured_output_safe_summary,
+)
+
 
 PUBLIC_MODELS = ("axio-fast", "axio-terra", "axio-pro")
 PUBLIC_MODEL_ALIASES = {
@@ -69,6 +78,17 @@ REASONING_EFFORT_LEVELS = (
 _REASONING_EFFORT_ORDER = {
     effort: index for index, effort in enumerate(REASONING_EFFORT_LEVELS)
 }
+SCREENING_REASONING_STATUSES = ("candidate", "unsupported", "unknown")
+SCREENING_REASONING_TRANSPORTS = (
+    "chat_reasoning_effort",
+    "responses_reasoning",
+    "responses_reasoning_effort",
+)
+SCREENING_REASONING_COST_MODELS = (
+    "provider_documented",
+    "monotonic_effort_policy",
+    "unknown",
+)
 _REASONING_TRANSPORT_FORMATS = {
     "chat_reasoning_effort": "chat",
     "responses_reasoning": "responses",
@@ -108,6 +128,105 @@ def normalize_reasoning_effort(value: Any) -> str:
 
     normalized = str(value or "").strip().casefold().replace("_", "-")
     return normalized if normalized in _REASONING_EFFORT_ORDER else ""
+
+
+def normalize_screening_reasoning_capability(
+    value: Any,
+    *,
+    api_format: Any = "",
+) -> dict[str, Any]:
+    """Normalize the research Agent's model-local reasoning declaration.
+
+    This is a research receipt, not proof that the upstream accepts the
+    parameter.  Live endpoint probing is the only operation that can promote
+    a ``candidate`` declaration to ``verified`` in ``reasoning_transport``.
+    Keeping this shape closed prevents research output from injecting an
+    arbitrary provider payload path into the serving adapter.
+    """
+
+    raw = value if isinstance(value, Mapping) else {}
+    status = str(raw.get("status") or "unknown").strip().casefold()
+    if status not in SCREENING_REASONING_STATUSES:
+        status = "unknown"
+    transport = str(raw.get("transport") or "").strip().casefold()
+    if transport not in SCREENING_REASONING_TRANSPORTS:
+        transport = ""
+    format_name = _reasoning_transport_api_format(api_format)
+    transport_format = _REASONING_TRANSPORT_FORMATS.get(transport, "")
+    api_format_compatible = bool(
+        transport_format and transport_format == format_name
+    )
+    if not api_format_compatible:
+        transport = ""
+    native_efforts = _reasoning_effort_values(
+        raw.get("native_efforts", raw.get("nativeEfforts", ()))
+    )
+    native_efforts.sort(key=lambda item: _REASONING_EFFORT_ORDER[item])
+    native_set = set(native_efforts)
+    raw_map = raw.get("effort_map", raw.get("effortMap", {}))
+    effort_map: dict[str, str] = {}
+    if isinstance(raw_map, Mapping):
+        for source, target in raw_map.items():
+            requested = normalize_reasoning_effort(source)
+            effective = normalize_reasoning_effort(target)
+            if (
+                requested
+                and effective
+                and effective in native_set
+                and _REASONING_EFFORT_ORDER[effective]
+                <= _REASONING_EFFORT_ORDER[requested]
+            ):
+                effort_map[requested] = effective
+    evidence_ids = _normalized_string_list(raw.get("evidence_ids", raw.get("evidenceIds", ())))
+    cost_evidence_ids = _normalized_string_list(
+        raw.get("cost_evidence_ids", raw.get("costEvidenceIds", ()))
+    )
+    try:
+        confidence = float(raw.get("confidence", 0.0))
+    except (TypeError, ValueError):
+        confidence = 0.0
+    if confidence != confidence or confidence in (float("inf"), float("-inf")):
+        confidence = 0.0
+    token_cost_model = str(
+        raw.get("token_cost_model", raw.get("tokenCostModel", "unknown"))
+        or "unknown"
+    ).strip().casefold()
+    latency_cost_model = str(
+        raw.get("latency_cost_model", raw.get("latencyCostModel", "unknown"))
+        or "unknown"
+    ).strip().casefold()
+    if token_cost_model not in SCREENING_REASONING_COST_MODELS:
+        token_cost_model = "unknown"
+    if latency_cost_model not in SCREENING_REASONING_COST_MODELS:
+        latency_cost_model = "unknown"
+    return {
+        "status": status,
+        "transport": transport,
+        "api_format": format_name,
+        "api_format_compatible": api_format_compatible,
+        "native_efforts": native_efforts,
+        "effort_map": dict(sorted(effort_map.items())),
+        "evidence_ids": evidence_ids,
+        "confidence": round(max(0.0, min(1.0, confidence)), 6),
+        "token_cost_model": token_cost_model,
+        "latency_cost_model": latency_cost_model,
+        "cost_evidence_ids": cost_evidence_ids,
+    }
+
+
+def _normalized_string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        values = value.replace(";", ",").split(",")
+    elif isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        values = value
+    else:
+        values = []
+    normalized: list[str] = []
+    for item in values:
+        text = str(item or "").strip()
+        if text and text not in normalized:
+            normalized.append(text[:160])
+    return normalized[:24]
 
 
 def _reasoning_transport_api_format(value: Any) -> str:
@@ -612,6 +731,10 @@ class ModelProfile:
     # Provider reasoning controls are a narrow, declarative capability gate.
     # They never contain arbitrary request-body paths or vendor extra fields.
     reasoning_transport: Mapping[str, Any] = field(default_factory=dict)
+    # Model-specific public-source reasoning research.  This is separate from
+    # ``reasoning_transport`` because research is a prior and cannot by itself
+    # authorize a provider wire field.
+    screening_reasoning_capability: Mapping[str, Any] = field(default_factory=dict)
     # Local scheduling controls for channels with bounded/shared rate limits.
     # This remains a closed configuration object and never changes an upstream
     # request payload.
@@ -669,6 +792,14 @@ class ModelProfile:
             "reasoning_transport",
             _normalize_reasoning_transport(
                 self.reasoning_transport,
+                api_format=self.api_format,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "screening_reasoning_capability",
+            normalize_screening_reasoning_capability(
+                self.screening_reasoning_capability,
                 api_format=self.api_format,
             ),
         )
@@ -816,6 +947,9 @@ class ModelProfile:
                 else None
             ),
             "reasoning_transport": dict(self.reasoning_transport),
+            "screening_reasoning_capability": dict(
+                self.screening_reasoning_capability
+            ),
             "traffic_control": dict(self.traffic_control),
             "screening_prior_only": True,
             "canonical_model_identity_declared": bool(self.canonical_model_id),
@@ -890,6 +1024,10 @@ class FusionRequest:
     model: str
     prompt: str
     system: str = "You are Axio Fusion, a careful and evidence-aware assistant."
+    # The last public user turn in a protocol-neutral content representation.
+    # Rich historical turns carry the same shape under ``content_parts`` in
+    # their request-local history events.
+    content_parts: tuple[Mapping[str, Any], ...] = ()
     # History may include protocol-neutral assistant tool calls and tool results
     # in addition to ordinary text turns. It remains request-local and is
     # represented only by a hash in durable receipts.
@@ -900,6 +1038,10 @@ class FusionRequest:
     # This is a protocol-neutral desired upper bound.  Provider adapters map
     # it only after a ModelProfile has verified the exact wire contract.
     reasoning_effort: str = ""
+    # Closed public output contract. Provider adapters render this into their
+    # native structured-output wrapper; arbitrary vendor fields never cross
+    # the provider boundary.
+    structured_output: Mapping[str, Any] = field(default_factory=dict)
     temperature: float | None = None
     top_p: float | None = None
     max_output_tokens: int | None = None
@@ -909,15 +1051,48 @@ class FusionRequest:
     policy: FusionPolicy = field(default_factory=FusionPolicy)
 
     def __post_init__(self) -> None:
+        parts = normalize_content_parts(
+            self.content_parts if self.content_parts else self.prompt,
+            source_format="chat",
+        )
+        object.__setattr__(self, "content_parts", tuple(dict(item) for item in parts))
         object.__setattr__(
             self,
             "reasoning_effort",
             normalize_reasoning_effort(self.reasoning_effort),
         )
+        object.__setattr__(
+            self,
+            "structured_output",
+            normalize_structured_output(
+                self.structured_output,
+                api_format=self.api_format,
+            ),
+        )
 
     @property
     def public_model(self) -> str:
         return canonical_public_model(self.model)
+
+    @property
+    def has_visual_input(self) -> bool:
+        if has_visual_content(self.content_parts):
+            return True
+        return any(
+            has_visual_content(event.get("content_parts"))
+            for event in self.history
+            if isinstance(event, Mapping)
+        )
+
+    @property
+    def has_non_text_input(self) -> bool:
+        if has_non_text_content(self.content_parts):
+            return True
+        return any(
+            has_non_text_content(event.get("content_parts"))
+            for event in self.history
+            if isinstance(event, Mapping)
+        )
 
     @property
     def request_fingerprint(self) -> str:
@@ -928,10 +1103,12 @@ class FusionRequest:
                     "prompt": self.prompt,
                     "system": self.system,
                     "history": list(self.history),
+                    "content_parts": list(self.content_parts),
                     "api_format": self.api_format,
                     "task_type": self.task_type,
                     "requested_capabilities": list(self.requested_capabilities),
                     "reasoning_effort": self.reasoning_effort,
+                    "structured_output": dict(self.structured_output),
                     "tools": list(self.tools),
                 }
             )
@@ -947,9 +1124,11 @@ class FusionRequest:
             "system_char_count": len(self.system),
             "history_count": len(self.history),
             "history_sha256": sha256_text(stable_json(list(self.history))),
+            "content_parts": content_parts_safe_summary(self.content_parts),
             "task_type": self.task_type,
             "requested_capabilities": list(self.requested_capabilities),
             "reasoning_effort": self.reasoning_effort,
+            "structured_output": structured_output_safe_summary(self.structured_output),
             "tool_count": len(self.tools),
             "metadata_keys": sorted(str(key) for key in self.metadata.keys()),
             "max_output_tokens": self.max_output_tokens,

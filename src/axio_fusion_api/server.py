@@ -19,6 +19,7 @@ from .compat import (
     render_response,
     render_stream_events,
 )
+from .content_contract import ContentContractError
 from .image_api import (
     ImageRequestError,
     ImageRouter,
@@ -160,7 +161,18 @@ def handle_request(
         return respond(_json_response(400, {"error": {"message": str(exc), "code": "invalid_json"}}))
     if route in {"/v1/axio/route-plan", "/route-plan"}:
         api_format = normalize_api_format(str(payload.get("api_format") or "chat/completions"))
-        request = canonicalize_payload(payload.get("request") if isinstance(payload.get("request"), Mapping) else payload, api_format=api_format)
+        try:
+            request = canonicalize_payload(
+                payload.get("request") if isinstance(payload.get("request"), Mapping) else payload,
+                api_format=api_format,
+            )
+        except ContentContractError as exc:
+            return respond(
+                _json_response(
+                    400,
+                    {"error": {"message": str(exc), "code": exc.code}},
+                )
+            )
         return respond(_json_response(200, _safe_route_plan_response(active_engine.complete(request, live=False).route_plan)))
     if route in {"/v1/inventory", "/inventory"}:
         return respond(_json_response(200, discover_provider_inventory(live=bool(payload.get("live")), timeout=float(payload.get("timeout") or 10.0))))
@@ -197,7 +209,15 @@ def handle_request(
         if continuation is None:
             return respond(_previous_response_not_found_response())
         payload = _inherit_responses_continuation_defaults(payload, continuation)
-    request = canonicalize_payload(payload, api_format=endpoint)
+    try:
+        request = canonicalize_payload(payload, api_format=endpoint)
+    except ContentContractError as exc:
+        return respond(
+            _json_response(
+                400,
+                {"error": {"message": str(exc), "code": exc.code}},
+            )
+        )
     if continuation is not None:
         request = _merge_responses_continuation(request, continuation)
     try:
@@ -489,7 +509,15 @@ def _prepare_incremental_stream_request(
         if continuation is None:
             return None, respond(_previous_response_not_found_response())
         payload = _inherit_responses_continuation_defaults(payload, continuation)
-    request = canonicalize_payload(payload, api_format=endpoint)
+    try:
+        request = canonicalize_payload(payload, api_format=endpoint)
+    except ContentContractError as exc:
+        return None, respond(
+            _json_response(
+                400,
+                {"error": {"message": str(exc), "code": exc.code}},
+            )
+        )
     if continuation is not None:
         request = _merge_responses_continuation(request, continuation)
     return (
@@ -1057,6 +1085,7 @@ def _attach_runtime_refresh(
         prefusion_research_batch_size: int | None = None,
         prefusion_research_max_workers: int | None = None,
         prefusion_stream_probe_samples: int | None = None,
+        prefusion_total_budget_seconds: float | None = None,
     ) -> dict[str, Any]:
         """Enroll a new channel portfolio and activate it as one generation.
 
@@ -1137,6 +1166,7 @@ def _attach_runtime_refresh(
                 prefusion_research_batch_size=prefusion_research_batch_size,
                 prefusion_research_max_workers=prefusion_research_max_workers,
                 prefusion_stream_probe_samples=prefusion_stream_probe_samples,
+                prefusion_total_budget_seconds=prefusion_total_budget_seconds,
             )
         except Exception as exc:  # noqa: BLE001 - preserve the active service
             return _runtime_refresh_blocked_receipt(
@@ -1229,6 +1259,7 @@ def create_runtime_http_server(
     prefusion_research_batch_size: int | None = None,
     prefusion_research_max_workers: int | None = None,
     prefusion_stream_probe_samples: int | None = None,
+    prefusion_total_budget_seconds: float | None = None,
     **engine_kwargs: Any,
 ) -> ThreadingHTTPServer:
     """Build a gateway directly from an in-memory arbitrary channel manifest.
@@ -1317,6 +1348,7 @@ def create_runtime_http_server(
             prefusion_research_batch_size=prefusion_research_batch_size,
             prefusion_research_max_workers=prefusion_research_max_workers,
             prefusion_stream_probe_samples=prefusion_stream_probe_samples,
+            prefusion_total_budget_seconds=prefusion_total_budget_seconds,
         )
         engine = enrollment.get("engine")
         enrollment_receipt = (

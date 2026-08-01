@@ -15,7 +15,7 @@ cases or labels.
 
 ## Contract
 
-The workflow has five ordered stages:
+The workflow has six ordered stages:
 
 1. Build the complete physical inventory. When a provider configuration is
    present and no explicit `--registry`/`profiles` input is supplied, the
@@ -31,7 +31,7 @@ The workflow has five ordered stages:
    singleton candidate request. Candidates with only shared evidence may be
    combined into bounded batches (default 4, configurable up to 64). Each
    request must return
-   `axio_fusion_api.prefusion_research_agent_output.v1` for every candidate in
+   `axio_fusion_api.prefusion_research_agent_output.v2` for every candidate in
    that batch, with contiguous local ranks, bounded capability axes, explicit
    role limits, and source evidence IDs. All batches are required; a missing,
    failed, slow, or invalid batch blocks the complete ranking.
@@ -60,7 +60,13 @@ the model ranking and not benchmark evidence.
    capability-axis vector; it is still only a research prior. The merge receipt
    stores only batch counts, candidate-set/output hashes, statuses, and
    latency.
-4. Run independent real streaming health probes for every ranked physical
+4. For every model-local `reasoning_capability.status=candidate`, run a
+   protocol-local reasoning transport probe. The probe sends a control request
+   without a reasoning field and then one strict streamed request for every
+   declared native effort. It must cover the complete candidate cohort; a
+   missing row blocks the handoff. Research evidence alone never promotes a
+   model to `verified`, and the probe never invents unsupported effort levels.
+5. Run independent real streaming health probes for every ranked physical
    profile. Fresh production runs use three samples by default, reject a
    requested count below two, and bound the count to five. A profile is
    eligible only when every sample is live, strict streaming transport was
@@ -81,7 +87,7 @@ the TLS phase receives only the time remaining from that same deadline. This
 protects both the pre-Fusion control plane and serving workers from an
 unbounded blocked read or handshake; the resulting request is still recorded
 as failed and never admitted.
-5. Bind only the eligible profile hashes to a private loadable registry. A
+6. Bind only the eligible profile hashes to a private loadable registry. A
    blocked screening run never produces enabled serving profiles.
 
 ### Candidate Admission Boundary
@@ -307,7 +313,7 @@ provider replicas remain inside the private registry solely for balancing and
 same-model failover.
 
 The research prompt uses the fixed contract
-`axio_fusion_api.prefusion_research_prompt.capability_evidence_mapping.v2`.
+`axio_fusion_api.prefusion_research_prompt.capability_evidence_mapping.v3`.
 For each candidate it requires the remote Agent to extract facts before
 scoring axes, distinguish an unreported capability from an explicitly
 unsupported capability, and map equivalent public terms such as function
@@ -412,6 +418,37 @@ The research ranking is an operational prior. It is never benchmark evidence,
 never a baseline score, and cannot bypass the live probe or the latency gate.
 The report and registry do not persist API keys, base URLs, source bodies,
 research prompts, research output, or provider response bodies.
+
+## Shared Pre-Fusion Budget
+
+Live screening uses one shared wall-clock budget across provider discovery,
+public-source fetches, research-agent batches, schema/transport retries,
+reasoning probes, and ordinary streaming probes. The default is 1,800 seconds;
+the bounded configuration range is 30 to 3,600 seconds. Every remote request
+still has the independent 90-second provider ceiling, but a retry receives only
+the remaining shared time and cannot reset the full request timeout. A budget
+exhaustion blocks publication rather than producing a partial ranking or
+partial serving registry.
+
+The manifest can set this without containing credentials:
+
+```json
+{
+  "prefusion": {
+    "total_budget_seconds": 1800,
+    "candidate_batch_size": 4,
+    "research_max_workers": 1,
+    "stream_probe_samples": 3
+  }
+}
+```
+
+The report emits `axio_fusion_api.prefusion_total_budget_receipt.v1` with the
+configured budget, remaining time, exhaustion decision, and per-stage timing.
+It contains no provider output, prompt, endpoint, or secret. The CLI exposes
+the same control as `--total-budget-seconds` for `pre-fusion-screen` and
+`generate-available-models`, and as `--prefusion-total-budget-seconds` for the
+dynamic service.
 
 ## Production Stream Boundary
 

@@ -4,6 +4,14 @@ import json
 import time
 from typing import Any, Mapping, Sequence
 
+from .content_contract import (
+    ContentContractError,
+    content_text,
+    has_non_text_content,
+    normalize_content_parts,
+    structured_output_from_payload,
+    structured_output_wire_fields,
+)
 from .schemas import (
     FusionPolicy,
     FusionRequest,
@@ -11,6 +19,7 @@ from .schemas import (
     canonical_public_model,
     normalize_reasoning_effort,
     sha256_text,
+    stable_json,
 )
 from .tool_contract import (
     normalize_history_events,
@@ -44,14 +53,15 @@ def canonicalize_payload(payload: Mapping[str, Any], *, api_format: str = "chat/
         top_p_value = generation_config.get("topP")
     top_p = _optional_float(top_p_value)
     reasoning_effort = _reasoning_effort_from_payload(payload, api_format=normalized)
+    structured_output = structured_output_from_payload(payload, api_format=normalized)
     history_events: list[dict[str, Any]] = []
     if normalized == "responses":
         system = str(payload.get("instructions") or "")
         messages = _responses_input_to_messages(payload.get("input"))
         history_events = normalize_history_events(payload.get("input"), api_format="responses")
     elif normalized == "anthropic":
-        system = _content_to_text(payload.get("system"))
-        messages = _message_rows(payload.get("messages"))
+        system = _text_only_content(payload.get("system"), source_format="anthropic")
+        messages = _message_rows(payload.get("messages"), source_format="anthropic")
         history_events = normalize_history_events(payload.get("messages"), api_format="anthropic")
     elif normalized == "gemini":
         system = _gemini_system_to_text(payload.get("systemInstruction") or payload.get("system_instruction"))
@@ -59,24 +69,31 @@ def canonicalize_payload(payload: Mapping[str, Any], *, api_format: str = "chat/
         history_events = normalize_history_events(payload.get("contents"), api_format="gemini")
     else:
         system = ""
-        messages = _message_rows(payload.get("messages"))
+        messages = _message_rows(payload.get("messages"), source_format="chat")
         history_events = normalize_history_events(payload.get("messages"), api_format="chat")
         if not messages and payload.get("prompt"):
-            messages = [{"role": "user", "content": _content_to_text(payload.get("prompt"))}]
-    msg_system, history, prompt = _messages_to_parts(messages)
+            prompt_parts = normalize_content_parts(payload.get("prompt"), source_format="chat")
+            messages = [{"role": "user", "content": content_text(prompt_parts), "content_parts": prompt_parts}]
+    msg_system, history, prompt, current_content_parts = _messages_to_parts(messages)
     tools = _tools_from_payload(payload, api_format=normalized)
     request_history = _request_history_with_protocol_events(history, history_events, prompt=prompt)
-    if _current_prompt_is_in_history(history_events, prompt=prompt):
+    if _current_prompt_is_in_history(
+        history_events,
+        prompt=prompt,
+        content_parts=current_content_parts,
+    ):
         metadata["_axio_current_prompt_in_history"] = True
     return FusionRequest(
         model=canonical_public_model(model),
         prompt=prompt,
         system=system or msg_system or "You are Axio Fusion, a careful and evidence-aware assistant.",
+        content_parts=tuple(current_content_parts),
         history=tuple(request_history),
         api_format=normalized,
         task_type=task_type,
         requested_capabilities=requested,
         reasoning_effort=reasoning_effort,
+        structured_output=structured_output,
         temperature=temperature,
         top_p=top_p,
         max_output_tokens=_max_output_tokens(payload, normalized),
@@ -192,7 +209,15 @@ def render_response(
             "previous_response_id": None,
             "reasoning": {"effort": None, "summary": None},
             "service_tier": "default",
-            "text": {"format": {"type": "text"}},
+            "text": {
+                "format": (
+                    structured_output_wire_fields(
+                        response.request.structured_output,
+                        target_format="responses",
+                    ).get("text", {}).get("format")
+                    or {"type": "text"}
+                )
+            },
             "temperature": response.request.temperature,
             "tool_choice": "auto",
             "tools": [],
@@ -2039,25 +2064,49 @@ def _responses_usage_payload(usage: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _messages_to_parts(messages: Sequence[Mapping[str, str]]) -> tuple[str, list[dict[str, str]], str]:
+def _messages_to_parts(
+    messages: Sequence[Mapping[str, Any]],
+) -> tuple[str, list[dict[str, Any]], str, tuple[Mapping[str, Any], ...]]:
     system_parts: list[str] = []
-    conversational: list[dict[str, str]] = []
+    conversational: list[dict[str, Any]] = []
     for message in messages:
         role = str(message.get("role") or "user").strip()
         content = str(message.get("content") or "").strip()
-        if not content:
+        raw_parts = message.get("content_parts")
+        parts = tuple(
+            dict(item)
+            for item in raw_parts
+            if isinstance(item, Mapping)
+        ) if isinstance(raw_parts, Sequence) and not isinstance(raw_parts, (str, bytes)) else ()
+        if not content and not parts:
             continue
         if role == "system":
+            if has_non_text_content(parts):
+                raise ContentContractError(
+                    "system_content_not_supported",
+                    "system content must contain text only",
+                )
             system_parts.append(content)
         elif role in {"user", "assistant"}:
-            conversational.append({"role": role, "content": content})
+            row: dict[str, Any] = {"role": role, "content": content}
+            if parts and has_non_text_content(parts):
+                row["content_parts"] = list(parts)
+            conversational.append(row)
     last_user = -1
     for index, message in enumerate(conversational):
         if message["role"] == "user":
             last_user = index
     if last_user < 0:
-        return "\n".join(system_parts), conversational, ""
-    return "\n".join(system_parts), conversational[:last_user], conversational[last_user]["content"]
+        return "\n".join(system_parts), conversational, "", ()
+    current = conversational[last_user]
+    current_parts = tuple(
+        dict(item)
+        for item in current.get("content_parts", ())
+        if isinstance(item, Mapping)
+    )
+    if not current_parts and current.get("content"):
+        current_parts = normalize_content_parts(current["content"], source_format="chat")
+    return "\n".join(system_parts), conversational[:last_user], current["content"], current_parts
 
 
 def _request_history_with_protocol_events(
@@ -2074,40 +2123,83 @@ def _request_history_with_protocol_events(
     return [dict(item) for item in text_history if isinstance(item, Mapping)]
 
 
-def _current_prompt_is_in_history(history_events: Sequence[Mapping[str, Any]], *, prompt: str) -> bool:
-    if not prompt:
+def _current_prompt_is_in_history(
+    history_events: Sequence[Mapping[str, Any]],
+    *,
+    prompt: str,
+    content_parts: Sequence[Mapping[str, Any]] = (),
+) -> bool:
+    if not prompt and not content_parts:
         return False
     last_user_index = max(
         (index for index, item in enumerate(history_events) if str(item.get("role") or "") == "user"),
         default=-1,
     )
+    if last_user_index < 0:
+        return False
+    current = history_events[last_user_index]
+    if prompt and str(current.get("content") or "") == prompt:
+        return True
+    event_parts = current.get("content_parts")
     return bool(
-        last_user_index >= 0
-        and str(history_events[last_user_index].get("content") or "") == prompt
+        content_parts
+        and isinstance(event_parts, Sequence)
+        and not isinstance(event_parts, (str, bytes))
+        and stable_json(list(event_parts)) == stable_json(list(content_parts))
     )
 
 
-def _message_rows(value: Any) -> list[dict[str, str]]:
+def _message_rows(
+    value: Any,
+    *,
+    source_format: str = "chat",
+) -> list[dict[str, Any]]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
         return []
-    rows: list[dict[str, str]] = []
+    rows: list[dict[str, Any]] = []
     for item in value:
         if not isinstance(item, Mapping):
             continue
         role = str(item.get("role") or "user")
-        content = _content_to_text(item.get("content"))
-        if content:
-            rows.append({"role": role, "content": content})
+        parts = normalize_content_parts(item.get("content"), source_format=source_format)
+        content = content_text(parts)
+        if content or parts:
+            row: dict[str, Any] = {"role": role, "content": content}
+            if has_non_text_content(parts):
+                row["content_parts"] = parts
+            rows.append(row)
     return rows
 
 
 def _responses_input_to_messages(value: Any) -> list[dict[str, str]]:
     if isinstance(value, str):
         return [{"role": "user", "content": value}]
-    return _message_rows(value)
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        return []
+    rows: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        item_type = str(item.get("type") or "").strip().casefold()
+        if item_type in {"input_text", "input_image", "input_file"}:
+            parts = normalize_content_parts([item], source_format="responses")
+            if parts:
+                rows.append({"role": "user", "content": content_text(parts), "content_parts": parts})
+            continue
+        if item_type in {"function_call", "function_call_output"}:
+            continue
+        content = item.get("content") if "content" in item else item.get("input")
+        parts = normalize_content_parts(content, source_format="responses")
+        text = content_text(parts)
+        if text or parts:
+            row: dict[str, Any] = {"role": str(item.get("role") or "user"), "content": text}
+            if has_non_text_content(parts):
+                row["content_parts"] = parts
+            rows.append(row)
+    return rows
 
 
-def _gemini_contents_to_messages(value: Any) -> list[dict[str, str]]:
+def _gemini_contents_to_messages(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
         return []
     rows = []
@@ -2117,26 +2209,37 @@ def _gemini_contents_to_messages(value: Any) -> list[dict[str, str]]:
         role = str(item.get("role") or "user")
         if role == "model":
             role = "assistant"
-        content = _content_to_text(item.get("parts") or item.get("content"))
-        if content:
-            rows.append({"role": role, "content": content})
+        parts = normalize_content_parts(item.get("parts") or item.get("content"), source_format="gemini")
+        content = content_text(parts)
+        if content or parts:
+            row: dict[str, Any] = {"role": role, "content": content}
+            if has_non_text_content(parts):
+                row["content_parts"] = parts
+            rows.append(row)
     return rows
 
 
-def _content_to_text(value: Any) -> str:
-    if isinstance(value, str):
-        return value
-    if isinstance(value, Mapping):
-        return str(value.get("text") or value.get("input_text") or value.get("output_text") or "")
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-        return "\n".join(part for part in (_content_to_text(item) for item in value) if part)
-    return ""
+def _content_to_text(value: Any, *, source_format: str = "chat") -> str:
+    return content_text(normalize_content_parts(value, source_format=source_format))
+
+
+def _text_only_content(value: Any, *, source_format: str) -> str:
+    parts = normalize_content_parts(value, source_format=source_format)
+    if has_non_text_content(parts):
+        raise ContentContractError(
+            "system_content_not_supported",
+            "system content must contain text only",
+        )
+    return content_text(parts)
 
 
 def _gemini_system_to_text(value: Any) -> str:
     if isinstance(value, Mapping):
-        return _content_to_text(value.get("parts") or value.get("content"))
-    return _content_to_text(value)
+        return _text_only_content(
+            value.get("parts") or value.get("content"),
+            source_format="gemini",
+        )
+    return _text_only_content(value, source_format="gemini")
 
 
 def _generation_config(payload: Mapping[str, Any]) -> Mapping[str, Any]:
