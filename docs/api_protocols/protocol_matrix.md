@@ -40,7 +40,7 @@ returns a bounded content-contract error.
 | Canonical field | Chat | Responses | Anthropic | Gemini |
 | --- | --- | --- | --- | --- |
 | model | `model` | `model` | `model` | route model or `model` convenience field |
-| system | system message | `instructions` or system input item | top-level `system` | `systemInstruction.parts` |
+| system/developer instruction | system/developer message (developer is normalized to the common system lane) | `instructions` string or text-only instruction items | top-level `system` | `systemInstruction.parts` |
 | conversation | `messages` | `input` string or typed items | `messages` | `contents` with `user`/`model` roles |
 | current prompt | last user message | final user input item | final user message | final user content |
 | max output | `max_tokens` or provider variant | `max_output_tokens` | required `max_tokens` | `generationConfig.maxOutputTokens` |

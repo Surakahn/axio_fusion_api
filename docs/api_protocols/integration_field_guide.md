@@ -82,8 +82,12 @@ must have a semantic contract, a provider adapter, and a regression fixture.
 
 ### 3.2 Conversation and Content Rules
 
-Chat uses `messages` with `system`, `user`, `assistant`, and tool messages.
-Responses uses a typed `input` list and typed output items. Anthropic uses
+Chat uses `messages` with `system`, `developer`, `user`, `assistant`, and tool
+messages. `developer` is normalized to the common system lane and keeps its
+instruction priority. Responses uses a string or text-only instruction items
+for `instructions`, while its `input` uses typed items. Image/file instruction
+parts are rejected before dispatch because the common system lane is text-only.
+Anthropic uses
 alternating `user` and `assistant` messages whose content is a block array.
 Gemini uses `user` and `model` contents with typed parts. The following
 conversions are safe only in the common subset:

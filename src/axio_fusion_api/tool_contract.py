@@ -462,7 +462,17 @@ def _message_event(
     content_parts: Sequence[Mapping[str, Any]] = (),
     tool_calls: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
-    event: dict[str, Any] = {"role": role if role in {"system", "user", "assistant"} else "user", "content": content}
+    normalized_role = str(role or "user").strip().lower()
+    # Chat Completions now accepts ``developer`` as a higher-priority
+    # instruction role.  The common Fusion contract has one system lane, so
+    # preserve its priority by normalizing it to ``system`` instead of
+    # silently demoting it to a user turn during cross-protocol conversion.
+    if normalized_role == "developer":
+        normalized_role = "system"
+    event: dict[str, Any] = {
+        "role": normalized_role if normalized_role in {"system", "user", "assistant"} else "user",
+        "content": content,
+    }
     if any(str(part.get("type") or "") != "text" for part in content_parts if isinstance(part, Mapping)):
         event["content_parts"] = [dict(part) for part in content_parts if isinstance(part, Mapping)]
     if tool_calls:

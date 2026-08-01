@@ -330,3 +330,58 @@ def test_invalid_structured_output_is_rejected_without_persisting_schema():
             },
             api_format="chat/completions",
         )
+
+
+def test_chat_developer_role_keeps_instruction_priority_across_history_normalization():
+    request = canonicalize_payload(
+        {
+            "model": "axio-pro",
+            "messages": [
+                {"role": "developer", "content": "Follow the internal policy."},
+                {"role": "user", "content": "Answer the task."},
+            ],
+        },
+        api_format="chat/completions",
+    )
+
+    assert request.system == "Follow the internal policy."
+    assert request.history[0]["role"] == "system"
+    assert request.history[-1]["role"] == "user"
+
+
+def test_responses_array_instructions_are_text_normalized_not_stringified():
+    request = canonicalize_payload(
+        {
+            "model": "axio-pro",
+            "instructions": [
+                {
+                    "role": "developer",
+                    "content": [{"type": "input_text", "text": "Use the fixed rubric."}],
+                },
+                {"type": "input_text", "text": "Cite uncertainty."},
+            ],
+            "input": "Solve the task.",
+        },
+        api_format="responses",
+    )
+
+    assert request.system == "Use the fixed rubric.\nCite uncertainty."
+    assert "input_text" not in request.system
+    assert "role': 'developer'" not in request.system
+
+
+def test_responses_non_text_instruction_is_rejected_before_provider_dispatch():
+    with pytest.raises(ContentContractError, match="instructions must contain text only"):
+        canonicalize_payload(
+            {
+                "model": "axio-pro",
+                "instructions": [
+                    {
+                        "type": "input_image",
+                        "image_url": "https://example.com/instruction.png",
+                    }
+                ],
+                "input": "Solve the task.",
+            },
+            api_format="responses",
+        )

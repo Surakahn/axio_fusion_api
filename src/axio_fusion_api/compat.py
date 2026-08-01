@@ -61,7 +61,7 @@ def canonicalize_payload(payload: Mapping[str, Any], *, api_format: str = "chat/
     structured_output = structured_output_from_payload(payload, api_format=normalized)
     history_events: list[dict[str, Any]] = []
     if normalized == "responses":
-        system = str(payload.get("instructions") or "")
+        system = _responses_instructions_to_text(payload.get("instructions"))
         messages = _responses_input_to_messages(payload.get("input"))
         history_events = normalize_history_events(payload.get("input"), api_format="responses")
     elif normalized == "anthropic":
@@ -88,10 +88,15 @@ def canonicalize_payload(payload: Mapping[str, Any], *, api_format: str = "chat/
         content_parts=current_content_parts,
     ):
         metadata["_axio_current_prompt_in_history"] = True
+    system_text = "\n".join(
+        part.strip()
+        for part in (system, msg_system)
+        if str(part or "").strip()
+    )
     return FusionRequest(
         model=canonical_public_model(model),
         prompt=prompt,
-        system=system or msg_system or "You are Axio Fusion, a careful and evidence-aware assistant.",
+        system=system_text or "You are Axio Fusion, a careful and evidence-aware assistant.",
         content_parts=tuple(current_content_parts),
         history=tuple(request_history),
         api_format=normalized,
@@ -2141,7 +2146,7 @@ def _messages_to_parts(
         ) if isinstance(raw_parts, Sequence) and not isinstance(raw_parts, (str, bytes)) else ()
         if not content and not parts:
             continue
-        if role == "system":
+        if role in {"system", "developer"}:
             if has_non_text_content(parts):
                 raise ContentContractError(
                     "system_content_not_supported",
@@ -2258,6 +2263,39 @@ def _responses_input_to_messages(value: Any) -> list[dict[str, str]]:
                 row["content_parts"] = parts
             rows.append(row)
     return rows
+
+
+def _responses_instructions_to_text(value: Any) -> str:
+    """Normalize Responses instructions without stringifying typed messages.
+
+    The Responses API accepts either a string or an array of instruction
+    messages/content parts.  Axio's common system contract is text-only, so
+    typed image/file instructions are rejected instead of being flattened or
+    silently discarded.
+    """
+
+    if value in (None, ""):
+        return ""
+    if isinstance(value, Mapping):
+        if "content" in value:
+            value = value.get("content")
+        elif "input" in value:
+            value = value.get("input")
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        text_parts: list[Mapping[str, Any]] = []
+        for item in value:
+            candidate = item
+            if isinstance(item, Mapping) and ("content" in item or "input" in item):
+                candidate = item.get("content") if "content" in item else item.get("input")
+            parts = normalize_content_parts(candidate, source_format="responses")
+            if has_non_text_content(parts):
+                raise ContentContractError(
+                    "system_content_not_supported",
+                    "Responses instructions must contain text only",
+                )
+            text_parts.extend(parts)
+        return content_text(text_parts)
+    return _text_only_content(value, source_format="responses")
 
 
 def _gemini_contents_to_messages(value: Any) -> list[dict[str, Any]]:

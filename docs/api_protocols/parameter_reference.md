@@ -75,7 +75,7 @@ Chat-only sentinel.
 | --- | --- | --- | --- |
 | `model` | required | public model identity | provider registry selection |
 | `input` string or typed items | supported common subset | history/content parts | typed input is preferred |
-| `instructions` | supported | system instruction | remains separate from user content |
+| `instructions` | supported string or text-only instruction items | system instruction | remains separate from user content; image/file items are rejected |
 | `stream` | supported | strict stream route | named event parser required |
 | `max_output_tokens`, `temperature`, `top_p` | supported | canonical fields | native Responses names |
 | `text.format` | supported JSON/text subset | structured output | never replaced with Chat `response_format` |
@@ -85,7 +85,10 @@ Chat-only sentinel.
 | `store`, `metadata` | bounded public behavior | continuation/receipt controls | Axio does not claim upstream storage semantics |
 | built-in tools, computer use, hosted MCP, background mode, encrypted reasoning items | outside closed contract | none | require a dedicated adapter and probe |
 
-Responses output is a typed item list. Text is read from message content
+Responses `instructions` may be a string or an array of instruction messages,
+but Axio's common system lane is text-only. Typed image/file instruction parts
+are rejected before provider dispatch instead of being stringified. Responses
+output is a typed item list. Text is read from message content
 blocks of type `output_text`; function calls are output items with
 `type=function_call` and JSON-string `arguments`; results return as
 `function_call_output` input items with the same `call_id`.
@@ -174,7 +177,7 @@ by turn/index; it does not treat one JSON object as a semantic completion.
 
 | Canonical value | Chat | Responses | Anthropic | Gemini |
 | --- | --- | --- | --- | --- |
-| system | system message | `instructions` | top-level `system` | `systemInstruction.parts` |
+| system/developer instruction | system/developer message (developer is normalized to the common system lane) | `instructions` text | top-level `system` | `systemInstruction.parts` |
 | user text | message content | `input_text` | text block | text part |
 | image URL/data | `image_url` | `input_image` | image source | `fileData`/`inlineData` |
 | max output | `max_tokens` or profile alias | `max_output_tokens` | `max_tokens` | `generationConfig.maxOutputTokens` |

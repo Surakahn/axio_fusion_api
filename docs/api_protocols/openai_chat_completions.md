@@ -36,7 +36,11 @@ completion and reasoning tokens; older compatible gateways may accept
 `max_tokens`. Axio's provider adapter uses the profile's audited payload
 policy and does not blindly copy both fields.
 
-Messages may contain text and image content blocks. Axio accepts HTTP(S) image
+Messages may contain text and image content blocks. The current Chat contract
+also accepts the OpenAI `developer` role; it is normalized into Axio's single
+system-instruction lane so a cross-protocol adapter cannot demote it to a user
+turn. Multiple system/developer instructions are joined in request order.
+Axio accepts HTTP(S) image
 URLs and base64 data URLs, rebuilding them as `image_url` blocks for a Chat
 provider. A file reference is not silently converted to an image and is
 rejected when Chat is the selected provider protocol. System content is

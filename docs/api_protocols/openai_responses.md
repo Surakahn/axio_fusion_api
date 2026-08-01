@@ -31,7 +31,10 @@ fields are:
 }
 ```
 
-`input` may be a string or an array of typed messages/items. Image inputs use
+`instructions` may be a string or an array of text-only instruction messages or
+input-text items. Axio preserves their text in the common system lane and
+rejects image/file instructions before dispatch; it never stringifies a typed
+instruction object. `input` may be a string or an array of typed messages/items. Image inputs use
 `input_image` with an HTTP(S)/data URL or a provider file id. File inputs use
 `input_file` with `file_id` or `file_url`; the canonical adapter also accepts
 these as standalone input items and as content inside a user message.
