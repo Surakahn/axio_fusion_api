@@ -1057,6 +1057,41 @@ def test_provider_adapters_omit_unspecified_temperature_but_preserve_explicit_ze
     assert captured["gemini"]["generationConfig"]["temperature"] == 0.0
 
 
+@pytest.mark.parametrize("parameter", ["max_tokens", "max_completion_tokens", "max_output_tokens"])
+def test_chat_adapter_uses_only_the_profile_selected_output_token_parameter(
+    monkeypatch,
+    parameter,
+):
+    profile = normalize_profile(
+        {
+            "provider": "fixture",
+            "model": "chat-model",
+            "api_format": "chat",
+            "max_output_tokens_parameter": parameter,
+        }
+    )
+    captured = {}
+
+    def fake_post(_profile, _path, payload, *, timeout, **kwargs):
+        del timeout, kwargs
+        captured.update(payload)
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    monkeypatch.setattr(provider_module, "_post_json", fake_post)
+    request = FusionRequest(model="axio-fast", prompt="hello", max_output_tokens=123)
+    HTTPProviderClient().complete_turn(
+        profile,
+        request,
+        prompt=request.prompt,
+        system=request.system,
+    )
+
+    assert captured[parameter] == 123
+    assert set(captured).isdisjoint(
+        {"max_tokens", "max_completion_tokens", "max_output_tokens"} - {parameter}
+    )
+
+
 def test_http_client_retries_bounded_semantic_empty_response(monkeypatch):
     profile = normalize_profile(
         {"provider": "fixture", "model": "empty", "api_format": "chat"}

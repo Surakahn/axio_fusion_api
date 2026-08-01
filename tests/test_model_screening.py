@@ -298,6 +298,8 @@ def _research_output(candidate_ids: list[str], *, confidence: float = 0.9, overa
                     "transport": "",
                     "native_efforts": [],
                     "effort_map": {},
+                    "supported_budget_tokens": [],
+                    "budget_tokens_by_effort": {},
                     "evidence_ids": ["source_official"],
                     "confidence": 0.0,
                     "token_cost_model": "unknown",
@@ -1565,6 +1567,80 @@ def test_unknown_reasoning_claim_with_invalid_evidence_is_downgraded_without_for
     assert declaration["token_cost_model"] == "unknown"
     assert declaration["latency_cost_model"] == "unknown"
     assert declaration["cost_evidence_ids"] == []
+
+
+def test_research_accepts_anthropic_budget_transport_without_native_effort_enum():
+    profile = normalize_profile(
+        {
+            "provider": "provider-anthropic",
+            "model": "claude-budget",
+            "canonical_model_id": "claude-budget",
+            "api_format": "anthropic",
+            "base_url_env": "PROVIDER_ANTHROPIC_BASE_URL",
+            "api_key_env": "PROVIDER_ANTHROPIC_API_KEY",
+        }
+    )
+    groups = _groups([profile])
+    output = _research_output([str(groups[0]["candidate_id"])])
+    output["ordered_models"][0]["reasoning_capability"] = {
+        "status": "candidate",
+        "transport": "anthropic_thinking",
+        "native_efforts": [],
+        "effort_map": {},
+        "supported_budget_tokens": [1024, 4096],
+        "budget_tokens_by_effort": {"high": 4096},
+        "evidence_ids": ["source_official"],
+        "confidence": 0.9,
+        "token_cost_model": "provider_documented",
+        "latency_cost_model": "provider_documented",
+        "cost_evidence_ids": ["source_official"],
+    }
+
+    ranking = validate_prefusion_research_output(
+        output,
+        groups=groups,
+        source_slots=["source_official"],
+        source_evidence={"source_official": sha256_text("actual-evidence")},
+    )
+    declaration = ranking["ordered_models"][0]["reasoning_capability"]
+    assert declaration["native_efforts"] == []
+    assert declaration["supported_budget_tokens"] == [1024, 4096]
+    screened = model_screening._apply_screening_metadata(
+        [profile], ranking["ordered_models"]
+    )
+    assert screened[0].reasoning_transport["status"] == "candidate"
+    assert screened[0].reasoning_transport["transport"] == "anthropic_thinking"
+    assert screened[0].reasoning_transport["supported_budget_tokens"] == [1024, 4096]
+
+
+def test_research_rejects_budget_controls_on_chat_effort_transport():
+    profile = _profile("provider-chat", "chat-model", "chat-model")
+    groups = _groups([profile])
+    output = _research_output([str(groups[0]["candidate_id"])])
+    output["ordered_models"][0]["reasoning_capability"] = {
+        "status": "candidate",
+        "transport": "chat_reasoning_effort",
+        "native_efforts": ["low", "high"],
+        "effort_map": {},
+        "supported_budget_tokens": [1024],
+        "budget_tokens_by_effort": {},
+        "evidence_ids": ["source_official"],
+        "confidence": 0.8,
+        "token_cost_model": "unknown",
+        "latency_cost_model": "unknown",
+        "cost_evidence_ids": [],
+    }
+
+    with pytest.raises(
+        ModelScreeningError,
+        match="prefusion_research_reasoning_budget_transport_mismatch",
+    ):
+        validate_prefusion_research_output(
+            output,
+            groups=groups,
+            source_slots=["source_official"],
+            source_evidence={"source_official": sha256_text("actual-evidence")},
+        )
 
 
 def test_model_scoped_reasoning_candidate_survives_research_unknown_for_probe_only():

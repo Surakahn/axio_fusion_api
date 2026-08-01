@@ -24,7 +24,7 @@ from axio_fusion_api.providers import (
     reasoning_transport_probe_binding,
 )
 from axio_fusion_api.registry import normalize_profile
-from axio_fusion_api.schemas import FusionRequest
+from axio_fusion_api.schemas import FusionRequest, normalize_reasoning_budget_tokens
 from axio_fusion_api.provider_enrollment import _apply_runtime_reasoning_probe
 
 
@@ -85,6 +85,37 @@ def test_public_payloads_normalize_native_reasoning_effort_before_fallbacks():
     assert invalid.reasoning_effort == ""
 
 
+def test_public_payloads_normalize_anthropic_and_gemini_reasoning_budgets():
+    anthropic = canonicalize_payload(
+        {
+            "model": "axio-terra",
+            "messages": [{"role": "user", "content": "hello"}],
+            "thinking": {"type": "enabled", "budget_tokens": 2048},
+        },
+        api_format="anthropic/messages",
+    )
+    gemini = canonicalize_payload(
+        {
+            "model": "axio-pro",
+            "contents": [{"role": "user", "parts": [{"text": "hello"}]}],
+            "generationConfig": {
+                "thinkingConfig": {"thinkingBudget": 4096},
+            },
+        },
+        api_format="gemini/generateContent",
+    )
+
+    assert anthropic.reasoning_budget_tokens == 2048
+    assert gemini.reasoning_budget_tokens == 4096
+
+
+def test_reasoning_budget_contract_requires_a_positive_integer():
+    assert normalize_reasoning_budget_tokens(1) == 1
+    assert normalize_reasoning_budget_tokens(0) is None
+    assert normalize_reasoning_budget_tokens(-1) is None
+    assert normalize_reasoning_budget_tokens(False) is None
+
+
 def test_reasoning_effort_partitions_request_fingerprint_and_safe_summary():
     base = FusionRequest(model="axio-fast", prompt="same task", reasoning_effort="low")
     stronger = FusionRequest(model="axio-fast", prompt="same task", reasoning_effort="high")
@@ -92,6 +123,15 @@ def test_reasoning_effort_partitions_request_fingerprint_and_safe_summary():
     assert base.request_fingerprint != stronger.request_fingerprint
     assert base.prompt_free_dict()["reasoning_effort"] == "low"
     assert stronger.prompt_free_dict()["reasoning_effort"] == "high"
+
+
+def test_reasoning_budget_partitions_request_fingerprint_and_safe_summary():
+    base = FusionRequest(model="axio-fast", prompt="same task", reasoning_budget_tokens=512)
+    stronger = FusionRequest(model="axio-fast", prompt="same task", reasoning_budget_tokens=2048)
+
+    assert base.request_fingerprint != stronger.request_fingerprint
+    assert base.prompt_free_dict()["reasoning_budget_tokens"] == 512
+    assert stronger.prompt_free_dict()["reasoning_budget_tokens"] == 2048
 
 
 def test_verified_chat_and_responses_profiles_use_only_their_own_wire_shape(monkeypatch):
@@ -225,6 +265,146 @@ def test_candidate_or_protocol_mismatched_profile_omits_reasoning_fields(monkeyp
     assert mismatched.safe_dict()["reasoning_transport"]["api_format_compatible"] is False
 
 
+def test_verified_anthropic_and_gemini_budget_profiles_use_protocol_local_fields(monkeypatch):
+    profiles = {
+        "anthropic": _profile(
+            api_format="anthropic",
+            reasoning_transport={
+                "status": "verified",
+                "transport": "anthropic_thinking",
+                "supported_budget_tokens": [2048],
+            },
+        ),
+        "gemini": _profile(
+            api_format="gemini",
+            reasoning_transport={
+                "status": "verified",
+                "transport": "gemini_thinking_config",
+                "supported_budget_tokens": [4096],
+            },
+        ),
+    }
+    captured: dict[str, dict] = {}
+
+    def fake_post(profile, path, payload, *, timeout, **kwargs):
+        del path, timeout, kwargs
+        captured[profile.api_format] = payload
+        if profile.api_format == "anthropic":
+            return {"content": [{"type": "text", "text": "anthropic-ok"}]}
+        return {"candidates": [{"content": {"parts": [{"text": "gemini-ok"}]}}]}
+
+    monkeypatch.setattr(provider_module, "_post_json", fake_post)
+    client = HTTPProviderClient()
+    anthropic_request = FusionRequest(
+        model="axio-terra",
+        prompt="hello",
+        reasoning_budget_tokens=2048,
+    )
+    gemini_request = FusionRequest(
+        model="axio-terra",
+        prompt="hello",
+        reasoning_budget_tokens=4096,
+    )
+
+    client.complete_turn(
+        profiles["anthropic"],
+        anthropic_request,
+        prompt=anthropic_request.prompt,
+        system=anthropic_request.system,
+    )
+    client.complete_turn(
+        profiles["gemini"],
+        gemini_request,
+        prompt=gemini_request.prompt,
+        system=gemini_request.system,
+    )
+
+    assert captured["anthropic"]["thinking"] == {
+        "type": "enabled",
+        "budget_tokens": 2048,
+    }
+    assert captured["anthropic"]["max_tokens"] > 2048
+    assert captured["gemini"]["generationConfig"]["thinkingConfig"] == {
+        "thinkingBudget": 4096,
+    }
+
+
+def test_unverified_budget_profiles_never_forward_native_budget_fields(monkeypatch):
+    profiles = {
+        "anthropic": _profile(
+            api_format="anthropic",
+            reasoning_transport={
+                "status": "candidate",
+                "transport": "anthropic_thinking",
+                "supported_budget_tokens": [2048],
+            },
+        ),
+        "gemini": _profile(
+            api_format="gemini",
+            reasoning_transport={
+                "status": "candidate",
+                "transport": "gemini_thinking_config",
+                "supported_budget_tokens": [4096],
+            },
+        ),
+    }
+    captured: dict[str, dict] = {}
+
+    def fake_post(profile, path, payload, *, timeout, **kwargs):
+        del path, timeout, kwargs
+        captured[profile.api_format] = payload
+        if profile.api_format == "anthropic":
+            return {"content": [{"type": "text", "text": "ok"}]}
+        return {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}
+
+    monkeypatch.setattr(provider_module, "_post_json", fake_post)
+    client = HTTPProviderClient()
+    for profile, budget in ((profiles["anthropic"], 2048), (profiles["gemini"], 4096)):
+        request = FusionRequest(
+            model="axio-terra",
+            prompt="hello",
+            reasoning_budget_tokens=budget,
+        )
+        client.complete_turn(profile, request, prompt=request.prompt, system=request.system)
+
+    assert "thinking" not in captured["anthropic"]
+    assert "thinkingConfig" not in captured["gemini"]["generationConfig"]
+
+
+def test_explicit_small_output_cap_does_not_silently_change_anthropic_total_cap(monkeypatch):
+    profile = _profile(
+        api_format="anthropic",
+        reasoning_transport={
+            "status": "verified",
+            "transport": "anthropic_thinking",
+            "supported_budget_tokens": [2048],
+        },
+    )
+    captured = {}
+
+    def fake_post(_profile, _path, payload, *, timeout, **kwargs):
+        del timeout, kwargs
+        captured.update(payload)
+        return {"content": [{"type": "text", "text": "ok"}]}
+
+    monkeypatch.setattr(provider_module, "_post_json", fake_post)
+    request = FusionRequest(
+        model="axio-terra",
+        prompt="hello",
+        max_output_tokens=32,
+        reasoning_budget_tokens=2048,
+    )
+    HTTPProviderClient().complete_turn(
+        profile,
+        request,
+        prompt=request.prompt,
+        system=request.system,
+    )
+
+    assert "thinking" not in captured
+    assert captured["max_tokens"] == 32
+
+
 def test_runtime_channel_configuration_preserves_model_level_reasoning_transport():
     profiles = build_runtime_profiles(
         {
@@ -292,6 +472,17 @@ def test_hermes_role_budget_is_capped_by_the_public_reasoning_effort():
         route_plan=direct_route,
     ).reasoning_effort == "low"
 
+    budgeted = FusionRequest(
+        model="axio-pro",
+        prompt="task",
+        reasoning_budget_tokens=2048,
+    )
+    assert _provider_request_for_role(
+        budgeted,
+        "judge",
+        route_plan=route_plan,
+    ).reasoning_budget_tokens == 2048
+
 
 class _ReasoningProbeClient:
     def __init__(self, *, reject_effort: str = "", control_fails: bool = False):
@@ -324,6 +515,49 @@ class _ReasoningProbeClient:
                 strict_streaming_requested=True,
             )
             raise ProviderExecutionError("parameter rejected", error_code="http_error", http_status=400)
+        provider_module._record_provider_request_receipt(
+            status="success",
+            key_attempt_count=1,
+            transport_attempt_count=1,
+            retry_attempt_count=0,
+            stream_requested=True,
+            stream_observed=True,
+            stream_fallback_used=False,
+            stream_protocol="sse",
+            stream_content_type="text/event-stream",
+            stream_frame_count=2,
+            strict_streaming_requested=True,
+        )
+        return ProviderCompletion(provider_module.REASONING_PROBE_MARKER)
+
+
+class _BudgetReasoningProbeClient:
+    def __init__(self, *, reject_budget: int | None = None):
+        self.reject_budget = reject_budget
+        self.calls: list[tuple[str, int | None, str]] = []
+
+    def complete_turn(self, profile, request, *, prompt, system, timeout, strict_wire=False):
+        del prompt, system, timeout
+        assert strict_wire is True
+        transport, budget = profile.resolve_reasoning_budget(
+            request.reasoning_effort,
+            request.reasoning_budget_tokens,
+        )
+        self.calls.append((transport, budget, request.reasoning_effort))
+        if self.reject_budget is not None and budget == self.reject_budget:
+            provider_module._record_provider_request_receipt(
+                status="failed",
+                key_attempt_count=1,
+                transport_attempt_count=1,
+                retry_attempt_count=0,
+                stream_requested=True,
+                strict_streaming_requested=True,
+            )
+            raise ProviderExecutionError(
+                "budget rejected",
+                error_code="http_error",
+                http_status=400,
+            )
         provider_module._record_provider_request_receipt(
             status="success",
             key_attempt_count=1,
@@ -424,6 +658,59 @@ def test_reasoning_probe_accepts_explicit_responses_top_level_transport():
         "responses_reasoning_effort",
         "high",
     )
+
+
+def test_budget_reasoning_probe_requires_each_exact_budget_and_promotes_only_complete_profile():
+    profile = _profile(
+        api_format="anthropic",
+        reasoning_transport={
+            "status": "candidate",
+            "transport": "anthropic_thinking",
+            "supported_budget_tokens": [512, 2048],
+        },
+    )
+    client = _BudgetReasoningProbeClient()
+
+    report = probe_provider_reasoning_support(
+        [profile],
+        live=True,
+        client=client,
+        max_workers=1,
+    )
+
+    row = report["probes"][0]
+    assert report["verified_count"] == 1
+    assert row["declared_efforts"] == []
+    assert row["declared_budget_tokens"] == [512, 2048]
+    assert row["verified_budget_tokens"] == [512, 2048]
+    assert {budget for _transport, budget, _effort in client.calls} >= {512, 2048}
+    updated = _apply_runtime_reasoning_probe([profile], [row])
+    assert updated[0].reasoning_transport["status"] == "verified"
+
+
+def test_budget_reasoning_probe_4xx_marks_budget_transport_unsupported():
+    profile = _profile(
+        api_format="gemini",
+        reasoning_transport={
+            "status": "candidate",
+            "transport": "gemini_thinking_config",
+            "supported_budget_tokens": [1024, 4096],
+        },
+    )
+    report = probe_provider_reasoning_support(
+        [profile],
+        live=True,
+        client=_BudgetReasoningProbeClient(reject_budget=4096),
+        max_workers=1,
+    )
+    row = report["probes"][0]
+
+    assert row["status"] == "rejected"
+    assert row["control"]["status"] == "accepted"
+    assert row["rejected_budget_tokens"] == [4096]
+    assert _apply_runtime_reasoning_probe([profile], [row])[0].reasoning_transport[
+        "status"
+    ] == "unsupported"
 
 
 def test_reasoning_probe_4xx_marks_only_parameterized_transport_unsupported():

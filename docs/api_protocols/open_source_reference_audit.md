@@ -19,6 +19,11 @@ review anchors; upstream projects continue to change.
 - Useful lesson: protocol routing should be explicit at the endpoint boundary;
   model mapping, per-channel keys, health checks, failover, and Responses
   session tracking are separate concerns.
+- File anchors reviewed: `backend-go/internal/autopilot/newapi_adapter.go`,
+  `backend-go/internal/autopilot/provider_quality_probe.go`,
+  `backend-go/internal/config/config_chat.go`,
+  `backend-go/internal/config/config_responses.go`, and
+  `backend-go/internal/config/config_gemini.go`.
 - Axio adoption: `server.py` selects the input protocol before canonicalizing;
   `providers.py` keeps provider payload construction separate from public
   rendering; image traffic has its own module.
@@ -34,6 +39,11 @@ review anchors; upstream projects continue to change.
   Codex, Gemini, OpenCode, OpenClaw, and Hermes-oriented clients.
 - Useful lesson: provider configuration needs explicit per-client format,
   model mapping, endpoint overrides, and a user-visible switching boundary.
+- File anchors reviewed: `src-tauri/src/proxy/providers/adapter.rs`,
+  `src-tauri/src/proxy/providers/streaming.rs`,
+  `src-tauri/src/proxy/providers/reasoning_bridge.rs`,
+  `src-tauri/src/proxy/providers/transform_responses.rs`, and
+  `src-tauri/src/proxy/providers/transform_gemini.rs`.
 - Axio adoption: provider profiles include API format, model identity, base URL
   indirection, key pools, traffic control, and reasoning capability metadata.
 - Deliberately not adopted: desktop state as a serving registry, implicit
@@ -50,6 +60,10 @@ review anchors; upstream projects continue to change.
   distribution.
 - Useful lesson: physical channel replicas and logical model aliases are
   different entities; routing and accounting need a stable model identity.
+- File anchors reviewed: `relay/channel/adapter.go`,
+  `relay/channel/openai/relay_responses.go`,
+  `relay/channel/openai/responses_via_chat.go`,
+  `relay/channel/gemini/adaptor.go`, and `model/channel.go`.
 - Axio adoption: `canonical_model_id` de-duplicates the same model exposed by
   multiple channels while retaining provider replicas for health-aware
   failover. Evaluation baselines bind to logical identity rather than a key.
@@ -67,6 +81,10 @@ review anchors; upstream projects continue to change.
 - Useful lesson: protocol translation must be divided into provider-specific
   request/response translators and stream bridges; account pools need health
   and retry state; protocol paths and auth headers are not interchangeable.
+- File anchors reviewed: `internal/translator/` and
+  `internal/relay/` translator/stream packages, plus the public
+  `examples/plugin/request-translator` and
+  `examples/plugin/response-translator` extension contracts.
 - Axio adoption: the adapter split in `providers.py`, native stream parsers,
   explicit route normalization, key rotation, bounded retry, and separate
   protocol renderers.
@@ -83,6 +101,10 @@ review anchors; upstream projects continue to change.
 - Useful lesson: keep client compatibility concerns at the edge and convert
   once into an internal request, rather than spreading protocol checks through
   every business operation.
+- File anchors reviewed: the repository's client adapter and request/response
+  conversion modules on the `main` branch. The project is intentionally kept
+  as a small reference rather than a dependency because its implementation
+  surface changes quickly.
 - Axio adoption: `compat.canonicalize_payload` and
   `compat.render_response` are the only public conversion boundary; the
   orchestrator consumes `FusionRequest` and knows no wire JSON layout.

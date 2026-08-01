@@ -228,6 +228,8 @@ def test_current_channel_template_keeps_reasoning_transport_protocol_local():
         "transport": "chat_reasoning_effort",
         "supported_efforts": ["low", "medium", "high"],
         "effort_map": {"max": "high", "xhigh": "high"},
+        "supported_budget_tokens": [],
+        "budget_tokens_by_effort": {},
         "api_format_compatible": True,
     }
     assert tokenapis.api_format == "responses"
@@ -237,6 +239,8 @@ def test_current_channel_template_keeps_reasoning_transport_protocol_local():
         "transport": "responses_reasoning",
         "supported_efforts": ["low", "medium", "high", "xhigh", "max"],
         "effort_map": {},
+        "supported_budget_tokens": [],
+        "budget_tokens_by_effort": {},
         "api_format_compatible": True,
     }
     assert nvidia.resolve_reasoning_transport("high") == ("", "")

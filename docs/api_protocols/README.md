@@ -24,17 +24,24 @@ The four public protocol surfaces are:
    [`google_gemini_generate_content.md`](google_gemini_generate_content.md)
    describe each native request, response, stream, tool, reasoning, and error
    contract.
-3. [`streaming_event_normalization.md`](streaming_event_normalization.md)
+3. [`parameter_reference.md`](parameter_reference.md) is the compact field
+   catalog and decision table. It distinguishes a public field that Axio can
+   parse from an upstream field that Axio may forward only after capability
+   proof.
+4. [`wire_examples.md`](wire_examples.md) contains placeholder-only cURL and
+   JSON examples for the four public surfaces, native provider shapes,
+   reasoning controls, tool round trips, and image routes.
+5. [`streaming_event_normalization.md`](streaming_event_normalization.md)
    describes how incremental output is normalized without leaking private
    Fusion traffic.
-4. [`tool_call_normalization.md`](tool_call_normalization.md) defines the
+6. [`tool_call_normalization.md`](tool_call_normalization.md) defines the
    lossless and lossy portions of function/tool conversion.
-5. [`image_generation_editing.md`](image_generation_editing.md) documents the
+7. [`image_generation_editing.md`](image_generation_editing.md) documents the
    separate image lane and why image models never enter text Fusion.
-6. [`open_source_reference_audit.md`](open_source_reference_audit.md) records
+8. [`open_source_reference_audit.md`](open_source_reference_audit.md) records
    the public GitHub implementations inspected and the bounded lessons
    adopted by Axio.
-7. [`integration_field_guide.md`](integration_field_guide.md) is the field-level
+9. [`integration_field_guide.md`](integration_field_guide.md) is the field-level
    implementation checklist for request parameters, conversions, streaming,
    tools, structured output, reasoning, images, errors, and retries.
 
@@ -48,9 +55,13 @@ page or README is a design input, never runtime proof.
 Official protocol references:
 
 - OpenAI Chat Completions reference:
-  <https://developers.openai.com/api/reference/chat>
+  <https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create/>
 - OpenAI Responses reference:
-  <https://developers.openai.com/api/reference/responses>
+  <https://developers.openai.com/api/reference/resources/responses/methods/create/>
+- OpenAI Chat Completions streaming events:
+  <https://developers.openai.com/api/reference/resources/chat/subresources/completions/streaming-events/>
+- OpenAI Responses streaming events:
+  <https://developers.openai.com/api/reference/resources/responses/streaming-events/>
 - OpenAI Responses migration guide:
   <https://developers.openai.com/api/docs/guides/migrate-to-responses>
 - OpenAI tools guide:
@@ -58,11 +69,11 @@ Official protocol references:
 - OpenAI reasoning guide:
   <https://developers.openai.com/api/docs/guides/reasoning>
 - OpenAI image generation guide:
-  <https://developers.openai.com/api/docs/guides/image-generation>
+  <https://developers.openai.com/api/docs/guides/image-generation/>
 - Anthropic Messages API:
-  <https://docs.anthropic.com/en/api/messages>
+  <https://platform.claude.com/docs/en/api/messages>
 - Anthropic Messages streaming:
-  <https://docs.anthropic.com/en/api/messages-streaming>
+  <https://platform.claude.com/docs/en/api/messages-streaming>
 - Google Gemini GenerateContent:
   <https://ai.google.dev/api/generate-content>
 - Google Gemini function calling:

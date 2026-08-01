@@ -21,7 +21,13 @@ from .providers import (
     reasoning_transport_probe_binding,
 )
 from .registry import normalize_profile, validate_prefusion_registry_handoff
-from .schemas import ModelProfile, normalize_reasoning_effort, sha256_text, stable_json
+from .schemas import (
+    ModelProfile,
+    normalize_reasoning_budget_tokens,
+    normalize_reasoning_effort,
+    sha256_text,
+    stable_json,
+)
 
 
 REASONING_TRANSPORT_RECONCILIATION_SCHEMA = (
@@ -427,12 +433,20 @@ def _validate_probe_row(
         transport_contract.get("supported_efforts") or []
     ):
         errors.append("reasoning_reconciliation_probe_effort_set_mismatch")
+    if _normalized_budgets(row.get("declared_budget_tokens")) != list(
+        transport_contract.get("supported_budget_tokens") or []
+    ):
+        errors.append("reasoning_reconciliation_probe_budget_set_mismatch")
     if errors:
         return "", errors
 
     status = str(row.get("status") or "").strip().casefold()
     if status == "verified":
-        if _verified_probe_row(row, transport_contract.get("supported_efforts") or []):
+        if _verified_probe_row(
+            row,
+            transport_contract.get("supported_efforts") or [],
+            transport_contract.get("supported_budget_tokens") or [],
+        ):
             return "verified", errors
         return "", ["reasoning_reconciliation_verified_probe_evidence_invalid"]
     if status == "rejected":
@@ -444,7 +458,11 @@ def _validate_probe_row(
     return "", ["reasoning_reconciliation_probe_status_invalid"]
 
 
-def _verified_probe_row(row: Mapping[str, Any], efforts: Sequence[str]) -> bool:
+def _verified_probe_row(
+    row: Mapping[str, Any],
+    efforts: Sequence[str],
+    budgets: Sequence[int] = (),
+) -> bool:
     if row.get("all_declared_efforts_strict_streaming") is not True:
         return False
     control = row.get("control") if isinstance(row.get("control"), Mapping) else {}
@@ -455,14 +473,36 @@ def _verified_probe_row(row: Mapping[str, Any], efforts: Sequence[str]) -> bool:
         for item in row.get("effort_results", [])
         if isinstance(item, Mapping) and normalize_reasoning_effort(item.get("effort"))
     } if isinstance(row.get("effort_results"), list) else {}
-    return all(_strict_attempt_accepted(by_effort.get(effort, {})) for effort in efforts)
+    if not all(_strict_attempt_accepted(by_effort.get(effort, {})) for effort in efforts):
+        return False
+    if not budgets:
+        return not _normalized_budgets(row.get("declared_budget_tokens"))
+    if row.get("all_declared_budgets_strict_streaming") is not True:
+        return False
+    budget_rows = row.get("budget_results") if isinstance(row.get("budget_results"), list) else []
+    by_budget = {
+        budget: attempt
+        for attempt in budget_rows
+        if isinstance(attempt, Mapping)
+        for budget in _normalized_budgets([attempt.get("budget_tokens")])
+    }
+    verified_budgets = set(_normalized_budgets(row.get("verified_budget_tokens")))
+    return all(
+        _strict_attempt_accepted(by_budget.get(budget, {}))
+        or budget in verified_budgets
+        for budget in budgets
+    ) and row.get("all_declared_reasoning_controls_strict_streaming") is True
 
 
 def _rejected_probe_row(row: Mapping[str, Any]) -> bool:
     control = row.get("control") if isinstance(row.get("control"), Mapping) else {}
     if not _strict_attempt_accepted(control):
         return False
-    attempts = row.get("effort_results") if isinstance(row.get("effort_results"), list) else []
+    attempts: list[Any] = []
+    if isinstance(row.get("effort_results"), list):
+        attempts.extend(row.get("effort_results"))
+    if isinstance(row.get("budget_results"), list):
+        attempts.extend(row.get("budget_results"))
     return any(
         isinstance(item, Mapping)
         and str(item.get("status") or "").strip().casefold() == "rejected"
@@ -569,8 +609,14 @@ def _transport_contract(profile: ModelProfile) -> dict[str, Any]:
     return {
         "status": str(config.get("status") or "").strip().casefold(),
         "transport": str(config.get("transport") or "").strip().casefold(),
-        "supported_efforts": _normalized_efforts(config.get("supported_efforts")),
+        "supported_efforts": _probe_efforts(config),
         "effort_map": _normalized_effort_map(config.get("effort_map")),
+        "supported_budget_tokens": _normalized_budgets(
+            config.get("supported_budget_tokens")
+        ),
+        "budget_tokens_by_effort": _normalized_budget_map(
+            config.get("budget_tokens_by_effort")
+        ),
         "api_format_compatible": config.get("api_format_compatible") is True,
     }
 
@@ -580,10 +626,21 @@ def _transport_contract_without_status(value: Mapping[str, Any]) -> dict[str, An
 
 
 def _valid_candidate_contract(value: Mapping[str, Any]) -> bool:
+    transport = str(value.get("transport") or "").strip().casefold()
+    budget_transport = transport in {
+        "anthropic_thinking",
+        "gemini_thinking_config",
+    }
+    has_controls = bool(
+        value.get("supported_budget_tokens")
+        if budget_transport
+        else value.get("supported_efforts")
+    )
     return bool(
         value.get("status") == "candidate"
         and value.get("transport")
-        and value.get("supported_efforts")
+        and has_controls
+        and (budget_transport or not value.get("supported_budget_tokens"))
         and value.get("api_format_compatible") is True
     )
 
@@ -607,6 +664,43 @@ def _normalized_effort_map(value: Any) -> dict[str, str]:
         effective = normalize_reasoning_effort(target)
         if requested and effective:
             normalized[requested] = effective
+    return dict(sorted(normalized.items()))
+
+
+def _probe_efforts(config: Mapping[str, Any]) -> list[str]:
+    efforts = _normalized_efforts(config.get("supported_efforts"))
+    transport = str(config.get("transport") or "").strip().casefold()
+    if transport in {"anthropic_thinking", "gemini_thinking_config"}:
+        budget_map = config.get("budget_tokens_by_effort")
+        if isinstance(budget_map, Mapping):
+            for raw_effort in budget_map:
+                effort = normalize_reasoning_effort(raw_effort)
+                if effort and effort not in efforts:
+                    efforts.append(effort)
+    return efforts
+
+
+def _normalized_budgets(value: Any) -> list[int]:
+    values = value if isinstance(value, Sequence) and not isinstance(
+        value, (str, bytes, bytearray)
+    ) else []
+    budgets: list[int] = []
+    for raw in values:
+        budget = normalize_reasoning_budget_tokens(raw)
+        if budget is not None and budget not in budgets:
+            budgets.append(budget)
+    return sorted(budgets)
+
+
+def _normalized_budget_map(value: Any) -> dict[str, int]:
+    if not isinstance(value, Mapping):
+        return {}
+    normalized: dict[str, int] = {}
+    for raw_effort, raw_budget in value.items():
+        effort = normalize_reasoning_effort(raw_effort)
+        budget = normalize_reasoning_budget_tokens(raw_budget)
+        if effort and budget is not None:
+            normalized[effort] = budget
     return dict(sorted(normalized.items()))
 
 

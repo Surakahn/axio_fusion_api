@@ -18,6 +18,7 @@ from .latency_policy import PROVIDER_MAX_RESPONSE_LATENCY_MS
 from .schemas import (
     CAPABILITY_AXES,
     ModelProfile,
+    normalize_reasoning_budget_tokens,
     normalize_reasoning_effort,
     sha256_text,
     stable_json,
@@ -456,8 +457,11 @@ def _reasoning_transport_patch(
     config = dict(current) if isinstance(current, Mapping) else {}
     if profile is None or str(config.get("status") or "").strip().casefold() != "candidate":
         return None
-    declared_efforts = _normalized_reasoning_efforts(config.get("supported_efforts"))
-    if not declared_efforts:
+    declared_efforts = _reasoning_probe_efforts(config)
+    declared_budgets = _normalized_reasoning_budgets(
+        config.get("supported_budget_tokens")
+    )
+    if not declared_efforts and not declared_budgets:
         return None
     probe_rows = [row for row in rows if isinstance(row, Mapping)] if isinstance(rows, Sequence) else []
     exact_rows = [
@@ -467,11 +471,16 @@ def _reasoning_transport_patch(
         and row.get("live_probe_evidence") is True
         and str(row.get("transport") or "") == str(config.get("transport") or "")
         and _normalized_reasoning_efforts(row.get("declared_efforts")) == declared_efforts
+        and _normalized_reasoning_budgets(row.get("declared_budget_tokens"))
+        == declared_budgets
         and _reasoning_probe_binding_matches(profile, row)
     ]
     if not exact_rows:
         return None
-    if any(_reasoning_probe_row_verified(row, declared_efforts) for row in exact_rows):
+    if any(
+        _reasoning_probe_row_verified(row, declared_efforts, declared_budgets)
+        for row in exact_rows
+    ):
         patched = dict(config)
         patched["status"] = "verified"
         return patched
@@ -524,6 +533,7 @@ def _reasoning_probe_binding_matches(
 def _reasoning_probe_row_verified(
     row: Mapping[str, Any],
     declared_efforts: Sequence[str],
+    declared_budgets: Sequence[int] = (),
 ) -> bool:
     if (
         str(row.get("status") or "").strip().casefold() != "verified"
@@ -544,6 +554,32 @@ def _reasoning_probe_row_verified(
     return all(
         _strict_reasoning_attempt_accepted(by_effort.get(effort, {}))
         for effort in declared_efforts
+    ) and _budget_probe_rows_verified(row, declared_budgets)
+
+
+def _budget_probe_rows_verified(
+    row: Mapping[str, Any],
+    declared_budgets: Sequence[int],
+) -> bool:
+    if not declared_budgets:
+        return not _normalized_reasoning_budgets(row.get("declared_budget_tokens"))
+    if row.get("all_declared_budgets_strict_streaming") is not True:
+        return False
+    budget_rows = row.get("budget_results") if isinstance(row.get("budget_results"), list) else []
+    by_budget = {
+        budget: attempt
+        for attempt in budget_rows
+        if isinstance(attempt, Mapping)
+        for budget in _normalized_reasoning_budgets([attempt.get("budget_tokens")])
+    }
+    return all(
+        _strict_reasoning_attempt_accepted(by_budget.get(budget, {}))
+        for budget in declared_budgets
+    ) or bool(
+        row.get("all_declared_reasoning_controls_strict_streaming") is True
+        and row.get("verified_budget_tokens")
+        and set(_normalized_reasoning_budgets(row.get("verified_budget_tokens")))
+        >= set(declared_budgets)
     )
 
 
@@ -553,7 +589,11 @@ def _reasoning_probe_row_rejected(row: Mapping[str, Any]) -> bool:
     control = row.get("control") if isinstance(row.get("control"), Mapping) else {}
     if not _strict_reasoning_attempt_accepted(control):
         return False
-    attempts = row.get("effort_results") if isinstance(row.get("effort_results"), list) else []
+    attempts: list[Any] = []
+    if isinstance(row.get("effort_results"), list):
+        attempts.extend(row.get("effort_results"))
+    if isinstance(row.get("budget_results"), list):
+        attempts.extend(row.get("budget_results"))
     return any(
         isinstance(attempt, Mapping)
         and str(attempt.get("status") or "").strip().casefold() == "rejected"
@@ -592,6 +632,31 @@ def _normalized_reasoning_efforts(value: Any) -> list[str]:
         if effort and effort not in values:
             values.append(effort)
     return values
+
+
+def _reasoning_probe_efforts(config: Mapping[str, Any]) -> list[str]:
+    efforts = _normalized_reasoning_efforts(config.get("supported_efforts"))
+    transport = str(config.get("transport") or "").strip().casefold()
+    if transport in {"anthropic_thinking", "gemini_thinking_config"}:
+        budget_map = config.get("budget_tokens_by_effort")
+        if isinstance(budget_map, Mapping):
+            for raw_effort in budget_map:
+                effort = normalize_reasoning_effort(raw_effort)
+                if effort and effort not in efforts:
+                    efforts.append(effort)
+    return efforts
+
+
+def _normalized_reasoning_budgets(value: Any) -> list[int]:
+    raw_values = value if isinstance(value, Sequence) and not isinstance(
+        value, (str, bytes, bytearray)
+    ) else []
+    budgets: list[int] = []
+    for raw in raw_values:
+        budget = normalize_reasoning_budget_tokens(raw)
+        if budget is not None and budget not in budgets:
+            budgets.append(budget)
+    return sorted(budgets)
 
 
 def _dominant_tool_probe_status(counts: Mapping[str, Any]) -> str:

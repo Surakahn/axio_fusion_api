@@ -17,6 +17,7 @@ from .schemas import (
     FusionRequest,
     FusionResponse,
     canonical_public_model,
+    normalize_reasoning_budget_tokens,
     normalize_reasoning_effort,
     sha256_text,
     stable_json,
@@ -53,6 +54,10 @@ def canonicalize_payload(payload: Mapping[str, Any], *, api_format: str = "chat/
         top_p_value = generation_config.get("topP")
     top_p = _optional_float(top_p_value)
     reasoning_effort = _reasoning_effort_from_payload(payload, api_format=normalized)
+    reasoning_budget_tokens = _reasoning_budget_from_payload(
+        payload,
+        api_format=normalized,
+    )
     structured_output = structured_output_from_payload(payload, api_format=normalized)
     history_events: list[dict[str, Any]] = []
     if normalized == "responses":
@@ -93,6 +98,7 @@ def canonicalize_payload(payload: Mapping[str, Any], *, api_format: str = "chat/
         task_type=task_type,
         requested_capabilities=requested,
         reasoning_effort=reasoning_effort,
+        reasoning_budget_tokens=reasoning_budget_tokens,
         structured_output=structured_output,
         temperature=temperature,
         top_p=top_p,
@@ -130,6 +136,49 @@ def _reasoning_effort_from_payload(
     if api_format in {"chat", "chat/completions"}:
         return top_level_effort or nested_effort
     return top_level_effort
+
+
+def _reasoning_budget_from_payload(
+    payload: Mapping[str, Any],
+    *,
+    api_format: str,
+) -> int | None:
+    """Parse native budget controls into the closed request contract.
+
+    The native field wins over the generic compatibility alias. Parsing does
+    not authorize forwarding; the selected provider profile must verify the
+    exact budget and streaming endpoint first.
+    """
+
+    generic = normalize_reasoning_budget_tokens(
+        payload.get("reasoning_budget_tokens", payload.get("reasoningBudgetTokens"))
+    )
+    if api_format == "anthropic":
+        thinking = payload.get("thinking")
+        if isinstance(thinking, Mapping):
+            thinking_type = str(thinking.get("type") or "").strip().casefold()
+            if thinking_type == "disabled":
+                return None
+            native = normalize_reasoning_budget_tokens(
+                thinking.get("budget_tokens", thinking.get("budgetTokens"))
+            )
+            if native is not None:
+                return native
+    if api_format == "gemini":
+        config = _generation_config(payload)
+        thinking_config = config.get("thinkingConfig")
+        if not isinstance(thinking_config, Mapping):
+            thinking_config = config.get("thinking_config")
+        if isinstance(thinking_config, Mapping):
+            native = normalize_reasoning_budget_tokens(
+                thinking_config.get(
+                    "thinkingBudget",
+                    thinking_config.get("thinking_budget"),
+                )
+            )
+            if native is not None:
+                return native
+    return generic
 
 
 def _public_metadata(value: Any) -> dict[str, Any]:
@@ -1439,7 +1488,19 @@ def normalize_api_format(value: str | None) -> str:
         return "responses"
     if normalized in {"anthropic", "messages", "anthropic/messages"}:
         return "anthropic"
-    if normalized in {"gemini", "google", "generatecontent", "generate_content"}:
+    if normalized in {
+        "gemini",
+        "google",
+        "generatecontent",
+        "generate_content",
+        "gemini/generatecontent",
+        "gemini/generate_content",
+        "gemini/generate-content",
+        "google/generatecontent",
+        "google/generate_content",
+        "google/generate-content",
+        "google/generativeai",
+    }:
         return "gemini"
     return "chat/completions"
 

@@ -78,11 +78,19 @@ REASONING_EFFORT_LEVELS = (
 _REASONING_EFFORT_ORDER = {
     effort: index for index, effort in enumerate(REASONING_EFFORT_LEVELS)
 }
+MAX_OUTPUT_TOKEN_PARAMETERS = (
+    "max_tokens",
+    "max_completion_tokens",
+    "max_output_tokens",
+)
+MAX_REASONING_BUDGET_TOKENS = 1_000_000
 SCREENING_REASONING_STATUSES = ("candidate", "unsupported", "unknown")
 SCREENING_REASONING_TRANSPORTS = (
     "chat_reasoning_effort",
     "responses_reasoning",
     "responses_reasoning_effort",
+    "anthropic_thinking",
+    "gemini_thinking_config",
 )
 SCREENING_REASONING_COST_MODELS = (
     "provider_documented",
@@ -96,6 +104,8 @@ _REASONING_TRANSPORT_FORMATS = {
     # spelling instead of the standard nested ``reasoning.effort`` object.
     # This remains profile-local and is never inferred from a provider name.
     "responses_reasoning_effort": "responses",
+    "anthropic_thinking": "anthropic",
+    "gemini_thinking_config": "gemini",
 }
 _REASONING_TRANSPORT_STATUSES = frozenset(
     {"unknown", "candidate", "verified", "unsupported"}
@@ -128,6 +138,27 @@ def normalize_reasoning_effort(value: Any) -> str:
 
     normalized = str(value or "").strip().casefold().replace("_", "-")
     return normalized if normalized in _REASONING_EFFORT_ORDER else ""
+
+
+def normalize_reasoning_budget_tokens(value: Any) -> int | None:
+    """Normalize one bounded native thinking-token budget."""
+
+    if isinstance(value, bool) or value in (None, ""):
+        return None
+    try:
+        budget = int(value)
+    except (TypeError, ValueError):
+        return None
+    if budget < 1 or budget > MAX_REASONING_BUDGET_TOKENS:
+        return None
+    return budget
+
+
+def normalize_max_output_tokens_parameter(value: Any) -> str:
+    """Return one audited spelling for a Chat output-token field."""
+
+    normalized = str(value or "max_tokens").strip().casefold()
+    return normalized if normalized in MAX_OUTPUT_TOKEN_PARAMETERS else "max_tokens"
 
 
 def normalize_screening_reasoning_capability(
@@ -177,6 +208,23 @@ def normalize_screening_reasoning_capability(
                 <= _REASONING_EFFORT_ORDER[requested]
             ):
                 effort_map[requested] = effective
+    supported_budgets = _reasoning_budget_values(
+        raw.get(
+            "supported_budget_tokens",
+            raw.get("supportedBudgetTokens", raw.get("budget_tokens", ())),
+        )
+    )
+    budget_tokens_by_effort = _reasoning_budget_map(
+        raw.get(
+            "budget_tokens_by_effort",
+            raw.get("budgetTokensByEffort", raw.get("budget_map", {})),
+        ),
+        supported_budgets=supported_budgets,
+    )
+    for budget in budget_tokens_by_effort.values():
+        if budget not in supported_budgets:
+            supported_budgets.append(budget)
+    supported_budgets.sort()
     evidence_ids = _normalized_string_list(raw.get("evidence_ids", raw.get("evidenceIds", ())))
     cost_evidence_ids = _normalized_string_list(
         raw.get("cost_evidence_ids", raw.get("costEvidenceIds", ()))
@@ -206,6 +254,8 @@ def normalize_screening_reasoning_capability(
         "api_format_compatible": api_format_compatible,
         "native_efforts": native_efforts,
         "effort_map": dict(sorted(effort_map.items())),
+        "supported_budget_tokens": supported_budgets,
+        "budget_tokens_by_effort": dict(sorted(budget_tokens_by_effort.items())),
         "evidence_ids": evidence_ids,
         "confidence": round(max(0.0, min(1.0, confidence)), 6),
         "token_cost_model": token_cost_model,
@@ -242,6 +292,23 @@ def _reasoning_transport_api_format(value: Any) -> str:
         return "chat"
     if normalized in {"responses", "response", "responses-api"}:
         return "responses"
+    if normalized in {
+        "anthropic",
+        "anthropic/messages",
+        "anthropic-messages",
+        "messages",
+        "claude",
+    }:
+        return "anthropic"
+    if normalized in {
+        "gemini",
+        "gemini/generatecontent",
+        "gemini/generate-content",
+        "google-gemini",
+        "google/gemini",
+        "google",
+    }:
+        return "gemini"
     return normalized
 
 
@@ -257,6 +324,38 @@ def _reasoning_effort_values(value: Any) -> list[str]:
         effort = normalize_reasoning_effort(raw)
         if effort and effort not in normalized:
             normalized.append(effort)
+    return normalized
+
+
+def _reasoning_budget_values(value: Any) -> list[int]:
+    if isinstance(value, str):
+        raw_values = value.replace(";", ",").split(",")
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        raw_values = value
+    else:
+        raw_values = []
+    normalized: list[int] = []
+    for raw in raw_values:
+        budget = normalize_reasoning_budget_tokens(raw)
+        if budget is not None and budget not in normalized:
+            normalized.append(budget)
+    return sorted(normalized[:32])
+
+
+def _reasoning_budget_map(
+    value: Any,
+    *,
+    supported_budgets: Sequence[int],
+) -> dict[str, int]:
+    if not isinstance(value, Mapping):
+        return {}
+    allowed = set(supported_budgets)
+    normalized: dict[str, int] = {}
+    for source, target in value.items():
+        effort = normalize_reasoning_effort(source)
+        budget = normalize_reasoning_budget_tokens(target)
+        if effort and budget is not None and (not allowed or budget in allowed):
+            normalized[effort] = budget
     return normalized
 
 
@@ -299,6 +398,23 @@ def _normalize_reasoning_transport(
                 <= _REASONING_EFFORT_ORDER[requested]
             ):
                 effort_map[requested] = effective
+    supported_budgets = _reasoning_budget_values(
+        raw.get(
+            "supported_budget_tokens",
+            raw.get("supportedBudgetTokens", raw.get("budget_tokens", ())),
+        )
+    )
+    budget_tokens_by_effort = _reasoning_budget_map(
+        raw.get(
+            "budget_tokens_by_effort",
+            raw.get("budgetTokensByEffort", raw.get("budget_map", {})),
+        ),
+        supported_budgets=supported_budgets,
+    )
+    for budget in budget_tokens_by_effort.values():
+        if budget not in supported_budgets:
+            supported_budgets.append(budget)
+    supported_budgets.sort()
     expected_format = _REASONING_TRANSPORT_FORMATS.get(transport, "")
     protocol_compatible = bool(
         expected_format
@@ -309,6 +425,8 @@ def _normalize_reasoning_transport(
         "transport": transport,
         "supported_efforts": supported_efforts,
         "effort_map": dict(sorted(effort_map.items())),
+        "supported_budget_tokens": supported_budgets,
+        "budget_tokens_by_effort": dict(sorted(budget_tokens_by_effort.items())),
         "api_format_compatible": protocol_compatible,
     }
     # A provider-level declaration is only a transport prior.  ``model`` is
@@ -703,6 +821,9 @@ class ModelProfile:
     base_url_env: str = ""
     api_key_env: str = ""
     auth_scheme: str = "bearer"
+    # Chat-compatible gateways vary between legacy and modern OpenAI output
+    # token spellings. This is a profile-local closed enum.
+    max_output_tokens_parameter: str = "max_tokens"
     # Model discovery is an optional control-plane capability.  A provider can
     # serve explicit model rows without exposing a compatible model-list route.
     models_endpoint: str = "/models"
@@ -796,6 +917,11 @@ class ModelProfile:
         object.__setattr__(self, "discover_models", bool(self.discover_models) and bool(endpoint))
         object.__setattr__(
             self,
+            "max_output_tokens_parameter",
+            normalize_max_output_tokens_parameter(self.max_output_tokens_parameter),
+        )
+        object.__setattr__(
+            self,
             "reasoning_transport",
             _normalize_reasoning_transport(
                 self.reasoning_transport,
@@ -858,6 +984,8 @@ class ModelProfile:
         if not isinstance(config, Mapping) or config.get("status") != "verified":
             return "", ""
         transport = str(config.get("transport") or "")
+        if transport in {"anthropic_thinking", "gemini_thinking_config"}:
+            return "", ""
         expected_format = _REASONING_TRANSPORT_FORMATS.get(transport, "")
         if (
             not expected_format
@@ -880,6 +1008,40 @@ class ModelProfile:
         ):
             return transport, mapped
         return "", ""
+
+    def resolve_reasoning_budget(
+        self,
+        requested_effort: Any = "",
+        requested_budget_tokens: Any = None,
+    ) -> tuple[str, int | None]:
+        """Resolve one verified model-local budget transport and exact budget."""
+
+        config = self.reasoning_transport
+        if not isinstance(config, Mapping) or config.get("status") != "verified":
+            return "", None
+        transport = str(config.get("transport") or "")
+        if transport not in {"anthropic_thinking", "gemini_thinking_config"}:
+            return "", None
+        expected_format = _REASONING_TRANSPORT_FORMATS.get(transport, "")
+        if (
+            expected_format != _reasoning_transport_api_format(self.api_format)
+            or config.get("api_format_compatible") is not True
+        ):
+            return "", None
+        supported = set(_reasoning_budget_values(config.get("supported_budget_tokens")))
+        requested_budget = normalize_reasoning_budget_tokens(requested_budget_tokens)
+        if requested_budget is not None:
+            return (transport, requested_budget) if requested_budget in supported else ("", None)
+        effort = normalize_reasoning_effort(requested_effort)
+        budget_map = config.get("budget_tokens_by_effort")
+        mapped = (
+            normalize_reasoning_budget_tokens(budget_map.get(effort))
+            if effort and isinstance(budget_map, Mapping)
+            else None
+        )
+        if mapped is not None and mapped in supported:
+            return transport, mapped
+        return "", None
 
     def safe_dict(self) -> dict[str, Any]:
         return {
@@ -909,6 +1071,7 @@ class ModelProfile:
             "base_url_env": self.base_url_env,
             "api_key_env": self.api_key_env,
             "auth_scheme": self.auth_scheme,
+            "max_output_tokens_parameter": self.max_output_tokens_parameter,
             "models_endpoint": self.models_endpoint,
             "discover_models": self.discover_models,
             "base_url_persisted": False,
@@ -1045,6 +1208,9 @@ class FusionRequest:
     # This is a protocol-neutral desired upper bound.  Provider adapters map
     # it only after a ModelProfile has verified the exact wire contract.
     reasoning_effort: str = ""
+    # Anthropic/Gemini native thinking controls are token budgets rather than
+    # the OpenAI effort enum. The selected provider must verify the exact value.
+    reasoning_budget_tokens: int | None = None
     # Closed public output contract. Provider adapters render this into their
     # native structured-output wrapper; arbitrary vendor fields never cross
     # the provider boundary.
@@ -1067,6 +1233,11 @@ class FusionRequest:
             self,
             "reasoning_effort",
             normalize_reasoning_effort(self.reasoning_effort),
+        )
+        object.__setattr__(
+            self,
+            "reasoning_budget_tokens",
+            normalize_reasoning_budget_tokens(self.reasoning_budget_tokens),
         )
         object.__setattr__(
             self,
@@ -1115,6 +1286,7 @@ class FusionRequest:
                     "task_type": self.task_type,
                     "requested_capabilities": list(self.requested_capabilities),
                     "reasoning_effort": self.reasoning_effort,
+                    "reasoning_budget_tokens": self.reasoning_budget_tokens,
                     "structured_output": dict(self.structured_output),
                     "tools": list(self.tools),
                 }
@@ -1135,6 +1307,7 @@ class FusionRequest:
             "task_type": self.task_type,
             "requested_capabilities": list(self.requested_capabilities),
             "reasoning_effort": self.reasoning_effort,
+            "reasoning_budget_tokens": self.reasoning_budget_tokens,
             "structured_output": structured_output_safe_summary(self.structured_output),
             "tool_count": len(self.tools),
             "metadata_keys": sorted(str(key) for key in self.metadata.keys()),

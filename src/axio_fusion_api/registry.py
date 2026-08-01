@@ -839,6 +839,10 @@ def _profile_from_probe_row(row: Mapping[str, Any], *, status: str) -> ModelProf
         "base_url_env": row.get("base_url_env"),
         "api_key_env": row.get("api_key_env"),
         "auth_scheme": row.get("auth_scheme"),
+        "max_output_tokens_parameter": row.get(
+            "max_output_tokens_parameter",
+            row.get("maxOutputTokensParameter", "max_tokens"),
+        ),
         "models_endpoint": row.get("models_endpoint") or row.get("modelsEndpoint") or row.get("model_list_endpoint"),
         "discover_models": row.get("discover_models", row.get("discoverModels", True)),
         "canonical_model_id": row.get("canonical_model_id")
@@ -1698,6 +1702,12 @@ def normalize_profile(raw: Mapping[str, Any]) -> ModelProfile:
         base_url_env=str(raw.get("base_url_env") or _default_base_url_env(provider)),
         api_key_env=str(raw.get("api_key_env") or _default_api_key_env(provider)),
         auth_scheme=_normalize_auth_scheme(raw.get("auth_scheme") or raw.get("auth") or _default_auth_scheme(provider, api_format)),
+        max_output_tokens_parameter=str(
+            raw.get("max_output_tokens_parameter")
+            or raw.get("maxOutputTokensParameter")
+            or raw.get("max_tokens_parameter")
+            or "max_tokens"
+        ),
         models_endpoint=str(
             raw.get("models_endpoint")
             or raw.get("modelsEndpoint")
@@ -3093,6 +3103,10 @@ def provider_seed_profiles_from_env(provider_names: Sequence[str] | None = None)
                     "base_url_env": str(config.get("base_url_env") or ""),
                     "api_key_env": str(config.get("api_key_env") or ""),
                     "auth_scheme": config.get("auth_scheme"),
+        "max_output_tokens_parameter": config.get(
+            "max_output_tokens_parameter",
+            config.get("maxOutputTokensParameter", "max_tokens"),
+        ),
                     "models_endpoint": config.get("models_endpoint", "/models"),
                     "discover_models": config.get("discover_models", True),
                     "input_cost_per_million": config.get("input_cost_per_million"),
@@ -3174,6 +3188,10 @@ def provider_discovery_priors_from_env(provider_names: Sequence[str] | None = No
             "base_url_env": str(config.get("base_url_env") or "").strip(),
             "api_key_env": str(config.get("api_key_env") or "").strip(),
             "auth_scheme": config.get("auth_scheme"),
+            "max_output_tokens_parameter": config.get(
+                "max_output_tokens_parameter",
+                config.get("maxOutputTokensParameter", "max_tokens"),
+            ),
             "models_endpoint": config.get("models_endpoint", "/models"),
             "discover_models": config.get("discover_models", True),
             "capabilities": config.get("capabilities", {}),
@@ -3258,6 +3276,12 @@ def _custom_provider_models_from_config(config: Mapping[str, Any]) -> list[dict[
                     model_config.get("auth_scheme")
                     or config.get("auth_scheme")
                     or _default_auth_scheme(provider, model_api_format)
+                ),
+                "max_output_tokens_parameter": _model_config_value(
+                    config,
+                    model_config,
+                    "max_output_tokens_parameter",
+                    default="max_tokens",
                 ),
                 "models_endpoint": _model_config_value(
                     config,
@@ -3739,6 +3763,7 @@ def _normalize_model_config_row(row: Mapping[str, Any]) -> dict[str, Any]:
         "canonicalModelId": "canonical_model_id",
         "canonicalModel": "canonical_model",
         "canonicalIdentity": "canonical_identity",
+        "maxOutputTokensParameter": "max_output_tokens_parameter",
         "reasoningTransport": "reasoning_transport",
         "trafficControl": "traffic_control",
     }
@@ -3767,6 +3792,12 @@ def _discovery_model_priors_for_config(config: Mapping[str, Any]) -> dict[str, d
                 model_config.get("auth_scheme")
                 or config.get("auth_scheme")
                 or _default_auth_scheme(provider, api_format)
+            ),
+            "max_output_tokens_parameter": _model_config_value(
+                config,
+                model_config,
+                "max_output_tokens_parameter",
+                default="max_tokens",
             ),
             "models_endpoint": _model_config_value(
                 config,

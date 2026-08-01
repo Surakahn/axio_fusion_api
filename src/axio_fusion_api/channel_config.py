@@ -353,6 +353,12 @@ def _build_channel_profiles(
             "base_url_env": base_env,
             "api_key_env": key_env,
             "auth_scheme": auth_scheme,
+            "max_output_tokens_parameter": _model_value(
+                row,
+                model_row,
+                "max_output_tokens_parameter",
+                default="max_tokens",
+            ),
             "models_endpoint": _model_value(
                 row,
                 model_row,
@@ -701,6 +707,11 @@ def _model_value(
         "image_capabilities": ("image_capabilities", "imageCapabilities", "image_capability"),
         "image_probe_status": ("image_probe_status", "imageProbeStatus"),
         "reasoning_transport": ("reasoning_transport", "reasoningTransport"),
+        "max_output_tokens_parameter": (
+            "max_output_tokens_parameter",
+            "maxOutputTokensParameter",
+            "max_tokens_parameter",
+        ),
         "traffic_control": ("traffic_control", "trafficControl"),
         "privacy_tags": ("privacy_tags", "privacyTags"),
         "models_endpoint": (

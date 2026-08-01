@@ -38,6 +38,24 @@ def _profile(*, status: str = "candidate"):
     )
 
 
+def _budget_profile(*, status: str = "candidate"):
+    return normalize_profile(
+        {
+            "provider": "reasoning-reconcile-anthropic",
+            "model": "reasoning-reconcile-budget-model",
+            "canonical_model_id": "reasoning-reconcile-budget-family-v1",
+            "api_format": "anthropic",
+            "base_url_env": "RECONCILE_BASE_URL",
+            "api_key_env": "RECONCILE_API_KEY",
+            "reasoning_transport": {
+                "status": status,
+                "transport": "anthropic_thinking",
+                "supported_budget_tokens": [512, 2048],
+            },
+        }
+    )
+
+
 def _registry(profile) -> dict:
     row = profile.safe_dict()
     row["canonical_model_id"] = profile.canonical_model_id
@@ -109,6 +127,54 @@ def _probe(profile, *, binding: dict | None = None) -> dict:
     }
 
 
+def _budget_probe(profile, *, binding: dict | None = None) -> dict:
+    def accepted(budget: int) -> dict:
+        return {"budget_tokens": budget, **_accepted_attempt()}
+
+    return {
+        "schema": "axio_fusion_api.provider_reasoning_probe.v1",
+        "probe_kind": "reasoning_transport",
+        "mode": "live",
+        "network_calls_performed": True,
+        "timeout_seconds": 90,
+        "candidate_model_count_before_selection": 1,
+        "model_count": 1,
+        "selection_policy": {
+            "profile_hash_filter_enabled": False,
+            "max_models": None,
+            "max_models_per_provider": None,
+            "selected_model_count": 1,
+        },
+        "probes": [
+            {
+                "profile_id": profile.profile_id,
+                "provider": profile.provider,
+                "model": profile.model,
+                "api_format": profile.api_format,
+                "probe_kind": "reasoning_transport",
+                "probe_mode": "live",
+                "live_probe_evidence": True,
+                "status": "verified",
+                "strict_wire_shape_preserved": True,
+                "all_declared_efforts_strict_streaming": True,
+                "all_declared_budgets_strict_streaming": True,
+                "all_declared_reasoning_controls_strict_streaming": True,
+                "transport": "anthropic_thinking",
+                "declared_efforts": [],
+                "declared_budget_tokens": [512, 2048],
+                "verified_budget_tokens": [512, 2048],
+                "control": _accepted_attempt(),
+                "effort_results": [],
+                "budget_results": [accepted(512), accepted(2048)],
+                "reasoning_transport_binding": binding
+                if binding is not None
+                else reasoning_transport_probe_binding(profile),
+            }
+        ],
+        "secrets_persisted": False,
+    }
+
+
 def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
@@ -160,6 +226,31 @@ def test_reconciliation_updates_only_endpoint_bound_reasoning_status(tmp_path, m
     assert output_path.is_file()
     assert "https://reconcile.example" not in serialized
     assert "fixture-key" not in serialized
+
+
+def test_reconciliation_promotes_anthropic_budget_transport_only_after_each_budget(tmp_path, monkeypatch):
+    monkeypatch.setenv("RECONCILE_BASE_URL", "https://reconcile.example/v1")
+    monkeypatch.setenv("RECONCILE_API_KEY", "fixture-key")
+    source_profile = _budget_profile(status="candidate")
+    calibration_profile = _budget_profile(status="verified")
+    source_path = tmp_path / "budget-source.private.json"
+    calibration_path = tmp_path / "budget-calibration.private.json"
+    probe_path = tmp_path / "budget-probe.private.json"
+    _write_json(source_path, _registry(source_profile))
+    _write_json(calibration_path, _registry(calibration_profile))
+    _write_json(probe_path, _budget_probe(source_profile))
+
+    reconciliation = build_reasoning_transport_reconciliation(
+        source_registry_path=source_path,
+        calibration_registry_path=calibration_path,
+        reasoning_probe_path=probe_path,
+    )
+
+    assert reconciliation["receipt"]["status"] == "ready"
+    assert reconciliation["receipt"]["outcome_status_counts"]["verified"] == 1
+    assert reconciliation["updated_registry"]["models"][0]["reasoning_transport"][
+        "status"
+    ] == "verified"
 
 
 def test_reconciliation_rejects_probe_when_endpoint_has_changed(tmp_path, monkeypatch):

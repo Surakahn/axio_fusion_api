@@ -46,6 +46,7 @@ from .schemas import (
     FusionRequest,
     ModelProfile,
     is_sha256_digest,
+    normalize_reasoning_budget_tokens,
     normalize_reasoning_effort,
     sha256_text,
     stable_json,
@@ -335,6 +336,8 @@ _REASONING_PROBE_TRANSPORTS = {
     "responses": frozenset(
         {"responses_reasoning", "responses_reasoning_effort"}
     ),
+    "anthropic": frozenset({"anthropic_thinking"}),
+    "gemini": frozenset({"gemini_thinking_config"}),
 }
 _REASONING_PROBE_TRANSIENT_HTTP_STATUSES = frozenset({401, 403, 408, 429})
 
@@ -1204,18 +1207,51 @@ def _reasoning_probe_plan(profile: ModelProfile) -> dict[str, Any] | None:
         return None
     raw_efforts = config.get("supported_efforts")
     if not isinstance(raw_efforts, Sequence) or isinstance(raw_efforts, (str, bytes, bytearray)):
-        return None
+        raw_efforts = ()
     efforts: list[str] = []
     for raw_effort in raw_efforts:
         effort = normalize_reasoning_effort(raw_effort)
         if effort and effort not in efforts:
             efforts.append(effort)
-    if not efforts:
+    raw_budgets = config.get("supported_budget_tokens")
+    budgets: list[int] = []
+    if isinstance(raw_budgets, Sequence) and not isinstance(raw_budgets, (str, bytes, bytearray)):
+        for raw_budget in raw_budgets:
+            budget = normalize_reasoning_budget_tokens(raw_budget)
+            if budget is not None and budget not in budgets:
+                budgets.append(budget)
+    budget_map = (
+        config.get("budget_tokens_by_effort")
+        if isinstance(config.get("budget_tokens_by_effort"), Mapping)
+        else {}
+    )
+    for raw_effort in budget_map:
+        effort = normalize_reasoning_effort(raw_effort)
+        if effort and effort not in efforts:
+            efforts.append(effort)
+    budget_transport = transport in {
+        "anthropic_thinking",
+        "gemini_thinking_config",
+    }
+    if budget_transport and not budgets:
+        return None
+    if not budget_transport and (budgets or budget_map):
+        # A budget declaration on Chat/Responses has no audited payload
+        # mapping. Never let a probe claim support for a field the adapter
+        # cannot actually send.
+        return None
+    if not budget_transport and not efforts:
         return None
     return {
         "transport": transport,
         "api_format": api_format,
         "supported_efforts": tuple(efforts),
+        "supported_budget_tokens": tuple(sorted(budgets)),
+        "budget_tokens_by_effort": (
+            dict(budget_map)
+            if isinstance(budget_map, Mapping)
+            else {}
+        ),
     }
 
 
@@ -1330,35 +1366,87 @@ def _probe_one_model_reasoning_support(
             "status": "verified",
             "transport": transport,
             "supported_efforts": efforts,
+            "supported_budget_tokens": list(plan.get("supported_budget_tokens", ())),
+            "budget_tokens_by_effort": dict(
+                plan.get("budget_tokens_by_effort", {})
+                if isinstance(plan.get("budget_tokens_by_effort", {}), Mapping)
+                else {}
+            ),
         },
     )
     effort_results = []
     for effort in efforts:
+        effort_request = replace(control_request, reasoning_effort=effort)
+        mapped_budget = normalize_reasoning_budget_tokens(
+            plan.get("budget_tokens_by_effort", {}).get(effort)
+            if isinstance(plan.get("budget_tokens_by_effort", {}), Mapping)
+            else None
+        )
+        if mapped_budget is not None and transport in {
+            "anthropic_thinking",
+            "gemini_thinking_config",
+        }:
+            # Anthropic requires budget_tokens < max_tokens.  The probe must
+            # make the declared budget observable rather than accidentally
+            # suppressing it behind the tiny marker output cap.
+            effort_request = replace(
+                effort_request,
+                max_output_tokens=max(32, mapped_budget + 32),
+            )
         attempt = _run_reasoning_probe_attempt(
             probe_profile,
-            replace(control_request, reasoning_effort=effort),
+            effort_request,
             timeout=timeout,
             client=client,
             parameterized=True,
         )
         effort_results.append({"effort": effort, **attempt})
 
-    statuses = {str(row.get("status") or "") for row in effort_results}
-    if effort_results and statuses == {"accepted"}:
+    budget_results = []
+    mapped_budgets = {
+        normalize_reasoning_budget_tokens(value)
+        for value in (
+            plan.get("budget_tokens_by_effort", {}).values()
+            if isinstance(plan.get("budget_tokens_by_effort", {}), Mapping)
+            else ()
+        )
+    }
+    for raw_budget in plan.get("supported_budget_tokens", ()):
+        budget = normalize_reasoning_budget_tokens(raw_budget)
+        if budget is None or budget in mapped_budgets:
+            continue
+        budget_request = replace(
+            control_request,
+            reasoning_budget_tokens=budget,
+            max_output_tokens=max(32, budget + 32),
+        )
+        attempt = _run_reasoning_probe_attempt(
+            probe_profile,
+            budget_request,
+            timeout=timeout,
+            client=client,
+            parameterized=True,
+        )
+        budget_results.append({"budget_tokens": budget, **attempt})
+
+    all_parameterized_results = [*effort_results, *budget_results]
+    statuses = {str(row.get("status") or "") for row in all_parameterized_results}
+    if all_parameterized_results and statuses == {"accepted"}:
         status = "verified"
         reason_codes: list[str] = []
     elif "rejected" in statuses:
         status = "rejected"
-        reason_codes = ["declared_reasoning_effort_rejected"]
+        reason_codes = ["declared_reasoning_control_rejected"]
     else:
         status = "indeterminate"
-        reason_codes = ["declared_reasoning_effort_not_fully_verified"]
+        reason_codes = ["declared_reasoning_control_not_fully_verified"]
     return _reasoning_probe_profile_row(
         profile,
         plan=plan,
         status=status,
         control=control,
         effort_results=effort_results,
+        budget_results=budget_results,
         reason_codes=reason_codes,
         transport_binding=transport_binding,
     )
@@ -1525,10 +1613,12 @@ def _reasoning_probe_profile_row(
     control: Mapping[str, Any],
     effort_results: Sequence[Mapping[str, Any]],
     reason_codes: Sequence[str],
+    budget_results: Sequence[Mapping[str, Any]] = (),
     probe_mode: str = "live",
     transport_binding: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     rows = [dict(row) for row in effort_results if isinstance(row, Mapping)]
+    budget_rows = [dict(row) for row in budget_results if isinstance(row, Mapping)]
     accepted_efforts = [
         str(row.get("effort") or "")
         for row in rows
@@ -1544,7 +1634,39 @@ def _reasoning_probe_profile_row(
         for row in rows
         if row.get("status") == "indeterminate" and str(row.get("effort") or "")
     ]
-    all_attempts = [dict(control), *rows]
+    accepted_budgets = [
+        _safe_int(row.get("budget_tokens"), default=-1)
+        for row in budget_rows
+        if row.get("status") == "accepted" and row.get("budget_tokens") is not None
+    ]
+    rejected_budgets = [
+        _safe_int(row.get("budget_tokens"), default=-1)
+        for row in budget_rows
+        if row.get("status") == "rejected" and row.get("budget_tokens") is not None
+    ]
+    indeterminate_budgets = [
+        _safe_int(row.get("budget_tokens"), default=-1)
+        for row in budget_rows
+        if row.get("status") == "indeterminate" and row.get("budget_tokens") is not None
+    ]
+    budget_map = plan.get("budget_tokens_by_effort")
+    if isinstance(budget_map, Mapping):
+        for row in rows:
+            effort = normalize_reasoning_effort(row.get("effort"))
+            budget = normalize_reasoning_budget_tokens(budget_map.get(effort))
+            if budget is None:
+                continue
+            target = {
+                "accepted": accepted_budgets,
+                "rejected": rejected_budgets,
+                "indeterminate": indeterminate_budgets,
+            }.get(str(row.get("status") or ""))
+            if target is not None and budget not in target:
+                target.append(budget)
+    accepted_budgets = [value for value in accepted_budgets if value > 0]
+    rejected_budgets = [value for value in rejected_budgets if value > 0]
+    indeterminate_budgets = [value for value in indeterminate_budgets if value > 0]
+    all_attempts = [dict(control), *rows, *budget_rows]
     binding = (
         dict(transport_binding)
         if isinstance(transport_binding, Mapping)
@@ -1568,14 +1690,40 @@ def _reasoning_probe_profile_row(
         "indeterminate_efforts": indeterminate_efforts,
         "control": dict(control),
         "effort_results": rows,
+        "declared_budget_tokens": [
+            _safe_int(value, default=-1)
+            for value in plan.get("supported_budget_tokens", ())
+            if _safe_int(value, default=-1) >= 0
+        ],
+        "verified_budget_tokens": accepted_budgets,
+        "rejected_budget_tokens": rejected_budgets,
+        "indeterminate_budget_tokens": indeterminate_budgets,
+        "budget_results": budget_rows,
         "reason_codes": sorted({str(code)[:120] for code in reason_codes if str(code)}),
         "probe_mode": str(probe_mode or "live")[:32],
         "live_probe_evidence": str(probe_mode or "").strip().casefold() == "live",
         "strict_wire_shape_preserved": True,
         "all_declared_efforts_strict_streaming": bool(
             control.get("status") == "accepted"
-            and bool(rows)
-            and all(row.get("status") == "accepted" for row in rows)
+            and (
+                not rows
+                or all(row.get("status") == "accepted" for row in rows)
+            )
+        ),
+        "all_declared_budgets_strict_streaming": bool(
+            control.get("status") == "accepted"
+            and (
+                not budget_rows
+                or all(row.get("status") == "accepted" for row in budget_rows)
+            )
+        ),
+        "all_declared_reasoning_controls_strict_streaming": bool(
+            control.get("status") == "accepted"
+            and bool(rows or budget_rows)
+            and all(
+                row.get("status") == "accepted"
+                for row in [*rows, *budget_rows]
+            )
         ),
         "provider_request_count": sum(
             _safe_int(row.get("provider_request_count"), default=0)
@@ -1631,6 +1779,26 @@ def reasoning_transport_probe_binding(profile: ModelProfile) -> dict[str, Any]:
             effective = normalize_reasoning_effort(target)
             if requested and effective:
                 effort_map[requested] = effective
+    supported_budgets = []
+    raw_budgets = config.get("supported_budget_tokens")
+    if isinstance(raw_budgets, Sequence) and not isinstance(
+        raw_budgets,
+        (str, bytes, bytearray),
+    ):
+        for raw_budget in raw_budgets:
+            budget = normalize_reasoning_budget_tokens(raw_budget)
+            if budget is not None and budget not in supported_budgets:
+                supported_budgets.append(budget)
+    budget_map: dict[str, int] = {}
+    raw_budget_map = config.get("budget_tokens_by_effort")
+    if isinstance(raw_budget_map, Mapping):
+        for source, target in raw_budget_map.items():
+            effort = normalize_reasoning_effort(source)
+            budget = normalize_reasoning_budget_tokens(target)
+            if effort and budget is not None:
+                budget_map[effort] = budget
+                if budget not in supported_budgets:
+                    supported_budgets.append(budget)
     binding = {
         "schema": REASONING_TRANSPORT_BINDING_SCHEMA,
         "profile_id_sha256": sha256_text(profile.profile_id),
@@ -1645,6 +1813,8 @@ def reasoning_transport_probe_binding(profile: ModelProfile) -> dict[str, Any]:
         "transport": str(config.get("transport") or "")[:80],
         "supported_efforts": supported_efforts,
         "effort_map": dict(sorted(effort_map.items())),
+        "supported_budget_tokens": sorted(supported_budgets),
+        "budget_tokens_by_effort": dict(sorted(budget_map.items())),
         "api_format_compatible": config.get("api_format_compatible") is True,
         "raw_provider_url_persisted": False,
         "raw_provider_model_id_persisted": False,
@@ -3617,7 +3787,7 @@ def _chat_payload(
     if request.temperature is not None:
         payload["temperature"] = request.temperature
     if request.max_output_tokens is not None:
-        payload["max_tokens"] = request.max_output_tokens
+        payload[profile.max_output_tokens_parameter] = request.max_output_tokens
     if request.top_p is not None:
         payload["top_p"] = request.top_p
     if request.stop:
@@ -3981,6 +4151,7 @@ def _redact_reasoning_probe_row(row: Mapping[str, Any]) -> dict[str, Any]:
     provider = str(row.get("provider") or "")
     model = str(row.get("model") or "")
     attempts = row.get("effort_results") if isinstance(row.get("effort_results"), list) else []
+    budget_attempts = row.get("budget_results") if isinstance(row.get("budget_results"), list) else []
     declared_efforts = row.get("declared_efforts") if isinstance(row.get("declared_efforts"), list) else []
     return {
         "profile_id_sha256": sha256_text(profile_id) if profile_id else "",
@@ -4010,6 +4181,26 @@ def _redact_reasoning_probe_row(row: Mapping[str, Any]) -> dict[str, Any]:
             for value in row.get("indeterminate_efforts", [])
             if normalize_reasoning_effort(value)
         ] if isinstance(row.get("indeterminate_efforts"), list) else [],
+        "declared_budget_tokens": [
+            _safe_int(value, default=-1)
+            for value in row.get("declared_budget_tokens", [])
+            if _safe_int(value, default=-1) >= 0
+        ] if isinstance(row.get("declared_budget_tokens"), list) else [],
+        "verified_budget_tokens": [
+            _safe_int(value, default=-1)
+            for value in row.get("verified_budget_tokens", [])
+            if _safe_int(value, default=-1) >= 0
+        ] if isinstance(row.get("verified_budget_tokens"), list) else [],
+        "rejected_budget_tokens": [
+            _safe_int(value, default=-1)
+            for value in row.get("rejected_budget_tokens", [])
+            if _safe_int(value, default=-1) >= 0
+        ] if isinstance(row.get("rejected_budget_tokens"), list) else [],
+        "indeterminate_budget_tokens": [
+            _safe_int(value, default=-1)
+            for value in row.get("indeterminate_budget_tokens", [])
+            if _safe_int(value, default=-1) >= 0
+        ] if isinstance(row.get("indeterminate_budget_tokens"), list) else [],
         "control": _redact_reasoning_probe_attempt(
             row.get("control") if isinstance(row.get("control"), Mapping) else {}
         ),
@@ -4021,6 +4212,14 @@ def _redact_reasoning_probe_row(row: Mapping[str, Any]) -> dict[str, Any]:
             for item in attempts
             if isinstance(item, Mapping)
         ],
+        "budget_results": [
+            {
+                "budget_tokens": _safe_int(item.get("budget_tokens"), default=-1),
+                **_redact_reasoning_probe_attempt(item),
+            }
+            for item in budget_attempts
+            if isinstance(item, Mapping)
+        ],
         "reason_codes": [
             str(value)[:120]
             for value in row.get("reason_codes", [])
@@ -4030,6 +4229,8 @@ def _redact_reasoning_probe_row(row: Mapping[str, Any]) -> dict[str, Any]:
         "live_probe_evidence": row.get("live_probe_evidence") is True,
         "strict_wire_shape_preserved": row.get("strict_wire_shape_preserved") is True,
         "all_declared_efforts_strict_streaming": row.get("all_declared_efforts_strict_streaming") is True,
+        "all_declared_budgets_strict_streaming": row.get("all_declared_budgets_strict_streaming") is True,
+        "all_declared_reasoning_controls_strict_streaming": row.get("all_declared_reasoning_controls_strict_streaming") is True,
         "provider_request_count": _safe_int(row.get("provider_request_count"), default=0),
         "provider_request_success_count": _safe_int(row.get("provider_request_success_count"), default=0),
         "provider_request_failure_count": _safe_int(row.get("provider_request_failure_count"), default=0),
@@ -4068,6 +4269,22 @@ def _redact_reasoning_transport_binding(value: Mapping[str, Any]) -> dict[str, A
             effective = normalize_reasoning_effort(target)
             if requested and effective:
                 effort_map[requested] = effective
+    raw_budgets = value.get("supported_budget_tokens")
+    budgets = [
+        normalize_reasoning_budget_tokens(item)
+        for item in raw_budgets
+        if normalize_reasoning_budget_tokens(item) is not None
+    ] if isinstance(raw_budgets, Sequence) and not isinstance(
+        raw_budgets, (str, bytes, bytearray)
+    ) else []
+    raw_budget_map = value.get("budget_tokens_by_effort")
+    budget_map = {}
+    if isinstance(raw_budget_map, Mapping):
+        for source, target in raw_budget_map.items():
+            effort = normalize_reasoning_effort(source)
+            budget = normalize_reasoning_budget_tokens(target)
+            if effort and budget is not None:
+                budget_map[effort] = budget
     return {
         "schema": str(value.get("schema") or "")[:120],
         "profile_id_sha256": str(value.get("profile_id_sha256") or "")[:128],
@@ -4079,6 +4296,8 @@ def _redact_reasoning_transport_binding(value: Mapping[str, Any]) -> dict[str, A
         "transport": str(value.get("transport") or "")[:80],
         "supported_efforts": efforts,
         "effort_map": dict(sorted(effort_map.items())),
+        "supported_budget_tokens": sorted(set(budgets)),
+        "budget_tokens_by_effort": dict(sorted(budget_map.items())),
         "api_format_compatible": value.get("api_format_compatible") is True,
         "binding_sha256": str(value.get("binding_sha256") or "")[:128],
         "raw_provider_url_persisted": False,
@@ -4141,6 +4360,11 @@ def _reasoning_probe_redaction_source_digest_input(
                     for value in row.get("declared_efforts", [])
                     if normalize_reasoning_effort(value)
                 ] if isinstance(row.get("declared_efforts"), list) else [],
+                "declared_budget_tokens": [
+                    normalize_reasoning_budget_tokens(value)
+                    for value in row.get("declared_budget_tokens", [])
+                    if normalize_reasoning_budget_tokens(value) is not None
+                ] if isinstance(row.get("declared_budget_tokens"), list) else [],
                 "reasoning_transport_binding": _redact_reasoning_transport_binding(
                     row.get("reasoning_transport_binding")
                     if isinstance(row.get("reasoning_transport_binding"), Mapping)
@@ -4157,6 +4381,16 @@ def _reasoning_probe_redaction_source_digest_input(
                     for item in row.get("effort_results", [])
                     if isinstance(item, Mapping)
                 ] if isinstance(row.get("effort_results"), list) else [],
+                "budget_results": [
+                    {
+                        "budget_tokens": normalize_reasoning_budget_tokens(
+                            item.get("budget_tokens")
+                        ),
+                        **_redact_reasoning_probe_attempt(item),
+                    }
+                    for item in row.get("budget_results", [])
+                    if isinstance(item, Mapping)
+                ] if isinstance(row.get("budget_results"), list) else [],
             }
             for row in probes
             if isinstance(row, Mapping)
@@ -5265,6 +5499,26 @@ def _anthropic_payload(
         payload["top_p"] = request.top_p
     if request.stop:
         payload["stop_sequences"] = list(request.stop)
+    reasoning_transport, reasoning_budget = profile.resolve_reasoning_budget(
+        request.reasoning_effort,
+        request.reasoning_budget_tokens,
+    )
+    if reasoning_transport == "anthropic_thinking" and reasoning_budget is not None:
+        # Anthropic counts thinking tokens inside max_tokens. Do not silently
+        # exceed an explicit caller bound; when omitted, reserve a bounded
+        # visible-output margin in the native total budget.
+        if request.max_output_tokens is not None:
+            if reasoning_budget < int(request.max_output_tokens):
+                payload["thinking"] = {
+                    "type": "enabled",
+                    "budget_tokens": reasoning_budget,
+                }
+        else:
+            payload["max_tokens"] = max(1024, reasoning_budget + 1024)
+            payload["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": reasoning_budget,
+            }
     payload.update(structured_output_wire_fields(request.structured_output, target_format="anthropic"))
     tools = provider_tool_declarations(request.tools, api_format="anthropic") if profile.tool_calling_eligible else []
     if tools:
@@ -5300,6 +5554,18 @@ def _gemini_payload(
         payload["generationConfig"]["topP"] = request.top_p
     if request.stop:
         payload["generationConfig"]["stopSequences"] = list(request.stop)
+    reasoning_transport, reasoning_budget = profile.resolve_reasoning_budget(
+        request.reasoning_effort,
+        request.reasoning_budget_tokens,
+    )
+    if reasoning_transport == "gemini_thinking_config" and reasoning_budget is not None:
+        if (
+            request.max_output_tokens is None
+            or reasoning_budget < int(request.max_output_tokens)
+        ):
+            payload["generationConfig"]["thinkingConfig"] = {
+                "thinkingBudget": reasoning_budget,
+            }
     structured_fields = structured_output_wire_fields(
         request.structured_output,
         target_format="gemini",

@@ -243,6 +243,9 @@ _RESEARCH_SINGLETON_RECOVERY_ERRORS = frozenset(
         "prefusion_research_batch_candidate_count_mismatch",
         "prefusion_research_reasoning_transport_format_invalid",
         "prefusion_research_reasoning_native_efforts_missing",
+        "prefusion_research_reasoning_budget_tokens_missing",
+        "prefusion_research_reasoning_budget_transport_mismatch",
+        "prefusion_research_reasoning_non_candidate_declaration_invalid",
     }
 )
 _RESEARCH_MERGE_STRATEGY = "deterministic_research_quality_confidence_candidate_id"
@@ -304,6 +307,8 @@ _RESEARCH_REASONING_CAPABILITY_KEYS = frozenset(
         "transport",
         "native_efforts",
         "effort_map",
+        "supported_budget_tokens",
+        "budget_tokens_by_effort",
         "evidence_ids",
         "confidence",
         "token_cost_model",
@@ -315,6 +320,8 @@ _REASONING_TRANSPORT_API_FORMATS = {
     "chat_reasoning_effort": "chat",
     "responses_reasoning": "responses",
     "responses_reasoning_effort": "responses",
+    "anthropic_thinking": "anthropic",
+    "gemini_thinking_config": "gemini",
 }
 
 
@@ -1045,7 +1052,9 @@ def run_prefusion_model_screening(
             "research_agent_must_return_model_specific_reasoning_capability": True,
             "research_agent_reasoning_transport_is_closed_enum": True,
             "research_agent_must_list_exact_native_efforts": True,
+            "research_agent_must_list_exact_native_budget_tokens": True,
             "research_agent_must_not_assume_all_effort_levels": True,
+            "research_agent_must_not_assume_all_budget_levels": True,
             "research_agent_reasoning_cost_evidence_is_separate_from_wire_support": True,
             "research_agent_uses_bounded_candidate_batches": True,
             "research_candidate_batch_size": configured_batch_size,
@@ -1061,7 +1070,7 @@ def run_prefusion_model_screening(
             "stream_probe_requires_all_samples_success": True,
             "stream_probe_requires_each_sample_within_90_seconds": True,
             "reasoning_probe_requires_complete_candidate_cohort": True,
-            "reasoning_probe_requires_control_and_each_declared_effort": True,
+            "reasoning_probe_requires_control_and_each_declared_effort_or_budget": True,
             "reasoning_probe_requires_endpoint_bound_strict_streaming": True,
             "unverified_reasoning_is_never_forwarded": True,
             "local_model_weights_loaded": False,
@@ -1543,18 +1552,40 @@ def _normalize_research_reasoning_capability(
     native_efforts = list(normalized.get("native_efforts") or [])
     effort_map = normalized.get("effort_map")
     effort_map = effort_map if isinstance(effort_map, Mapping) else {}
+    supported_budgets = list(normalized.get("supported_budget_tokens") or [])
+    budget_map = normalized.get("budget_tokens_by_effort")
+    budget_map = budget_map if isinstance(budget_map, Mapping) else {}
+    budget_transport = transport in {
+        "anthropic_thinking",
+        "gemini_thinking_config",
+    }
     valid_empty_transport = raw_transport in {"", "none", "unknown", "unsupported"}
     if status == "candidate":
         if not transport or not normalized.get("api_format_compatible"):
             raise ModelScreeningError(
                 "prefusion_research_reasoning_transport_format_invalid"
             )
-        if not native_efforts:
+        if budget_transport and not supported_budgets:
+            raise ModelScreeningError(
+                "prefusion_research_reasoning_budget_tokens_missing"
+            )
+        if not budget_transport and not native_efforts:
             raise ModelScreeningError(
                 "prefusion_research_reasoning_native_efforts_missing"
             )
+        if not budget_transport and (supported_budgets or budget_map):
+            raise ModelScreeningError(
+                "prefusion_research_reasoning_budget_transport_mismatch"
+            )
     else:
-        if not valid_empty_transport or transport or native_efforts or effort_map:
+        if (
+            not valid_empty_transport
+            or transport
+            or native_efforts
+            or effort_map
+            or supported_budgets
+            or budget_map
+        ):
             raise ModelScreeningError(
                 "prefusion_research_reasoning_non_candidate_declaration_invalid"
             )
@@ -5997,6 +6028,8 @@ def _build_research_prompt(
                     "transport": "",
                     "native_efforts": [],
                     "effort_map": {},
+                    "supported_budget_tokens": [],
+                    "budget_tokens_by_effort": {},
                     "evidence_ids": (
                         candidate_source_slots.get(candidate_id) or source_ids
                     )[:1],
@@ -6044,12 +6077,16 @@ def _build_research_prompt(
         repair_instruction += (
             "Reasoning repair rule: status=candidate is allowed only when this "
             "candidate's evidence proves the exact protocol-local transport and "
-            "at least one exact native_efforts value. Do not infer or copy an "
-            "effort list from the provider, another model, or the operator "
-            "template. If the evidence cannot prove the transport or every "
-            "listed native effort, return status=unknown with transport='', "
-            "native_efforts=[], effort_map={}, evidence_ids=[], confidence=0.0, "
-            "and unknown token/latency cost models.\n\n"
+            "its exact native controls. Chat/Responses transports require at "
+            "least one exact native_efforts value. Anthropic/Gemini budget "
+            "transports require at least one exact supported_budget_tokens value; "
+            "native_efforts may be empty when no native effort enum exists. Do "
+            "not infer or copy controls from the provider, another model, or the "
+            "operator template. If the evidence cannot prove the transport or "
+            "every listed control, return status=unknown with transport='', "
+            "native_efforts=[], effort_map={}, supported_budget_tokens=[], "
+            "budget_tokens_by_effort={}, evidence_ids=[], confidence=0.0, and "
+            "unknown token/latency cost models.\n\n"
         )
     return (
         "Prompt contract: "
@@ -6142,29 +6179,32 @@ def _build_research_prompt(
         "label, or another model's documentation. For each candidate, inspect "
         "the candidate-scoped evidence and return exactly one reasoning_capability "
         "object. Use status=candidate only when the evidence identifies a "
-        "specific protocol-local transport and one or more native effort levels; "
-        "use status=unsupported only for explicit evidence that the model or "
-        "endpoint does not expose reasoning control; otherwise use status=unknown. "
-        "The only allowed candidate transports are chat_reasoning_effort for Chat "
-        "Completions, responses_reasoning for nested Responses reasoning.effort, "
-        "and responses_reasoning_effort for a top-level Responses reasoning_effort "
-        "field. The transport name is a closed enum, not a place to write an "
-        "arbitrary JSON path. native_efforts must list only the exact native "
+        "specific protocol-local transport and its exact native controls; use "
+        "status=unsupported only for explicit evidence that the model or endpoint "
+        "does not expose reasoning control; otherwise use status=unknown. The "
+        "allowed transports are chat_reasoning_effort for Chat Completions, "
+        "responses_reasoning for nested Responses reasoning.effort, "
+        "responses_reasoning_effort for a top-level Responses reasoning_effort "
+        "field, anthropic_thinking for Anthropic thinking.budget_tokens, and "
+        "gemini_thinking_config for Gemini generationConfig.thinkingConfig. "
+        "The transport name is a closed enum, not a place to write an arbitrary "
+        "JSON path. Chat/Responses native_efforts must list only the exact native "
         "values supported by this model at this endpoint, in increasing order; "
         "do not fill low, medium, high, xhigh, or max unless the evidence supports "
-        "each one. An effort_map is optional and must contain only explicit, "
-        "non-escalating logical-to-native downgrades whose targets are in "
-        "native_efforts. Never manufacture a map merely to fill the template. "
-        "If the supplied evidence does not establish a reasoning transport, "
-        "return status=unknown with an empty evidence_ids array, zero confidence, "
-        "and unknown token/latency cost models; this is an intentional admission "
-        "of uncertainty and the live endpoint probe remains authoritative. Do "
-        "not cite a source slot from another candidate merely to avoid an empty "
-        "array. "
-        "For Anthropic or Gemini candidates, use unknown or unsupported unless "
-        "this contract is extended with a separately audited transport; do not "
-        "pretend that an OpenAI field works there. reasoning_capability.evidence_ids "
-        "must cite only this candidate's allowed source slots.\n\n"
+        "each one. Anthropic/Gemini native budget transports must list exact integer "
+        "supported_budget_tokens values, and may use budget_tokens_by_effort only "
+        "when the evidence explicitly maps a logical effort to one of those exact "
+        "budgets. Never manufacture a map merely to fill the template. An "
+        "effort_map is optional and must contain only explicit, non-escalating "
+        "logical-to-native downgrades whose targets are in native_efforts. Do not "
+        "put budget controls on Chat/Responses transports. If the supplied evidence "
+        "does not establish a reasoning transport or exact control set, return "
+        "status=unknown with empty transport/control/evidence fields, zero "
+        "confidence, and unknown token/latency cost models; this is an intentional "
+        "admission of uncertainty and the live endpoint probe remains authoritative. "
+        "Do not cite a source slot from another candidate merely to avoid an empty "
+        "array. reasoning_capability.evidence_ids must cite only this candidate's "
+        "allowed source slots.\n\n"
         "Reasoning cost rule: report token_cost_model and latency_cost_model as "
         "provider_documented only when the cited source states a cost relationship; "
         "otherwise use unknown. The runtime may apply a separate monotonic effort "
@@ -6666,6 +6706,20 @@ def _project_screening_reasoning_capability(value: Any) -> dict[str, Any]:
                 if str(key) and str(value)
             )
         ),
+        "supported_budget_tokens": [
+            int(value)
+            for value in capability.get("supported_budget_tokens", [])
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0
+        ],
+        "budget_tokens_by_effort": {
+            str(key): int(value)
+            for key, value in (
+                capability.get("budget_tokens_by_effort")
+                if isinstance(capability.get("budget_tokens_by_effort"), Mapping)
+                else {}
+            ).items()
+            if str(key) and isinstance(value, int) and not isinstance(value, bool) and value > 0
+        },
         "evidence_ids": _normalize_source_ids(capability.get("evidence_ids")),
         "confidence": _bounded_optional_float(capability.get("confidence")),
         "token_cost_model": str(capability.get("token_cost_model") or "unknown"),
@@ -6765,10 +6819,16 @@ def _is_model_scoped_reasoning_candidate(value: Any) -> bool:
         return False
     if str(value.get("status") or "").strip().casefold() != "candidate":
         return False
-    if not str(value.get("transport") or "").strip():
+    transport = str(value.get("transport") or "").strip().casefold()
+    if not transport:
         return False
     efforts = value.get("supported_efforts")
-    return isinstance(efforts, list) and bool(efforts)
+    has_efforts = isinstance(efforts, list) and bool(efforts)
+    budgets = value.get("supported_budget_tokens")
+    has_budgets = isinstance(budgets, list) and bool(budgets)
+    if transport in {"anthropic_thinking", "gemini_thinking_config"}:
+        return has_budgets
+    return has_efforts and not has_budgets
 
 
 def _reasoning_transport_from_research(
@@ -6789,24 +6849,51 @@ def _reasoning_transport_from_research(
         if isinstance(capability.get("effort_map"), Mapping)
         else {}
     )
+    supported_budgets = [
+        int(value)
+        for value in capability.get("supported_budget_tokens", [])
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0
+    ] if isinstance(capability.get("supported_budget_tokens"), list) else []
+    budget_map = (
+        dict(capability.get("budget_tokens_by_effort"))
+        if isinstance(capability.get("budget_tokens_by_effort"), Mapping)
+        else {}
+    )
     if status != "candidate":
         return {
             "status": status if status in {"unknown", "unsupported"} else "unknown",
             "transport": "",
             "supported_efforts": [],
             "effort_map": {},
+            "supported_budget_tokens": [],
+            "budget_tokens_by_effort": {},
             "api_format_compatible": False,
         }
     expected = {
         "chat": "chat_reasoning_effort",
         "responses": transport,
+        "anthropic": "anthropic_thinking",
+        "gemini": "gemini_thinking_config",
     }.get(_normalize_research_api_format(profile.api_format), "")
-    if not transport or expected != transport or not native_efforts:
+    budget_transport = transport in {
+        "anthropic_thinking",
+        "gemini_thinking_config",
+    }
+    controls_present = bool(supported_budgets) if budget_transport else bool(native_efforts)
+    if (
+        not transport
+        or expected != transport
+        or not controls_present
+        or (budget_transport and (native_efforts or effort_map))
+        or (not budget_transport and (supported_budgets or budget_map))
+    ):
         return {
             "status": "unknown",
             "transport": "",
             "supported_efforts": [],
             "effort_map": {},
+            "supported_budget_tokens": [],
+            "budget_tokens_by_effort": {},
             "api_format_compatible": False,
         }
     return {
@@ -6814,7 +6901,10 @@ def _reasoning_transport_from_research(
         "transport": transport,
         "supported_efforts": native_efforts,
         "effort_map": effort_map,
+        "supported_budget_tokens": supported_budgets,
+        "budget_tokens_by_effort": budget_map,
         "api_format_compatible": True,
+        "scope": "model",
     }
 
 
@@ -7144,7 +7234,7 @@ def _empty_reasoning_probe_payload(
         "verification_contract": {
             "requires_model_level_candidate_declaration": True,
             "requires_protocol_local_wire_field": True,
-            "requires_control_and_every_declared_effort": True,
+            "requires_control_and_every_declared_effort_or_budget": True,
             "requires_strict_sse_or_ndjson_streaming": True,
             "benchmark_labels_or_cases_used": False,
         },
@@ -7236,9 +7326,25 @@ def _prefusion_reasoning_probe_verified(
     ):
         return False
     config = profile.reasoning_transport
-    declared = _normalized_reasoning_efforts(config.get("supported_efforts"))
+    transport = str(config.get("transport") or "").strip().casefold()
+    declared = _reasoning_probe_efforts(config)
     observed = _normalized_reasoning_efforts(row.get("declared_efforts"))
-    if not declared or declared != observed:
+    budget_transport = transport in {
+        "anthropic_thinking",
+        "gemini_thinking_config",
+    }
+    if (not budget_transport and not declared) or declared != observed:
+        return False
+    declared_budgets = _normalized_reasoning_budgets(
+        config.get("supported_budget_tokens")
+    )
+    observed_budgets = _normalized_reasoning_budgets(
+        row.get("declared_budget_tokens")
+    )
+    if budget_transport:
+        if not declared_budgets or observed_budgets != declared_budgets:
+            return False
+    elif declared_budgets or observed_budgets:
         return False
     control = row.get("control") if isinstance(row.get("control"), Mapping) else {}
     if not _prefusion_reasoning_attempt_accepted(control):
@@ -7250,10 +7356,40 @@ def _prefusion_reasoning_probe_verified(
         for item in attempts
         if isinstance(item, Mapping) and normalize_reasoning_effort(item.get("effort"))
     }
-    return all(
+    efforts_valid = all(
         _prefusion_reasoning_attempt_accepted(by_effort.get(effort, {}))
         for effort in declared
     )
+    if not efforts_valid and declared:
+        return False
+    if not budget_transport:
+        return True
+    if row.get("all_declared_budgets_strict_streaming") is not True:
+        return False
+    budget_rows = row.get("budget_results")
+    budget_rows = budget_rows if isinstance(budget_rows, list) else []
+    by_budget = {
+        _safe_nonnegative_int(item.get("budget_tokens")): item
+        for item in budget_rows
+        if isinstance(item, Mapping)
+        and _safe_nonnegative_int(item.get("budget_tokens")) > 0
+    }
+    budget_map = config.get("budget_tokens_by_effort")
+    for budget in declared_budgets:
+        mapped_efforts = [
+            effort
+            for effort, raw_budget in budget_map.items()
+            if normalize_reasoning_budget_tokens(raw_budget) == budget
+        ] if isinstance(budget_map, Mapping) else []
+        if mapped_efforts:
+            if not any(
+                _prefusion_reasoning_attempt_accepted(by_effort.get(effort, {}))
+                for effort in mapped_efforts
+            ):
+                return False
+        elif not _prefusion_reasoning_attempt_accepted(by_budget.get(budget, {})):
+            return False
+    return row.get("all_declared_reasoning_controls_strict_streaming") is True
 
 
 def _normalized_reasoning_efforts(value: Any) -> list[str]:
@@ -7266,6 +7402,41 @@ def _normalized_reasoning_efforts(value: Any) -> list[str]:
         if effort and effort not in normalized:
             normalized.append(effort)
     return normalized
+
+
+def _reasoning_probe_efforts(config: Mapping[str, Any]) -> list[str]:
+    """Return logical effort controls exercised by a strict probe.
+
+    Anthropic and Gemini may expose only integer budgets. When an operator or
+    research Agent supplies an explicit logical-effort-to-budget map, those
+    map keys are still probe controls even though ``native_efforts`` is empty.
+    """
+
+    efforts = _normalized_reasoning_efforts(config.get("supported_efforts"))
+    transport = str(config.get("transport") or "").strip().casefold()
+    if transport in {"anthropic_thinking", "gemini_thinking_config"}:
+        budget_map = config.get("budget_tokens_by_effort")
+        if isinstance(budget_map, Mapping):
+            for raw_effort in budget_map:
+                effort = normalize_reasoning_effort(raw_effort)
+                if effort and effort not in efforts:
+                    efforts.append(effort)
+    return efforts
+
+
+def _normalized_reasoning_budgets(value: Any) -> list[int]:
+    values = value if isinstance(value, Sequence) and not isinstance(
+        value, (str, bytes, bytearray)
+    ) else []
+    normalized: list[int] = []
+    for item in values:
+        try:
+            budget = int(item)
+        except (TypeError, ValueError):
+            continue
+        if budget > 0 and budget not in normalized:
+            normalized.append(budget)
+    return sorted(normalized)
 
 
 def _prefusion_reasoning_probe_rejected(
@@ -7282,15 +7453,16 @@ def _prefusion_reasoning_probe_rejected(
     control = row.get("control") if isinstance(row.get("control"), Mapping) else {}
     if not _prefusion_reasoning_attempt_accepted(control):
         return False
-    attempts = row.get("effort_results")
-    return bool(
-        isinstance(attempts, list)
-        and any(
-            isinstance(item, Mapping)
-            and str(item.get("status") or "").strip().casefold() == "rejected"
-            and 400 <= _safe_nonnegative_int(item.get("http_status")) < 500
-            for item in attempts
-        )
+    attempts: list[Any] = []
+    if isinstance(row.get("effort_results"), list):
+        attempts.extend(row.get("effort_results"))
+    if isinstance(row.get("budget_results"), list):
+        attempts.extend(row.get("budget_results"))
+    return any(
+        isinstance(item, Mapping)
+        and str(item.get("status") or "").strip().casefold() == "rejected"
+        and 400 <= _safe_nonnegative_int(item.get("http_status")) < 500
+        for item in attempts
     )
 
 
