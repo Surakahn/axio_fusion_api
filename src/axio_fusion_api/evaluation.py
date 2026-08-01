@@ -50,6 +50,7 @@ from .registry import (
     provider_configuration_source_summary,
     provider_configured_profiles_from_env,
     provider_seed_profiles_from_env,
+    validate_prefusion_registry_handoff,
 )
 from .schemas import (
     PUBLIC_MODELS,
@@ -4409,18 +4410,48 @@ def _registry_claim_readiness_receipt(registry_path: str | Path | None) -> dict[
     readiness = payload.get("readiness") if isinstance(payload.get("readiness"), Mapping) else {}
     portfolio_summary = _registry_provider_portfolio_claim_summary(registry_path, artifact_valid=artifact["valid_json_object"])
     generated_from_probe = payload.get("generated_from_probe") is True
-    final_ready = readiness.get("final_claim_registry_ready") is True
-    live_proven = readiness.get("live_probe_proven") is True
+    generated_from_prefusion = payload.get("generated_from_prefusion_screening") is True
+    prefusion_validation: dict[str, Any] = {}
+    if artifact["valid_json_object"] and generated_from_prefusion:
+        try:
+            prefusion_validation = validate_prefusion_registry_handoff(
+                payload,
+                require_ready=True,
+            )
+        except Exception:  # noqa: BLE001 - readiness must fail closed
+            prefusion_validation = {
+                "valid": False,
+                "reason_codes": ["prefusion_registry_handoff_validation_failed"],
+            }
+    prefusion_handoff_valid = prefusion_validation.get("valid") is True
+    probe_backed_registry = generated_from_probe or prefusion_handoff_valid
+    final_ready = (
+        readiness.get("final_claim_registry_ready") is True
+        if generated_from_probe
+        else prefusion_handoff_valid and readiness.get("ready") is True
+    )
+    live_proven = (
+        readiness.get("live_probe_proven") is True
+        if generated_from_probe
+        else prefusion_handoff_valid
+    )
     blockers: list[str] = []
     if registry_path is None:
         blockers.append("registry_path_missing_for_final_claim")
     elif not artifact["exists"] or not artifact["valid_json_object"]:
         blockers.append("registry_artifact_unavailable_for_final_claim")
-    if artifact["valid_json_object"] and not generated_from_probe:
+    if artifact["valid_json_object"] and not probe_backed_registry:
         blockers.append("registry_not_generated_from_probe")
-    if artifact["valid_json_object"] and generated_from_probe and not live_proven:
+    if artifact["valid_json_object"] and generated_from_prefusion and not prefusion_handoff_valid:
+        blockers.append("registry_prefusion_handoff_invalid")
+        blockers.extend(
+            f"registry_prefusion_{str(reason)}"
+            for reason in prefusion_validation.get("reason_codes", [])
+            if str(reason)
+        )
+    if artifact["valid_json_object"] and probe_backed_registry and not live_proven:
         blockers.append("registry_live_probe_evidence_missing")
-    if artifact["valid_json_object"] and generated_from_probe and not final_ready:
+    if artifact["valid_json_object"] and probe_backed_registry and not final_ready:
         blockers.append("registry_final_claim_readiness_false")
     for reason in readiness.get("blockers", []) if isinstance(readiness.get("blockers"), list) else []:
         blockers.append(f"registry_readiness_{str(reason)}")
@@ -4445,6 +4476,9 @@ def _registry_claim_readiness_receipt(registry_path: str | Path | None) -> dict[
         "registry_artifact_valid_json": artifact["valid_json_object"],
         "registry_schema": artifact["schema"],
         "generated_from_probe": generated_from_probe,
+        "generated_from_prefusion_screening": generated_from_prefusion,
+        "prefusion_handoff_valid": prefusion_handoff_valid,
+        "probe_backed_registry": probe_backed_registry,
         "readiness_status": str(readiness.get("status") or ""),
         "final_claim_registry_ready": final_ready and not blockers,
         "live_probe_proven": live_proven,
@@ -9032,7 +9066,7 @@ def build_fusion_live_readiness(
             "provided": registry_readiness.get("registry_path_provided") is True,
             "exists": registry_readiness.get("registry_artifact_exists") is True,
             "valid": registry_readiness.get("registry_artifact_valid_json") is True,
-            "generated_from_probe": registry_readiness.get("generated_from_probe") is True,
+            "generated_from_probe": registry_readiness.get("probe_backed_registry") is True,
             "live_probe_proven": registry_readiness.get("live_probe_proven") is True,
             "final_claim_registry_ready": registry_readiness.get("final_claim_registry_ready") is True,
             "live_available_model_count": _optional_int(registry_readiness.get("live_available_model_count")) or 0,

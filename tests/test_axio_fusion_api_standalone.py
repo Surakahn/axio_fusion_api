@@ -19744,6 +19744,45 @@ def test_standalone_benchmark_readiness_requires_live_probe_registry_for_final_c
     assert '"secrets_persisted": true' not in serialized
 
 
+def test_standalone_benchmark_readiness_accepts_valid_prefusion_registry(tmp_path, monkeypatch):
+    registry_path = _write_live_runbook_registry_fixture(tmp_path)
+    portfolio_profiles = load_registry(registry_path)
+    payload = json.loads(registry_path.read_text(encoding="utf-8"))
+    payload.pop("generated_from_probe", None)
+    payload["generated_from_prefusion_screening"] = True
+    payload["readiness"]["ready"] = True
+    payload["readiness"].pop("final_claim_registry_ready", None)
+    payload["readiness"].pop("live_probe_proven", None)
+    registry_path.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(
+        evaluation_module,
+        "validate_prefusion_registry_handoff",
+        lambda value, require_ready=True: {
+            "valid": require_ready,
+            "reason_codes": [],
+        },
+    )
+    # The complete physical/logical handoff contract is covered by the
+    # model-screening tests. This boundary test isolates evaluation's
+    # classification of an already-validated pre-Fusion registry while
+    # keeping the portfolio audit backed by the fixture's real profiles.
+    monkeypatch.setattr(
+        evaluation_module,
+        "load_registry",
+        lambda _path: portfolio_profiles,
+    )
+
+    receipt = _registry_claim_readiness_receipt(registry_path)
+
+    assert receipt["generated_from_probe"] is False
+    assert receipt["generated_from_prefusion_screening"] is True
+    assert receipt["prefusion_handoff_valid"] is True
+    assert receipt["probe_backed_registry"] is True
+    assert receipt["live_probe_proven"] is True
+    assert receipt["final_claim_registry_ready"] is True
+    assert "registry_not_generated_from_probe" not in receipt["final_claim_blocking_reasons"]
+
+
 def test_standalone_official_harness_suites_require_import_receipts_for_readiness(tmp_path):
     registry_path = _benchmark_registry_path(tmp_path)
     dataset_path = tmp_path / "livecodebench.jsonl"
