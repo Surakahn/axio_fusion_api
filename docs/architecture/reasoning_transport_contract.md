@@ -257,6 +257,20 @@ latency, status code class, stream framing, and output hashes. Neither form
 stores endpoint values, credentials, raw prompts, raw outputs, or hidden
 reasoning.
 
+The live probe also records two sorted, hash-only profile sets: the complete
+candidate set considered before selection and the exact selected set that
+received probe rows. Each set has its own SHA-256 digest, and the selected set
+must be a subset of the candidate set. Handoff validation uses these sets for
+the probe counts and required-contract flag, so a real selection limit or
+provider-fair selection cannot be confused with a missing research declaration.
+The probe selection policy repeats the same sets and digests, binding the
+selection decision to the evidence without retaining provider responses.
+
+The operational role probe covers the complete admitted profile cohort for its
+requested high-impact roles. A profile with no admitted target receives an
+explicit empty receipt with `skipped_no_role_targets`; that receipt records no
+role capability and cannot promote Critic, Judge, or Synthesizer admission.
+
 The endpoint binding is captured immediately before the probe's first network
 request. This prevents a long-running probe from being attributed to a channel
 target that an operator configured only after the request began. Local

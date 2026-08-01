@@ -1141,6 +1141,18 @@ def probe_provider_reasoning_support(
         "rejected_count": status_counts.get("rejected", 0),
         "indeterminate_count": status_counts.get("indeterminate", 0),
         "status_counts": dict(sorted(status_counts.items())),
+        "candidate_profile_hashes": list(
+            selection_policy.get("candidate_profile_hashes", [])
+        ),
+        "selected_profile_hashes": list(
+            selection_policy.get("selected_profile_hashes", [])
+        ),
+        "candidate_profile_set_sha256": str(
+            selection_policy.get("candidate_profile_set_sha256") or ""
+        ),
+        "selected_profile_set_sha256": str(
+            selection_policy.get("selected_profile_set_sha256") or ""
+        ),
         "probes": rows,
         "selection_policy": selection_policy,
         "verification_contract": {
@@ -3696,8 +3708,10 @@ def _select_probe_profiles(
         if global_limit is not None
         else provider_limited
     )
-    candidate_hashes = {sha256_text(profile.profile_id) for profile in candidates}
-    matched_hashes = sorted(candidate_hashes.intersection(requested_hash_set))
+    candidate_hashes = sorted(
+        {sha256_text(profile.profile_id) for profile in candidates}
+    )
+    matched_hashes = sorted(set(candidate_hashes).intersection(requested_hash_set))
     unmatched_hashes = sorted(requested_hash_set.difference(candidate_hashes))
     selected_hashes = [sha256_text(profile.profile_id) for profile in selected]
     return selected, {
@@ -3710,11 +3724,16 @@ def _select_probe_profiles(
         "unmatched_profile_hash_count": len(unmatched_hashes),
         "matched_profile_hashes": matched_hashes,
         "unmatched_profile_hashes": unmatched_hashes,
+        "candidate_profile_hashes": candidate_hashes,
+        "candidate_profile_set_sha256": sha256_text(stable_json(candidate_hashes)),
         "candidate_model_count_before_selection": len(candidates),
         "candidate_model_count_after_hash_filter": len(hash_filtered),
         "candidate_model_count_after_per_provider_limit": len(provider_limited),
         "selected_model_count": len(selected),
         "selected_profile_hashes": selected_hashes,
+        "selected_profile_set_sha256": sha256_text(
+            stable_json(sorted(set(selected_hashes)))
+        ),
         "max_models": global_limit,
         "max_models_per_provider": per_provider_limit,
         "global_limit_policy": "provider_fair_round_robin" if global_limit is not None else "unbounded",

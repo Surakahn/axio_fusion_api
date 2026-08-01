@@ -2079,11 +2079,20 @@ def _validate_prefusion_reasoning_handoff(
         issues.append("prefusion_reasoning_research_rows_incomplete")
     probe = report.get("reasoning_probe")
     probe = probe if isinstance(probe, Mapping) else {}
-    expected_candidate_profile_hashes = {
+    researched_candidate_profile_hashes = {
         str(replica.get("profile_id_sha256") or "").strip().lower()
         for row in candidate_rows
         for replica in (
             row.get("replicas") if isinstance(row.get("replicas"), list) else []
+        )
+        if isinstance(replica, Mapping)
+        and is_sha256_digest(replica.get("profile_id_sha256"))
+    }
+    researched_profile_hashes = {
+        str(replica.get("profile_id_sha256") or "").strip().lower()
+        for row in rows
+        for replica in (
+            row.get("replicas") if isinstance(row, Mapping) else []
         )
         if isinstance(replica, Mapping)
         and is_sha256_digest(replica.get("profile_id_sha256"))
@@ -2095,6 +2104,108 @@ def _validate_prefusion_reasoning_handoff(
         for row in probe_rows
         if isinstance(row, Mapping) and str(row.get("profile_id") or "")
     }
+    selection_policy = probe.get("selection_policy")
+    selection_policy = selection_policy if isinstance(selection_policy, Mapping) else {}
+
+    def normalized_hashes(value: Any, code: str) -> tuple[list[str], bool]:
+        if not isinstance(value, list):
+            issues.append(code)
+            return [], False
+        result: list[str] = []
+        valid = True
+        for item in value:
+            digest = str(item or "").strip().lower()
+            if not is_sha256_digest(digest) or digest in result:
+                valid = False
+                continue
+            result.append(digest)
+        result.sort()
+        if not valid:
+            issues.append(code)
+        return result, valid
+
+    explicit_profile_sets = any(
+        key in probe
+        for key in (
+            "candidate_profile_hashes",
+            "selected_profile_hashes",
+            "candidate_profile_set_sha256",
+            "selected_profile_set_sha256",
+        )
+    )
+    if explicit_profile_sets:
+        candidate_profile_hashes, candidate_hashes_valid = normalized_hashes(
+            probe.get("candidate_profile_hashes"),
+            "prefusion_reasoning_probe_candidate_profile_hashes_invalid",
+        )
+        selected_profile_hashes, selected_hashes_valid = normalized_hashes(
+            probe.get("selected_profile_hashes"),
+            "prefusion_reasoning_probe_selected_profile_hashes_invalid",
+        )
+        expected_candidate_set_digest = sha256_text(
+            stable_json(candidate_profile_hashes)
+        )
+        expected_selected_set_digest = sha256_text(
+            stable_json(selected_profile_hashes)
+        )
+        if str(probe.get("candidate_profile_set_sha256") or "").strip().lower() != (
+            expected_candidate_set_digest
+        ):
+            issues.append("prefusion_reasoning_probe_candidate_profile_set_digest_invalid")
+        if str(probe.get("selected_profile_set_sha256") or "").strip().lower() != (
+            expected_selected_set_digest
+        ):
+            issues.append("prefusion_reasoning_probe_selected_profile_set_digest_invalid")
+        for key, expected_digest in (
+            ("candidate_profile_set_sha256", expected_candidate_set_digest),
+            ("selected_profile_set_sha256", expected_selected_set_digest),
+        ):
+            policy_digest = str(selection_policy.get(key) or "").strip().lower()
+            if policy_digest and policy_digest != expected_digest:
+                issues.append(
+                    f"prefusion_reasoning_probe_selection_{key}_invalid"
+                )
+        policy_candidate_hashes = selection_policy.get("candidate_profile_hashes")
+        if isinstance(policy_candidate_hashes, list):
+            policy_candidate_hashes, _ = normalized_hashes(
+                policy_candidate_hashes,
+                "prefusion_reasoning_probe_selection_candidate_profile_hashes_invalid",
+            )
+            if policy_candidate_hashes != candidate_profile_hashes:
+                issues.append("prefusion_reasoning_probe_candidate_profile_set_mismatch")
+        policy_selected_hashes = selection_policy.get("selected_profile_hashes")
+        if isinstance(policy_selected_hashes, list):
+            policy_selected_hashes, _ = normalized_hashes(
+                policy_selected_hashes,
+                "prefusion_reasoning_probe_selection_selected_profile_hashes_invalid",
+            )
+            if policy_selected_hashes != selected_profile_hashes:
+                issues.append("prefusion_reasoning_probe_selected_profile_set_mismatch")
+        for key, expected_count in (
+            ("candidate_model_count_before_selection", len(candidate_profile_hashes)),
+            ("selected_model_count", len(selected_profile_hashes)),
+        ):
+            if key in selection_policy and _safe_nonnegative_int(
+                selection_policy.get(key)
+            ) != expected_count:
+                issues.append(
+                    f"prefusion_reasoning_probe_selection_{key}_invalid"
+                )
+        if candidate_hashes_valid and selected_hashes_valid and not set(
+            selected_profile_hashes
+        ).issubset(candidate_profile_hashes):
+            issues.append("prefusion_reasoning_probe_selected_profile_not_candidate")
+        if researched_profile_hashes and not set(candidate_profile_hashes).issubset(
+            researched_profile_hashes
+        ):
+            issues.append("prefusion_reasoning_probe_candidate_profile_not_researched")
+    else:
+        # Older offline fixtures did not persist the explicit selection set.
+        # Keep them readable, while every current provider probe takes the
+        # strict branch above and carries both hash-bound sets.
+        candidate_profile_hashes = sorted(researched_candidate_profile_hashes)
+        selected_profile_hashes = sorted(observed_profile_hashes)
+
     if require_ready:
         if str(probe.get("schema") or "") != "axio_fusion_api.provider_reasoning_probe.v1":
             issues.append("prefusion_reasoning_probe_schema_invalid")
@@ -2103,17 +2214,17 @@ def _validate_prefusion_reasoning_handoff(
         if str(probe.get("mode") or "").strip().casefold() != "live":
             issues.append("prefusion_reasoning_probe_not_live")
         if _safe_nonnegative_int(probe.get("candidate_model_count_before_selection")) != len(
-            expected_candidate_profile_hashes
+            candidate_profile_hashes
         ):
             issues.append("prefusion_reasoning_probe_candidate_count_invalid")
         if _safe_nonnegative_int(probe.get("model_count")) != len(
-            expected_candidate_profile_hashes
+            selected_profile_hashes
         ):
             issues.append("prefusion_reasoning_probe_model_count_invalid")
-        if expected_candidate_profile_hashes and (
-            observed_profile_hashes != expected_candidate_profile_hashes
-        ):
+        if observed_profile_hashes != set(selected_profile_hashes):
             issues.append("prefusion_reasoning_probe_profile_set_mismatch")
+        if len(observed_profile_hashes) != len(probe_rows):
+            issues.append("prefusion_reasoning_probe_duplicate_profile_rows")
         for row in probe_rows:
             if not isinstance(row, Mapping) or row.get("live_probe_evidence") is not True:
                 issues.append("prefusion_reasoning_probe_live_evidence_missing")
@@ -2125,7 +2236,7 @@ def _validate_prefusion_reasoning_handoff(
             }:
                 issues.append("prefusion_reasoning_probe_status_invalid")
                 break
-    required_flag = len(expected_candidate_profile_hashes) > 0
+    required_flag = len(candidate_profile_hashes) > 0
     if handoff.get("reasoning_probe_contract_required") is not required_flag:
         issues.append("prefusion_handoff_reasoning_probe_requirement_mismatch")
     probe_digest = str(handoff.get("reasoning_probe_content_sha256") or "").strip().lower()
@@ -2148,7 +2259,9 @@ def _validate_prefusion_reasoning_handoff(
         "valid": not issues,
         "reason_codes": sorted(set(issues)),
         "require_ready": bool(require_ready),
-        "researched_candidate_profile_count": len(expected_candidate_profile_hashes),
+        "researched_candidate_profile_count": len(candidate_profile_hashes),
+        "selected_profile_count": len(selected_profile_hashes),
+        "profile_set_source": "probe_selection_policy" if explicit_profile_sets else "legacy_research_rows",
         "probe_row_count": len(probe_rows),
         "unverified_reasoning_is_not_forwarded": True,
         "raw_probe_prompt_persisted": False,
@@ -3300,9 +3413,11 @@ def _apply_operational_role_probe_metadata(
         role = " ".join(str(row.get("role") or "").strip().casefold().split())
         if profile_id and role in requested_roles:
             by_profile.setdefault(profile_id, []).append(row)
-    contract_attempted = str(role_probe.get("status") or "").strip().casefold() in {
+    role_probe_status = str(role_probe.get("status") or "").strip().casefold()
+    contract_attempted = role_probe_status in {
         "ready",
         "incomplete",
+        "skipped_no_role_targets",
     }
     result: list[ModelProfile] = []
     for profile in profiles:
@@ -3350,7 +3465,7 @@ def _apply_operational_role_probe_metadata(
                 admission["operational_role_probe"] = _project_operational_role_probe(
                     {
                         **dict(role_probe),
-                        "status": "ready",
+                        "status": role_probe_status or "ready",
                         "tested_roles": [],
                         "passed_roles": [],
                         "failed_roles": [],
@@ -6988,8 +7103,8 @@ def _empty_reasoning_probe_payload(
     *,
     live: bool,
 ) -> dict[str, Any]:
-    candidate_count = sum(
-        1
+    candidate_hashes = sorted(
+        sha256_text(profile.profile_id)
         for profile in profiles
         if isinstance(profile.reasoning_transport, Mapping)
         and str(profile.reasoning_transport.get("status") or "")
@@ -6997,6 +7112,8 @@ def _empty_reasoning_probe_payload(
         .casefold()
         == "candidate"
     )
+    candidate_count = len(candidate_hashes)
+    selected_hashes: list[str] = []
     return {
         "schema": "axio_fusion_api.provider_reasoning_probe.v1",
         "probe_kind": "reasoning_transport",
@@ -7004,6 +7121,10 @@ def _empty_reasoning_probe_payload(
         "network_calls_performed": False,
         "candidate_model_count_before_selection": candidate_count,
         "model_count": 0,
+        "candidate_profile_hashes": candidate_hashes,
+        "selected_profile_hashes": selected_hashes,
+        "candidate_profile_set_sha256": sha256_text(stable_json(candidate_hashes)),
+        "selected_profile_set_sha256": sha256_text(stable_json(selected_hashes)),
         "verified_count": 0,
         "rejected_count": 0,
         "indeterminate_count": 0,

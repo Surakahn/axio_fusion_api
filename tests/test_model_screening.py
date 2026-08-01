@@ -1118,6 +1118,40 @@ def test_operational_role_probe_binds_profiles_without_role_targets():
     assert receipt["streaming_contract_verified"] is True
 
 
+def test_skipped_role_probe_binds_empty_receipt_without_promoting_roles():
+    profile = _role_profile(
+        _profile("provider-a", "narrow-skipped", "narrow-skipped"),
+        allowed_roles=("structured_extraction",),
+        denied_roles=("critic", "judge", "synthesizer"),
+    )
+    role_probe = {
+        "schema": "axio_fusion_api.provider_role_probe.v1",
+        "contract": "axio_fusion_api.provider_role_probe.fixed_control_packet.v1",
+        "status": "skipped_no_role_targets",
+        "requested_roles": ["critic", "judge", "synthesizer"],
+        "probes": [],
+    }
+
+    updated = model_screening._apply_operational_role_probe_metadata(
+        [profile], role_probe
+    )[0]
+    receipt = updated.screening_role_admission["operational_role_probe"]
+
+    assert receipt["status"] == "skipped_no_role_targets"
+    assert receipt["requested_roles"] == ["critic", "judge", "synthesizer"]
+    assert receipt["tested_roles"] == []
+    assert receipt["passed_roles"] == []
+    assert receipt["failed_roles"] == []
+    assert receipt["missing_roles"] == []
+    assert receipt["streaming_contract_verified"] is True
+    assert updated.screening_allowed_roles == ("structured_extraction",)
+    assert set(updated.screening_disallowed_roles) == {
+        "critic",
+        "judge",
+        "synthesizer",
+    }
+
+
 def test_prefusion_registry_binds_empty_role_receipts_for_unprobed_profiles(
     monkeypatch,
 ):
@@ -2621,6 +2655,132 @@ def test_reasoning_reconciliation_preserves_loadable_prefusion_handoff(monkeypat
     assert updated["prefusion_model_catalog"] == source_registry["prefusion_model_catalog"]
     assert validate_prefusion_registry_handoff(updated)["valid"] is True
     assert len(load_registry(output_path, require_prefusion=True)) == 1
+
+
+def test_reasoning_probe_selection_binding_accepts_unknown_research_prior(
+    monkeypatch,
+):
+    profile = replace(
+        _profile("provider-a", "candidate-alpha", "candidate-alpha", p50=220),
+        reasoning_transport={
+            "status": "candidate",
+            "scope": "model",
+            "transport": "chat_reasoning_effort",
+            "supported_efforts": ["low"],
+            "api_format_compatible": True,
+        },
+    )
+    groups = _groups([profile])
+    research = _research_output([str(groups[0]["candidate_id"])])
+    assert research["ordered_models"][0]["reasoning_capability"]["status"] == "unknown"
+
+    def fake_probe(probe_profiles, **_kwargs):
+        return {
+            "schema": "axio_fusion_api.provider_probe.v1",
+            "mode": "live",
+            "network_calls_performed": True,
+            "probes": [
+                {
+                    "profile_id": item.profile_id,
+                    "provider": item.provider,
+                    "model": item.model,
+                    "status": "available",
+                    "latency_ms": 220,
+                    "output_sha256": sha256_text(f"prefusion:{item.profile_id}"),
+                    "probe_mode": "live",
+                    "live_probe_evidence": True,
+                    **_stream_evidence(),
+                }
+                for item in probe_profiles
+            ],
+        }
+
+    def fake_reasoning_probe(probe_profiles, **_kwargs):
+        accepted = {
+            "status": "accepted",
+            "marker_observed": True,
+            "strict_streaming_contract_valid": True,
+            "stream_requested": True,
+            "strict_streaming_requested": True,
+            "stream_observed": True,
+            "stream_fallback_used": False,
+            "stream_protocol": "sse",
+            "stream_frame_count": 2,
+            "latency_ms": 12,
+        }
+        rows = [
+            {
+                "profile_id": item.profile_id,
+                "provider": item.provider,
+                "model": item.model,
+                "api_format": item.api_format,
+                "probe_kind": "reasoning_transport",
+                "probe_mode": "live",
+                "live_probe_evidence": True,
+                "status": "indeterminate",
+                "strict_wire_shape_preserved": True,
+                "all_declared_efforts_strict_streaming": False,
+                "transport": "chat_reasoning_effort",
+                "declared_efforts": ["low"],
+                "control": accepted,
+                "effort_results": [{"effort": "low", **accepted}],
+                "reasoning_transport_binding": reasoning_transport_probe_binding(item),
+            }
+            for item in probe_profiles
+        ]
+        profile_hashes = [sha256_text(item.profile_id) for item in probe_profiles]
+        profile_set_sha256 = sha256_text(
+            model_screening.stable_json(sorted(profile_hashes))
+        )
+        return {
+            "schema": "axio_fusion_api.provider_reasoning_probe.v1",
+            "probe_kind": "reasoning_transport",
+            "mode": "live",
+            "network_calls_performed": True,
+            "candidate_model_count_before_selection": len(profile_hashes),
+            "model_count": len(profile_hashes),
+            "candidate_profile_hashes": sorted(profile_hashes),
+            "selected_profile_hashes": profile_hashes,
+            "candidate_profile_set_sha256": profile_set_sha256,
+            "selected_profile_set_sha256": profile_set_sha256,
+            "selection_policy": {
+                "candidate_profile_hashes": sorted(profile_hashes),
+                "selected_profile_hashes": profile_hashes,
+                "candidate_profile_set_sha256": profile_set_sha256,
+                "selected_profile_set_sha256": profile_set_sha256,
+                "candidate_model_count_before_selection": len(profile_hashes),
+                "selected_model_count": len(profile_hashes),
+            },
+            "probes": rows,
+            "verification_contract": {
+                "requires_model_level_candidate_declaration": True,
+                "requires_protocol_local_wire_field": True,
+                "requires_control_and_every_declared_effort": True,
+                "requires_strict_sse_or_ndjson_streaming": True,
+            },
+        }
+
+    monkeypatch.setattr(model_screening, "probe_provider_models", fake_probe)
+    monkeypatch.setattr(
+        model_screening,
+        "probe_provider_reasoning_support",
+        fake_reasoning_probe,
+    )
+    report = run_prefusion_model_screening(
+        profiles=[profile],
+        source_manifest=_source_manifest(),
+        research_output=research,
+        live=True,
+        min_available_models=1,
+    )
+
+    assert report["status"] == "ready"
+    assert validate_prefusion_handoff(report)["valid"] is True
+    assert report["fusion_handoff"]["reasoning_probe_contract_required"] is True
+    assert (
+        report["fusion_handoff"]["reasoning_probe_content_sha256"]
+        == sha256_text(model_screening.stable_json(report["reasoning_probe"]))
+    )
 
 
 def test_live_prefusion_binds_multi_sample_stability_evidence_and_rejects_tampering(

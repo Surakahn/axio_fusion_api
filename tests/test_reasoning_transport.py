@@ -368,6 +368,22 @@ def test_reasoning_probe_uses_protocol_local_wire_controls_and_promotes_only_exa
 
     assert report["verified_count"] == 2
     assert all(row["status"] == "verified" for row in report["probes"])
+    assert report["candidate_profile_hashes"] == sorted(
+        [
+            provider_module.sha256_text(chat.profile_id),
+            provider_module.sha256_text(responses.profile_id),
+        ]
+    )
+    assert report["selected_profile_hashes"] == [
+        provider_module.sha256_text(chat.profile_id),
+        provider_module.sha256_text(responses.profile_id),
+    ]
+    assert report["candidate_profile_set_sha256"] == provider_module.sha256_text(
+        provider_module.stable_json(report["candidate_profile_hashes"])
+    )
+    assert report["selected_profile_set_sha256"] == provider_module.sha256_text(
+        provider_module.stable_json(sorted(report["selected_profile_hashes"]))
+    )
     assert ("chat_reasoning_effort", "high") in client.calls
     assert ("responses_reasoning", "high") in client.calls
     assert ("", "") in client.calls
