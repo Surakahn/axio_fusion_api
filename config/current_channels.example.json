@@ -6,6 +6,28 @@
       "base_url_env": "AXIO_NVIDIA_BASE_URL",
       "api_key_env": "AXIO_NVIDIA_API_KEYS",
       "models_env": "AXIO_NVIDIA_MODELS",
+      "models": [
+        {
+          "model": "openai/gpt-oss-120b",
+          "reasoning_transport": {
+            "scope": "model",
+            "status": "candidate",
+            "transport": "chat_reasoning_effort",
+            "supported_efforts": ["low", "medium", "high"],
+            "effort_map": {"xhigh": "high", "max": "high"}
+          }
+        },
+        {
+          "model": "openai/gpt-oss-20b",
+          "reasoning_transport": {
+            "scope": "model",
+            "status": "candidate",
+            "transport": "chat_reasoning_effort",
+            "supported_efforts": ["low", "medium", "high"],
+            "effort_map": {"xhigh": "high", "max": "high"}
+          }
+        }
+      ],
       "traffic_control": {
         "scope": "channel",
         "max_in_flight": 1,
@@ -15,12 +37,7 @@
         "fallback_cooldown_ms": 5000,
         "max_cooldown_ms": 60000
       },
-      "reasoning_transport": {
-        "status": "candidate",
-        "transport": "chat_reasoning_effort",
-        "supported_efforts": ["low", "medium", "high"],
-        "effort_map": {"xhigh": "high", "max": "high"}
-      }
+      "reasoning_transport": {}
     },
     {
       "provider": "tokenapis",
@@ -28,6 +45,53 @@
       "base_url_env": "AXIO_TOKENAPIS_BASE_URL",
       "api_key_env": "AXIO_TOKENAPIS_API_KEY",
       "models_env": "AXIO_TOKENAPIS_MODELS",
+      "models": [
+        {
+          "model": "gpt-5.2",
+          "reasoning_transport": {
+            "scope": "model",
+            "status": "candidate",
+            "transport": "responses_reasoning",
+            "supported_efforts": ["low", "medium", "high", "xhigh"]
+          }
+        },
+        {
+          "model": "gpt-5.5",
+          "reasoning_transport": {
+            "scope": "model",
+            "status": "candidate",
+            "transport": "responses_reasoning",
+            "supported_efforts": ["low", "medium", "high", "xhigh"]
+          }
+        },
+        {
+          "model": "gpt-5.6-luna",
+          "reasoning_transport": {
+            "scope": "model",
+            "status": "candidate",
+            "transport": "responses_reasoning",
+            "supported_efforts": ["low", "medium", "high", "xhigh", "max"]
+          }
+        },
+        {
+          "model": "gpt-5.6-terra",
+          "reasoning_transport": {
+            "scope": "model",
+            "status": "candidate",
+            "transport": "responses_reasoning",
+            "supported_efforts": ["low", "medium", "high", "xhigh", "max"]
+          }
+        },
+        {
+          "model": "gpt-5.6-sol",
+          "reasoning_transport": {
+            "scope": "model",
+            "status": "candidate",
+            "transport": "responses_reasoning",
+            "supported_efforts": ["low", "medium", "high", "xhigh", "max"]
+          }
+        }
+      ],
       "traffic_control": {
         "scope": "profile",
         "max_in_flight": 0,
@@ -37,12 +101,7 @@
         "fallback_cooldown_ms": 5000,
         "max_cooldown_ms": 60000
       },
-      "reasoning_transport": {
-        "status": "candidate",
-        "transport": "responses_reasoning",
-        "supported_efforts": ["low", "medium", "high"],
-        "effort_map": {"xhigh": "high", "max": "high"}
-      }
+      "reasoning_transport": {}
     }
   ],
   "prefusion": {

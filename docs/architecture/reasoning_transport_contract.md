@@ -42,6 +42,14 @@ only when it is explicit, maps to a declared native level, and does not raise
 the caller's requested intensity. The research evidence must be visible to
 the same candidate; a source attached to another model cannot be reused.
 
+An evidence gap is represented as `status: "unknown"`, with no transport,
+native effort, cost claim, or reasoning evidence forwarded. This is a bounded
+uncertainty state, not permission to guess and not a reason to discard an
+otherwise valid model ranking. The endpoint-bound probe remains the only path
+that can promote a reasoning declaration; `candidate` and `unsupported`
+claims still require candidate-scoped evidence and remain strict when that
+evidence is missing or mis-scoped.
+
 Chat Completions, Responses, Anthropic Messages, and Gemini are separate
 transport contracts. A Chat `reasoning_effort` claim cannot authorize a
 Responses `reasoning` object, and neither OpenAI field is inferred for

@@ -218,6 +218,7 @@ _MAX_PREFUSION_STABILITY_PROBE_SAMPLES = 5
 _RESEARCH_RETRYABLE_ERROR_PREFIXES = (
     "prefusion_research_output_",
     "prefusion_capability_axis_coverage_",
+    "prefusion_research_reasoning_",
     "prefusion_research_batch_candidate_count_mismatch",
     "prefusion_research_agent_empty_output",
     "prefusion_research_agent_output_exceeds_bound",
@@ -232,6 +233,8 @@ _RESEARCH_SINGLETON_RECOVERY_ERRORS = frozenset(
         "prefusion_research_output_source_evidence_scope_invalid",
         "prefusion_research_output_source_evidence_hash_missing",
         "prefusion_research_batch_candidate_count_mismatch",
+        "prefusion_research_reasoning_transport_format_invalid",
+        "prefusion_research_reasoning_native_efforts_missing",
     }
 )
 _RESEARCH_MERGE_STRATEGY = "deterministic_research_quality_confidence_candidate_id"
@@ -1519,6 +1522,23 @@ def _normalize_research_reasoning_capability(
     if not reasoning_evidence or not set(reasoning_evidence).issubset(
         successful_slots
     ):
+        # Missing or mis-scoped evidence cannot promote a reasoning claim. An
+        # ``unknown`` declaration is still useful as an explicit negative
+        # capability signal for the next endpoint-bound probe, so downgrade it
+        # to an evidence-free unknown instead of allowing the Agent to block
+        # an otherwise complete model ranking. Candidate and unsupported
+        # declarations remain strict because either one would change routing.
+        if status == "unknown":
+            normalized.update(
+                {
+                    "evidence_ids": [],
+                    "confidence": 0.0,
+                    "token_cost_model": "unknown",
+                    "latency_cost_model": "unknown",
+                    "cost_evidence_ids": [],
+                }
+            )
+            return normalized
         raise ModelScreeningError(
             "prefusion_research_output_reasoning_evidence_invalid"
         )
@@ -5852,6 +5872,17 @@ def _build_research_prompt(
             "shared_source_evidence. Do not invent, normalize, translate, or "
             "copy a source slot from another candidate.\n\n"
         )
+    if repair_reason.startswith("prefusion_research_reasoning_"):
+        repair_instruction += (
+            "Reasoning repair rule: status=candidate is allowed only when this "
+            "candidate's evidence proves the exact protocol-local transport and "
+            "at least one exact native_efforts value. Do not infer or copy an "
+            "effort list from the provider, another model, or the operator "
+            "template. If the evidence cannot prove the transport or every "
+            "listed native effort, return status=unknown with transport='', "
+            "native_efforts=[], effort_map={}, evidence_ids=[], confidence=0.0, "
+            "and unknown token/latency cost models.\n\n"
+        )
     return (
         "Prompt contract: "
         + PREFUSION_RESEARCH_PROMPT_CONTRACT
@@ -5956,6 +5987,12 @@ def _build_research_prompt(
         "each one. An effort_map is optional and must contain only explicit, "
         "non-escalating logical-to-native downgrades whose targets are in "
         "native_efforts. Never manufacture a map merely to fill the template. "
+        "If the supplied evidence does not establish a reasoning transport, "
+        "return status=unknown with an empty evidence_ids array, zero confidence, "
+        "and unknown token/latency cost models; this is an intentional admission "
+        "of uncertainty and the live endpoint probe remains authoritative. Do "
+        "not cite a source slot from another candidate merely to avoid an empty "
+        "array. "
         "For Anthropic or Gemini candidates, use unknown or unsupported unless "
         "this contract is extended with a separately audited transport; do not "
         "pretend that an OpenAI field works there. reasoning_capability.evidence_ids "
@@ -6510,6 +6547,14 @@ def _apply_screening_metadata(
             profile,
             reasoning_capability,
         )
+        if (
+            str(reasoning_transport.get("status") or "unknown") == "unknown"
+            and _is_model_scoped_reasoning_candidate(profile.reasoning_transport)
+        ):
+            # A model-local operator declaration is a probe candidate, not
+            # serving proof. Preserve it only when research is inconclusive so
+            # the exact endpoint can verify or reject the declared levels.
+            reasoning_transport = dict(profile.reasoning_transport)
         result.append(
             replace(
                 profile,
@@ -6537,6 +6582,21 @@ def _apply_screening_metadata(
             )
         )
     return result
+
+
+def _is_model_scoped_reasoning_candidate(value: Any) -> bool:
+    """Return whether a model-local declaration may enter the live probe."""
+
+    if not isinstance(value, Mapping):
+        return False
+    if str(value.get("scope") or "").strip().casefold() != "model":
+        return False
+    if str(value.get("status") or "").strip().casefold() != "candidate":
+        return False
+    if not str(value.get("transport") or "").strip():
+        return False
+    efforts = value.get("supported_efforts")
+    return isinstance(efforts, list) and bool(efforts)
 
 
 def _reasoning_transport_from_research(

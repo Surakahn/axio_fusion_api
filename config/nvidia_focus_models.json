@@ -7,6 +7,29 @@
     "default_allow_unlisted": true,
     "provider_rules": [
       {
+        "provider": "nvidia",
+        "allow_models": [
+          "openai/gpt-oss-120b",
+          "nvidia/nemotron-3-super-120b-a12b",
+          "deepseek-ai/deepseek-v4-flash",
+          "deepseek-ai/deepseek-v4-pro",
+          "minimaxai/minimax-m2.7",
+          "mistralai/mistral-large-3-675b-instruct-2512",
+          "stepfun-ai/step-3.5-flash",
+          "minimaxai/minimax-m3",
+          "z-ai/glm-5.2",
+          "stepfun-ai/step-3.7-flash",
+          "openai/gpt-oss-20b",
+          "nvidia/nemotron-3-nano-30b-a3b",
+          "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+          "nvidia/llama-3.1-nemotron-nano-8b-v1",
+          "nvidia/llama-3.1-nemotron-nano-vl-8b-v1",
+          "nvidia/nemotron-mini-4b-instruct"
+        ],
+        "allow_unlisted": false,
+        "excluded_unlisted_class": "auxiliary_or_out_of_cohort"
+      },
+      {
         "provider": "tokenapis",
         "allow_models": [
           "gpt-5.2",

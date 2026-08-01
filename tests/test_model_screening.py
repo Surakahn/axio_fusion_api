@@ -668,6 +668,14 @@ def test_research_prompt_scopes_candidate_specific_source_evidence():
     assert "exact allowed_source_slots array" in repair_prompt
     assert "Do not invent, normalize, translate" in repair_prompt
 
+    reasoning_repair_prompt = model_screening._build_research_prompt(
+        groups,
+        source_pack,
+        repair_reason="prefusion_research_reasoning_native_efforts_missing",
+    )
+    assert "status=candidate is allowed only" in reasoning_repair_prompt
+    assert "return status=unknown" in reasoning_repair_prompt
+
 
 def test_source_manifest_merges_focus_locators_without_persisting_secrets():
     focus = model_screening.load_prefusion_focus_manifest(
@@ -1276,6 +1284,33 @@ class _RetryingBatchResearchClient(_BatchResearchClient):
         return ProviderCompletion(json.dumps(_research_output(candidate_ids)))
 
 
+class _ReasoningRepairClient(_BatchResearchClient):
+    """Return a malformed reasoning declaration once, then repair it."""
+
+    def complete_turn(self, profile, request, *, prompt, system, timeout):
+        del profile, request, system, timeout
+        self.calls.append({"prompt": prompt})
+        marker = "AUTHORITATIVE_CANDIDATE_INVENTORY\n"
+        inventory = prompt.split(marker, 1)[1].split(
+            "\n\nUNTRUSTED_SOURCE_DATA", 1
+        )[0]
+        candidate_ids = [
+            str(row["candidate_id"]) for row in json.loads(inventory)
+        ]
+        output = _research_output(candidate_ids)
+        reasoning = output["ordered_models"][0]["reasoning_capability"]
+        reasoning.update(
+            {
+                "status": "candidate",
+                "transport": "chat_reasoning_effort",
+                "evidence_ids": ["source_official"],
+            }
+        )
+        if len(self.calls) > 1:
+            reasoning["native_efforts"] = ["low", "medium", "high"]
+        return ProviderCompletion(json.dumps(output))
+
+
 def test_research_output_requires_complete_contiguous_ranking_and_real_evidence():
     profiles = [_profile("provider-a", "alpha", "alpha"), _profile("provider-b", "beta", "beta")]
     groups = _groups(profiles)
@@ -1316,6 +1351,80 @@ def test_research_output_requires_complete_contiguous_ranking_and_real_evidence(
                 source_slots=["source_official"],
                 source_evidence={"source_official": sha256_text("actual-evidence")},
             )
+
+
+def test_unknown_reasoning_claim_with_invalid_evidence_is_downgraded_without_forwarding():
+    profile = _profile("provider-a", "alpha", "alpha")
+    groups = _groups([profile])
+    output = _research_output([str(groups[0]["candidate_id"])])
+    reasoning = output["ordered_models"][0]["reasoning_capability"]
+    reasoning.update(
+        {
+            "status": "unknown",
+            "transport": "",
+            "native_efforts": [],
+            "effort_map": {},
+            "evidence_ids": ["source-from-another-candidate"],
+            "confidence": 0.8,
+            "token_cost_model": "provider_documented",
+            "latency_cost_model": "provider_documented",
+            "cost_evidence_ids": ["source-from-another-candidate"],
+        }
+    )
+
+    normalized = validate_prefusion_research_output(
+        output,
+        groups=groups,
+        source_slots=["source_official"],
+        source_evidence={"source_official": sha256_text("actual-evidence")},
+    )
+    declaration = normalized["ordered_models"][0]["reasoning_capability"]
+    assert declaration["status"] == "unknown"
+    assert declaration["evidence_ids"] == []
+    assert declaration["confidence"] == 0.0
+    assert declaration["token_cost_model"] == "unknown"
+    assert declaration["latency_cost_model"] == "unknown"
+    assert declaration["cost_evidence_ids"] == []
+
+
+def test_model_scoped_reasoning_candidate_survives_research_unknown_for_probe_only():
+    profile = replace(
+        _profile("provider-a", "alpha", "alpha"),
+        reasoning_transport={
+            "scope": "model",
+            "status": "candidate",
+            "transport": "chat_reasoning_effort",
+            "supported_efforts": ["low", "medium", "high"],
+        },
+    )
+    groups = _groups([profile])
+    output = _research_output([str(groups[0]["candidate_id"])])
+    output["ordered_models"][0]["reasoning_capability"] = {
+        "status": "unknown",
+        "transport": "",
+        "native_efforts": [],
+        "effort_map": {},
+        "evidence_ids": [],
+        "confidence": 0.0,
+        "token_cost_model": "unknown",
+        "latency_cost_model": "unknown",
+        "cost_evidence_ids": [],
+    }
+    ranking = validate_prefusion_research_output(
+        output,
+        groups=groups,
+        source_slots=["source_official"],
+        source_evidence={"source_official": sha256_text("actual-evidence")},
+    )
+
+    screened = model_screening._apply_screening_metadata(
+        [profile], ranking["ordered_models"]
+    )
+    assert screened[0].reasoning_transport["status"] == "candidate"
+    assert screened[0].reasoning_transport["scope"] == "model"
+    # A model-scoped candidate is eligible for the endpoint-bound probe, but
+    # must remain fail-closed until that probe promotes it to ``verified``.
+    assert screened[0].resolve_reasoning_transport("high") == ("", "")
 
 
 def test_research_output_requires_capability_axis_coverage_for_broad_priors():
@@ -1597,6 +1706,44 @@ def test_research_batch_retries_once_then_merges_only_validated_output():
     assert all(item["retry_used"] is True for item in receipt["batch_results"])
     assert all(len(item["attempts"]) == 2 for item in receipt["batch_results"])
     assert [row["rank"] for row in ranking["ordered_models"]] == [1, 2, 3]
+
+
+def test_research_batch_repairs_missing_reasoning_efforts_before_merge():
+    profile = _profile("provider-a", "model-00", "model-00")
+    groups = _groups([profile])
+    client = _ReasoningRepairClient()
+    ranking, receipt = model_screening._run_research_agent_batches(
+        _profile("nvidia", "researcher", "researcher"),
+        groups=groups,
+        source_pack={
+            "receipts": [
+                {
+                    "source_slot": "source_official",
+                    "status": "inline_source_ready",
+                    "evidence_hash": sha256_text("source"),
+                }
+            ],
+            "evidence": [],
+        },
+        timeout=10.0,
+        client=client,
+        focus_manifest=model_screening.load_prefusion_focus_manifest(),
+        batch_size=1,
+        max_workers=1,
+        merge_strategy=model_screening._RESEARCH_MERGE_STRATEGY,
+    )
+
+    assert len(client.calls) == 2
+    assert receipt["status"] == "validated"
+    assert receipt["batch_results"][0]["retry_used"] is True
+    assert receipt["batch_results"][0]["attempts"][0]["error_code"] == (
+        "prefusion_research_reasoning_native_efforts_missing"
+    )
+    assert ranking["ordered_models"][0]["reasoning_capability"]["native_efforts"] == [
+        "low",
+        "medium",
+        "high",
+    ]
 
 
 def test_research_batch_allows_two_bounded_transport_retries():

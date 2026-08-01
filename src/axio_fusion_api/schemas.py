@@ -304,13 +304,20 @@ def _normalize_reasoning_transport(
         expected_format
         and expected_format == _reasoning_transport_api_format(api_format)
     )
-    return {
+    normalized = {
         "status": status,
         "transport": transport,
         "supported_efforts": supported_efforts,
         "effort_map": dict(sorted(effort_map.items())),
         "api_format_compatible": protocol_compatible,
     }
+    # A provider-level declaration is only a transport prior.  ``model`` is
+    # the sole scope that may survive research uncertainty and reach the
+    # endpoint-bound reasoning probe; keeping the marker optional preserves
+    # the existing provider-level configuration shape.
+    if str(raw.get("scope") or "").strip().casefold() == "model":
+        normalized["scope"] = "model"
+    return normalized
 
 
 def _bounded_traffic_control_int(

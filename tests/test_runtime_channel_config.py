@@ -215,12 +215,15 @@ def test_current_channel_template_keeps_reasoning_transport_protocol_local():
         },
     )
 
-    by_provider = {profile.provider: profile for profile in profiles}
-    nvidia = by_provider["nvidia"]
-    tokenapis = by_provider["tokenapis"]
+    by_model = {(profile.provider, profile.model): profile for profile in profiles}
+    nvidia = by_model[("nvidia", "openai/gpt-oss-120b")]
+    tokenapis = by_model[("tokenapis", "gpt-5.6-sol")]
+    nvidia_seed = by_model[("nvidia", "nvidia-fixture-model")]
+    tokenapis_seed = by_model[("tokenapis", "responses-fixture-model")]
 
     assert nvidia.api_format == "chat"
     assert nvidia.reasoning_transport == {
+        "scope": "model",
         "status": "candidate",
         "transport": "chat_reasoning_effort",
         "supported_efforts": ["low", "medium", "high"],
@@ -229,14 +232,17 @@ def test_current_channel_template_keeps_reasoning_transport_protocol_local():
     }
     assert tokenapis.api_format == "responses"
     assert tokenapis.reasoning_transport == {
+        "scope": "model",
         "status": "candidate",
         "transport": "responses_reasoning",
-        "supported_efforts": ["low", "medium", "high"],
-        "effort_map": {"max": "high", "xhigh": "high"},
+        "supported_efforts": ["low", "medium", "high", "xhigh", "max"],
+        "effort_map": {},
         "api_format_compatible": True,
     }
     assert nvidia.resolve_reasoning_transport("high") == ("", "")
     assert tokenapis.resolve_reasoning_transport("high") == ("", "")
+    assert nvidia_seed.reasoning_transport["status"] == "unknown"
+    assert tokenapis_seed.reasoning_transport["status"] == "unknown"
 
 
 def test_runtime_discovery_and_probe_use_direct_credentials_for_all_protocols():
@@ -809,16 +815,24 @@ def test_current_channel_manifest_binds_the_three_supplied_channels_without_secr
         "responses",
     ]
     assert all("base_url" not in row and "api_key" not in row for row in manifest["providers"])
-    assert manifest["providers"][0]["reasoning_transport"]["transport"] == "chat_reasoning_effort"
-    assert manifest["providers"][1]["reasoning_transport"]["transport"] == "responses_reasoning"
-    assert all(
-        row["reasoning_transport"]["effort_map"] == {"xhigh": "high", "max": "high"}
-        for row in manifest["providers"]
-    )
-    assert all(
-        row["reasoning_transport"]["status"] == "candidate"
-        for row in manifest["providers"]
-    )
+    assert manifest["providers"][0]["reasoning_transport"] == {}
+    assert manifest["providers"][1]["reasoning_transport"] == {}
+    nvidia_models = {
+        row["model"]: row for row in manifest["providers"][0]["models"]
+    }
+    tokenapis_models = {
+        row["model"]: row for row in manifest["providers"][1]["models"]
+    }
+    assert nvidia_models["openai/gpt-oss-120b"]["reasoning_transport"]["scope"] == "model"
+    assert nvidia_models["openai/gpt-oss-120b"]["reasoning_transport"]["transport"] == "chat_reasoning_effort"
+    assert tokenapis_models["gpt-5.6-sol"]["reasoning_transport"]["scope"] == "model"
+    assert tokenapis_models["gpt-5.6-sol"]["reasoning_transport"]["supported_efforts"] == [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+    ]
     env_example = (ROOT / "config" / "current_channels.env.example").read_text(encoding="utf-8")
     assert "https://integrate.api.nvidia.com/v1" in env_example
     assert "https://tokenapis.com/v1" in env_example
@@ -842,18 +856,8 @@ def test_current_channel_reasoning_candidates_propagate_to_models_env_rows():
     )
     by_provider = {profile.provider: profile for profile in profiles}
 
-    assert by_provider["nvidia"].reasoning_transport["status"] == "candidate"
-    assert by_provider["nvidia"].reasoning_transport["transport"] == "chat_reasoning_effort"
-    assert by_provider["nvidia"].reasoning_transport["effort_map"] == {
-        "max": "high",
-        "xhigh": "high",
-    }
-    assert by_provider["tokenapis"].reasoning_transport["status"] == "candidate"
-    assert by_provider["tokenapis"].reasoning_transport["transport"] == "responses_reasoning"
-    assert by_provider["tokenapis"].reasoning_transport["effort_map"] == {
-        "max": "high",
-        "xhigh": "high",
-    }
+    assert by_provider["nvidia"].reasoning_transport["status"] == "unknown"
+    assert by_provider["tokenapis"].reasoning_transport["status"] == "unknown"
 
 
 def test_runtime_http_server_can_enroll_discovered_four_protocol_channels():
