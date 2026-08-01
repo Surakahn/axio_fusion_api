@@ -34,6 +34,9 @@ The four public protocol surfaces are:
 6. [`open_source_reference_audit.md`](open_source_reference_audit.md) records
    the public GitHub implementations inspected and the bounded lessons
    adopted by Axio.
+7. [`integration_field_guide.md`](integration_field_guide.md) is the field-level
+   implementation checklist for request parameters, conversions, streaming,
+   tools, structured output, reasoning, images, errors, and retries.
 
 ## Source Policy
 
@@ -83,6 +86,9 @@ design essay:
   `tests/test_image_api.py` are executable examples of the current contract.
   `tests/test_content_contracts.py` covers protocol-neutral multimodal and
   structured-output conversion, fail-closed admission, and public 400 errors.
+
+The field guide is explanatory and versioned with the code. It does not replace
+the official protocol sources or the provider-specific live capability probe.
 
 ## Compatibility Vocabulary
 

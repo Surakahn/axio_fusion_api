@@ -310,6 +310,51 @@ _REASONING_TRANSPORT_API_FORMATS = {
 }
 
 
+def project_prefusion_research_agent_output(
+    value: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Project a captured research result back to the raw Agent contract.
+
+    Validation receives the Agent's closed JSON shape, not the normalized
+    ranking projection persisted in a screening report.  This allow-list
+    removes internal fields such as ``api_format`` and
+    ``api_format_compatible`` from nested reasoning metadata without filling
+    missing evidence, identity, or rationale fields.  The validator remains
+    responsible for rejecting an incomplete or otherwise invalid capture.
+    """
+
+    if not isinstance(value, Mapping):
+        raise ModelScreeningError("prefusion_research_output_not_object")
+    projected: dict[str, Any] = {
+        "schema": value.get("schema"),
+        "ordered_models": [],
+    }
+    rows = value.get("ordered_models")
+    if not isinstance(rows, list):
+        projected["ordered_models"] = rows
+        return projected
+    projected_rows: list[Any] = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            projected_rows.append(row)
+            continue
+        item = {
+            key: row[key]
+            for key in _RESEARCH_OUTPUT_ROW_KEYS
+            if key in row
+        }
+        reasoning = row.get("reasoning_capability")
+        if isinstance(reasoning, Mapping):
+            item["reasoning_capability"] = {
+                key: reasoning[key]
+                for key in _RESEARCH_REASONING_CAPABILITY_KEYS
+                if key in reasoning
+            }
+        projected_rows.append(item)
+    projected["ordered_models"] = projected_rows
+    return projected
+
+
 class ModelScreeningError(ValueError):
     """Raised when a pre-Fusion contract cannot be validated."""
 

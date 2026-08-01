@@ -18,6 +18,7 @@ from axio_fusion_api.model_screening import (
     build_prefusion_fusion_handoff,
     build_fusion_registry_from_screening,
     load_prefusion_research_agent_config,
+    project_prefusion_research_agent_output,
     run_prefusion_model_screening,
     validate_prefusion_handoff,
     validate_prefusion_research_output,
@@ -326,6 +327,110 @@ def _research_output(candidate_ids: list[str], *, confidence: float = 0.9, overa
 def _groups(profiles):
     focus = model_screening.load_prefusion_focus_manifest()
     return model_screening._build_candidate_groups(profiles, focus)
+
+
+def test_project_prefusion_research_output_strips_runtime_derived_fields():
+    profile = _profile("provider-a", "alpha", "alpha")
+    groups = _groups([profile])
+    captured = _research_output([str(groups[0]["candidate_id"])])
+    captured["ordered_models"][0]["api_format"] = "chat"
+    captured["ordered_models"][0]["replicas"] = [{"profile_id": "secret"}]
+    captured["ordered_models"][0]["reasoning_capability"][
+        "api_format_compatible"
+    ] = True
+
+    with pytest.raises(ModelScreeningError, match="prefusion_research_output_row_extra_keys"):
+        validate_prefusion_research_output(
+            captured,
+            groups=groups,
+            source_slots=["source_official"],
+            source_evidence={"source_official": sha256_text("evidence")},
+        )
+
+    projected = project_prefusion_research_agent_output(captured)
+
+    assert "api_format" not in projected["ordered_models"][0]
+    assert "replicas" not in projected["ordered_models"][0]
+    assert "api_format_compatible" not in projected["ordered_models"][0][
+        "reasoning_capability"
+    ]
+    assert validate_prefusion_research_output(
+        projected,
+        groups=groups,
+        source_slots=["source_official"],
+        source_evidence={"source_official": sha256_text("evidence")},
+    )["candidate_count"] == 1
+
+
+def test_project_prefusion_research_output_preserves_valid_raw_agent_contract():
+    profile = _profile("provider-a", "alpha", "alpha")
+    groups = _groups([profile])
+    captured = _research_output([str(groups[0]["candidate_id"])])
+
+    projected = project_prefusion_research_agent_output(captured)
+
+    assert projected == captured
+    assert validate_prefusion_research_output(
+        projected,
+        groups=groups,
+        source_slots=["source_official"],
+        source_evidence={"source_official": sha256_text("evidence")},
+    )["candidate_count"] == 1
+
+
+@pytest.mark.parametrize(
+    ("field", "expected_code"),
+    [
+        ("candidate_id", "prefusion_research_output_unknown_candidate"),
+        ("source_evidence_ids", "prefusion_research_output_source_evidence_invalid"),
+        ("rationale", "prefusion_research_output_rationale_invalid"),
+    ],
+)
+def test_project_prefusion_research_output_does_not_fill_missing_evidence(
+    field, expected_code
+):
+    profile = _profile("provider-a", "alpha", "alpha")
+    groups = _groups([profile])
+    captured = _research_output([str(groups[0]["candidate_id"])])
+    if field == "candidate_id":
+        captured["ordered_models"][0].pop(field)
+    elif field == "source_evidence_ids":
+        captured["ordered_models"][0][field] = []
+    else:
+        captured["ordered_models"][0][field] = ""
+
+    projected = project_prefusion_research_agent_output(captured)
+
+    with pytest.raises(ModelScreeningError, match=expected_code):
+        validate_prefusion_research_output(
+            projected,
+            groups=groups,
+            source_slots=["source_official"],
+            source_evidence={"source_official": sha256_text("evidence")},
+        )
+
+
+def test_project_prefusion_research_output_cannot_relabel_normalized_ranking():
+    profile = _profile("provider-a", "alpha", "alpha")
+    groups = _groups([profile])
+    raw = _research_output([str(groups[0]["candidate_id"])])
+    normalized = validate_prefusion_research_output(
+        raw,
+        groups=groups,
+        source_slots=["source_official"],
+        source_evidence={"source_official": sha256_text("evidence")},
+    )
+
+    projected = project_prefusion_research_agent_output(normalized)
+
+    assert projected["schema"] == "axio_fusion_api.prefusion_research_ranking.v1"
+    with pytest.raises(ModelScreeningError, match="prefusion_research_output_schema_invalid"):
+        validate_prefusion_research_output(
+            projected,
+            groups=groups,
+            source_slots=["source_official"],
+            source_evidence={"source_official": sha256_text("evidence")},
+        )
 
 
 def _formal_tokenapis_focus() -> dict:

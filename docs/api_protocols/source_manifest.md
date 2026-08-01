@@ -23,6 +23,15 @@ Axio.
 | CLIProxyAPI | <https://github.com/router-for-me/CLIProxyAPI> | 2026-08-01 | `bc71c77f5cc42f3fbe1bf040cf14d4f166894835` |
 | Client2API | <https://github.com/Hongtruongbvn/client2api> | 2026-08-01 | default branch `main` |
 
+## Local Companion Documents
+
+| Document | Purpose | Boundary |
+| --- | --- | --- |
+| [`README.md`](README.md) | Reading order, source policy, and code anchors | Orientation only |
+| [`protocol_matrix.md`](protocol_matrix.md) | Compact cross-protocol mapping | Contract summary |
+| [`integration_field_guide.md`](integration_field_guide.md) | Field-level implementation and review guide | No live capability proof |
+| [`open_source_reference_audit.md`](open_source_reference_audit.md) | Bounded lessons from public gateways | No code or credential reuse |
+
 ## Refresh Procedure
 
 When an upstream protocol changes:
