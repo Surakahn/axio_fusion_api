@@ -146,6 +146,14 @@ _PREFUSION_OPERATIONAL_ROLE_PROBE_ROLES = (
     "judge",
     "synthesizer",
 )
+# These thresholds admit a role only as an operational capability prior. They
+# are intentionally lower than any quality claim and are paired with the
+# endpoint-bound role probe for the output contract of high-impact stages.
+_PREFUSION_PRIMARY_SOLVER_SIGNAL_THRESHOLD = 0.55
+_PREFUSION_JUDGE_CRITIQUE_THRESHOLD = 0.55
+_PREFUSION_JUDGE_LOGIC_THRESHOLD = 0.55
+_PREFUSION_SYNTHESIZER_CRITIQUE_THRESHOLD = 0.50
+_PREFUSION_SYNTHESIZER_CONTEXT_THRESHOLD = 0.55
 _SENSITIVE_CONFIG_KEYS = frozenset(
     {
         "api_key",
@@ -6423,8 +6431,9 @@ def _role_admission_decision(
 
     The thresholds are serving-control priors only. They are intentionally
     role-specific: a primary solver needs task-solving evidence, a Judge needs
-    structured adjudication evidence, and a Synthesizer needs structured
-    composition plus context handling. No role is admitted from rank alone.
+    critique/logic evidence plus a later endpoint-bound JSON control probe, and
+    a Synthesizer needs critique/context evidence plus a later endpoint-bound
+    streaming probe. No role is admitted from rank alone.
     """
 
     focus_allowed = set(_normalize_roles(group.get("focus_allowed_roles", ())))
@@ -6463,7 +6472,7 @@ def _role_admission_decision(
         "primary_solver": (
             confidence >= 0.65
             and overall >= 0.45
-            and solver_signal >= 0.60
+            and solver_signal >= _PREFUSION_PRIMARY_SOLVER_SIGNAL_THRESHOLD
             and nonzero_axis_count >= 3
         ),
         "independent_solver": (
@@ -6479,22 +6488,25 @@ def _role_admission_decision(
             and axis("logic") >= 0.55
         ),
         "domain_specialist": confidence >= 0.65 and specialist_ready,
-        # Judge and Synthesizer outputs are normalized after the provider
-        # call, but structured-output evidence is still required before using
-        # a model for these high-impact stages.
+        # The role probe supplies endpoint-specific evidence for the judge's
+        # JSON envelope. The research prior only needs to establish that the
+        # model can critique and reason; a missing public structured-output
+        # claim must not be treated as proof that JSON output is impossible.
         "judge": (
             confidence >= 0.70
             and overall >= 0.45
-            and axis("critique") >= 0.55
-            and axis("logic") >= 0.55
-            and axis("structured_output") >= 0.55
+            and axis("critique") >= _PREFUSION_JUDGE_CRITIQUE_THRESHOLD
+            and axis("logic") >= _PREFUSION_JUDGE_LOGIC_THRESHOLD
         ),
+        # Synthesis is a user-facing text stage. Structured-output support is
+        # useful for some prompts, but it is not a prerequisite for producing
+        # the canonical text answer and is independently checked by the
+        # streaming role probe.
         "synthesizer": (
             confidence >= 0.70
             and overall >= 0.45
-            and axis("structured_output") >= 0.55
-            and axis("critique") >= 0.50
-            and axis("long_context") >= 0.55
+            and axis("critique") >= _PREFUSION_SYNTHESIZER_CRITIQUE_THRESHOLD
+            and axis("long_context") >= _PREFUSION_SYNTHESIZER_CONTEXT_THRESHOLD
         ),
         "structured_extraction": (
             confidence >= 0.55 and axis("structured_output") >= 0.45

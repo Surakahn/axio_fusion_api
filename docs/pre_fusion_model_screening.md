@@ -480,6 +480,19 @@ to pass the request cost/deadline checks and the hard 3x latency guard. Legacy
 profiles without an explicit screening role contract retain the prior neutral
 portfolio behavior.
 
+Role admission separates public evidence from endpoint behavior. Public-source
+capability axes establish the semantic prior: a primary solver needs enough
+general task-solving signal, a Judge needs critique and logic signal, and a
+Synthesizer needs critique and context signal. The strict live role probes then
+verify the protocol/output contract at the exact model/endpoint: the Judge
+probe must return the required JSON object while the Synthesizer probe must
+produce a non-empty streamed text result. A missing public structured-output
+claim is therefore not treated as proof that JSON is impossible, and a
+successful control packet is not treated as a quality or benchmark score.
+Failed or missing role probes still remove the role from the serving profile;
+the distinction only prevents an overly conservative research prior from
+blocking a separately verified transport capability.
+
 Candidate evidence isolation is a transport property, not only a prompt rule:
 when a source manifest binds a model card to one canonical candidate, that
 candidate is placed in a singleton research request. A different candidate

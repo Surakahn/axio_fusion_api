@@ -930,6 +930,47 @@ def test_high_capability_prior_can_cover_fusion_roles_but_low_confidence_cannot(
     assert "synthesizer" in low["disallowed_roles"]
 
 
+def test_role_admission_separates_public_prior_from_endpoint_role_probe_contract():
+    """Sparse public structured-output evidence is not a failed JSON probe."""
+
+    profile = _profile("provider-a", "luna-like", "luna-like")
+    groups = _groups([profile])
+    output = _research_output(
+        [str(groups[0]["candidate_id"])], confidence=0.72, overall=0.52
+    )
+    output["ordered_models"][0]["capability_summary"]["axes"] = {
+        "science_knowledge": 0.55,
+        "multilingual": 0.0,
+        "code": 0.55,
+        "math": 0.0,
+        "logic": 0.65,
+        "agentic_tool_calling": 0.55,
+        "daily_work": 0.55,
+        "structured_output": 0.0,
+        "critique": 0.55,
+        "long_context": 0.65,
+        "current_information": 0.0,
+    }
+
+    normalized = validate_prefusion_research_output(
+        output,
+        groups=groups,
+        source_slots=["source_official"],
+        source_evidence={"source_official": sha256_text("evidence")},
+    )["ordered_models"][0]
+
+    assert {
+        "primary_solver",
+        "judge",
+        "synthesizer",
+    }.issubset(set(normalized["allowed_roles"]))
+    assert normalized["role_admission"]["local_role_eligibility"][
+        "structured_extraction"
+    ] is False
+    assert normalized["role_admission"]["local_role_eligibility"]["judge"] is True
+    assert normalized["role_admission"]["local_role_eligibility"]["synthesizer"] is True
+
+
 def test_capability_admission_recovers_required_roles_from_conservative_agent_deny_list():
     """A conservative Agent contract must not block evidence-backed serving roles."""
 
