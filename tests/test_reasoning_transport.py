@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -806,6 +807,44 @@ def test_reasoning_probe_control_failure_and_missing_rows_preserve_candidate_sta
     assert row["control"]["status"] == "indeterminate"
     assert _apply_runtime_reasoning_probe([profile], [row])[0].reasoning_transport["status"] == "candidate"
     assert _apply_runtime_reasoning_probe([profile], [])[0].reasoning_transport["status"] == "candidate"
+
+
+def test_reasoning_probe_shared_deadline_skips_expired_cohort_without_requests():
+    profiles = [
+        _profile(
+            api_format="chat",
+            reasoning_transport={
+                "status": "candidate",
+                "transport": "chat_reasoning_effort",
+                "supported_efforts": ["low", "medium", "high"],
+            },
+        ),
+        _profile(
+            api_format="responses",
+            reasoning_transport={
+                "status": "candidate",
+                "transport": "responses_reasoning",
+                "supported_efforts": ["low", "high"],
+            },
+        ),
+    ]
+    client = _ReasoningProbeClient()
+
+    report = probe_provider_reasoning_support(
+        profiles,
+        live=True,
+        client=client,
+        max_workers=1,
+        deadline=time.monotonic() - 1.0,
+    )
+
+    assert client.calls == []
+    assert report["budget_exhausted"] is True
+    assert all(
+        row["reason_codes"] == ["prefusion_total_budget_exhausted"]
+        for row in report["probes"]
+    )
+    assert all(row["status"] == "indeterminate" for row in report["probes"])
 
 
 def test_runtime_reasoning_probe_rejects_missing_marker_and_slow_evidence():

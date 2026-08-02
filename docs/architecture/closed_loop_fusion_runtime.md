@@ -65,6 +65,24 @@ No onboarding artifact can select a hidden provider for a role, mutate the
 source registry in place, or make an unapproved profile eligible for Terra or
 Pro Fusion.
 
+### Shared Control-Plane Deadline
+
+Pre-Fusion admission uses one monotonic wall-clock deadline for discovery,
+public-source collection, Research Agent batches, model-scoped reasoning
+controls, and multi-sample streaming admission. The deadline is propagated
+through three boundaries: the stage call, each provider request, and the
+killable process used for live HTTP control-plane work. A provider request
+receives only the remaining budget after a small process-reporting reserve;
+profile-level sample and role loops recompute that remainder before every
+request. Once the deadline is exhausted, the workflow emits a hash-safe
+indeterminate/failed receipt without starting another network call.
+
+This prevents a cohort with many declared reasoning levels, stability samples,
+or role probes from multiplying the nominal 90-second provider ceiling into an
+unbounded refresh. It also prevents partially probed candidates from entering
+the active registry: budget exhaustion is a blocking publication condition,
+and the last known-good registry remains untouched.
+
 ## Tier Contracts
 
 - `axio-fast`: bounded direct cascade with optional light verification only

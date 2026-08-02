@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 import threading
+import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -459,6 +460,48 @@ def test_multi_sample_stream_probe_aggregates_independent_receipts(monkeypatch) 
     assert row["sample_receipts_sha256"]
     assert report["stability_contract"]["samples_per_profile"] == 3
     assert report["stability_contract"]["requires_all_samples_success"] is True
+
+
+def test_multi_sample_stream_probe_shared_deadline_skips_expired_profiles(monkeypatch) -> None:
+    profiles = [
+        normalize_profile(
+            {
+                "provider": "deadline-fixture",
+                "model": f"deadline-model-{index}",
+                "api_format": "chat",
+            }
+        )
+        for index in range(2)
+    ]
+    calls: list[str] = []
+
+    def unexpected_probe(*args, **kwargs):
+        del args, kwargs
+        calls.append("provider-request")
+        raise AssertionError("an expired shared deadline must not start a request")
+
+    monkeypatch.setattr(provider_module, "_probe_one_model", unexpected_probe)
+    report = provider_module.probe_provider_models(
+        profiles,
+        client=object(),
+        live=True,
+        require_streaming=True,
+        samples_per_profile=3,
+        max_workers=1,
+        deadline=time.monotonic() - 1.0,
+    )
+
+    assert calls == []
+    assert report["budget_exhausted"] is True
+    assert report["shared_deadline_bound"] is True
+    assert all(row["status"] != "available" for row in report["probes"])
+    assert all(
+        any(
+            sample.get("error_code") == "prefusion_total_budget_exhausted"
+            for sample in row["sample_receipts"]
+        )
+        for row in report["probes"]
+    )
 
 
 def test_multi_sample_stream_probe_rejects_a_single_late_sample(monkeypatch) -> None:

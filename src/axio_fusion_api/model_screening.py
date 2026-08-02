@@ -771,6 +771,7 @@ def run_prefusion_model_screening(
             live=True,
             max_workers=max(1, min(32, int(max_workers or 1))),
             isolate_live_requests=bool(isolate_live_network),
+            deadline=budget_deadline,
         )
         if not _reasoning_probe_cohort_is_complete(
             reasoning_candidates,
@@ -822,6 +823,7 @@ def run_prefusion_model_screening(
             samples_per_profile=configured_stream_probe_samples,
             role_probe_roles=_PREFUSION_OPERATIONAL_ROLE_PROBE_ROLES,
             isolate_live_requests=bool(isolate_live_network),
+            deadline=budget_deadline,
         )
         eligible_profiles = _eligible_profiles_from_probe(ranked_profiles, probe_payload)
         eligible_profiles = _apply_operational_role_probe_metadata(

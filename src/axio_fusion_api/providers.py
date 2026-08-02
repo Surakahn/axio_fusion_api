@@ -114,6 +114,106 @@ class ProviderCompletion:
         return bool(self.text or self.tool_calls)
 
 
+# A small parent-side reserve lets an isolated probe report its result before
+# the enclosing pre-Fusion deadline expires.  It is deliberately much smaller
+# than the provider ceiling; the provider request itself remains bounded by
+# the shared deadline, not by an unbounded thread wait.
+_PROBE_DEADLINE_RESERVE_SECONDS = 0.25
+
+
+def _probe_timeout_for_deadline(
+    requested: float,
+    deadline: float | None,
+) -> float | None:
+    """Return one provider-call timeout that cannot cross a shared deadline."""
+
+    bounded = max(1.0, min(PROVIDER_MAX_RESPONSE_SECONDS, float(requested)))
+    if deadline is None:
+        return bounded
+    remaining = float(deadline) - time.monotonic()
+    usable = remaining - _PROBE_DEADLINE_RESERVE_SECONDS
+    if usable < 1.0:
+        return None
+    return min(bounded, usable)
+
+
+def _probe_budget_exhausted_sample(
+    profile: ModelProfile,
+    *,
+    sample_index: int,
+    sample_count: int,
+    require_streaming: bool,
+) -> dict[str, Any]:
+    """Create a no-network sample when the enclosing budget is exhausted."""
+
+    row = _probe_row(
+        profile,
+        "failed",
+        latency_ms=0.0,
+        error_type="PrefusionBudgetDeadlineExceeded",
+        error_code="prefusion_total_budget_exhausted",
+        http_status=None,
+        output="",
+        probe_mode="budget_exhausted",
+    )
+    row.update(
+        {
+            "sample_index": max(1, int(sample_index)),
+            "sample_count": max(1, int(sample_count)),
+            "budget_exhausted": True,
+            "stream_requested": bool(require_streaming),
+            "stream_observed": False,
+            "stream_fallback_used": False,
+            "strict_streaming_requested": bool(require_streaming),
+        }
+    )
+    return row
+
+
+def _role_probe_budget_exhausted_row(
+    profile: ModelProfile,
+    role: str,
+) -> dict[str, Any]:
+    """Create a failed role receipt without sending a late control request."""
+
+    return {
+        "schema": ROLE_PROBE_SCHEMA,
+        "contract": ROLE_PROBE_CONTRACT,
+        "profile_id": profile.profile_id,
+        "provider": profile.provider,
+        "model": profile.model,
+        "api_format": profile.api_format,
+        "role": str(role or "")[:64],
+        "status": "failed",
+        "latency_ms": 0.0,
+        "output_sha256": "",
+        "role_output_contract_valid": False,
+        "role_streaming_contract_valid": False,
+        "latency_eligibility": latency_eligibility(observed_latency_ms=0.0),
+        "error_type": "PrefusionBudgetDeadlineExceeded",
+        "error_code": "prefusion_total_budget_exhausted",
+        "http_status": None,
+        "probe_mode": "budget_exhausted",
+        "live_probe_evidence": False,
+        "stream_requested": False,
+        "stream_observed": False,
+        "stream_fallback_used": False,
+        "stream_protocol": "",
+        "stream_frame_count": 0,
+        "strict_streaming_requested": True,
+        "provider_request_count": 0,
+        "provider_request_success_count": 0,
+        "provider_request_failure_count": 0,
+        "key_attempt_count": 0,
+        "transport_attempt_count": 0,
+        "retry_attempt_count": 0,
+        "budget_exhausted": True,
+        "raw_role_probe_prompt_persisted": False,
+        "raw_provider_output_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
 class ProviderStreamObserver:
     """Forward only public, visible provider text while retaining no text copy.
 
@@ -1072,6 +1172,7 @@ def probe_provider_reasoning_support(
     max_models_per_provider: int | None = None,
     redact_provider_identifiers: bool = False,
     isolate_live_requests: bool = False,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     """Verify declared reasoning transports without inferring model quality.
 
@@ -1111,16 +1212,77 @@ def probe_provider_reasoning_support(
     else:
         rows = []
         workers = max(1, min(32, int(max_workers or 1), len(selected_profiles) or 1))
+
+        def execute_probe(profile: ModelProfile) -> dict[str, Any]:
+            effective_timeout = _probe_timeout_for_deadline(
+                bounded_timeout,
+                deadline,
+            )
+            if effective_timeout is None:
+                return _reasoning_probe_budget_exhausted_row(
+                    profile,
+                    _reasoning_probe_plan(profile) or {},
+                )
+            profile_deadline = time.monotonic() + effective_timeout
+            if isolate_live_requests and isinstance(probe_client, HTTPProviderClient):
+                try:
+                    return run_isolated_call(
+                        _probe_one_model_reasoning_support,
+                        profile,
+                        plan=_reasoning_probe_plan(profile) or {},
+                        timeout=effective_timeout,
+                        client=probe_client,
+                        isolate_live_requests=False,
+                        budget_deadline=profile_deadline,
+                        deadline=min(
+                            300.0,
+                            effective_timeout + _PROBE_DEADLINE_RESERVE_SECONDS,
+                        ),
+                    )
+                except IsolatedCallError as exc:
+                    binding = reasoning_transport_probe_binding(profile)
+                    budget_expired = (
+                        deadline is not None and time.monotonic() >= float(deadline)
+                    )
+                    reason_code = (
+                        "prefusion_total_budget_exhausted"
+                        if budget_expired
+                        else (
+                            "provider_response_timeout_exceeded_90s"
+                            if exc.timed_out
+                            else "reasoning_probe_isolated_call_failed"
+                        )
+                    )
+                    attempt = _reasoning_probe_attempt_row(
+                        status="indeterminate",
+                        reason_code=reason_code,
+                        latency_ms=min(
+                            PROVIDER_MAX_RESPONSE_LATENCY_MS,
+                            max(0.0, float(effective_timeout) * 1000.0),
+                        ),
+                        error_type=exc.error_type,
+                        error_code=exc.code,
+                    )
+                    return _reasoning_probe_profile_row(
+                        profile,
+                        plan=_reasoning_probe_plan(profile) or {},
+                        status="indeterminate",
+                        control=attempt,
+                        effort_results=[],
+                        reason_codes=[reason_code],
+                        transport_binding=binding,
+                    )
+            return _probe_one_model_reasoning_support(
+                profile,
+                plan=_reasoning_probe_plan(profile) or {},
+                timeout=effective_timeout,
+                client=probe_client,
+                budget_deadline=profile_deadline,
+            )
+
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {
-                executor.submit(
-                    _probe_one_model_reasoning_support,
-                    profile,
-                    plan=_reasoning_probe_plan(profile) or {},
-                    timeout=bounded_timeout,
-                    client=probe_client,
-                    isolate_live_requests=bool(isolate_live_requests),
-                ): profile
+                executor.submit(execute_probe, profile): profile
                 for profile in selected_profiles
             }
             for future in as_completed(futures):
@@ -1137,6 +1299,24 @@ def probe_provider_reasoning_support(
         "mode": "live" if live else "dry_run",
         "network_calls_performed": bool(live and selected_profiles),
         "timeout_seconds": bounded_timeout,
+        "shared_deadline_bound": deadline is not None,
+        "budget_exhausted": any(
+            row.get("error_code") == "prefusion_total_budget_exhausted"
+            or row.get("budget_exhausted") is True
+            or "prefusion_total_budget_exhausted" in row.get("reason_codes", [])
+            or (
+                isinstance(row.get("control"), Mapping)
+                and row["control"].get("error_code")
+                == "prefusion_total_budget_exhausted"
+            )
+            for row in rows
+            if isinstance(row, Mapping)
+        ),
+        "deadline_remaining_seconds": (
+            round(max(0.0, float(deadline) - time.monotonic()), 3)
+            if deadline is not None
+            else None
+        ),
         "max_workers": max(1, int(max_workers or 1)),
         "candidate_model_count_before_selection": len(candidate_profiles),
         "model_count": len(selected_profiles),
@@ -1276,6 +1456,31 @@ def _reasoning_probe_skipped_row(
     )
 
 
+def _reasoning_probe_budget_exhausted_row(
+    profile: ModelProfile,
+    plan: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return a complete hash-safe row when no reasoning request may start."""
+
+    attempt = _reasoning_probe_attempt_row(
+        status="indeterminate",
+        reason_code="prefusion_total_budget_exhausted",
+        latency_ms=0.0,
+        error_type="PrefusionBudgetDeadlineExceeded",
+        error_code="prefusion_total_budget_exhausted",
+    )
+    return _reasoning_probe_profile_row(
+        profile,
+        plan=plan,
+        status="indeterminate",
+        control=attempt,
+        effort_results=[],
+        budget_results=[],
+        reason_codes=["prefusion_total_budget_exhausted"],
+        transport_binding=reasoning_transport_probe_binding(profile),
+    )
+
+
 def _probe_one_model_reasoning_support(
     profile: ModelProfile,
     *,
@@ -1283,30 +1488,47 @@ def _probe_one_model_reasoning_support(
     timeout: float,
     client: Any,
     isolate_live_requests: bool = False,
+    budget_deadline: float | None = None,
 ) -> dict[str, Any]:
+    effective_timeout = _probe_timeout_for_deadline(timeout, budget_deadline)
+    if effective_timeout is None:
+        return _reasoning_probe_budget_exhausted_row(profile, plan)
     if isolate_live_requests and isinstance(client, HTTPProviderClient):
         try:
             return run_isolated_call(
                 _probe_one_model_reasoning_support,
                 profile,
                 plan=plan,
-                timeout=timeout,
+                timeout=effective_timeout,
                 client=client,
                 isolate_live_requests=False,
-                deadline=min(300.0, max(1.0, float(timeout)) + 0.25),
+                budget_deadline=time.monotonic() + effective_timeout,
+                deadline=min(
+                    300.0,
+                    effective_timeout + _PROBE_DEADLINE_RESERVE_SECONDS,
+                ),
             )
         except IsolatedCallError as exc:
             binding = reasoning_transport_probe_binding(profile)
-            attempt = _reasoning_probe_attempt_row(
-                status="indeterminate",
-                reason_code=(
+            budget_expired = (
+                budget_deadline is not None
+                and time.monotonic() >= float(budget_deadline)
+            )
+            reason_code = (
+                "prefusion_total_budget_exhausted"
+                if budget_expired
+                else (
                     "provider_response_timeout_exceeded_90s"
                     if exc.timed_out
                     else "reasoning_probe_isolated_call_failed"
-                ),
+                )
+            )
+            attempt = _reasoning_probe_attempt_row(
+                status="indeterminate",
+                reason_code=reason_code,
                 latency_ms=min(
                     PROVIDER_MAX_RESPONSE_LATENCY_MS,
-                    max(0.0, float(timeout) * 1000.0),
+                    max(0.0, float(effective_timeout) * 1000.0),
                 ),
                 error_type=exc.error_type,
                 error_code=exc.code,
@@ -1339,9 +1561,10 @@ def _probe_one_model_reasoning_support(
     control = _run_reasoning_probe_attempt(
         profile,
         control_request,
-        timeout=timeout,
+        timeout=effective_timeout,
         client=client,
         parameterized=False,
+        budget_deadline=budget_deadline,
     )
     if control.get("status") != "accepted":
         return _reasoning_probe_profile_row(
@@ -1396,9 +1619,10 @@ def _probe_one_model_reasoning_support(
         attempt = _run_reasoning_probe_attempt(
             probe_profile,
             effort_request,
-            timeout=timeout,
+            timeout=effective_timeout,
             client=client,
             parameterized=True,
+            budget_deadline=budget_deadline,
         )
         effort_results.append({"effort": effort, **attempt})
 
@@ -1423,9 +1647,10 @@ def _probe_one_model_reasoning_support(
         attempt = _run_reasoning_probe_attempt(
             probe_profile,
             budget_request,
-            timeout=timeout,
+            timeout=effective_timeout,
             client=client,
             parameterized=True,
+            budget_deadline=budget_deadline,
         )
         budget_results.append({"budget_tokens": budget, **attempt})
 
@@ -1459,8 +1684,18 @@ def _run_reasoning_probe_attempt(
     timeout: float,
     client: Any,
     parameterized: bool,
+    budget_deadline: float | None = None,
 ) -> dict[str, Any]:
     started = time.monotonic()
+    effective_timeout = _probe_timeout_for_deadline(timeout, budget_deadline)
+    if effective_timeout is None:
+        return _reasoning_probe_attempt_row(
+            status="indeterminate",
+            reason_code="prefusion_total_budget_exhausted",
+            latency_ms=0.0,
+            error_type="PrefusionBudgetDeadlineExceeded",
+            error_code="prefusion_total_budget_exhausted",
+        )
     _begin_provider_request_trace()
     try:
         completion = client.complete_turn(
@@ -1468,7 +1703,7 @@ def _run_reasoning_probe_attempt(
             request,
             prompt=request.prompt,
             system=request.system,
-            timeout=timeout,
+            timeout=effective_timeout,
             strict_wire=True,
         )
         request_receipt = _finish_provider_request_trace()
@@ -1858,6 +2093,7 @@ def probe_provider_models(
     role_probe_roles: Sequence[str] | None = None,
     redact_provider_identifiers: bool = False,
     isolate_live_requests: bool = False,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     """Probe each physical profile with bounded independent health samples.
 
@@ -1906,31 +2142,56 @@ def probe_provider_models(
     else:
         rows = []
         workers = max(1, min(int(max_workers or 1), len(selected_profiles) or 1))
+
         def execute_probe(profile: ModelProfile) -> dict[str, Any]:
+            effective_timeout = _probe_timeout_for_deadline(timeout, deadline)
+            if effective_timeout is None:
+                return _aggregate_probe_samples(
+                    profile,
+                    [
+                        _probe_budget_exhausted_sample(
+                            profile,
+                            sample_index=1,
+                            sample_count=bounded_samples,
+                            require_streaming=bool(require_streaming),
+                        )
+                    ],
+                    requested_sample_count=bounded_samples,
+                    require_streaming=bool(require_streaming),
+                )
+            profile_deadline = time.monotonic() + effective_timeout
             if isolate_live_requests and isinstance(probe_client, HTTPProviderClient):
                 try:
                     return run_isolated_call(
                         _probe_profile_samples,
                         profile,
-                        timeout=min(PROVIDER_MAX_RESPONSE_SECONDS, max(1.0, float(timeout))),
+                        timeout=effective_timeout,
                         client=probe_client,
                         samples_per_profile=bounded_samples,
                         require_streaming=bool(require_streaming),
                         role_probe_roles=bounded_role_probe_roles,
+                        budget_deadline=profile_deadline,
                         deadline=min(
                             300.0,
-                            max(1.0, float(timeout)) + 0.25,
+                            effective_timeout + _PROBE_DEADLINE_RESERVE_SECONDS,
                         ),
                     )
                 except IsolatedCallError as exc:
+                    budget_expired = (
+                        deadline is not None and time.monotonic() >= float(deadline)
+                    )
                     return _isolated_probe_failure_row(
                         profile,
                         requested_sample_count=bounded_samples,
                         require_streaming=bool(require_streaming),
                         error_code=(
-                            "provider_response_timeout_exceeded_90s"
-                            if exc.timed_out
-                            else exc.code
+                            "prefusion_total_budget_exhausted"
+                            if budget_expired
+                            else (
+                                "provider_response_timeout_exceeded_90s"
+                                if exc.timed_out
+                                else exc.code
+                            )
                         ),
                         error_type=exc.error_type or "ProviderExecutionError",
                         latency_ms=(
@@ -1946,6 +2207,7 @@ def probe_provider_models(
                 samples_per_profile=bounded_samples,
                 require_streaming=bool(require_streaming),
                 role_probe_roles=bounded_role_probe_roles,
+                budget_deadline=profile_deadline,
             )
 
         with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -1984,6 +2246,26 @@ def probe_provider_models(
         "mode": "live" if live else "dry_run",
         "network_calls_performed": bool(live and selected_profiles),
         "timeout_seconds": timeout,
+        "shared_deadline_bound": deadline is not None,
+        "budget_exhausted": any(
+            row.get("error_code") == "prefusion_total_budget_exhausted"
+            or row.get("budget_exhausted") is True
+            or any(
+                isinstance(sample, Mapping)
+                and (
+                    sample.get("error_code") == "prefusion_total_budget_exhausted"
+                    or sample.get("budget_exhausted") is True
+                )
+                for sample in row.get("sample_receipts", [])
+            )
+            for row in rows
+            if isinstance(row, Mapping)
+        ),
+        "deadline_remaining_seconds": (
+            round(max(0.0, float(deadline) - time.monotonic()), 3)
+            if deadline is not None
+            else None
+        ),
         "max_workers": max(1, int(max_workers or 1)),
         "samples_per_profile": bounded_samples,
         "role_probe": {
@@ -2330,11 +2612,27 @@ def _probe_profile_roles(
     roles: Sequence[str],
     timeout: float,
     client: HTTPProviderClient,
+    budget_deadline: float | None = None,
 ) -> list[dict[str, Any]]:
-    return [
-        _probe_one_model_role(profile, role, timeout=timeout, client=client)
-        for role in _role_probe_targets(profile, roles)
-    ]
+    rows: list[dict[str, Any]] = []
+    targets = _role_probe_targets(profile, roles)
+    for index, role in enumerate(targets):
+        effective_timeout = _probe_timeout_for_deadline(timeout, budget_deadline)
+        if effective_timeout is None:
+            rows.extend(
+                _role_probe_budget_exhausted_row(profile, pending_role)
+                for pending_role in targets[index:]
+            )
+            break
+        rows.append(
+            _probe_one_model_role(
+                profile,
+                role,
+                timeout=effective_timeout,
+                client=client,
+            )
+        )
+    return rows
 
 
 def _probe_profile_samples(
@@ -2345,17 +2643,30 @@ def _probe_profile_samples(
     samples_per_profile: int,
     require_streaming: bool,
     role_probe_roles: Sequence[str] = (),
+    budget_deadline: float | None = None,
 ) -> dict[str, Any]:
-    samples = [
-        _probe_one_model(
-            profile,
-            timeout=timeout,
-            client=client,
-            sample_index=sample_index,
-            sample_count=samples_per_profile,
+    samples: list[dict[str, Any]] = []
+    for sample_index in range(1, samples_per_profile + 1):
+        effective_timeout = _probe_timeout_for_deadline(timeout, budget_deadline)
+        if effective_timeout is None:
+            samples.append(
+                _probe_budget_exhausted_sample(
+                    profile,
+                    sample_index=sample_index,
+                    sample_count=samples_per_profile,
+                    require_streaming=require_streaming,
+                )
+            )
+            break
+        samples.append(
+            _probe_one_model(
+                profile,
+                timeout=effective_timeout,
+                client=client,
+                sample_index=sample_index,
+                sample_count=samples_per_profile,
+            )
         )
-        for sample_index in range(1, samples_per_profile + 1)
-    ]
     aggregate = _aggregate_probe_samples(
         profile,
         samples,
@@ -2375,6 +2686,7 @@ def _probe_profile_samples(
             roles=role_probe_roles,
             timeout=timeout,
             client=client,
+            budget_deadline=budget_deadline,
         )
     else:
         aggregate["role_probes"] = []
