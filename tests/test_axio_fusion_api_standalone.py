@@ -2362,14 +2362,15 @@ def test_standalone_mandatory_fusion_stage_reservations_keep_judge_and_synthesis
     assert budget_lock["planned_mandatory_stage_call_count"] == 2
     assert budget_lock["consumed_mandatory_stage_call_count"] == 2
     assert budget_lock["reserved_mandatory_stage_call_count"] == 0
-    assert budget_lock["mandatory_stage_reservation_skip_count"] >= 1
-    assert any(
+    assert budget_lock["mandatory_stage_reservation_skip_count"] == 0
+    assert not any(
         row["reason"] == "mandatory_fusion_stage_call_reservation"
         for row in budget_lock["skipped_calls"]
     )
-    assert response.trace["panel_repair"]["attempted"] is True
+    assert response.trace["panel_repair"]["attempted"] is False
+    assert response.trace["panel_repair"]["optional_hermes_enrichment_skipped"] is True
     assert public_trace["mandatory_stage_reservation_enabled"] is True
-    assert public_trace["mandatory_stage_reservation_skip_count"] >= 1
+    assert public_trace["mandatory_stage_reservation_skip_count"] == 0
     assert receipt["budget_lock"]["mandatory_stage_reservation_enabled"] is True
     assert receipt["budget_lock"]["consumed_mandatory_stage_call_count"] == 2
     assert receipt["budget_lock"]["reserved_mandatory_stage_call_count"] == 0
@@ -3856,7 +3857,7 @@ def test_standalone_live_panel_judges_and_synthesizes_with_fake_client():
     assert any("Synthesize one final answer" in call["prompt"] for call in fake.calls)
 
 
-def test_standalone_live_panel_repairs_failed_branch_before_judge():
+def test_standalone_live_panel_skips_optional_repair_after_reference_quorum():
     class RepairClient:
         def __init__(self):
             self.calls = []
@@ -3872,8 +3873,8 @@ def test_standalone_live_panel_repairs_failed_branch_before_judge():
                     {
                         "consensus": [
                             {
-                                "claim": "fallback restored enough independent evidence",
-                                "supporting_candidates": ["primary_solver", "fallback_solver"],
+                                "claim": "surviving reference panel is sufficient for adjudication",
+                                "supporting_candidates": ["primary_solver", "critic"],
                                 "evidence_strength": 0.9,
                             }
                         ],
@@ -3881,7 +3882,7 @@ def test_standalone_live_panel_repairs_failed_branch_before_judge():
                         "missing_coverage": [],
                         "collective_blind_spots": [],
                         "ranked_candidates": [
-                            {"candidate_id": "fallback_solver", "score": 0.91},
+                            {"candidate_id": "critic", "score": 0.91},
                             {"candidate_id": "primary_solver", "score": 0.88},
                         ],
                         "follow_up_tasks": [],
@@ -3925,21 +3926,30 @@ def test_standalone_live_panel_repairs_failed_branch_before_judge():
     assert response.text == "repaired final answer"
     assert "down/unstable" in fake.calls
     assert "gamma/backup-judge" in fake.calls
+    assert "delta/independent-fallback" in fake.calls
     assert fake.judge_candidate_packets
-    assert {row["candidate_id"] for row in fake.judge_candidate_packets[0]} == {"primary_solver", "critic", "fallback_solver"}
-    assert response.trace["provider_call_count"] == 6
+    assert {row["candidate_id"] for row in fake.judge_candidate_packets[0]} == {"primary_solver", "critic"}
+    assert response.trace["provider_call_count"] == 5
     assert response.trace["judge_provider_call_count"] == 1
-    assert panel_repair["attempted"] is True
+    assert panel_repair["attempted"] is False
     assert panel_repair["required_min_candidate_count"] == 2
     assert panel_repair["completed_before"] == 2
-    assert panel_repair["repair_attempt_count"] == 1
-    assert panel_repair["completed_after"] == 3
+    assert panel_repair["repair_attempt_count"] == 0
+    assert panel_repair["completed_after"] == 2
     assert panel_repair["success"] is True
     assert panel_repair["missing_required_roles_after"] == []
     assert panel_repair["degraded_mode"] is False
-    assert safe_panel_repair["attempted"] is True
-    assert safe_panel_repair["repair_attempt_count"] == 1
-    assert safe_panel_repair["repair_candidate_receipts"][0]["profile_id_sha256"]
+    assert panel_repair["optional_hermes_enrichment_skipped"] is True
+    assert panel_repair["optional_hermes_enrichment_skip_reason"] == (
+        "existing_reference_sufficient_for_acting_aggregator"
+    )
+    assert safe_panel_repair["attempted"] is False
+    assert safe_panel_repair["repair_attempt_count"] == 0
+    assert safe_panel_repair["optional_hermes_enrichment_skipped"] is True
+    assert safe_panel_repair["optional_hermes_enrichment_skip_reason"] == (
+        "existing_reference_sufficient_for_acting_aggregator"
+    )
+    assert safe_panel_repair["missing_hermes_reference_roles_after"]
     assert "alpha/primary" not in serialized_panel
     assert "down/unstable" not in serialized_panel
     assert "gamma/backup-judge" not in serialized_panel

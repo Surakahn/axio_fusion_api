@@ -2263,9 +2263,19 @@ class FusionEngine:
             route_plan,
             completed,
         )
-        if local_consensus_mode and required_min_candidates > 1 and (
+        existing_hermes_reference = _has_completed_hermes_reference(
+            route_plan,
+            completed,
+        )
+        panel_quorum_missing = bool(
             _fusion_evidence_candidate_count(completed) < required_min_candidates
             or missing_required_roles
+        )
+        optional_hermes_enrichment_needed = bool(
+            missing_hermes_reference_roles and not existing_hermes_reference
+        )
+        if local_consensus_mode and required_min_candidates > 1 and (
+            panel_quorum_missing
         ):
             panel_repair["enabled"] = False
             panel_repair["degraded_mode"] = True
@@ -2273,9 +2283,7 @@ class FusionEngine:
                 "local_consensus_does_not_expand_panel_after_initial_wave"
             ]
         elif required_min_candidates > 1 and (
-            _fusion_evidence_candidate_count(completed) < required_min_candidates
-            or missing_required_roles
-            or missing_hermes_reference_roles
+            panel_quorum_missing or optional_hermes_enrichment_needed
         ):
             if not completed:
                 # A repair call is optional work.  Do not let it consume a
@@ -2305,6 +2313,22 @@ class FusionEngine:
                     for candidate in candidates
                     if candidate.status == "completed" and (candidate.answer.strip() or candidate.tool_calls)
                 ]
+        elif (
+            required_min_candidates > 1
+            and missing_hermes_reference_roles
+            and existing_hermes_reference
+            and not panel_quorum_missing
+        ):
+            # A surviving Hermes reference is sufficient for the acting
+            # aggregator. Filling every named advisory seat is optional work
+            # and must not consume the protected Judge/Synthesizer window.
+            panel_repair["optional_hermes_enrichment_skipped"] = True
+            panel_repair["optional_hermes_enrichment_skip_reason"] = (
+                "existing_reference_sufficient_for_acting_aggregator"
+            )
+            panel_repair["missing_hermes_reference_roles_after"] = list(
+                missing_hermes_reference_roles
+            )
         if not completed:
             released_mandatory_stage_calls = call_budget.release_pending_mandatory_stage_reservations(
                 reason="zero_candidate_panel_requires_degraded_fallback_recovery",
@@ -4058,6 +4082,7 @@ class FusionEngine:
         optional_hermes_enrichment_pending = bool(
             quorum_reached()
             and _missing_hermes_reference_roles(route_plan, completed)
+            and not _has_completed_hermes_reference(route_plan, completed)
         )
         for role in fallback_roles:
             if quorum_reached() and not optional_hermes_enrichment_pending:
@@ -7526,6 +7551,8 @@ def _panel_repair_receipt(
         "success": bool(success),
         "degraded_mode": bool(enabled and not success),
         "blocked_reasons": [] if success or not enabled else ["not_enough_completed_candidates"],
+        "optional_hermes_enrichment_skipped": False,
+        "optional_hermes_enrichment_skip_reason": "",
         "missing_required_roles_after": [],
         "missing_hermes_reference_roles_after": [],
         "attempted_profile_hashes": [],
@@ -8383,6 +8410,29 @@ def _missing_hermes_reference_roles(
         for role in reference_roles
         if str(role) and str(role) not in completed_roles
     ][:8]
+
+
+def _has_completed_hermes_reference(
+    route_plan: Mapping[str, Any],
+    candidates: Sequence[CandidateResult],
+) -> bool:
+    """Return whether the acting aggregator already has one usable reference.
+
+    Hermes reference seats are advisory and the finalizer only needs one
+    non-empty reference output to satisfy its process contract.  This helper
+    deliberately mirrors the public fusion-panel viability check so the
+    pre-finalization repair gate cannot spend time completing redundant seats.
+    """
+
+    hermes_plan = _effective_hermes_plan(route_plan)
+    if hermes_plan.get("enabled") is not True:
+        return False
+    return any(
+        candidate.status == "completed"
+        and candidate.answer.strip()
+        and hermes_is_reference_role(hermes_plan, candidate.role)
+        for candidate in candidates
+    )
 
 
 def _missing_required_candidate_roles(route_plan: Mapping[str, Any], candidates: Sequence[CandidateResult]) -> list[str]:

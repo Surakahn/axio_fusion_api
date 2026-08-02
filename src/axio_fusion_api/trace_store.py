@@ -1580,8 +1580,11 @@ def _safe_panel_repair(value: Mapping[str, Any]) -> dict[str, Any]:
         "completed_after": _optional_int(value.get("completed_after")),
         "success": bool(value.get("success")),
         "degraded_mode": bool(value.get("degraded_mode")),
+        "optional_hermes_enrichment_skipped": bool(value.get("optional_hermes_enrichment_skipped")),
+        "optional_hermes_enrichment_skip_reason": str(value.get("optional_hermes_enrichment_skip_reason") or "")[:120],
         "blocked_reasons": [str(item)[:120] for item in value.get("blocked_reasons", [])[:24] if str(item)] if isinstance(value.get("blocked_reasons"), list) else [],
         "missing_required_roles_after": [str(item)[:80] for item in value.get("missing_required_roles_after", [])[:12] if str(item)] if isinstance(value.get("missing_required_roles_after"), list) else [],
+        "missing_hermes_reference_roles_after": [str(item)[:80] for item in value.get("missing_hermes_reference_roles_after", [])[:12] if str(item)] if isinstance(value.get("missing_hermes_reference_roles_after"), list) else [],
         "attempted_profile_hashes": [str(item) for item in value.get("attempted_profile_hashes", [])[:24] if str(item)] if isinstance(value.get("attempted_profile_hashes"), list) else [],
         "attempted_provider_hashes": [str(item) for item in value.get("attempted_provider_hashes", [])[:24] if str(item)] if isinstance(value.get("attempted_provider_hashes"), list) else [],
         "repair_candidate_receipts": [
