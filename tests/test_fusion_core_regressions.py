@@ -428,6 +428,53 @@ def test_short_verifier_opens_bounded_local_consensus_without_solver_promotion()
     )
 
 
+def test_unused_domain_prior_does_not_suppress_short_verification_target():
+    primary = _screened_profile(
+        "primary-with-domain-prior",
+        allowed_roles=("primary_solver", "domain_specialist"),
+    )
+    short = _screened_profile(
+        "short-with-domain-prior",
+        allowed_roles=("short_verification",),
+        disallowed_roles=(
+            "primary_solver",
+            "independent_solver",
+            "critic",
+            "domain_specialist",
+            "judge",
+            "synthesizer",
+        ),
+    )
+    request = FusionRequest(
+        model="axio-pro",
+        prompt="Solve a complex scientific code task and verify the key constraint.",
+    )
+
+    route_plan = build_route_plan(request, [primary, short])
+
+    assert {row["role"] for row in route_plan["roles"]} == {
+        "primary_solver",
+        "short_verification",
+    }
+    assert route_plan["fusion_admission"]["activated"] is True
+
+
+def test_same_primary_domain_prior_does_not_count_as_independent_evidence():
+    primary = _screened_profile(
+        "primary-domain-only",
+        allowed_roles=("primary_solver", "domain_specialist"),
+    )
+    request = FusionRequest(
+        model="axio-pro",
+        prompt="Solve a difficult scientific code task and verify contradictions.",
+    )
+
+    route_plan = build_route_plan(request, [primary])
+
+    assert route_plan["fusion_admission"]["activated"] is False
+    assert "insufficient_independent_models" in route_plan["fusion_admission"]["blocked_reasons"]
+
+
 def test_short_verifier_failure_remains_a_missing_required_role():
     primary, short = _short_verification_profiles()
     request = FusionRequest(

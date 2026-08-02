@@ -1369,10 +1369,14 @@ def _local_consensus_plan(
         and str(row.get("role") or "") == "short_verification"
         for row in role_blueprint
     )
-    has_full_second_role = any(
-        _screening_role_allowed(profile, role)
-        for profile, _score in scored
-        for role in ("independent_solver", "domain_specialist")
+    has_domain_target = any(
+        isinstance(row, Mapping)
+        and str(row.get("role") or "") == "domain_specialist"
+        for row in role_blueprint
+    )
+    has_full_second_role = _distinct_full_second_role_available(
+        scored,
+        role_blueprint,
     )
     # Pro's original local-consensus contract requires a third verification
     # seat whenever the task blueprint calls for a Critic.  A narrow verifier
@@ -1945,6 +1949,43 @@ def _screening_role_contract_present(profile: ModelProfile) -> bool:
     return bool(profile.screening_allowed_roles or profile.screening_disallowed_roles)
 
 
+def _distinct_full_second_role_available(
+    scored: Sequence[tuple[ModelProfile, float]],
+    role_blueprint: Sequence[Mapping[str, Any]],
+) -> bool:
+    """Check for a separately assignable full evidence branch.
+
+    A screening prior on the same canonical model as the direct primary is
+    not independent evidence.  Domain-specialist capacity is considered only
+    when the current request actually has a domain-specialist target; an
+    unused role prior must not suppress the narrower short-verification path.
+    """
+
+    has_domain_target = any(
+        isinstance(row, Mapping)
+        and str(row.get("role") or "") == "domain_specialist"
+        for row in role_blueprint
+    )
+    primary_profiles = [
+        profile
+        for profile, _score in scored
+        if _screening_role_allowed(profile, "primary_solver")
+    ]
+    if not primary_profiles:
+        return False
+    second_profiles = [
+        profile
+        for profile, _score in scored
+        if _screening_role_allowed(profile, "independent_solver")
+        or (has_domain_target and _screening_role_allowed(profile, "domain_specialist"))
+    ]
+    return any(
+        primary.canonical_identity != second.canonical_identity
+        for primary in primary_profiles
+        for second in second_profiles
+    )
+
+
 def _legacy_neutral_capability(profile: ModelProfile, axis: str) -> bool:
     """Treat only the normalized neutral value as unknown legacy evidence."""
 
@@ -2102,12 +2143,9 @@ def _select_panel(
             "domain_specialist",
         }
     ]
-    full_second_role_available = any(
-        any(
-            _screening_role_allowed(profile, role)
-            for role in ("independent_solver", "domain_specialist")
-        )
-        for profile, _score in scored
+    full_second_role_available = _distinct_full_second_role_available(
+        scored,
+        role_blueprint,
     )
     if not full_second_role_available:
         role_targets.extend(
@@ -2766,13 +2804,9 @@ def _augment_pro_role_blueprint_for_screened_specialist(
             )
         )
 
-    has_qualified_full_second_role = any(
-        _screening_role_contract_present(profile)
-        and (
-            _screening_role_allowed(profile, "independent_solver")
-            or _screening_role_allowed(profile, "domain_specialist")
-        )
-        for profile, _ in scored
+    has_qualified_full_second_role = _distinct_full_second_role_available(
+        scored,
+        blueprint,
     )
     has_short_target = any(
         isinstance(row, Mapping)
