@@ -80,14 +80,14 @@ def test_hermes_moa_2_process_policy_separates_stage_depth_and_output_budget() -
     )
     assert terra["stage_cognitive_budget"]["slots"]["judge"]["reasoning_effort"] == "high"
     assert pro["stage_cognitive_budget"]["slots"]["judge"]["reasoning_effort"] == "xhigh"
-    assert pro["stage_output_budget"]["judge_max_tokens"] == 2_048
-    assert terra["stage_output_budget"]["judge_max_tokens"] == 1_536
+    assert pro["stage_output_budget"]["judge_max_tokens"] == 1_024
+    assert terra["stage_output_budget"]["judge_max_tokens"] == 768
     assert pro["stage_output_budget"]["judge_is_caller_output_capped"] is False
     assert pro["stage_output_budget"]["synthesizer_caller_output_cap_applied"] is True
 
     assert cognitive_budget(terra, "critic")["public_reasoning_summary_only"] is True
-    assert stage_max_output_tokens(terra, "judge", 4_096) == 1_536
-    assert stage_max_output_tokens(pro, "judge", 128) == 2_048
+    assert stage_max_output_tokens(terra, "judge", 4_096) == 768
+    assert stage_max_output_tokens(pro, "judge", 128) == 1_024
     assert stage_max_output_tokens(pro, "synthesizer", 128) == 128
     assert stage_max_output_tokens(pro, "synthesizer", 4_096) == 4_096
     assert stage_max_output_tokens(pro, "synthesizer", None) is None
@@ -489,7 +489,7 @@ def test_hermes_runtime_uses_tool_free_reference_requests_and_one_aggregator(
     assert "untrusted advisory data" in str(judge_calls[0]["system"])
     assert '"content_trust": "untrusted_advisory_data"' in str(judge_calls[0]["prompt"])
     assert '"instruction_authority": "none"' in str(judge_calls[0]["prompt"])
-    assert judge_calls[0]["request"].max_output_tokens == 2_048
+    assert judge_calls[0]["request"].max_output_tokens == 1_024
     assert synthesis_calls[0]["request"].max_output_tokens == 4_096
     assert '"cognitive_budget"' in str(judge_calls[0]["prompt"])
     assert '"cognitive_budget"' in str(synthesis_calls[0]["prompt"])

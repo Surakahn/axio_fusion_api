@@ -1714,7 +1714,7 @@ def test_standalone_initial_cost_estimate_uses_runtime_role_output_budget_defaul
     input_tokens = router_module._estimated_input_tokens_for_route(analysis)
     expected = (
         2 * (input_tokens + 1024)
-        + (max(input_tokens, 1024 * 2) + 768)
+        + (max(input_tokens, 1024 * 2) + 1024)
         + (max(input_tokens, 1024 * 2) + 1024)
     ) / 1_000_000
 

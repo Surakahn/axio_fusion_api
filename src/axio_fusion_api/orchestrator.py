@@ -123,6 +123,8 @@ _REPLICA_LATENCY_ABSOLUTE_TOLERANCE_MS = 120
 _DEFAULT_CIRCUIT_BREAKER_COOLDOWN_SECONDS = 30.0
 _MAX_CIRCUIT_BREAKER_COOLDOWN_SECONDS = 3_600.0
 _MANDATORY_STAGE_DEADLINE_MARGIN_MS = 180
+_MANDATORY_STAGE_DEADLINE_TAIL_NUMERATOR = 5
+_MANDATORY_STAGE_DEADLINE_TAIL_DENOMINATOR = 4
 _MANDATORY_STAGE_DEADLINE_MIN_RESERVATION_MS = 250
 _MANDATORY_STAGE_DEADLINE_MAX_RESERVATION_MS = 12_000
 _RUNTIME_EXPERT_ROLE_PRIORITY = {
@@ -146,6 +148,30 @@ _RUNTIME_EVIDENCE_ROLES = frozenset(
         "targeted_escalation",
     }
 )
+
+
+def _stage_deadline_reservation_ms(latency_ms: Any) -> int:
+    """Convert observed latency into one bounded mandatory-stage reservation.
+
+    p50 is already used by route admission.  A mandatory stage therefore gets
+    a conservative p95-derived tail allowance plus a small fixed transport
+    margin.  Keeping this calculation in one helper makes initial and dynamic
+    reservations obey the same policy.
+    """
+
+    baseline = max(0, _safe_int(latency_ms, default=0))
+    tail = (
+        baseline * _MANDATORY_STAGE_DEADLINE_TAIL_NUMERATOR
+        + _MANDATORY_STAGE_DEADLINE_TAIL_DENOMINATOR
+        - 1
+    ) // _MANDATORY_STAGE_DEADLINE_TAIL_DENOMINATOR
+    return max(
+        _MANDATORY_STAGE_DEADLINE_MIN_RESERVATION_MS,
+        min(
+            _MANDATORY_STAGE_DEADLINE_MAX_RESERVATION_MS,
+            tail + _MANDATORY_STAGE_DEADLINE_MARGIN_MS,
+        ),
+    )
 
 
 class FusionExecutionError(RuntimeError):
@@ -545,10 +571,10 @@ def _mandatory_fusion_stage_deadline_reservations(
 
     The initial route estimate is a p50 admission signal.  Live provider tails
     can still consume that entire estimate before a mandatory stage starts.  A
-    p95 reservation keeps optional expert/repair work from spending the time
-    required to finish an already-admitted Fusion pass.  Unknown telemetry is
-    intentionally left unreserved and remains governed by the ordinary
-    request deadline.
+    bounded p95 tail reservation keeps optional expert/repair work from
+    spending the time required to finish an already-admitted Fusion pass.
+    Unknown telemetry is intentionally left unreserved and remains governed by
+    the ordinary request deadline.
     """
 
     judge_contract = (
@@ -588,13 +614,7 @@ def _mandatory_fusion_stage_deadline_reservations(
         )
         if latency_ms <= 0:
             continue
-        reservations[role_name] = max(
-            _MANDATORY_STAGE_DEADLINE_MIN_RESERVATION_MS,
-            min(
-                _MANDATORY_STAGE_DEADLINE_MAX_RESERVATION_MS,
-                latency_ms + _MANDATORY_STAGE_DEADLINE_MARGIN_MS,
-            ),
-        )
+        reservations[role_name] = _stage_deadline_reservation_ms(latency_ms)
     return reservations
 
 
@@ -1270,6 +1290,14 @@ class _DeadlineBudget:
         self._dynamic_stage_reservations_ms: dict[str, int] = {}
         self._dynamic_pending_stage_reservations_ms: dict[str, int] = {}
         self._started_stage_roles: set[str] = set()
+        # A consumed reservation becomes the deadline for that one stage
+        # execution.  It is intentionally separate from pending headroom:
+        # pending protects later stages, while active deadlines prevent the
+        # current Judge/Synthesizer (or a bounded replica failover) from
+        # borrowing that later stage's time.
+        self._active_stage_deadlines: dict[str, float] = {}
+        self._active_stage_reservation_ms: dict[str, int] = {}
+        self._active_stage_reservation_classes: dict[str, str] = {}
         self._consumed_stage_reservations_ms: dict[str, int] = {}
         self._consumed_dynamic_stage_reservations_ms: dict[str, int] = {}
         self._released_stage_reservations_ms: dict[str, int] = {}
@@ -1301,6 +1329,8 @@ class _DeadlineBudget:
                 if reason == "mandatory_stage_deadline_reservation":
                     self._stage_reservation_skip_count += 1
                 return False
+            reservation = 0
+            reservation_class = ""
             if role_name in self._pending_stage_reservations_ms:
                 initial_pending = self._initial_pending_stage_reservations_ms.get(
                     role_name, 0
@@ -1313,6 +1343,7 @@ class _DeadlineBudget:
                 # own dynamic hold instead of collapsing both classes.
                 if initial_pending > 0:
                     reservation = initial_pending
+                    reservation_class = "initial"
                     self._initial_pending_stage_reservations_ms[role_name] = 0
                     self._consumed_stage_reservations_ms[role_name] = (
                         self._consumed_stage_reservations_ms.get(role_name, 0)
@@ -1320,6 +1351,7 @@ class _DeadlineBudget:
                     )
                 elif dynamic_pending > 0:
                     reservation = dynamic_pending
+                    reservation_class = "dynamic"
                     self._dynamic_pending_stage_reservations_ms[role_name] = 0
                     self._consumed_dynamic_stage_reservations_ms[role_name] = (
                         self._consumed_dynamic_stage_reservations_ms.get(role_name, 0)
@@ -1336,6 +1368,18 @@ class _DeadlineBudget:
                 if self._pending_stage_reservations_ms.get(role_name, 0) <= 0:
                     self._pending_stage_reservations_ms.pop(role_name, None)
                 self._started_stage_roles.add(role_name)
+                if reservation > 0 and (
+                    role_name not in self._active_stage_deadlines
+                    or reservation_class == "dynamic"
+                ):
+                    now = time.monotonic()
+                    outer_deadline = self.started_at + self.max_latency_ms / 1000.0
+                    self._active_stage_deadlines[role_name] = min(
+                        outer_deadline,
+                        now + reservation / 1000.0,
+                    )
+                    self._active_stage_reservation_ms[role_name] = reservation
+                    self._active_stage_reservation_classes[role_name] = reservation_class
             return True
 
     def reserve_stage_reservations(
@@ -1544,15 +1588,27 @@ class _DeadlineBudget:
         kind: str = "",
     ) -> float:
         request_timeout = _timeout_seconds(request)
-        remaining = self.remaining_seconds(minimum=0.001)
-        if remaining <= 0.0:
-            return 0.001
         role_name = str(role or "")[:80]
         with self._lock:
+            now = time.monotonic()
+            remaining = self._remaining_seconds_unlocked()
+            if remaining <= 0.0:
+                return 0.001
             protected = self._pending_stage_reservation_seconds_unlocked(
                 exclude_role=role_name,
             )
+            active_deadline = self._active_stage_deadlines.get(role_name)
+            active_remaining = (
+                active_deadline - now
+                if active_deadline is not None
+                else None
+            )
         available = max(0.001, remaining - protected)
+        if active_remaining is not None:
+            # A stage may use its own admitted reservation only.  The outer
+            # request deadline and pending reservations still apply as the
+            # other two independent limits.
+            available = min(available, max(0.001, active_remaining))
         return max(0.001, min(request_timeout, available))
 
     @property
@@ -1565,6 +1621,7 @@ class _DeadlineBudget:
             elapsed_ms = max(0.0, (time.monotonic() - self.started_at) * 1000)
             remaining_ms = max(0.0, float(self.max_latency_ms) - elapsed_ms)
             pending_reservation_ms = sum(self._pending_stage_reservations_ms.values())
+            now = time.monotonic()
             return {
                 "schema": "axio_fusion_api.deadline_budget.v1",
                 "max_latency_ms": self.max_latency_ms,
@@ -1580,6 +1637,20 @@ class _DeadlineBudget:
                 ),
                 "mandatory_stage_deadline_pending_ms": pending_reservation_ms,
                 "mandatory_stage_deadline_started_roles": sorted(self._started_stage_roles)[:8],
+                "mandatory_stage_deadline_active_roles": sorted(
+                    self._active_stage_deadlines
+                )[:8],
+                "mandatory_stage_deadline_active_remaining_ms": {
+                    role: round(max(0.0, deadline - now) * 1000, 3)
+                    for role, deadline in sorted(self._active_stage_deadlines.items())
+                },
+                "mandatory_stage_deadline_active_reservations_ms": dict(
+                    sorted(self._active_stage_reservation_ms.items())
+                ),
+                "mandatory_stage_deadline_active_reservation_classes": dict(
+                    sorted(self._active_stage_reservation_classes.items())
+                ),
+                "mandatory_stage_deadline_active_cap_enforced": True,
                 "mandatory_stage_deadline_consumed_ms": sum(
                     self._consumed_stage_reservations_ms.values()
                 ),
@@ -9047,13 +9118,7 @@ def _dynamic_stage_deadline_estimate_ms(profile: ModelProfile) -> int:
     # bounded conservative estimate, not a latency guarantee; the provider
     # timeout and request deadline remain authoritative during execution.
     baseline = observed if observed > 0 else 800
-    return max(
-        _MANDATORY_STAGE_DEADLINE_MIN_RESERVATION_MS,
-        min(
-            _MANDATORY_STAGE_DEADLINE_MAX_RESERVATION_MS,
-            baseline + _MANDATORY_STAGE_DEADLINE_MARGIN_MS,
-        ),
-    )
+    return _stage_deadline_reservation_ms(baseline)
 
 
 def _feedback_stage_admission_receipt(

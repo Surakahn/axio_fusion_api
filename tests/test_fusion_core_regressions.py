@@ -12,6 +12,7 @@ from axio_fusion_api.orchestrator import (
     _fusion_evidence_candidate_count,
     _independent_candidate_count,
     _mandatory_fusion_stage_deadline_reservations,
+    _dynamic_stage_deadline_estimate_ms,
     _candidates_for_fusion_finalization,
     _local_judge_candidates,
     _normalize_provider_judge_result,
@@ -902,6 +903,64 @@ def test_deadline_budget_reserves_measured_mandatory_stages_from_optional_work(m
     assert receipt["skipped_calls"][0]["reason"] == "mandatory_stage_deadline_reservation"
 
 
+def test_deadline_budget_caps_judge_to_its_own_reservation(monkeypatch):
+    clock = {"now": 0.0}
+    monkeypatch.setattr(orchestrator_module.time, "monotonic", lambda: clock["now"])
+    budget = _DeadlineBudget(
+        4_000,
+        mandatory_stage_reservations_ms={"judge": 800, "synthesizer": 800},
+    )
+
+    assert budget.acquire(kind="judge", role="judge", profile_id="judge") is True
+
+    # Without an active stage cap, the old implementation could spend the
+    # request's remaining time minus Synthesizer headroom (over three
+    # seconds).  Judge is admitted a single 800ms stage and must stop there.
+    clock["now"] = 0.1
+    timeout = budget.timeout_seconds(
+        FusionRequest(model="axio-pro", prompt="task"),
+        role="judge",
+        kind="judge",
+    )
+    assert 0.69 <= timeout <= 0.71
+    receipt = budget.safe_dict()
+    assert receipt["mandatory_stage_deadline_active_reservations_ms"] == {"judge": 800}
+    assert receipt["mandatory_stage_deadline_active_reservation_classes"] == {
+        "judge": "initial"
+    }
+
+
+def test_deadline_budget_dynamic_rejudge_gets_a_new_stage_cap_without_borrowing_synth(
+    monkeypatch,
+):
+    clock = {"now": 0.0}
+    monkeypatch.setattr(orchestrator_module.time, "monotonic", lambda: clock["now"])
+    budget = _DeadlineBudget(
+        5_000,
+        mandatory_stage_reservations_ms={"judge": 1_000, "synthesizer": 1_000},
+    )
+    assert budget.reserve_stage_reservations(
+        {"judge": 500},
+        reason="hermes_feedback_rejudge",
+    ) is True
+    assert budget.acquire(kind="judge", role="judge", profile_id="judge-initial") is True
+
+    clock["now"] = 0.1
+    assert budget.acquire(kind="judge", role="judge", profile_id="judge-recheck") is True
+    timeout = budget.timeout_seconds(
+        FusionRequest(model="axio-pro", prompt="task"),
+        role="judge",
+        kind="judge",
+    )
+    assert 0.49 <= timeout <= 0.51
+    receipt = budget.safe_dict()
+    assert receipt["mandatory_stage_deadline_active_reservations_ms"] == {"judge": 500}
+    assert receipt["mandatory_stage_deadline_active_reservation_classes"] == {
+        "judge": "dynamic"
+    }
+    assert receipt["mandatory_stage_deadline_pending_ms"] == 1_000
+
+
 def test_dynamic_call_reservations_are_atomic_and_consumed_by_stage_role():
     budget = _CallBudget(
         6,
@@ -1016,7 +1075,20 @@ def test_mandatory_stage_deadline_reservations_prefer_p95_and_have_bounded_margi
 
     reservations = _mandatory_fusion_stage_deadline_reservations(route_plan)
 
-    assert reservations == {"judge": 1_080, "synthesizer": 480}
+    assert reservations == {"judge": 1_305, "synthesizer": 555}
+
+
+def test_dynamic_stage_deadline_estimate_uses_the_same_bounded_tail_policy():
+    profile = normalize_profile(
+        {
+            "provider": "provider-a",
+            "model": "judge",
+            "p50_latency_ms": 300,
+            "p95_latency_ms": 900,
+        }
+    )
+
+    assert _dynamic_stage_deadline_estimate_ms(profile) == 1_305
 
 
 def _local_consensus_fixture_profiles(*, cost=None):

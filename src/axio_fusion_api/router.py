@@ -20,7 +20,10 @@ LOCAL_CONSENSUS_OVERHEAD_MS = 75
 LOCAL_CONSENSUS_MAX_PANEL_SIZE = 4
 EXPERT_QUALITY_REPLACEMENT_TOLERANCE = 0.12
 ROUTE_COST_EXPERT_OUTPUT_TOKENS = 1024
-ROUTE_COST_JUDGE_OUTPUT_TOKENS = 768
+# Keep this equal to the largest Hermes Judge wire cap. A lower estimate would
+# admit a route whose real mandatory control packet can exceed its cost/time
+# reservation; the Terra cap remains lower but is safely covered by this bound.
+ROUTE_COST_JUDGE_OUTPUT_TOKENS = 1_024
 ROUTE_COST_SYNTHESIZER_OUTPUT_TOKENS = 1024
 FAST_DIRECT_BASE_SCORE_WEIGHT = 0.35
 FAST_DIRECT_LATENCY_WEIGHT = 0.50

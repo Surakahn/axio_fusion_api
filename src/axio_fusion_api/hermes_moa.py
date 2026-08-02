@@ -33,8 +33,14 @@ HERMES_MOA_REFERENCE_ROLES = (
 HERMES_MOA_REFERENCE_RESULT_CHAR_LIMIT = 4_000
 HERMES_MOA_TERRA_REFERENCE_MAX_TOKENS = 512
 HERMES_MOA_PRO_REFERENCE_MAX_TOKENS = 768
-HERMES_MOA_TERRA_JUDGE_MAX_TOKENS = 1_536
-HERMES_MOA_PRO_JUDGE_MAX_TOKENS = 2_048
+# The Judge emits a bounded control packet, not a user-visible answer. Keep
+# its cap aligned with the router's resource estimate so the mandatory Judge
+# and acting Synthesizer still have time after the parallel reference wave.
+# The packet schema deliberately carries hashes/labels instead of candidate
+# passages, so these caps leave room for all required fields without inviting
+# verbose internal deliberation.
+HERMES_MOA_TERRA_JUDGE_MAX_TOKENS = 768
+HERMES_MOA_PRO_JUDGE_MAX_TOKENS = 1_024
 HERMES_MOA_MAX_FEEDBACK_ROUNDS = 1
 HERMES_MOA_SOURCE_COMMIT = "e89bc58a5ba80ec6be19b43beca37cbb03091afd"
 
