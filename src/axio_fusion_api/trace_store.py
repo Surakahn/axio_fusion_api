@@ -2037,8 +2037,14 @@ def _safe_fusion_admission(value: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "schema": value.get("schema") or "axio_fusion_api.fusion_admission.v1",
         "activated": bool(value.get("activated")),
+        "fusion_finalization_mode": str(value.get("fusion_finalization_mode") or "direct")[:80],
         "decision_reason": str(value.get("decision_reason") or "")[:160],
         "blocked_reasons": [str(item)[:160] for item in value.get("blocked_reasons", [])[:12] if str(item)] if isinstance(value.get("blocked_reasons"), list) else [],
+        "provider_plan_blocked_reasons": [
+            str(item)[:160]
+            for item in value.get("provider_plan_blocked_reasons", [])[:12]
+            if str(item)
+        ] if isinstance(value.get("provider_plan_blocked_reasons"), list) else [],
         "force_reasons": [str(item)[:160] for item in value.get("force_reasons", [])[:12] if str(item)] if isinstance(value.get("force_reasons"), list) else [],
         "threshold": _optional_float(value.get("threshold")),
         "threshold_passed": bool(value.get("threshold_passed")),
@@ -2052,6 +2058,69 @@ def _safe_fusion_admission(value: Mapping[str, Any]) -> dict[str, Any]:
         "utility_score": _optional_float(value.get("utility_score")),
         "pricing_known": bool(value.get("pricing_known")),
         "latency_known": bool(value.get("latency_known")),
+        "p95_latency_known": bool(value.get("p95_latency_known")),
+        "direct_p95_estimated_latency_ms": _optional_float(
+            value.get("direct_p95_estimated_latency_ms")
+        ),
+        "fusion_p95_estimated_latency_ms": _optional_float(
+            value.get("fusion_p95_estimated_latency_ms")
+        ),
+        "p95_latency_multiplier_vs_single_model": _optional_float(
+            value.get("p95_latency_multiplier_vs_single_model")
+        ),
+        "p95_latency_deadline_guard_blocked": bool(
+            value.get("p95_latency_deadline_guard_blocked")
+        ),
+        "p95_latency_multiplier_guard_blocked": bool(
+            value.get("p95_latency_multiplier_guard_blocked")
+        ),
+        "p95_latency_guard_blocked": bool(value.get("p95_latency_guard_blocked")),
+        "latency_multiplier_guard": {
+            "enabled": bool(
+                value.get("latency_multiplier_guard", {}).get("enabled")
+                if isinstance(value.get("latency_multiplier_guard"), Mapping)
+                else False
+            ),
+            "target_max_vs_single_model": _optional_float(
+                value.get("latency_multiplier_guard", {}).get(
+                    "target_max_vs_single_model"
+                )
+                if isinstance(value.get("latency_multiplier_guard"), Mapping)
+                else None
+            ),
+            "blocked": bool(
+                value.get("latency_multiplier_guard", {}).get("blocked")
+                if isinstance(value.get("latency_multiplier_guard"), Mapping)
+                else False
+            ),
+            "provider_plan_blocked": bool(
+                value.get("latency_multiplier_guard", {}).get(
+                    "provider_plan_blocked"
+                )
+                if isinstance(value.get("latency_multiplier_guard"), Mapping)
+                else False
+            ),
+            "p95_latency_known": bool(
+                value.get("latency_multiplier_guard", {}).get("p95_latency_known")
+                if isinstance(value.get("latency_multiplier_guard"), Mapping)
+                else False
+            ),
+            "p95_deadline_blocked": bool(
+                value.get("latency_multiplier_guard", {}).get(
+                    "p95_deadline_blocked"
+                )
+                if isinstance(value.get("latency_multiplier_guard"), Mapping)
+                else False
+            ),
+            "p95_multiplier_guard_blocked": bool(
+                value.get("latency_multiplier_guard", {}).get(
+                    "p95_multiplier_guard_blocked"
+                )
+                if isinstance(value.get("latency_multiplier_guard"), Mapping)
+                else False
+            ),
+            "raw_profile_id_persisted": False,
+        },
         "quality_target": _optional_float(value.get("quality_target")),
         "complexity": _optional_float(value.get("complexity")),
         "risk": _optional_float(value.get("risk")),
@@ -2080,6 +2149,9 @@ def _safe_fusion_admission(value: Mapping[str, Any]) -> dict[str, Any]:
             "expected_quality": _optional_float(fusion.get("expected_quality")),
             "estimated_cost_usd": _optional_float(fusion.get("estimated_cost_usd")),
             "estimated_latency_ms": _optional_float(fusion.get("estimated_latency_ms")),
+            "p95_estimated_latency_ms": _optional_float(
+                fusion.get("p95_estimated_latency_ms")
+            ),
             "provider_diversity": _optional_float(fusion.get("provider_diversity")),
             "capability_coverage": _optional_float(fusion.get("capability_coverage")),
             "capability_complementarity": _optional_float(fusion.get("capability_complementarity")),

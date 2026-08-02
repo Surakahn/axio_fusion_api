@@ -70,21 +70,29 @@ def _profile(index: int, *, critique: float = 0.8, structured: float = 0.84):
     )
 
 
-def _latency_profile(name: str, latency: int, *, critique: float = 0.8, structured: float = 0.84):
-    return normalize_profile(
-        {
-            "provider": f"latency-{name}",
-            "model": name,
-            "api_format": "chat",
-            "p50_latency_ms": latency,
-            "capabilities": {
-                "daily_work": 0.86,
-                "logic": 0.84,
-                "structured_output": structured,
-                "critique": critique,
-            },
-        }
-    )
+def _latency_profile(
+    name: str,
+    latency: int,
+    *,
+    critique: float = 0.8,
+    structured: float = 0.84,
+    p95_latency: int | None = None,
+):
+    payload = {
+        "provider": f"latency-{name}",
+        "model": name,
+        "api_format": "chat",
+        "p50_latency_ms": latency,
+        "capabilities": {
+            "daily_work": 0.86,
+            "logic": 0.84,
+            "structured_output": structured,
+            "critique": critique,
+        },
+    }
+    if p95_latency is not None:
+        payload["p95_latency_ms"] = p95_latency
+    return normalize_profile(payload)
 
 
 def _screened_profile(
@@ -1087,6 +1095,132 @@ def test_local_consensus_route_replaces_over_3x_provider_plan_for_terra_and_pro(
         }
 
 
+def test_provider_stage_p95_deadline_guard_switches_to_local_consensus_when_p50_passes():
+    profiles = [
+        _latency_profile(
+            f"p95-deadline-{index}",
+            500,
+            critique=0.9,
+            structured=0.9,
+            p95_latency=1_000,
+        )
+        for index in range(4)
+    ]
+    request = canonicalize_payload(
+        {
+            "model": "axio-pro",
+            "max_latency_ms": 2_500,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Analyze a high-risk production workflow and prove the routing constraints are logically consistent.",
+                }
+            ],
+        }
+    )
+
+    route_plan = build_route_plan(request, profiles)
+    admission = route_plan["fusion_admission"]
+    guard = admission["latency_multiplier_guard"]
+
+    assert guard["p50_multiplier_vs_single_model"] == 3.0
+    assert admission["p95_latency_known"] is True
+    assert admission["p95_latency_deadline_guard_blocked"] is True
+    assert admission["p95_latency_multiplier_guard_blocked"] is False
+    assert admission["provider_plan_blocked_reasons"] == [
+        "fusion_p95_latency_exceeds_request_deadline"
+    ]
+    assert admission["activated"] is True
+    assert admission["fusion_finalization_mode"] == "local_consensus"
+    assert guard["blocked"] is False
+    assert guard["provider_plan_blocked"] is True
+    assert guard["p95_deadline_blocked"] is True
+    assert route_plan["strategy"] == "pro_local_consensus"
+
+
+def test_provider_stage_p95_three_x_guard_switches_to_local_consensus_when_p50_passes():
+    profiles = [
+        _latency_profile(
+            "p95-multiplier-direct",
+            500,
+            critique=0.9,
+            structured=0.9,
+            p95_latency=800,
+        ),
+        _latency_profile(
+            "p95-multiplier-tail-one",
+            500,
+            critique=0.9,
+            structured=0.9,
+            p95_latency=2_000,
+        ),
+        _latency_profile(
+            "p95-multiplier-tail-two",
+            500,
+            critique=0.9,
+            structured=0.9,
+            p95_latency=2_000,
+        ),
+        _latency_profile(
+            "p95-multiplier-tail-three",
+            500,
+            critique=0.9,
+            structured=0.9,
+            p95_latency=2_000,
+        ),
+    ]
+    request = canonicalize_payload(
+        {
+            "model": "axio-pro",
+            "max_latency_ms": 10_000,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Analyze a high-risk production workflow and prove the routing constraints are logically consistent.",
+                }
+            ],
+        }
+    )
+
+    route_plan = build_route_plan(request, profiles)
+    admission = route_plan["fusion_admission"]
+    guard = admission["latency_multiplier_guard"]
+
+    assert guard["p50_multiplier_vs_single_model"] == 3.0
+    assert admission["p95_latency_known"] is True
+    assert admission["p95_latency_deadline_guard_blocked"] is False
+    assert admission["p95_latency_multiplier_guard_blocked"] is True
+    assert admission["p95_latency_multiplier_vs_single_model"] > 3.0
+    assert admission["provider_plan_blocked_reasons"] == [
+        "fusion_p95_latency_exceeds_3x_single_model_guard"
+    ]
+    assert admission["activated"] is True
+    assert admission["fusion_finalization_mode"] == "local_consensus"
+    assert guard["blocked"] is False
+    assert guard["provider_plan_blocked"] is True
+    assert guard["p95_multiplier_guard_blocked"] is True
+
+
+def test_missing_p95_evidence_remains_unknown_and_does_not_block_provider_admission():
+    route_plan = build_route_plan(
+        FusionRequest(
+            model="axio-pro",
+            prompt="Analyze a high-risk production workflow and prove the routing constraints are logically consistent.",
+        ),
+        _local_consensus_fixture_profiles(),
+    )
+    admission = route_plan["fusion_admission"]
+
+    assert admission["p95_latency_known"] is False
+    assert admission["direct_p95_estimated_latency_ms"] is None
+    assert admission["fusion_p95_estimated_latency_ms"] is None
+    assert admission["p95_latency_guard_blocked"] is False
+    assert not any(
+        reason.startswith("fusion_p95_latency_")
+        for reason in admission["provider_plan_blocked_reasons"]
+    )
+
+
 def test_neutral_runtime_portfolio_uses_provider_diversity_and_one_parallel_backup():
     profiles = [
         normalize_profile(
@@ -1175,6 +1309,49 @@ def test_local_consensus_respects_channel_single_flight_and_uses_cross_provider_
     assert local_plan["provider_diversity_requirement_reason"] == "channel_single_flight_parallelism"
     assert local_plan["provider_serialization_group_count"] == 1
     assert local_plan["provider_serialization_candidate_count"] == 2
+    assert local_plan["feasible"] is True
+    assert len(set(local_plan["panel_provider_hashes"])) == 2
+
+
+def test_local_consensus_requires_cross_provider_independence_with_capability_evidence():
+    def profile(provider, model, latency, daily, logic, critique):
+        return normalize_profile(
+            {
+                "provider": provider,
+                "model": model,
+                "canonical_model_id": model,
+                "api_format": "chat",
+                "p50_latency_ms": latency,
+                "p95_latency_ms": latency + 40,
+                "health": "available",
+                "source": "runtime_channel_live_probe",
+                "capabilities": {
+                    "daily_work": daily,
+                    "logic": logic,
+                    "structured_output": critique,
+                    "critique": critique,
+                },
+            }
+        )
+
+    profiles = [
+        profile("tokenapis", "primary", 100, 0.99, 0.99, 0.90),
+        profile("tokenapis", "same-channel-independent", 110, 0.98, 0.98, 0.89),
+        profile("nvidia", "cross-provider-verifier", 130, 0.94, 0.94, 0.88),
+    ]
+    route_plan = build_route_plan(
+        FusionRequest(
+            model="axio-terra",
+            prompt="Analyze a difficult scientific constraint and verify the conclusion.",
+        ),
+        profiles,
+    )
+
+    local_plan = route_plan["budget"]["local_consensus_plan"]
+
+    assert local_plan["capability_evidence_mode"] == "declared_or_calibrated"
+    assert local_plan["provider_diversity_required"] is True
+    assert local_plan["provider_diversity_requirement_reason"] == "cross_provider_independence"
     assert local_plan["feasible"] is True
     assert len(set(local_plan["panel_provider_hashes"])) == 2
 
@@ -2206,6 +2383,31 @@ def test_implicit_fast_deadline_adapts_to_observed_direct_profile_latency():
     assert adapted["max_latency_ms"] == 11_750
     assert adapted["direct_profile_deadline_adaptation"]["applied"] is True
     assert adapted["direct_profile_deadline_adaptation"]["observed_latency_ms"] == 4_500.0
+
+
+def test_implicit_fusion_deadline_uses_direct_p95_three_x_bound():
+    profile = normalize_profile(
+        {
+            "provider": "tail-fixture",
+            "model": "terra-direct-model",
+            "api_format": "responses",
+            "p50_latency_ms": 5_000,
+            "p95_latency_ms": 7_000,
+        }
+    )
+    adapted = _budget_with_direct_profile_deadline(
+        FusionRequest(model="axio-terra", prompt="task"),
+        {"max_latency_ms": 15_000},
+        profile,
+    )
+
+    assert adapted["max_latency_ms"] == 21_000
+    receipt = adapted["direct_profile_deadline_adaptation"]
+    assert receipt["enabled"] is True
+    assert receipt["reason"] == "calibrated_direct_profile_p95_three_x_bound"
+    assert receipt["observed_latency_quantile"] == "p95"
+    assert receipt["target_latency_multiplier"] == 3.0
+    assert receipt["deadline_margin_ms"] == 0
 
 
 def test_canonical_replica_failover_precedes_cross_model_fallback_and_stage_failover_is_bounded():

@@ -721,7 +721,14 @@ def _budget_for_request(
     if request.policy.max_cost_usd is not None:
         max_cost = min(max_cost, request.policy.max_cost_usd)
     if request.policy.max_latency_ms is not None:
-        max_latency = min(max_latency, request.policy.max_latency_ms)
+        # A caller deadline is an upper bound for this request, while the
+        # tier's implicit default is only an operating target. Do not let a
+        # smaller internal default silently override an explicit but still
+        # bounded caller deadline.
+        max_latency = min(
+            FAST_DIRECT_MAX_DEADLINE_MS,
+            max(1, int(request.policy.max_latency_ms)),
+        )
     # Judge and synthesis are part of every admitted Fusion route, including
     # the bounded fast light-verify path.  Fallback and escalation allowances
     # remain separate so the initial plan has an explicit call budget floor.
@@ -783,14 +790,14 @@ def _budget_with_direct_profile_deadline(
     budget: Mapping[str, Any],
     direct_profile: ModelProfile | None,
 ) -> dict[str, Any]:
-    """Adapt an implicit Fast deadline to the calibrated direct profile.
+    """Adapt an implicit tier deadline to the calibrated direct profile.
 
-    A fixed two-and-a-half-second ceiling is useful as a default, but it is
-    not a valid universal provider SLA.  A live probe can legitimately show a
-    slower remote gateway, and the direct Fast route must not turn a successful
-    response into a local timeout merely because that gateway is slower than
-    the default.  Keep an explicit caller deadline authoritative; otherwise
-    derive a bounded operating window from the profile's observed p95 latency.
+    A fixed tier ceiling is useful as a default, but it is not a valid
+    universal provider SLA. A live probe can legitimately show a slower remote
+    gateway, and the runtime must not cancel an admitted Fusion panel at the
+    exact implicit default while the direct provider is still within its
+    calibrated tail. Fast uses its tighter operating target; Terra and Pro use
+    the measured direct p95 as the reference for the hard 3x upper bound.
 
     This is a timeout/admission allowance, not a promise that Fusion may spend
     that whole window.  The hard three-times latency comparison remains a
@@ -811,7 +818,9 @@ def _budget_with_direct_profile_deadline(
         "raw_profile_id_persisted": False,
         "raw_model_name_persisted": False,
     }
-    if request.public_model != "axio-fast":
+    adaptive_models = {"axio-fast", "axio-terra", "axio-pro"}
+    receipt["enabled"] = request.public_model in adaptive_models
+    if request.public_model not in adaptive_models:
         updated["direct_profile_deadline_adaptation"] = receipt
         return updated
     if request.policy.max_latency_ms is not None:
@@ -823,6 +832,7 @@ def _budget_with_direct_profile_deadline(
         updated["direct_profile_deadline_adaptation"] = receipt
         return updated
     observed = direct_profile.p95_latency_ms or direct_profile.p50_latency_ms
+    observed_quantile = "p95" if direct_profile.p95_latency_ms is not None else "p50"
     if observed is None or float(observed) <= 0.0:
         receipt["reason"] = "direct_profile_latency_unknown"
         updated["direct_profile_deadline_adaptation"] = receipt
@@ -831,19 +841,30 @@ def _budget_with_direct_profile_deadline(
         FAST_DIRECT_DEFAULT_DEADLINE_MS,
         int(budget.get("max_latency_ms") or FAST_DIRECT_DEFAULT_DEADLINE_MS),
     )
+    if request.public_model == "axio-fast":
+        target_multiplier = FAST_DIRECT_DEADLINE_MULTIPLIER
+        margin_ms = FAST_DIRECT_DEADLINE_MARGIN_MS
+        reason = "calibrated_direct_profile_latency"
+    else:
+        target_multiplier = FUSION_LATENCY_MULTIPLIER_GUARD
+        margin_ms = 0
+        reason = "calibrated_direct_profile_p95_three_x_bound"
     adapted = min(
         FAST_DIRECT_MAX_DEADLINE_MS,
         max(
             configured,
-            int(math.ceil(float(observed) * FAST_DIRECT_DEADLINE_MULTIPLIER + FAST_DIRECT_DEADLINE_MARGIN_MS)),
+            int(math.ceil(float(observed) * target_multiplier + margin_ms)),
         ),
     )
     receipt.update(
         {
             "applied": adapted != configured,
-            "reason": "calibrated_direct_profile_latency",
+            "reason": reason,
             "direct_profile_latency_known": True,
             "observed_latency_ms": round(float(observed), 3),
+            "observed_latency_quantile": observed_quantile,
+            "target_latency_multiplier": target_multiplier,
+            "deadline_margin_ms": margin_ms,
             "configured_deadline_ms": configured,
             "adapted_deadline_ms": adapted,
         }
@@ -1175,6 +1196,7 @@ def _safe_fusion_latency_execution_receipt(value: Mapping[str, Any]) -> dict[str
     return {
         "schema": str(value.get("schema") or "axio_fusion_api.initial_execution_latency_estimate.v1")[:120],
         "basis": str(value.get("basis") or "")[:160],
+        "latency_quantile": str(value.get("latency_quantile") or "p50")[:8],
         "expert_role_count": _safe_nonnegative_int(value.get("expert_role_count")),
         "expert_profile_hashes": [
             str(item)
@@ -1365,6 +1387,12 @@ def _local_consensus_plan(
         "latency_multiplier_vs_direct": None,
         "latency_guard_blocked": False,
         "request_deadline_blocked": False,
+        "p95_latency_known": False,
+        "expert_p95_phase_latency_ms": None,
+        "estimated_p95_latency_ms": None,
+        "p95_latency_multiplier_vs_direct": None,
+        "p95_latency_guard_blocked": False,
+        "p95_request_deadline_blocked": False,
         "cost_known": False,
         "estimated_cost_usd": None,
         "cost_budget_blocked": False,
@@ -1387,6 +1415,23 @@ def _local_consensus_plan(
         "planned_execution": {
             "schema": "axio_fusion_api.local_consensus_execution.v1",
             "basis": "parallel_expert_calls_only_plus_in_process_consensus",
+            "expert_role_count": 0,
+            "expert_profile_hashes": [],
+            "expert_parallel_slots": 0,
+            "expert_wave_count": 0,
+            "expert_phase_latency_ms": None,
+            "latency_quantile": "p50",
+            "local_consensus_overhead_ms": LOCAL_CONSENSUS_OVERHEAD_MS,
+            "total_latency_ms": None,
+            "provider_judge_included": False,
+            "provider_synthesizer_included": False,
+            "raw_profile_id_persisted": False,
+            "secrets_persisted": False,
+        },
+        "planned_p95_execution": {
+            "schema": "axio_fusion_api.local_consensus_execution.v1",
+            "basis": "parallel_expert_calls_only_plus_in_process_consensus",
+            "latency_quantile": "p95",
             "expert_role_count": 0,
             "expert_profile_hashes": [],
             "expert_parallel_slots": 0,
@@ -1535,25 +1580,26 @@ def _local_consensus_plan(
             "provider_serialization_candidate_count": serializing_candidate_count,
         }
     )
-    # With only transport/protocol evidence, provider independence is the
-    # strongest honest diversity signal available.  When a portfolio has
-    # enough providers, do not let neutral capability defaults select several
-    # near-identical replicas from one channel.
-    require_provider_diversity = bool(
-        provider_diversity_floor > 1
-        and (
-            not capability_evidence_available
-            or provider_parallelism_constraint
-        )
-    )
+    # A local-consensus panel is only useful when its evidence and failure
+    # domains are meaningfully independent.  Capability scores can rank
+    # models, but they cannot prove that two models on the same gateway have
+    # independent queueing, rate limits, or outage behavior.  When at least
+    # two providers are available, prefer a cross-provider panel even when
+    # capability evidence exists; a single-provider panel remains valid only
+    # when the portfolio offers no provider-diverse alternative.
+    require_provider_diversity = bool(provider_diversity_floor > 1)
     default["provider_diversity_required"] = require_provider_diversity
     default["provider_diversity_requirement_reason"] = (
         "channel_single_flight_parallelism"
         if provider_parallelism_constraint and provider_diversity_floor > 1
         else (
-            "neutral_capability_evidence"
-            if not capability_evidence_available and provider_diversity_floor > 1
-            else ""
+            "cross_provider_independence"
+            if capability_evidence_available and provider_diversity_floor > 1
+            else (
+                "neutral_capability_evidence"
+                if provider_diversity_floor > 1
+                else ""
+            )
         )
     )
     desired_panel_size = minimum_count
@@ -1568,7 +1614,17 @@ def _local_consensus_plan(
 
     direct_quality = _expected_profile_quality(direct_profile, analysis)
     default["direct_expected_quality"] = round(direct_quality, 4)
-    evaluations: list[tuple[tuple[ModelProfile, ...], list[dict[str, Any]], float, float, float | None]] = []
+    evaluations: list[
+        tuple[
+            tuple[ModelProfile, ...],
+            list[dict[str, Any]],
+            float,
+            float,
+            float | None,
+            float | None,
+            float | None,
+        ]
+    ] = []
     max_parallel = max(1, int(budget.get("max_parallel_experts") or minimum_count))
     for panel_size in range(minimum_count, desired_panel_size + 1):
         for panel_tuple in combinations(candidate_pool, panel_size):
@@ -1592,6 +1648,7 @@ def _local_consensus_plan(
                 role_blueprint,
                 budget=budget,
                 latency_baseline_profile=direct_profile,
+                allow_critic_as_second_evidence=True,
             )
             if len(panel) > minimum_count:
                 assigned_expert_profile_ids = {
@@ -1676,12 +1733,43 @@ def _local_consensus_plan(
                 continue
             if cost is not None and cost > max(0.0, float(budget.get("max_cost_usd") or 0.0)):
                 continue
+            panel_p95_latency: float | None = None
+            panel_p95_multiplier: float | None = None
+            p95_known = bool(
+                direct_profile.p95_latency_ms is not None
+                and all(profile.p95_latency_ms is not None for profile in expert_profiles)
+            )
+            if p95_known:
+                panel_p95_phase = _parallel_expert_phase_latency_ms(
+                    [float(profile.p95_latency_ms or 0.0) for profile in expert_profiles],
+                    max_parallel=max_parallel,
+                    profiles=expert_profiles,
+                )
+                panel_p95_latency = panel_p95_phase + LOCAL_CONSENSUS_OVERHEAD_MS
+                panel_p95_multiplier = panel_p95_latency / max(
+                    1.0,
+                    float(direct_profile.p95_latency_ms or 0.0),
+                )
+                if panel_p95_latency > max_latency_ms:
+                    continue
+                if panel_p95_multiplier > FUSION_LATENCY_MULTIPLIER_GUARD:
+                    continue
             quality = _local_consensus_expected_quality(expert_profiles, analysis)
             # A local consensus panel may trade a small amount of peak capability
             # for independent error coverage, but never a large quality regression.
             if quality < direct_quality - EXPERT_QUALITY_REPLACEMENT_TOLERANCE:
                 continue
-            evaluations.append((panel, expert_roles, quality, multiplier, cost))
+            evaluations.append(
+                (
+                    panel,
+                    expert_roles,
+                    quality,
+                    multiplier,
+                    cost,
+                    panel_p95_latency,
+                    panel_p95_multiplier,
+                )
+            )
 
     default["candidate_panel_evaluation_count"] = len(evaluations)
     if not evaluations:
@@ -1703,7 +1791,15 @@ def _local_consensus_plan(
             tuple(profile.profile_id for profile in row[0]),
         ),
     )
-    panel, expert_roles, quality, multiplier, cost = chosen
+    (
+        panel,
+        expert_roles,
+        quality,
+        multiplier,
+        cost,
+        panel_p95_latency,
+        panel_p95_multiplier,
+    ) = chosen
     phase_latency = _parallel_expert_phase_latency_ms(
         [float(profile.p50_latency_ms or 0.0) for profile in panel],
         max_parallel=max_parallel,
@@ -1733,6 +1829,32 @@ def _local_consensus_plan(
             "provider_synthesizer_included": False,
         }
     )
+    planned_p95_execution = _fusion_latency_execution_receipt(
+        panel,
+        None,
+        None,
+        max_parallel=max_parallel,
+        latency_quantile="p95",
+        expert_phase_latency_ms=(
+            max(0.0, float(panel_p95_latency) - LOCAL_CONSENSUS_OVERHEAD_MS)
+            if panel_p95_latency is not None
+            else 0.0
+        ),
+    )
+    planned_p95_execution.update(
+        {
+            "schema": "axio_fusion_api.local_consensus_execution.v1",
+            "basis": "parallel_expert_calls_only_plus_in_process_consensus",
+            "local_consensus_overhead_ms": LOCAL_CONSENSUS_OVERHEAD_MS,
+            "total_latency_ms": (
+                round(float(panel_p95_latency), 3)
+                if panel_p95_latency is not None
+                else None
+            ),
+            "provider_judge_included": False,
+            "provider_synthesizer_included": False,
+        }
+    )
     planned_cost = dict(chosen_cost_receipt)
     planned_cost.update(
         {
@@ -1755,6 +1877,27 @@ def _local_consensus_plan(
             "expert_phase_latency_ms": round(float(phase_latency), 3),
             "estimated_latency_ms": round(float(phase_latency + LOCAL_CONSENSUS_OVERHEAD_MS), 3),
             "latency_multiplier_vs_direct": round(float(multiplier), 4),
+            "p95_latency_known": panel_p95_latency is not None,
+            "expert_p95_phase_latency_ms": (
+                round(
+                    max(0.0, float(panel_p95_latency) - LOCAL_CONSENSUS_OVERHEAD_MS),
+                    3,
+                )
+                if panel_p95_latency is not None
+                else None
+            ),
+            "estimated_p95_latency_ms": (
+                round(float(panel_p95_latency), 3)
+                if panel_p95_latency is not None
+                else None
+            ),
+            "p95_latency_multiplier_vs_direct": (
+                round(float(panel_p95_multiplier), 4)
+                if panel_p95_multiplier is not None
+                else None
+            ),
+            "p95_latency_guard_blocked": False,
+            "p95_request_deadline_blocked": False,
             "expected_quality": round(float(quality), 4),
             "expected_quality_delta": round(float(quality - direct_quality), 4),
             "cost_known": cost is not None,
@@ -1774,6 +1917,7 @@ def _local_consensus_plan(
             "redundancy_enabled": bool(desired_panel_size > minimum_count),
             "redundancy_candidate_count": max(0, len(panel) - minimum_count),
             "planned_execution": planned_execution,
+            "planned_p95_execution": planned_p95_execution,
             "planned_cost": planned_cost,
             "provider_stage_calls_reserved": False,
         }
@@ -1856,6 +2000,11 @@ def _local_consensus_expected_quality(
 
 def _safe_local_consensus_plan(value: Mapping[str, Any]) -> dict[str, Any]:
     execution = value.get("planned_execution") if isinstance(value.get("planned_execution"), Mapping) else {}
+    p95_execution = (
+        value.get("planned_p95_execution")
+        if isinstance(value.get("planned_p95_execution"), Mapping)
+        else {}
+    )
     cost = value.get("planned_cost") if isinstance(value.get("planned_cost"), Mapping) else {}
     return {
         "schema": str(value.get("schema") or "axio_fusion_api.local_consensus_plan.v1")[:120],
@@ -1878,6 +2027,20 @@ def _safe_local_consensus_plan(value: Mapping[str, Any]) -> dict[str, Any]:
         "latency_multiplier_vs_direct": _safe_nonnegative_float(value.get("latency_multiplier_vs_direct")),
         "latency_guard_blocked": bool(value.get("latency_guard_blocked")),
         "request_deadline_blocked": bool(value.get("request_deadline_blocked")),
+        "p95_latency_known": bool(value.get("p95_latency_known")),
+        "expert_p95_phase_latency_ms": _safe_nonnegative_float(
+            value.get("expert_p95_phase_latency_ms")
+        ),
+        "estimated_p95_latency_ms": _safe_nonnegative_float(
+            value.get("estimated_p95_latency_ms")
+        ),
+        "p95_latency_multiplier_vs_direct": _safe_nonnegative_float(
+            value.get("p95_latency_multiplier_vs_direct")
+        ),
+        "p95_latency_guard_blocked": bool(value.get("p95_latency_guard_blocked")),
+        "p95_request_deadline_blocked": bool(
+            value.get("p95_request_deadline_blocked")
+        ),
         "cost_known": bool(value.get("cost_known")),
         "estimated_cost_usd": _safe_nonnegative_float(value.get("estimated_cost_usd")),
         "cost_budget_blocked": bool(value.get("cost_budget_blocked")),
@@ -1911,38 +2074,14 @@ def _safe_local_consensus_plan(value: Mapping[str, Any]) -> dict[str, Any]:
         "redundancy_candidate_count": _safe_nonnegative_int(
             value.get("redundancy_candidate_count")
         ),
-        "planned_execution": {
-            "schema": str(
-                execution.get("schema")
-                or "axio_fusion_api.local_consensus_execution.v1"
-            )[:120],
-            "basis": str(execution.get("basis") or "")[:160],
-            "expert_role_count": _safe_nonnegative_int(execution.get("expert_role_count")),
-            "expert_profile_hashes": [
-                str(item)
-                for item in execution.get("expert_profile_hashes", [])
-                if str(item)
-            ][:24]
-            if isinstance(execution.get("expert_profile_hashes"), list)
-            else [],
-            "expert_parallel_slots": _safe_nonnegative_int(
-                execution.get("expert_parallel_slots")
-            ),
-            "expert_wave_count": _safe_nonnegative_int(execution.get("expert_wave_count")),
-            "expert_phase_latency_ms": _safe_nonnegative_float(
-                execution.get("expert_phase_latency_ms")
-            ),
-            "local_consensus_overhead_ms": _safe_nonnegative_float(
-                execution.get("local_consensus_overhead_ms")
-            ),
-            "total_latency_ms": _safe_nonnegative_float(execution.get("total_latency_ms")),
-            "provider_judge_included": bool(execution.get("provider_judge_included")),
-            "provider_synthesizer_included": bool(
-                execution.get("provider_synthesizer_included")
-            ),
-            "raw_profile_id_persisted": False,
-            "secrets_persisted": False,
-        },
+        "planned_execution": _safe_local_consensus_execution(
+            execution,
+            latency_quantile="p50",
+        ),
+        "planned_p95_execution": _safe_local_consensus_execution(
+            p95_execution,
+            latency_quantile="p95",
+        ),
         "planned_cost": {
             "schema": str(
                 cost.get("schema")
@@ -1967,6 +2106,39 @@ def _safe_local_consensus_plan(value: Mapping[str, Any]) -> dict[str, Any]:
         "raw_profile_ids_persisted": False,
         "raw_provider_names_persisted": False,
         "raw_model_names_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _safe_local_consensus_execution(
+    value: Mapping[str, Any],
+    *,
+    latency_quantile: str,
+) -> dict[str, Any]:
+    return {
+        "schema": str(
+            value.get("schema") or "axio_fusion_api.local_consensus_execution.v1"
+        )[:120],
+        "basis": str(value.get("basis") or "")[:160],
+        "latency_quantile": str(latency_quantile or value.get("latency_quantile") or "p50")[:8],
+        "expert_role_count": _safe_nonnegative_int(value.get("expert_role_count")),
+        "expert_profile_hashes": [
+            str(item) for item in value.get("expert_profile_hashes", []) if str(item)
+        ][:24] if isinstance(value.get("expert_profile_hashes"), list) else [],
+        "expert_parallel_slots": _safe_nonnegative_int(value.get("expert_parallel_slots")),
+        "expert_wave_count": _safe_nonnegative_int(value.get("expert_wave_count")),
+        "expert_phase_latency_ms": _safe_nonnegative_float(
+            value.get("expert_phase_latency_ms")
+        ),
+        "local_consensus_overhead_ms": _safe_nonnegative_float(
+            value.get("local_consensus_overhead_ms")
+        ),
+        "total_latency_ms": _safe_nonnegative_float(value.get("total_latency_ms")),
+        "provider_judge_included": bool(value.get("provider_judge_included")),
+        "provider_synthesizer_included": bool(
+            value.get("provider_synthesizer_included")
+        ),
+        "raw_profile_id_persisted": False,
         "secrets_persisted": False,
     }
 
@@ -3513,6 +3685,11 @@ def _local_consensus_required_roles(
         required.append("domain_specialist")
     elif "short_verification" in assigned_role_names:
         required.append("short_verification")
+    elif "critic" in assigned_role_names:
+        # A screened Critic is a full-evidence role, but it is not relabeled as
+        # an independent solver. This is the bounded cross-provider fallback
+        # when the pre-Fusion role contract has no independent_solver seat.
+        required.append("critic")
     else:
         required.append("independent_solver")
     if request.public_model == "axio-pro" and len(selected) >= 3 and any(
@@ -3617,6 +3794,10 @@ def _fusion_admission(
             blocked_reasons.append(normalized)
     if estimate["latency_multiplier_guard_blocked"]:
         blocked_reasons.append("fusion_latency_exceeds_3x_single_model_guard")
+    if estimate["p95_latency_deadline_guard_blocked"]:
+        blocked_reasons.append("fusion_p95_latency_exceeds_request_deadline")
+    if estimate["p95_latency_multiplier_guard_blocked"]:
+        blocked_reasons.append("fusion_p95_latency_exceeds_3x_single_model_guard")
     if bool(analysis.get("fusion_plugin_requested")):
         force_reasons.append("fusion_plugin_requested")
     if isinstance(routing_policy, Mapping) and routing_policy.get("force_fusion") is True:
@@ -3637,6 +3818,8 @@ def _fusion_admission(
         blocked_reasons.append("low_risk_direct_cascade_preferred")
     local_trigger_reasons = {
         "fusion_latency_exceeds_3x_single_model_guard",
+        "fusion_p95_latency_exceeds_request_deadline",
+        "fusion_p95_latency_exceeds_3x_single_model_guard",
         "initial_fusion_cost_exceeds_request_budget",
         "initial_fusion_latency_exceeds_request_deadline",
         "max_total_model_calls_below_complete_fusion_floor",
@@ -3714,6 +3897,7 @@ def _fusion_admission(
             "expected_quality": estimate["direct_expected_quality"],
             "estimated_cost_usd": estimate["direct_estimated_cost_usd"],
             "estimated_latency_ms": estimate["direct_estimated_latency_ms"],
+            "p95_estimated_latency_ms": estimate["direct_p95_estimated_latency_ms"],
             "raw_profile_id_persisted": False,
         },
         "fusion_candidate": {
@@ -3748,6 +3932,11 @@ def _fusion_admission(
                 if local_can_replace_provider_plan
                 else estimate["fusion_estimated_latency_ms"]
             ),
+            "p95_estimated_latency_ms": (
+                None
+                if local_can_replace_provider_plan
+                else estimate["fusion_p95_estimated_latency_ms"]
+            ),
             "provider_diversity": estimate["provider_diversity"],
             "capability_coverage": estimate["capability_coverage"],
             "capability_complementarity": estimate["capability_complementarity"],
@@ -3757,6 +3946,11 @@ def _fusion_admission(
                 local_consensus_plan.get("planned_execution")
                 if local_can_replace_provider_plan
                 else estimate["fusion_latency_execution"]
+            ),
+            "planned_initial_p95_execution": (
+                None
+                if local_can_replace_provider_plan
+                else estimate["fusion_p95_latency_execution"]
             ),
             "planned_initial_cost": (
                 local_consensus_plan.get("planned_cost")
@@ -3814,13 +4008,54 @@ def _fusion_admission(
             if local_can_replace_provider_plan
             else estimate["latency_multiplier_vs_single_model"]
         ),
+        "p95_latency_known": estimate["p95_latency_known"],
+        "direct_p95_estimated_latency_ms": estimate[
+            "direct_p95_estimated_latency_ms"
+        ],
+        "fusion_p95_estimated_latency_ms": estimate[
+            "fusion_p95_estimated_latency_ms"
+        ],
+        "p95_latency_multiplier_vs_single_model": estimate[
+            "p95_latency_multiplier_vs_single_model"
+        ],
+        "p95_latency_deadline_guard_blocked": estimate[
+            "p95_latency_deadline_guard_blocked"
+        ],
+        "p95_latency_multiplier_guard_blocked": estimate[
+            "p95_latency_multiplier_guard_blocked"
+        ],
+        "p95_latency_guard_blocked": estimate["p95_latency_guard_blocked"],
         "latency_multiplier_guard": {
             "enabled": True,
             "target_max_vs_single_model": FUSION_LATENCY_MULTIPLIER_GUARD,
-            "blocked": False if local_can_replace_provider_plan else estimate["latency_multiplier_guard_blocked"],
+            "blocked": False if local_can_replace_provider_plan else bool(
+                estimate["latency_multiplier_guard_blocked"]
+                or estimate["p95_latency_guard_blocked"]
+            ),
             "latency_known": True if local_can_replace_provider_plan else estimate["latency_known"],
-            "provider_plan_blocked": estimate["latency_multiplier_guard_blocked"],
-            "policy": "admitted execution shape must keep known p50 latency at or below 3x direct single-model latency",
+            "provider_plan_blocked": bool(
+                estimate["latency_multiplier_guard_blocked"]
+                or estimate["p95_latency_guard_blocked"]
+            ),
+            "p50_multiplier_vs_single_model": estimate[
+                "latency_multiplier_vs_single_model"
+            ],
+            "p95_latency_known": estimate["p95_latency_known"],
+            "p95_latency_ms": estimate["fusion_p95_estimated_latency_ms"],
+            "direct_p95_latency_ms": estimate[
+                "direct_p95_estimated_latency_ms"
+            ],
+            "p95_multiplier_vs_single_model": estimate[
+                "p95_latency_multiplier_vs_single_model"
+            ],
+            "p95_deadline_blocked": estimate[
+                "p95_latency_deadline_guard_blocked"
+            ],
+            "p95_multiplier_guard_blocked": estimate[
+                "p95_latency_multiplier_guard_blocked"
+            ],
+            "p95_provider_plan_blocked": estimate["p95_latency_guard_blocked"],
+            "policy": "admitted execution shape must keep known p50 and p95 latency within the request deadline and 3x direct single-model guard",
         },
         "error_correlation_penalty": estimate["error_correlation_penalty"],
         "utility_score": estimate["utility_score"],
@@ -3942,11 +4177,46 @@ def _fusion_utility_estimate(
     latency_multiplier_guard_blocked = bool(
         latency_known and latency_multiplier > FUSION_LATENCY_MULTIPLIER_GUARD
     )
+    direct_p95_latency = (
+        float(direct_profile.p95_latency_ms)
+        if direct_profile is not None
+        and direct_profile.p95_latency_ms is not None
+        and float(direct_profile.p95_latency_ms) > 0.0
+        else 0.0
+    )
+    direct_p95_latency_known = bool(direct_p95_latency > 0.0)
+    fusion_p95_latency, fusion_p95_latency_known, fusion_p95_latency_execution = (
+        _estimated_fusion_execution_latency_p95_ms(
+            selected,
+            planned_fusion_roles,
+            max_parallel=max(1, int(budget.get("max_parallel_experts") or 1)),
+            profile_pool=stage_profile_pool,
+        )
+    )
+    p95_latency_known = bool(
+        direct_p95_latency_known and fusion_p95_latency_known
+    )
+    p95_latency_multiplier = (
+        fusion_p95_latency / max(1.0, direct_p95_latency)
+        if p95_latency_known and direct_p95_latency > 0.0
+        else None
+    )
+    max_latency = max(1.0, float(budget.get("max_latency_ms") or 10_000))
+    p95_latency_deadline_guard_blocked = bool(
+        p95_latency_known and fusion_p95_latency > max_latency
+    )
+    p95_latency_multiplier_guard_blocked = bool(
+        p95_latency_multiplier is not None
+        and p95_latency_multiplier > FUSION_LATENCY_MULTIPLIER_GUARD
+    )
+    p95_latency_guard_blocked = bool(
+        p95_latency_deadline_guard_blocked
+        or p95_latency_multiplier_guard_blocked
+    )
     cost_weight = 0.055 if request.public_model == "axio-terra" else 0.035
     latency_weight = 0.050 if request.public_model == "axio-terra" else 0.035
     risk_weight = 1.0
     max_cost = max(0.000001, float(budget.get("max_cost_usd") or 0.001))
-    max_latency = max(1.0, float(budget.get("max_latency_ms") or 10_000))
     if pricing_known:
         cost_penalty = min(0.18, (float(extra_cost or 0.0) / max_cost) * cost_weight)
     else:
@@ -3966,6 +4236,7 @@ def _fusion_utility_estimate(
         "direct_estimated_latency_ms": round(direct_latency, 3),
         "fusion_estimated_latency_ms": round(fusion_latency, 3),
         "fusion_latency_execution": fusion_latency_execution,
+        "fusion_p95_latency_execution": fusion_p95_latency_execution,
         "initial_execution_profile_count": len(execution_profiles),
         "extra_latency_ms": round(extra_latency, 3),
         "provider_diversity": round(provider_diversity, 4),
@@ -3983,6 +4254,19 @@ def _fusion_utility_estimate(
         if math.isfinite(latency_multiplier)
         else None,
         "latency_multiplier_guard_blocked": latency_multiplier_guard_blocked,
+        "direct_p95_estimated_latency_ms": round(direct_p95_latency, 3)
+        if direct_p95_latency_known
+        else None,
+        "fusion_p95_estimated_latency_ms": round(fusion_p95_latency, 3)
+        if fusion_p95_latency_known
+        else None,
+        "p95_latency_known": p95_latency_known,
+        "p95_latency_multiplier_vs_single_model": round(p95_latency_multiplier, 4)
+        if p95_latency_multiplier is not None
+        else None,
+        "p95_latency_deadline_guard_blocked": p95_latency_deadline_guard_blocked,
+        "p95_latency_multiplier_guard_blocked": p95_latency_multiplier_guard_blocked,
+        "p95_latency_guard_blocked": p95_latency_guard_blocked,
         "cost_penalty_weight": cost_weight,
         "latency_penalty_weight": latency_weight,
         "error_correlation_penalty_weight": 0.055,
@@ -4524,16 +4808,64 @@ def _estimated_fusion_execution_latency_ms(
     max_parallel: int,
     profile_pool: Sequence[ModelProfile] | None = None,
 ) -> tuple[float, bool, dict[str, Any]]:
-    """Estimate the runtime's initial expert/judge/synthesis sequence.
+    return _estimated_fusion_execution_latency_quantile_ms(
+        selected,
+        planned_roles,
+        max_parallel=max_parallel,
+        profile_pool=profile_pool,
+        latency_attribute="p50_latency_ms",
+        latency_quantile="p50",
+    )
 
-    This is deliberately an admission estimate, not a promise for optional
-    retries or targeted escalation.  It mirrors the initial role schedule that
-    ``FusionEngine._complete_live`` submits before any data-dependent repair.
+
+def _estimated_fusion_execution_latency_p95_ms(
+    selected: Sequence[ModelProfile | None],
+    planned_roles: Sequence[Mapping[str, Any]],
+    *,
+    max_parallel: int,
+    profile_pool: Sequence[ModelProfile] | None = None,
+) -> tuple[float, bool, dict[str, Any]]:
+    """Estimate the same initial schedule from measured p95 role telemetry.
+
+    A missing p95 remains unknown.  Callers may display the estimate, but
+    must not turn the fallback arithmetic into a hard p95 admission failure.
+    """
+
+    return _estimated_fusion_execution_latency_quantile_ms(
+        selected,
+        planned_roles,
+        max_parallel=max_parallel,
+        profile_pool=profile_pool,
+        latency_attribute="p95_latency_ms",
+        latency_quantile="p95",
+    )
+
+
+def _estimated_fusion_execution_latency_quantile_ms(
+    selected: Sequence[ModelProfile | None],
+    planned_roles: Sequence[Mapping[str, Any]],
+    *,
+    max_parallel: int,
+    profile_pool: Sequence[ModelProfile] | None,
+    latency_attribute: str,
+    latency_quantile: str,
+) -> tuple[float, bool, dict[str, Any]]:
+    """Estimate the assigned expert/control-stage sequence at one quantile.
+
+    The role assignment and provider-capacity semantics are shared by p50 and
+    p95.  Only the measured profile field changes, which keeps the two guards
+    from drifting apart as the orchestration graph evolves.
     """
 
     clean = [profile for profile in selected if profile is not None]
     if not clean:
-        return 0.0, False, _fusion_latency_execution_receipt([], None, None, max_parallel=max_parallel)
+        return 0.0, False, _fusion_latency_execution_receipt(
+            [],
+            None,
+            None,
+            max_parallel=max_parallel,
+            latency_quantile=latency_quantile,
+        )
     expert_profiles = _planned_expert_profiles(planned_roles, clean)
     judge_profile = _profile_for_assigned_role(
         planned_roles,
@@ -4552,22 +4884,32 @@ def _estimated_fusion_execution_latency_ms(
         latency_profiles.append(judge_profile)
     if synthesizer_profile is not None:
         latency_profiles.append(synthesizer_profile)
-    known = bool(latency_profiles) and all(profile.p50_latency_ms is not None for profile in latency_profiles)
-    expert_latencies = [float(profile.p50_latency_ms or 1500) for profile in expert_profiles]
+    known = bool(latency_profiles) and all(
+        getattr(profile, latency_attribute, None) is not None
+        and float(getattr(profile, latency_attribute)) > 0.0
+        for profile in latency_profiles
+    )
+
+    def latency(profile: ModelProfile) -> float:
+        value = getattr(profile, latency_attribute, None)
+        return float(value) if value is not None and float(value) > 0.0 else 1500.0
+
+    expert_latencies = [latency(profile) for profile in expert_profiles]
     provider_serialization_adjusted = _panel_contains_serialized_provider_pair(expert_profiles)
     expert_phase = _parallel_expert_phase_latency_ms(
         expert_latencies,
         max_parallel=max_parallel,
         profiles=expert_profiles,
     )
-    judge_latency = float(judge_profile.p50_latency_ms or 1500) if judge_profile is not None else 0.0
-    synthesis_latency = float(synthesizer_profile.p50_latency_ms or 1500) if synthesizer_profile is not None else 0.0
+    judge_latency = latency(judge_profile) if judge_profile is not None else 0.0
+    synthesis_latency = latency(synthesizer_profile) if synthesizer_profile is not None else 0.0
     total = expert_phase + judge_latency + synthesis_latency
     receipt = _fusion_latency_execution_receipt(
         expert_profiles,
         judge_profile,
         synthesizer_profile,
         max_parallel=max_parallel,
+        latency_quantile=latency_quantile,
         expert_phase_latency_ms=expert_phase,
         judge_latency_ms=judge_latency,
         synthesis_latency_ms=synthesis_latency,
@@ -4586,11 +4928,13 @@ def _fusion_latency_execution_receipt(
     judge_latency_ms: float = 0.0,
     synthesis_latency_ms: float = 0.0,
     provider_serialization_adjustment_applied: bool = False,
+    latency_quantile: str = "p50",
 ) -> dict[str, Any]:
     slots = max(1, int(max_parallel or 1))
     return {
         "schema": "axio_fusion_api.initial_execution_latency_estimate.v1",
         "basis": "assigned_runtime_roles_before_data_dependent_repair_or_escalation",
+        "latency_quantile": str(latency_quantile or "p50")[:8],
         "expert_role_count": len(expert_profiles),
         "expert_profile_hashes": [sha256_text(profile.profile_id) for profile in expert_profiles],
         "expert_parallel_slots": slots,
@@ -4645,6 +4989,7 @@ def _role_assignments(
     budget: Mapping[str, Any] | None = None,
     latency_baseline_profile: ModelProfile | None = None,
     stage_profile_pool: Sequence[ModelProfile] | None = None,
+    allow_critic_as_second_evidence: bool = False,
 ) -> list[dict[str, Any]]:
     if not selected:
         return []
@@ -4652,7 +4997,18 @@ def _role_assignments(
         isinstance(row, Mapping) and str(row.get("role") or "") == "critic"
         for row in role_blueprint
     )
-    needs_critic = activated and has_critic_target and len(selected) >= 3
+    has_distinct_independent_candidate = any(
+        _screening_role_allowed(profile, "independent_solver")
+        for profile in selected
+    )
+    needs_critic = activated and (
+        (has_critic_target and len(selected) >= 3)
+        or (
+            allow_critic_as_second_evidence
+            and len(selected) >= 2
+            and not has_distinct_independent_candidate
+        )
+    )
     critic: ModelProfile | None = None
     critic_reused = False
     reserved: set[str] = set()
