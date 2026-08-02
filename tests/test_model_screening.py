@@ -2114,6 +2114,69 @@ def test_research_transport_failure_switches_to_next_agent_profile():
     assert attempts[1]["agent_profile_sha256"] == sha256_text(fallback.profile_id)
 
 
+def test_research_transport_budget_walks_the_complete_agent_profile_chain():
+    profiles = tuple(
+        _profile(f"provider-{index}", f"researcher-{index}", f"researcher-{index}")
+        for index in range(4)
+    )
+    groups = _groups([_profile("provider-c", "candidate", "candidate")])
+
+    class ChainRecoveryClient(_BatchResearchClient):
+        def complete_turn(self, profile, request, *, prompt, system, timeout):
+            del request, system, timeout
+            self.calls.append({"profile_id": profile.profile_id, "prompt": prompt})
+            if len(self.calls) <= 3:
+                raise provider_module.ProviderExecutionError(
+                    "research profile unavailable",
+                    error_code="provider_request_timeout",
+                )
+            marker = "AUTHORITATIVE_CANDIDATE_INVENTORY\n"
+            inventory = prompt.split(marker, 1)[1].split(
+                "\n\nUNTRUSTED_SOURCE_DATA", 1
+            )[0]
+            candidate_ids = [
+                str(row["candidate_id"]) for row in json.loads(inventory)
+            ]
+            return ProviderCompletion(json.dumps(_research_output(candidate_ids)))
+
+    client = ChainRecoveryClient()
+    _ranking, receipt = model_screening._run_research_agent_batches(
+        profiles[0],
+        research_profiles=profiles,
+        groups=groups,
+        source_pack={
+            "receipts": [
+                {
+                    "source_slot": "source_official",
+                    "status": "inline_source_ready",
+                    "evidence_hash": sha256_text("source"),
+                }
+            ],
+            "evidence": [],
+        },
+        timeout=10.0,
+        client=client,
+        focus_manifest=model_screening.load_prefusion_focus_manifest(),
+        batch_size=1,
+        max_workers=1,
+        merge_strategy=model_screening._RESEARCH_MERGE_STRATEGY,
+    )
+
+    attempts = receipt["batch_results"][0]["attempts"]
+    assert receipt["status"] == "validated"
+    assert receipt["max_transport_retries_per_batch"] == 3
+    assert len(client.calls) == 4
+    assert [call["profile_id"] for call in client.calls] == [
+        profile.profile_id for profile in profiles
+    ]
+    assert [attempt["error_code"] for attempt in attempts[:3]] == [
+        "provider_request_timeout",
+        "provider_request_timeout",
+        "provider_request_timeout",
+    ]
+    assert attempts[3]["status"] == "validated"
+
+
 def test_research_transport_failure_does_not_consume_schema_repair_budget():
     primary = _profile("provider-a", "primary-researcher", "primary-researcher")
     fallback = _profile("provider-b", "fallback-researcher", "fallback-researcher")

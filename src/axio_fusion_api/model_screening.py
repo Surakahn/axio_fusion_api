@@ -5293,6 +5293,10 @@ def _run_research_agent_batches(
         default=_DEFAULT_RESEARCH_MAX_WORKERS,
         upper=_MAX_RESEARCH_MAX_WORKERS,
     )
+    transport_retry_limit = max(
+        _MAX_RESEARCH_TRANSPORT_RETRIES_PER_BATCH,
+        max(0, len(agent_profiles) - 1),
+    )
     batches = _build_research_batches(
         ordered_groups,
         source_pack=source_pack,
@@ -5329,7 +5333,7 @@ def _run_research_agent_batches(
             max_attempts = (
                 1
                 + _MAX_RESEARCH_RETRIES_PER_BATCH
-                + _MAX_RESEARCH_TRANSPORT_RETRIES_PER_BATCH
+                + transport_retry_limit
             )
             for attempt in range(1, max_attempts + 1):
                 attempt_receipt: dict[str, Any] = {
@@ -5533,10 +5537,12 @@ def _run_research_agent_batches(
                     transport_failures += 1
                     fallback_activated = advance_agent_profile(selected_agent)
                     attempt_receipt["fallback_activated"] = fallback_activated
-                    # Transport errors get at most two recovery rounds. Each
-                    # attempt receives the remaining provider budget and a
-                    # third failure still blocks the complete ranking.
-                    if transport_failures > _MAX_RESEARCH_TRANSPORT_RETRIES_PER_BATCH:
+                    # Transport errors get a bounded recovery round for each
+                    # configured fallback, with a minimum of the historical
+                    # two-round allowance. Each attempt receives the remaining
+                    # provider budget; exhaustion still blocks the complete
+                    # ranking.
+                    if transport_failures > transport_retry_limit:
                         receipt.update(
                             {
                                 "status": "failed",
@@ -5631,7 +5637,7 @@ def _run_research_agent_batches(
         "raw_research_output_persisted": False,
         "secrets_persisted": False,
         "max_retries_per_batch": _MAX_RESEARCH_RETRIES_PER_BATCH,
-        "max_transport_retries_per_batch": _MAX_RESEARCH_TRANSPORT_RETRIES_PER_BATCH,
+        "max_transport_retries_per_batch": transport_retry_limit,
         "candidate_specific_evidence_forces_single_candidate_batch": True,
         "research_batch_isolation_mode": "candidate_specific_singleton_shared_batched",
         "agent_profile_chain_sha256": sha256_text(
