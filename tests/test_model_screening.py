@@ -11,6 +11,7 @@ import pytest
 
 from axio_fusion_api import model_screening
 from axio_fusion_api import providers as provider_module
+from axio_fusion_api import registry as registry_module
 from axio_fusion_api.calibration import build_registry_calibration
 from axio_fusion_api.cli import main as fusion_cli_main
 from axio_fusion_api.model_screening import (
@@ -43,7 +44,7 @@ from axio_fusion_api.registry import (
     normalize_profile,
     validate_prefusion_registry_handoff,
 )
-from axio_fusion_api.schemas import CAPABILITY_AXES, sha256_text
+from axio_fusion_api.schemas import CAPABILITY_AXES, sha256_text, stable_json
 
 
 def _profile(provider: str, model: str, canonical: str, *, p50: int | None = 200) :
@@ -1469,6 +1470,145 @@ def test_role_probe_binding_is_hash_bound_and_rejects_manual_role_promotion(monk
     assert "prefusion_registry_role_probe_allowed_roles_mismatch" in validation[
         "reason_codes"
     ]
+
+
+def test_registry_role_probe_migrates_known_legacy_shape_but_requires_current_stability():
+    profile_id = "provider-a/alpha"
+    profile_hash = sha256_text(profile_id)
+    legacy_roles = [
+        "critic",
+        "judge",
+        "synthesizer",
+        "structured_extraction",
+        "simple_classification",
+        "short_verification",
+        "single_tool_argument_validation",
+    ]
+
+    def make_binding(requested_roles, *, repeated_samples):
+        result = {
+            "role": "critic",
+            "status": "available",
+            "latency_ms": 120,
+            "output_sha256": sha256_text("role-output"),
+            "role_output_contract_valid": True,
+            "role_streaming_contract_valid": True,
+            "stream_requested": True,
+            "stream_observed": True,
+            "stream_fallback_used": False,
+            "stream_protocol": "sse",
+            "stream_frame_count": 2,
+            "strict_streaming_requested": True,
+        }
+        if repeated_samples:
+            result.update(
+                {
+                    "p50_latency_ms": 120.0,
+                    "p95_latency_ms": 120.0,
+                    "role_probe_sample_count": 2,
+                    "role_probe_completed_sample_count": 2,
+                    "role_probe_success_count": 2,
+                    "role_probe_failure_count": 0,
+                    "role_probe_all_samples_eligible": True,
+                    "role_probe_sample_receipts_sha256": sha256_text(
+                        "role-samples"
+                    ),
+                }
+            )
+        results = [result]
+        receipt = {
+            "profile_id_sha256": profile_hash,
+            "target_roles": ["critic"],
+            "tested_roles": ["critic"],
+            "passed_roles": ["critic"],
+            "failed_roles": [],
+            "missing_roles": [],
+            "probe_count": 1,
+            "available_probe_count": 1,
+            "failed_probe_count": 0,
+            "streaming_contract_verified": True,
+            "probe_receipt_sha256": sha256_text(stable_json(results)),
+            "probe_results": results,
+        }
+        role_probe = {
+            "schema": "axio_fusion_api.provider_role_probe.binding.v1",
+            "contract": "axio_fusion_api.provider_role_probe.fixed_control_packet.v1",
+            "requested_roles": list(requested_roles),
+            "streaming_required": True,
+            "latency_ceiling_ms": 90_000,
+            "status": "ready",
+            "profile_count": 1,
+            "profile_receipts": [receipt],
+            "probe_receipt_sha256": sha256_text(stable_json([receipt])),
+        }
+        if repeated_samples:
+            role_probe.update(
+                {
+                    "samples_per_role": 2,
+                    "requires_all_samples_success": True,
+                    "requires_each_sample_latency_at_or_below_90_seconds": True,
+                    "requires_each_sample_strict_streaming": True,
+                }
+            )
+        role_probe_digest = sha256_text(stable_json(role_probe))
+        operational = {
+            "requested_roles": list(requested_roles),
+            "tested_roles": ["critic"],
+            "passed_roles": ["critic"],
+            "failed_roles": [],
+            "missing_roles": [],
+            "probe_count": 1,
+            "available_probe_count": 1,
+            "failed_probe_count": 0,
+            "probe_receipt_sha256": receipt["probe_receipt_sha256"],
+            "streaming_contract_verified": True,
+        }
+        model = {
+            "profile_id": profile_id,
+            "screening_allowed_roles": ["critic"],
+            "screening_disallowed_roles": [],
+            "screening_role_admission": {
+                "effective_allowed_roles": ["critic"],
+                "effective_disallowed_roles": [],
+                "operational_role_probe": operational,
+            },
+        }
+        binding = {
+            "role_probe": role_probe,
+            "role_probe_content_sha256": role_probe_digest,
+        }
+        return binding, {"role_probe_content_sha256": role_probe_digest}, [model]
+
+    legacy_binding, legacy_generation, legacy_models = make_binding(
+        legacy_roles,
+        repeated_samples=False,
+    )
+    assert registry_module._validate_prefusion_role_probe_binding(
+        binding=legacy_binding,
+        models=legacy_models,
+        generation_contract=legacy_generation,
+    ) == []
+
+    current_binding, current_generation, current_models = make_binding(
+        list(provider_module.ROLE_PROBE_ROLES),
+        repeated_samples=True,
+    )
+    assert registry_module._validate_prefusion_role_probe_binding(
+        binding=current_binding,
+        models=current_models,
+        generation_contract=current_generation,
+    ) == []
+
+    incomplete_binding, incomplete_generation, incomplete_models = make_binding(
+        list(provider_module.ROLE_PROBE_ROLES),
+        repeated_samples=False,
+    )
+    invalid = registry_module._validate_prefusion_role_probe_binding(
+        binding=incomplete_binding,
+        models=incomplete_models,
+        generation_contract=incomplete_generation,
+    )
+    assert "prefusion_registry_role_probe_stability_contract_invalid" in invalid
 
 
 class _FakeClient:

@@ -70,6 +70,19 @@ _PREFUSION_OPERATIONAL_ROLE_PROBE_ROLES = (
     "short_verification",
     "single_tool_argument_validation",
 )
+# r20 was generated after the narrow-role probe expansion but before the
+# primary-solver role and repeated role-level samples were added. Keep this
+# exact shape readable for rollback/migration; it remains a single-sample
+# operational receipt and cannot satisfy the current role-calibration contract.
+_PRE_ROLE_CALIBRATION_OPERATIONAL_ROLE_PROBE_ROLES = (
+    "critic",
+    "judge",
+    "synthesizer",
+    "structured_extraction",
+    "simple_classification",
+    "short_verification",
+    "single_tool_argument_validation",
+)
 _LEGACY_OPERATIONAL_ROLE_PROBE_ROLES = (
     "critic",
     "judge",
@@ -2538,7 +2551,11 @@ def validate_prefusion_registry_handoff(
     }
 
 
-def _prefusion_role_result_is_available(row: Mapping[str, Any]) -> bool:
+def _prefusion_role_result_is_available(
+    row: Mapping[str, Any],
+    *,
+    required_sample_count: int | None = None,
+) -> bool:
     """Validate the persisted hash-safe result of one operational role probe."""
 
     if str(row.get("status") or "").strip().casefold() != "available":
@@ -2570,14 +2587,36 @@ def _prefusion_role_result_is_available(row: Mapping[str, Any]) -> bool:
     if frame_count < 1 or not 0.0 <= latency_ms <= 90_000.0:
         return False
     # Older role receipts have no repeated-sample fields. Preserve their
-    # validation contract while enforcing the stronger role-level stability
-    # contract whenever the new fields are present.
+    # validation contract unless the current role-calibration contract is
+    # explicitly requested by the caller.
     try:
         sample_count = int(row.get("role_probe_sample_count") or 0)
         completed_count = int(row.get("role_probe_completed_sample_count") or 0)
         success_count = int(row.get("role_probe_success_count") or 0)
+        failure_count = int(row.get("role_probe_failure_count") or 0)
     except (TypeError, ValueError):
         return False
+    if required_sample_count is not None:
+        if (
+            required_sample_count < 2
+            or sample_count != required_sample_count
+            or completed_count != required_sample_count
+            or success_count != required_sample_count
+            or failure_count != 0
+            or row.get("role_probe_all_samples_eligible") is not True
+            or not is_sha256_digest(row.get("role_probe_sample_receipts_sha256"))
+        ):
+            return False
+        for quantile_key in ("p50_latency_ms", "p95_latency_ms"):
+            if quantile_key not in row:
+                return False
+            try:
+                quantile_value = float(row.get(quantile_key))
+            except (TypeError, ValueError):
+                return False
+            if not 0.0 <= quantile_value <= 90_000.0:
+                return False
+        return True
     if sample_count > 0 and (
         completed_count != sample_count
         or success_count != sample_count
@@ -2622,15 +2661,37 @@ def _validate_prefusion_role_probe_binding(
         for item in role_probe.get("requested_roles", [])
         if str(item)
     ] if isinstance(role_probe.get("requested_roles"), list) else []
-    if requested_roles not in (
-        list(_PREFUSION_OPERATIONAL_ROLE_PROBE_ROLES),
+    current_role_contract = requested_roles == list(
+        _PREFUSION_OPERATIONAL_ROLE_PROBE_ROLES
+    )
+    legacy_role_contract = requested_roles in (
+        list(_PRE_ROLE_CALIBRATION_OPERATIONAL_ROLE_PROBE_ROLES),
         list(_LEGACY_OPERATIONAL_ROLE_PROBE_ROLES),
-    ):
+    )
+    if not current_role_contract and not legacy_role_contract:
         issues.append("prefusion_registry_role_probe_roles_invalid")
     if role_probe.get("streaming_required") is not True:
         issues.append("prefusion_registry_role_probe_streaming_required_invalid")
     if int(role_probe.get("latency_ceiling_ms") or 0) != 90_000:
         issues.append("prefusion_registry_role_probe_latency_ceiling_invalid")
+
+    required_role_sample_count: int | None = None
+    if current_role_contract:
+        try:
+            required_role_sample_count = int(role_probe.get("samples_per_role"))
+        except (TypeError, ValueError):
+            required_role_sample_count = 0
+        if (
+            required_role_sample_count < 2
+            or required_role_sample_count > 5
+            or role_probe.get("requires_all_samples_success") is not True
+            or role_probe.get(
+                "requires_each_sample_latency_at_or_below_90_seconds"
+            )
+            is not True
+            or role_probe.get("requires_each_sample_strict_streaming") is not True
+        ):
+            issues.append("prefusion_registry_role_probe_stability_contract_invalid")
 
     profile_receipts = role_probe.get("profile_receipts")
     profile_receipts = profile_receipts if isinstance(profile_receipts, list) else []
@@ -2692,7 +2753,10 @@ def _validate_prefusion_role_probe_binding(
             if any(
                 isinstance(row, Mapping)
                 and str(row.get("role") or "") == role
-                and _prefusion_role_result_is_available(row)
+                and _prefusion_role_result_is_available(
+                    row,
+                    required_sample_count=required_role_sample_count,
+                )
                 for row in results
             )
         )
@@ -2724,7 +2788,14 @@ def _validate_prefusion_role_probe_binding(
         if int(receipt.get("failed_probe_count") or 0) != len(failed):
             issues.append("prefusion_registry_role_probe_failed_count_invalid")
         streaming_verified = bool(
-            results and all(_prefusion_role_result_is_available(row) for row in results)
+            results
+            and all(
+                _prefusion_role_result_is_available(
+                    row,
+                    required_sample_count=required_role_sample_count,
+                )
+                for row in results
+            )
         ) if results else not target
         if receipt.get("streaming_contract_verified") is not streaming_verified:
             issues.append("prefusion_registry_role_probe_streaming_projection_invalid")
