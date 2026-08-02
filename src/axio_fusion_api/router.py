@@ -1184,6 +1184,9 @@ def _safe_fusion_latency_execution_receipt(value: Mapping[str, Any]) -> dict[str
         "expert_parallel_slots": _safe_nonnegative_int(value.get("expert_parallel_slots")),
         "expert_wave_count": _safe_nonnegative_int(value.get("expert_wave_count")),
         "expert_phase_latency_ms": _safe_nonnegative_float(value.get("expert_phase_latency_ms")),
+        "provider_serialization_adjustment_applied": bool(
+            value.get("provider_serialization_adjustment_applied")
+        ),
         "judge_included": bool(value.get("judge_included")),
         "judge_profile_sha256": str(value.get("judge_profile_sha256") or ""),
         "judge_latency_ms": _safe_nonnegative_float(value.get("judge_latency_ms")),
@@ -4424,7 +4427,11 @@ def _estimated_route_latency_ms(
     latencies = [float(profile.p50_latency_ms or 1500) for profile in clean]
     if include_judge_and_synth and clean:
         parallel = max(1, int(max_parallel or 1))
-        expert_latency = _parallel_expert_phase_latency_ms(latencies, max_parallel=parallel)
+        expert_latency = _parallel_expert_phase_latency_ms(
+            latencies,
+            max_parallel=parallel,
+            profiles=clean,
+        )
         judge = _best_judge(clean)
         synth = _best_synthesizer(clean, {"domains": ["daily_work"]})
         if judge is None or synth is None:
@@ -4547,7 +4554,12 @@ def _estimated_fusion_execution_latency_ms(
         latency_profiles.append(synthesizer_profile)
     known = bool(latency_profiles) and all(profile.p50_latency_ms is not None for profile in latency_profiles)
     expert_latencies = [float(profile.p50_latency_ms or 1500) for profile in expert_profiles]
-    expert_phase = _parallel_expert_phase_latency_ms(expert_latencies, max_parallel=max_parallel)
+    provider_serialization_adjusted = _panel_contains_serialized_provider_pair(expert_profiles)
+    expert_phase = _parallel_expert_phase_latency_ms(
+        expert_latencies,
+        max_parallel=max_parallel,
+        profiles=expert_profiles,
+    )
     judge_latency = float(judge_profile.p50_latency_ms or 1500) if judge_profile is not None else 0.0
     synthesis_latency = float(synthesizer_profile.p50_latency_ms or 1500) if synthesizer_profile is not None else 0.0
     total = expert_phase + judge_latency + synthesis_latency
@@ -4559,6 +4571,7 @@ def _estimated_fusion_execution_latency_ms(
         expert_phase_latency_ms=expert_phase,
         judge_latency_ms=judge_latency,
         synthesis_latency_ms=synthesis_latency,
+        provider_serialization_adjustment_applied=provider_serialization_adjusted,
     )
     return total, known, receipt
 
@@ -4572,6 +4585,7 @@ def _fusion_latency_execution_receipt(
     expert_phase_latency_ms: float = 0.0,
     judge_latency_ms: float = 0.0,
     synthesis_latency_ms: float = 0.0,
+    provider_serialization_adjustment_applied: bool = False,
 ) -> dict[str, Any]:
     slots = max(1, int(max_parallel or 1))
     return {
@@ -4582,6 +4596,9 @@ def _fusion_latency_execution_receipt(
         "expert_parallel_slots": slots,
         "expert_wave_count": int(math.ceil(len(expert_profiles) / slots)) if expert_profiles else 0,
         "expert_phase_latency_ms": round(float(expert_phase_latency_ms), 3),
+        "provider_serialization_adjustment_applied": bool(
+            provider_serialization_adjustment_applied
+        ),
         "judge_included": judge_profile is not None,
         "judge_profile_sha256": sha256_text(judge_profile.profile_id) if judge_profile is not None else "",
         "judge_latency_ms": round(float(judge_latency_ms), 3),
@@ -4598,9 +4615,17 @@ def _parallel_expert_phase_latency_ms(
     latencies: Sequence[float],
     *,
     max_parallel: int,
+    profiles: Sequence[ModelProfile] | None = None,
 ) -> float:
     """Conservatively estimate every queued expert wave in the runtime pool."""
 
+    if profiles is not None and len(profiles) == len(latencies):
+        # A channel-scoped shared single-flight pool serializes calls even if
+        # the executor has free worker slots.  Use a conservative upper bound
+        # for provider-stage admission so the 3x guard cannot be cleared by a
+        # purely local thread-count calculation.
+        if _panel_contains_serialized_provider_pair(profiles):
+            return sum(max(0.0, float(value)) for value in latencies)
     slots = max(1, int(max_parallel or 1))
     total = 0.0
     for start in range(0, len(latencies), slots):

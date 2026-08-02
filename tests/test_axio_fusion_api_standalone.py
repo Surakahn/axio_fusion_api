@@ -1334,6 +1334,41 @@ def test_standalone_role_latency_estimator_preserves_all_assigned_expert_waves()
     assert latency_ms == 2400.0
 
 
+def test_standalone_role_latency_estimator_respects_channel_single_flight():
+    traffic_control = {
+        "scope": "channel",
+        "max_in_flight": 1,
+        "rate_limit_key_pool": "shared",
+    }
+    profiles = [
+        normalize_profile(
+            {
+                "provider": "shared-channel",
+                "model": model,
+                "p50_latency_ms": latency,
+                "traffic_control": traffic_control,
+            }
+        )
+        for model, latency in (("solver-a", 300), ("solver-b", 700))
+    ]
+    roles = [
+        {"role": role, "model": profile.safe_dict()}
+        for role, profile in zip(("primary_solver", "independent_solver"), profiles)
+    ]
+
+    latency_ms, known, receipt = router_module._estimated_fusion_execution_latency_ms(
+        profiles,
+        roles,
+        max_parallel=2,
+    )
+
+    assert known is True
+    assert receipt["expert_wave_count"] == 1
+    assert receipt["provider_serialization_adjustment_applied"] is True
+    assert receipt["expert_phase_latency_ms"] == 1000.0
+    assert latency_ms == 1000.0
+
+
 def test_standalone_fusion_utility_uses_only_assigned_initial_roles_for_cost_and_quality():
     profiles = [
         normalize_profile(
