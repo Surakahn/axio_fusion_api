@@ -44,7 +44,7 @@ from axio_fusion_api.router import (
     analyze_request,
     build_route_plan,
 )
-from axio_fusion_api.schemas import CandidateResult, FusionRequest, sha256_text
+from axio_fusion_api.schemas import CandidateResult, FusionRequest, FusionResponse, sha256_text
 from axio_fusion_api.trace_store import safe_execution_trace
 from axio_fusion_api import orchestrator as orchestrator_module
 
@@ -2670,6 +2670,156 @@ def test_canonical_replica_failover_precedes_cross_model_fallback_and_stage_fail
     assert stage_attempt_count == 2
     assert stage_receipt["stage_failure_count"] == 1
     assert stage_receipt["successful_profile_sha256"] == sha256_text(profiles[1].profile_id)
+
+
+def test_stage_cross_model_failover_is_one_shot_and_budgeted_after_canonical_replicas():
+    canonical_profiles = _canonical_replica_profiles()
+    cross_model = _profile(20)
+    second_cross_model = _profile(21)
+
+    class StageFailoverClient:
+        def __init__(self):
+            self.calls = []
+
+        def complete(self, profile, request, *, prompt, system, timeout=None):
+            del request, prompt, system, timeout
+            self.calls.append(profile.profile_id)
+            if profile.canonical_identity == canonical_profiles[0].canonical_identity:
+                raise RuntimeError("fixture canonical stage outage")
+            if profile.profile_id == cross_model.profile_id:
+                return "cross-model stage output"
+            raise RuntimeError("fixture second cross-model outage")
+
+    profiles = [*canonical_profiles, cross_model, second_cross_model]
+    engine = FusionEngine(profiles, client=StageFailoverClient(), cache_enabled=False)
+    output, selected, routing, attempt_count = engine._complete_stage_with_replica_failover(
+        canonical_profiles[0],
+        FusionRequest(model="axio-pro", prompt="stage failover fixture"),
+        route_plan={},
+        kind="judge",
+        role_name="judge",
+        prompt="judge fixture",
+        system="judge system fixture",
+        call_budget=None,
+        cost_budget=None,
+        deadline_budget=None,
+        prompt_budget=None,
+        cross_model_fallback_profiles=[cross_model, second_cross_model],
+    )
+
+    assert output == "cross-model stage output"
+    assert selected.profile_id == cross_model.profile_id
+    assert attempt_count == 4
+    assert engine.client.calls[-1] == cross_model.profile_id
+    assert second_cross_model.profile_id not in engine.client.calls
+    assert all(
+        profile_id in {profile.profile_id for profile in canonical_profiles}
+        for profile_id in engine.client.calls[:3]
+    )
+    assert routing["stage_failover_scope"] == "same_canonical_then_cross_model"
+    assert routing["cross_model_failover_attempted"] is True
+    assert routing["cross_model_failover_used"] is True
+    assert routing["cross_model_failover_candidate_count"] == 1
+    assert routing["stage_attempt_receipts"][-1]["attempt_scope"] == "cross_model"
+
+    budget_client = StageFailoverClient()
+    budget_engine = FusionEngine(profiles, client=budget_client, cache_enabled=False)
+    empty, _, budget_routing, budget_attempt_count = budget_engine._complete_stage_with_replica_failover(
+        canonical_profiles[0],
+        FusionRequest(model="axio-pro", prompt="budgeted stage failover fixture"),
+        route_plan={},
+        kind="judge",
+        role_name="judge",
+        prompt="judge fixture",
+        system="judge system fixture",
+        call_budget=_CallBudget(3),
+        cost_budget=None,
+        deadline_budget=None,
+        prompt_budget=None,
+        cross_model_fallback_profiles=[cross_model],
+    )
+
+    assert empty == ""
+    assert budget_attempt_count == 3
+    assert budget_client.calls == [profile.profile_id for profile in canonical_profiles[:3]]
+    assert budget_routing["cross_model_failover_attempted"] is True
+    assert budget_routing["cross_model_failover_used"] is False
+    assert budget_routing["terminal_reason"] == "max_total_model_calls_exhausted"
+    assert budget_routing["stage_attempt_receipts"][-1]["status"] == "skipped"
+
+
+def test_failed_judge_cross_model_fallback_remains_unaccepted_and_safe():
+    canonical_profiles = _canonical_replica_profiles()
+    cross_model = _profile(30)
+    profiles = [*canonical_profiles, cross_model]
+
+    class FailingJudgeClient:
+        def complete(self, profile, request, *, prompt, system, timeout=None):
+            del profile, request, prompt, system, timeout
+            raise RuntimeError("SECRET_PROVIDER_FAILURE_DETAIL")
+
+    request = FusionRequest(model="axio-pro", prompt="judge failure fixture")
+    fallback_pool = [
+        {
+            "profile_id_sha256": profile.profile_id and sha256_text(profile.profile_id),
+            "runtime_canonical_identity_sha256": profile.canonical_identity_sha256,
+        }
+        for profile in profiles
+    ]
+    route_plan = {
+        "judge_contract": {"required": True},
+        "roles": [{"role": "judge", "model": canonical_profiles[0].safe_dict()}],
+        "provider_routing_policy": {"fallback_pool": fallback_pool},
+        "request_analysis": {"domains": ["daily_work"]},
+        "budget": {"max_latency_ms": 10_000},
+    }
+    candidates = [
+        CandidateResult(
+            "primary_solver",
+            "primary_solver",
+            canonical_profiles[0].profile_id,
+            canonical_profiles[0].provider,
+            canonical_profiles[0].model,
+            "candidate one",
+            canonical_identity=canonical_profiles[0].canonical_identity,
+        ),
+        CandidateResult(
+            "independent_solver",
+            "independent_solver",
+            canonical_profiles[1].profile_id,
+            canonical_profiles[1].provider,
+            canonical_profiles[1].model,
+            "candidate two",
+            canonical_identity=canonical_profiles[1].canonical_identity,
+        ),
+    ]
+    engine = FusionEngine(profiles, client=FailingJudgeClient(), cache_enabled=False)
+    judge_result = engine._judge_candidates(request, route_plan, candidates)
+
+    assert judge_result["judge_provider_call"] is False
+    assert judge_result["judge_provider_call_attempted"] is True
+    assert judge_result["judge_parse_failed"] is False
+    assert judge_result["judge_error_type"] == "RuntimeError"
+    assert judge_result["judge_replica_routing"]["cross_model_failover_attempted"] is True
+    assert judge_result["judge_replica_routing"]["cross_model_failover_used"] is False
+
+    safe = safe_execution_trace(
+        FusionResponse(
+            text="",
+            request=request,
+            route_plan=route_plan,
+            candidates=tuple(candidates),
+            judge_result=judge_result,
+            trace={},
+            provider_calls_recorded=True,
+        )
+    )
+    serialized = json.dumps(safe, ensure_ascii=False)
+    assert safe["judge_result"]["judge_parse_failed"] is False
+    assert safe["judge_result"]["judge_error_type"] == "RuntimeError"
+    assert safe["judge_result"]["judge_replica_routing"]["cross_model_failover_attempted"] is True
+    assert safe["judge_result"]["judge_replica_routing"]["cross_model_failover_used"] is False
+    assert "SECRET_PROVIDER_FAILURE_DETAIL" not in serialized
 
 
 def test_role_replica_selected_but_blocked_before_provider_is_not_counted_as_attempt():

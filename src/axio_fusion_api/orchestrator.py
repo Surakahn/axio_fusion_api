@@ -16,7 +16,11 @@ from typing import Any, Mapping, Sequence
 from .policy_control import load_active_routing_policy
 from .latency_policy import profile_latency_eligibility
 from .providers import HTTPProviderClient, ProviderCompletion, ProviderStreamObserver
-from .router import build_route_plan
+from .router import (
+    _screening_role_allowed,
+    _stage_profile_eligibility,
+    build_route_plan,
+)
 from .schemas import (
     REASONING_EFFORT_LEVELS,
     CandidateResult,
@@ -113,6 +117,11 @@ _RUNTIME_TELEMETRY_MIN_OBSERVATIONS = 3
 _RUNTIME_TELEMETRY_PRIOR_WEIGHT = 3.0
 _RUNTIME_TELEMETRY_MAX_LATENCY_SAMPLES = 64
 _MAX_CANONICAL_REPLICA_ATTEMPTS = 3
+# A mandatory control stage may cross to one already-admitted, different
+# logical model only after every equivalent canonical replica has failed.  The
+# bound keeps a transient provider outage from becoming an unbounded second
+# fusion pass or silently consuming the public latency budget.
+_MAX_CROSS_MODEL_STAGE_FAILOVER_ATTEMPTS = 1
 # Panel repair is a bounded recovery wave, not a second model-selection pass.
 # The normal route must reach quorum with its initially admitted experts; at
 # runtime we allow only a few provider substitutions before failing closed.
@@ -1195,8 +1204,44 @@ class _CostBudget:
                     }
                 )
                 return None
-            self.reserved_cost_usd += reservation.estimated_cost_usd
+                self.reserved_cost_usd += reservation.estimated_cost_usd
             return reservation
+
+    def would_exceed(
+        self,
+        *,
+        role: str,
+        profile: ModelProfile,
+        prompt: str,
+        system: str,
+        expected_output_tokens: int | None = None,
+    ) -> bool:
+        """Check a priced call without emitting a skipped-call receipt.
+
+        Stage failover uses this as a preflight before expanding from a
+        canonical replica to a different logical model. Pending dynamic stage
+        reservations remain authoritative and are therefore allowed to flow
+        through ``acquire``.
+        """
+
+        estimated = _estimate_provider_call_cost(
+            profile,
+            prompt=prompt,
+            system=system,
+            expected_output_tokens=expected_output_tokens,
+        )
+        if not estimated["pricing_known"] or self.max_cost_usd <= 0.0:
+            return False
+        with self._lock:
+            pending = self._dynamic_stage_reservations.get(str(role or ""), [])
+            if any(reservation.active for reservation in pending):
+                return False
+            return (
+                self.actual_cost_usd
+                + self.reserved_cost_usd
+                + float(estimated["estimated_cost_usd"])
+                > self.max_cost_usd
+            )
 
     def commit(self, reservation: _CostReservation | None, *, profile: ModelProfile, prompt: str, system: str, output_text: str) -> None:
         if reservation is None or not reservation.active:
@@ -3666,13 +3711,15 @@ class FusionEngine:
         allow_tool_calls: bool = False,
         stream_observer: ProviderStreamObserver | None = None,
         cancellation_event: threading.Event | None = None,
+        cross_model_fallback_profiles: Sequence[ModelProfile] = (),
     ) -> tuple[str | ProviderCompletion, ModelProfile, dict[str, Any], int]:
         """Execute a bounded internal stage across equivalent channel replicas.
 
         Each physical attempt reserves its own call and cost budget.  This
         keeps a same-model availability retry visible to the hard 3x latency
         and total-call contracts instead of treating it as a free transport
-        retry.
+        retry.  A caller may provide one already-admitted logical fallback;
+        it is considered only after canonical replicas are exhausted.
         """
 
         replicas, routing = self._replica_attempt_profiles(
@@ -3681,12 +3728,49 @@ class FusionEngine:
             role={"role": role_name},
         )
         selected_profile = replicas[0] if replicas else profile
+        fallback_profiles: list[ModelProfile] = []
+        seen_canonical = {item.canonical_identity for item in replicas}
+        seen_profiles = {item.profile_id for item in replicas}
+        for candidate in cross_model_fallback_profiles:
+            if len(fallback_profiles) >= _MAX_CROSS_MODEL_STAGE_FAILOVER_ATTEMPTS:
+                break
+            if not isinstance(candidate, ModelProfile):
+                continue
+            if candidate.profile_id in seen_profiles:
+                continue
+            if candidate.canonical_identity in seen_canonical:
+                continue
+            fallback_profiles.append(candidate)
+            seen_profiles.add(candidate.profile_id)
+            seen_canonical.add(candidate.canonical_identity)
+        routing = {
+            **routing,
+            "stage_failover_scope": (
+                "same_canonical_then_cross_model"
+                if fallback_profiles
+                else "same_canonical_only"
+            ),
+            "cross_model_failover_enabled": bool(fallback_profiles),
+            "cross_model_failover_candidate_count": len(fallback_profiles),
+            "cross_model_failover_profile_hashes": [
+                sha256_text(item.profile_id) for item in fallback_profiles
+            ],
+            "cross_model_failover_attempted": False,
+            "cross_model_failover_used": False,
+        }
         attempts: list[dict[str, Any]] = []
         provider_attempt_count = 0
         terminal_reason = "no_eligible_canonical_replica"
-        for replica_index, replica in enumerate(replicas, start=1):
+        attempt_plan = [
+            ("same_canonical", item) for item in replicas
+        ] + [
+            ("cross_model", item) for item in fallback_profiles
+        ]
+        for replica_index, (attempt_scope, replica) in enumerate(attempt_plan, start=1):
             if cancellation_event is not None and cancellation_event.is_set():
                 raise PublicStreamInterruptedError(client_cancelled=True)
+            if attempt_scope == "cross_model":
+                routing["cross_model_failover_attempted"] = True
             if deadline_budget is not None and not deadline_budget.acquire(
                 kind=kind,
                 role=role_name,
@@ -3704,6 +3788,24 @@ class FusionEngine:
             )
             if prompt_budget is not None:
                 prompt_budget.record(budget_receipt)
+            if (
+                attempt_scope == "cross_model"
+                and provider_attempt_count == 0
+                and cost_budget is not None
+                and cost_budget.would_exceed(
+                    role=role_name,
+                    profile=replica,
+                    prompt=attempt_prompt,
+                    system=attempt_system,
+                    expected_output_tokens=_expected_output_tokens_for_call(
+                        request,
+                        kind,
+                    ),
+                )
+            ):
+                routing["cross_model_failover_attempted"] = False
+                terminal_reason = "max_cost_usd_exhausted"
+                break
             cost_reservation = (
                 cost_budget.acquire(
                     kind=kind,
@@ -3721,6 +3823,7 @@ class FusionEngine:
                     _canonical_replica_stage_attempt_receipt(
                         replica,
                         replica_index=replica_index,
+                        attempt_scope=attempt_scope,
                         status="skipped",
                         reason="max_cost_usd_exhausted",
                     )
@@ -3738,6 +3841,7 @@ class FusionEngine:
                     _canonical_replica_stage_attempt_receipt(
                         replica,
                         replica_index=replica_index,
+                        attempt_scope=attempt_scope,
                         status="skipped",
                         reason="max_total_model_calls_exhausted",
                     )
@@ -3796,10 +3900,12 @@ class FusionEngine:
                         _canonical_replica_stage_attempt_receipt(
                             replica,
                             replica_index=replica_index,
+                            attempt_scope=attempt_scope,
                             status="completed",
                             reason="provider_output_received",
                         )
                     )
+                    routing["cross_model_failover_used"] = attempt_scope == "cross_model"
                     return (
                         completion if allow_tool_calls else str(output).strip(),
                         replica,
@@ -3810,8 +3916,15 @@ class FusionEngine:
                             1 for row in attempts if row.get("status") == "failed"
                         ),
                         "successful_profile_sha256": sha256_text(replica.profile_id),
-                        "terminal_reason": "provider_output_received",
-                        "stage_attempt_receipts": attempts[:_MAX_CANONICAL_REPLICA_ATTEMPTS],
+                        "terminal_reason": (
+                            "cross_model_failover_output_received"
+                            if attempt_scope == "cross_model"
+                            else "provider_output_received"
+                        ),
+                        "stage_attempt_receipts": attempts[
+                            : _MAX_CANONICAL_REPLICA_ATTEMPTS
+                            + _MAX_CROSS_MODEL_STAGE_FAILOVER_ATTEMPTS
+                        ],
                         },
                         provider_attempt_count,
                     )
@@ -3820,10 +3933,12 @@ class FusionEngine:
                         _canonical_replica_stage_attempt_receipt(
                             replica,
                             replica_index=replica_index,
+                            attempt_scope=attempt_scope,
                             status="completed",
                             reason="provider_tool_call_received",
                         )
                     )
+                    routing["cross_model_failover_used"] = attempt_scope == "cross_model"
                     return completion, replica, {
                         **routing,
                         "stage_attempt_count": provider_attempt_count,
@@ -3832,7 +3947,10 @@ class FusionEngine:
                         ),
                         "successful_profile_sha256": sha256_text(replica.profile_id),
                         "terminal_reason": "provider_tool_call_received",
-                        "stage_attempt_receipts": attempts[:_MAX_CANONICAL_REPLICA_ATTEMPTS],
+                        "stage_attempt_receipts": attempts[
+                            : _MAX_CANONICAL_REPLICA_ATTEMPTS
+                            + _MAX_CROSS_MODEL_STAGE_FAILOVER_ATTEMPTS
+                        ],
                     }, provider_attempt_count
                 if stream_observer is not None and stream_observer.emitted_text:
                     raise PublicStreamInterruptedError()
@@ -3840,11 +3958,16 @@ class FusionEngine:
                     _canonical_replica_stage_attempt_receipt(
                         replica,
                         replica_index=replica_index,
+                        attempt_scope=attempt_scope,
                         status="empty",
                         reason="empty_provider_output",
                     )
                 )
-                terminal_reason = "empty_provider_output"
+                terminal_reason = (
+                    "cross_model_empty_provider_output"
+                    if attempt_scope == "cross_model"
+                    else "empty_provider_output"
+                )
             except Exception as exc:  # noqa: PERF203 - provider boundary
                 if cost_budget is not None:
                     cost_budget.release(cost_reservation)
@@ -3856,13 +3979,18 @@ class FusionEngine:
                     _canonical_replica_stage_attempt_receipt(
                         replica,
                         replica_index=replica_index,
+                        attempt_scope=attempt_scope,
                         status="failed",
                         reason=type(exc).__name__,
                         error_code=str(getattr(exc, "error_code", "") or ""),
                         http_status=getattr(exc, "http_status", None),
                     )
                 )
-                terminal_reason = "same_canonical_model_replica_failed"
+                terminal_reason = (
+                    "cross_model_stage_fallback_failed"
+                    if attempt_scope == "cross_model"
+                    else "same_canonical_model_replica_failed"
+                )
                 selected_profile = replica
                 if stream_observer is not None and (
                     stream_observer.emitted_text
@@ -3879,8 +4007,86 @@ class FusionEngine:
             ),
             "successful_profile_sha256": "",
             "terminal_reason": terminal_reason,
-            "stage_attempt_receipts": attempts[:_MAX_CANONICAL_REPLICA_ATTEMPTS],
+            "stage_attempt_receipts": attempts[
+                : _MAX_CANONICAL_REPLICA_ATTEMPTS
+                + _MAX_CROSS_MODEL_STAGE_FAILOVER_ATTEMPTS
+            ],
         }, provider_attempt_count
+
+    def _cross_model_stage_fallback_profiles(
+        self,
+        profile: ModelProfile,
+        route_plan: Mapping[str, Any],
+        *,
+        role_name: str,
+    ) -> list[ModelProfile]:
+        """Return at most one route-admitted logical fallback for a stage.
+
+        This is deliberately computed from the already published route and
+        registry.  It never promotes an un-screened model, bypasses a role
+        deny-list, or treats a different model as an equivalent replica.
+        """
+
+        policy = route_plan.get("provider_routing_policy")
+        fallback_pool = policy.get("fallback_pool") if isinstance(policy, Mapping) else None
+        allowed_hashes = {
+            str(row.get("profile_id_sha256") or "")
+            for row in fallback_pool or ()
+            if isinstance(row, Mapping) and str(row.get("profile_id_sha256") or "")
+        }
+        if not allowed_hashes:
+            return []
+        analysis = route_plan.get("request_analysis")
+        analysis = analysis if isinstance(analysis, Mapping) else {}
+        budget = route_plan.get("budget")
+        budget = budget if isinstance(budget, Mapping) else {}
+        candidates: list[ModelProfile] = []
+        for candidate in self.profiles:
+            if candidate.profile_id == profile.profile_id:
+                continue
+            if candidate.canonical_identity == profile.canonical_identity:
+                continue
+            if allowed_hashes and sha256_text(candidate.profile_id) not in allowed_hashes:
+                continue
+            if self._circuit_open(candidate.profile_id):
+                continue
+            if str(candidate.health or "unknown") == "unavailable":
+                continue
+            if not _screening_role_allowed(candidate, role_name):
+                continue
+            eligible, _basis = _stage_profile_eligibility(
+                candidate,
+                role_name,
+                analysis,
+                budget,
+            )
+            if not eligible:
+                continue
+            candidates.append(candidate)
+        if not candidates:
+            return []
+        domains = [
+            str(axis)
+            for axis in analysis.get("domains", [])
+            if str(axis) in {"science_knowledge", "multilingual", "code", "math", "logic", "daily_work"}
+        ] or ["daily_work"]
+
+        def quality(item: ModelProfile) -> float:
+            domain = sum(item.capability(axis) for axis in domains) / len(domains)
+            if role_name == "judge":
+                return item.capability("critique") * 0.48 + item.capability("structured_output") * 0.32 + domain * 0.20
+            return item.capability("structured_output") * 0.48 + item.capability("long_context") * 0.20 + domain * 0.32
+
+        return sorted(
+            candidates,
+            key=lambda item: (
+                quality(item),
+                float(item.recent_success_rate or 0.0),
+                -float(item.p50_latency_ms or 1_500),
+                item.profile_id,
+            ),
+            reverse=True,
+        )[:_MAX_CROSS_MODEL_STAGE_FAILOVER_ATTEMPTS]
 
     def _fallback_roles(
         self,
@@ -4228,6 +4434,11 @@ class FusionEngine:
                 cost_budget=cost_budget,
                 deadline_budget=deadline_budget,
                 prompt_budget=prompt_budget,
+                cross_model_fallback_profiles=self._cross_model_stage_fallback_profiles(
+                    profile,
+                    route_plan,
+                    role_name="judge",
+                ),
             )
         )
         if not output:
@@ -4245,7 +4456,9 @@ class FusionEngine:
                     "judge_provider_call_count": provider_attempt_count,
                     "judge_profile_sha256": sha256_text(selected_profile.profile_id),
                     "judge_replica_routing": replica_routing,
-                    "judge_error_type": "CanonicalReplicaFailoverExhausted",
+                    "judge_error_type": _stage_failure_error_type(replica_routing),
+                    "judge_parse_failed": False,
+                    "judge_output_sha256": "",
                     "raw_judge_output_persisted": False,
                     "raw_candidate_text_persisted": False,
                 }
@@ -4262,6 +4475,8 @@ class FusionEngine:
             )
             result["judge_provider_call_count"] = provider_attempt_count
             result["judge_replica_routing"] = replica_routing
+            result["judge_parse_failed"] = False
+            result["judge_error_type"] = ""
             return result
         result = dict(local)
         result.update(
@@ -4273,6 +4488,7 @@ class FusionEngine:
                 "judge_replica_routing": replica_routing,
                 "judge_output_sha256": sha256_text(output),
                 "judge_parse_failed": True,
+                "judge_error_type": "StructuredOutputParseError",
                 "raw_judge_output_persisted": False,
                 "raw_candidate_text_persisted": False,
             }
@@ -4996,7 +5212,11 @@ class FusionEngine:
                     return (
                         stage_output.text.strip(),
                         provider_attempt_count,
-                        compression_receipt,
+                        {
+                            **compression_receipt,
+                            "provider_synthesis_output_accepted": True,
+                            "provider_synthesis_fallback_used": False,
+                        },
                         tuple(stage_output.tool_calls),
                         True,
                     )
@@ -5004,7 +5224,11 @@ class FusionEngine:
                     return (
                         stage_output.text.strip(),
                         provider_attempt_count,
-                        compression_receipt,
+                        {
+                            **compression_receipt,
+                            "provider_synthesis_output_accepted": True,
+                            "provider_synthesis_fallback_used": False,
+                        },
                         (),
                         True,
                     )
@@ -5012,7 +5236,11 @@ class FusionEngine:
                 return (
                     str(stage_output).strip(),
                     provider_attempt_count,
-                    compression_receipt,
+                    {
+                        **compression_receipt,
+                        "provider_synthesis_output_accepted": True,
+                        "provider_synthesis_fallback_used": False,
+                    },
                     (),
                     True,
                 )
@@ -5244,6 +5472,7 @@ def _canonical_replica_stage_attempt_receipt(
     profile: ModelProfile,
     *,
     replica_index: int,
+    attempt_scope: str = "same_canonical",
     status: str,
     reason: str,
     error_code: str = "",
@@ -5251,6 +5480,7 @@ def _canonical_replica_stage_attempt_receipt(
 ) -> dict[str, Any]:
     return {
         "replica_attempt_index": max(1, int(replica_index)),
+        "attempt_scope": str(attempt_scope or "same_canonical")[:40],
         "profile_id_sha256": sha256_text(profile.profile_id),
         "provider_sha256": sha256_text(profile.provider),
         "runtime_canonical_identity_sha256": profile.canonical_identity_sha256,
@@ -8762,6 +8992,25 @@ def _judge_provider_call_count(judge_result: Mapping[str, Any]) -> int:
         return max(0, int(value))
     except (TypeError, ValueError):
         return int(bool(judge_result.get("judge_provider_call") or judge_result.get("judge_provider_call_attempted")))
+
+
+def _stage_failure_error_type(routing: Mapping[str, Any]) -> str:
+    """Return a bounded, non-secret stage failure category for diagnostics."""
+
+    receipts = (
+        routing.get("stage_attempt_receipts")
+        if isinstance(routing.get("stage_attempt_receipts"), list)
+        else []
+    )
+    for row in reversed(receipts):
+        if not isinstance(row, Mapping):
+            continue
+        status = str(row.get("status") or "")
+        if status == "failed":
+            return str(row.get("reason") or "ProviderStageFailure")[:120]
+        if status == "empty":
+            return "EmptyProviderOutput"
+    return str(routing.get("terminal_reason") or "ProviderStageFailure")[:120]
 
 
 def _judge_output_accepted(judge_result: Mapping[str, Any]) -> bool:

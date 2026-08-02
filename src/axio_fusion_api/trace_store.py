@@ -824,6 +824,12 @@ def _safe_replica_routing(value: Mapping[str, Any]) -> dict[str, Any]:
             "runtime_eligible_replica_count": 0,
             "comparable_replica_count": 0,
             "bounded_failover_attempt_count": 0,
+            "stage_failover_scope": "",
+            "cross_model_failover_enabled": False,
+            "cross_model_failover_candidate_count": 0,
+            "cross_model_failover_profile_hashes": [],
+            "cross_model_failover_attempted": False,
+            "cross_model_failover_used": False,
             "selected_profile_sha256": "",
             "raw_canonical_identity_persisted": False,
             "raw_profile_id_persisted": False,
@@ -833,6 +839,11 @@ def _safe_replica_routing(value: Mapping[str, Any]) -> dict[str, Any]:
     hashes = (
         value.get("ordered_attempt_profile_hashes")
         if isinstance(value.get("ordered_attempt_profile_hashes"), list)
+        else []
+    )
+    cross_model_hashes = (
+        value.get("cross_model_failover_profile_hashes")
+        if isinstance(value.get("cross_model_failover_profile_hashes"), list)
         else []
     )
     return {
@@ -859,6 +870,20 @@ def _safe_replica_routing(value: Mapping[str, Any]) -> dict[str, Any]:
         "bounded_failover_attempt_count": _optional_int(
             value.get("bounded_failover_attempt_count")
         ),
+        "stage_failover_scope": str(value.get("stage_failover_scope") or "")[:80],
+        "cross_model_failover_enabled": bool(
+            value.get("cross_model_failover_enabled")
+        ),
+        "cross_model_failover_candidate_count": _optional_int(
+            value.get("cross_model_failover_candidate_count")
+        ),
+        "cross_model_failover_profile_hashes": [
+            str(item) for item in cross_model_hashes if str(item)
+        ][:8],
+        "cross_model_failover_attempted": bool(
+            value.get("cross_model_failover_attempted")
+        ),
+        "cross_model_failover_used": bool(value.get("cross_model_failover_used")),
         "selected_profile_sha256": str(value.get("selected_profile_sha256") or ""),
         "ordered_attempt_profile_hashes": [str(item) for item in hashes if str(item)][:24],
         "selection_policy": str(value.get("selection_policy") or "")[:120],
@@ -1099,6 +1124,9 @@ def _safe_judge(value: Mapping[str, Any]) -> dict[str, Any]:
         "judge_provider_call_attempted": bool(value.get("judge_provider_call_attempted")),
         "judge_provider_call_count": _optional_int(value.get("judge_provider_call_count")),
         "judge_profile_sha256": str(value.get("judge_profile_sha256") or ""),
+        "judge_parse_failed": bool(value.get("judge_parse_failed")),
+        "judge_error_type": str(value.get("judge_error_type") or "")[:120],
+        "judge_output_sha256": str(value.get("judge_output_sha256") or ""),
         "judge_replica_routing": _safe_replica_routing(
             value.get("judge_replica_routing")
             if isinstance(value.get("judge_replica_routing"), Mapping)
@@ -1235,6 +1263,12 @@ def _safe_synthesis_compression(value: Mapping[str, Any]) -> dict[str, Any]:
         "max_full_candidate_count": _optional_int(value.get("max_full_candidate_count")),
         "full_candidate_count": _optional_int(value.get("full_candidate_count")),
         "omitted_candidate_count": _optional_int(value.get("omitted_candidate_count")),
+        "provider_synthesis_output_accepted": bool(
+            value.get("provider_synthesis_output_accepted")
+        ),
+        "provider_synthesis_fallback_used": bool(
+            value.get("provider_synthesis_fallback_used")
+        ),
         "synthesizer_replica_routing": _safe_replica_routing(
             value.get("synthesizer_replica_routing")
             if isinstance(value.get("synthesizer_replica_routing"), Mapping)
