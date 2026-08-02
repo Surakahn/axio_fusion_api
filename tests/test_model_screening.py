@@ -2114,6 +2114,72 @@ def test_research_transport_failure_switches_to_next_agent_profile():
     assert attempts[1]["agent_profile_sha256"] == sha256_text(fallback.profile_id)
 
 
+def test_research_transport_failure_does_not_consume_schema_repair_budget():
+    primary = _profile("provider-a", "primary-researcher", "primary-researcher")
+    fallback = _profile("provider-b", "fallback-researcher", "fallback-researcher")
+    groups = _groups([_profile("provider-c", "candidate", "candidate")])
+
+    class TransportThenSchemaRepairClient(_BatchResearchClient):
+        def complete_turn(self, profile, request, *, prompt, system, timeout):
+            del request, system, timeout
+            self.calls.append({"profile_id": profile.profile_id, "prompt": prompt})
+            if len(self.calls) == 1:
+                raise provider_module.ProviderExecutionError(
+                    "primary unavailable",
+                    error_code="provider_request_timeout",
+                )
+            marker = "AUTHORITATIVE_CANDIDATE_INVENTORY\n"
+            inventory = prompt.split(marker, 1)[1].split(
+                "\n\nUNTRUSTED_SOURCE_DATA", 1
+            )[0]
+            candidate_ids = [
+                str(row["candidate_id"]) for row in json.loads(inventory)
+            ]
+            if len(self.calls) == 2:
+                malformed = _research_output(candidate_ids)
+                malformed["ordered_models"][0]["reasoning_capability"].update(
+                    {
+                        "status": "unsupported",
+                        "transport": "chat_reasoning_effort",
+                        "native_efforts": ["low"],
+                    }
+                )
+                return ProviderCompletion(json.dumps(malformed))
+            return ProviderCompletion(json.dumps(_research_output(candidate_ids)))
+
+    client = TransportThenSchemaRepairClient()
+    _ranking, receipt = model_screening._run_research_agent_batches(
+        primary,
+        research_profiles=(primary, fallback),
+        groups=groups,
+        source_pack={
+            "receipts": [
+                {
+                    "source_slot": "source_official",
+                    "status": "inline_source_ready",
+                    "evidence_hash": sha256_text("source"),
+                }
+            ],
+            "evidence": [],
+        },
+        timeout=10.0,
+        client=client,
+        focus_manifest=model_screening.load_prefusion_focus_manifest(),
+        batch_size=1,
+        max_workers=1,
+        merge_strategy=model_screening._RESEARCH_MERGE_STRATEGY,
+    )
+
+    attempts = receipt["batch_results"][0]["attempts"]
+    assert len(client.calls) == 3
+    assert receipt["status"] == "validated"
+    assert attempts[0]["error_code"] == "provider_request_timeout"
+    assert attempts[1]["error_code"] == (
+        "prefusion_research_reasoning_non_candidate_declaration_invalid"
+    )
+    assert attempts[2]["status"] == "validated"
+
+
 def test_malformed_multi_candidate_batch_recovers_with_validated_singletons():
     profiles = [
         _profile("provider-a", f"model-{index:02d}", f"model-{index:02d}")

@@ -5324,14 +5324,14 @@ def _run_research_agent_batches(
         try:
             attempts: list[dict[str, Any]] = []
             repair_reason = ""
-            for attempt in range(
-                1,
-                max(
-                    _MAX_RESEARCH_RETRIES_PER_BATCH,
-                    _MAX_RESEARCH_TRANSPORT_RETRIES_PER_BATCH,
-                )
-                + 2,
-            ):
+            schema_failures = 0
+            transport_failures = 0
+            max_attempts = (
+                1
+                + _MAX_RESEARCH_RETRIES_PER_BATCH
+                + _MAX_RESEARCH_TRANSPORT_RETRIES_PER_BATCH
+            )
+            for attempt in range(1, max_attempts + 1):
                 attempt_receipt: dict[str, Any] = {
                     "attempt": attempt,
                     "status": "failed",
@@ -5430,16 +5430,19 @@ def _run_research_agent_batches(
                     attempt_receipt["status"] = "failed"
                     attempt_receipt["error_code"] = exc.code
                     attempts.append(attempt_receipt)
-                    # Schema failures keep the one-repair-round contract. A
-                    # measured latency still bounds every individual request;
-                    # transport failures are allowed one additional recovery
-                    # round below without admitting partial output.
+                    # Keep schema repair and transport recovery on independent
+                    # budgets. A timeout followed by a fallback response that
+                    # fails schema validation still deserves the one bounded
+                    # repair round; neither failure should consume the other
+                    # category's retry allowance.
                     retryable = (
                         exc.code.startswith(_RESEARCH_RETRYABLE_ERROR_PREFIXES)
                         or exc.code == "prefusion_research_agent_request_failed"
                     )
+                    if retryable and exc.code != "prefusion_research_agent_latency_ineligible":
+                        schema_failures += 1
                     exhausted = (
-                        attempt > _MAX_RESEARCH_RETRIES_PER_BATCH
+                        schema_failures > _MAX_RESEARCH_RETRIES_PER_BATCH
                         or not retryable
                         or exc.code == "prefusion_research_agent_latency_ineligible"
                     )
@@ -5527,12 +5530,13 @@ def _run_research_agent_batches(
                     attempt_receipt["status"] = "failed"
                     attempt_receipt["error_code"] = code
                     attempts.append(attempt_receipt)
+                    transport_failures += 1
                     fallback_activated = advance_agent_profile(selected_agent)
                     attempt_receipt["fallback_activated"] = fallback_activated
                     # Transport errors get at most two recovery rounds. Each
                     # attempt receives the remaining provider budget and a
                     # third failure still blocks the complete ranking.
-                    if attempt > _MAX_RESEARCH_TRANSPORT_RETRIES_PER_BATCH:
+                    if transport_failures > _MAX_RESEARCH_TRANSPORT_RETRIES_PER_BATCH:
                         receipt.update(
                             {
                                 "status": "failed",
