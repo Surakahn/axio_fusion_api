@@ -61,6 +61,7 @@ _PREFUSION_REQUIRED_ROLES = (
     "synthesizer",
 )
 _PREFUSION_OPERATIONAL_ROLE_PROBE_ROLES = (
+    "primary_solver",
     "critic",
     "judge",
     "synthesizer",
@@ -2566,7 +2567,33 @@ def _prefusion_role_result_is_available(row: Mapping[str, Any]) -> bool:
         latency_ms = float(row.get("latency_ms") or 0.0)
     except (TypeError, ValueError):
         return False
-    return frame_count >= 1 and 0.0 <= latency_ms <= 90_000.0
+    if frame_count < 1 or not 0.0 <= latency_ms <= 90_000.0:
+        return False
+    # Older role receipts have no repeated-sample fields. Preserve their
+    # validation contract while enforcing the stronger role-level stability
+    # contract whenever the new fields are present.
+    try:
+        sample_count = int(row.get("role_probe_sample_count") or 0)
+        completed_count = int(row.get("role_probe_completed_sample_count") or 0)
+        success_count = int(row.get("role_probe_success_count") or 0)
+    except (TypeError, ValueError):
+        return False
+    if sample_count > 0 and (
+        completed_count != sample_count
+        or success_count != sample_count
+        or row.get("role_probe_all_samples_eligible") is not True
+    ):
+        return False
+    for quantile_key in ("p50_latency_ms", "p95_latency_ms"):
+        if quantile_key not in row:
+            continue
+        try:
+            quantile_value = float(row.get(quantile_key))
+        except (TypeError, ValueError):
+            return False
+        if not 0.0 <= quantile_value <= 90_000.0:
+            return False
+    return True
 
 
 def _validate_prefusion_role_probe_binding(

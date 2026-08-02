@@ -1221,6 +1221,125 @@ def test_missing_p95_evidence_remains_unknown_and_does_not_block_provider_admiss
     )
 
 
+def _role_calibrated_local_panel_profiles(*, independent_p50, independent_p95):
+    def profile(provider, model, role_latency):
+        return normalize_profile(
+            {
+                "provider": provider,
+                "model": model,
+                "canonical_model_id": model,
+                "api_format": "chat",
+                "p50_latency_ms": 100,
+                "p95_latency_ms": 100,
+                "capabilities": {
+                    "daily_work": 0.98,
+                    "logic": 0.98,
+                    "structured_output": 0.98,
+                    "critique": 0.98,
+                },
+                "screening_role_admission": {
+                    "operational_role_probe": {
+                        "role_latency": role_latency,
+                    }
+                },
+            }
+        )
+
+    return [
+        profile(
+            "role-direct",
+            "role-direct-model",
+            {
+                "primary_solver": {
+                    "p50_latency_ms": 100,
+                    "p95_latency_ms": 100,
+                    "all_samples_eligible": True,
+                }
+            },
+        ),
+        profile(
+            "role-slow-a",
+            "role-slow-model-a",
+            {
+                "independent_solver": {
+                    "p50_latency_ms": independent_p50,
+                    "p95_latency_ms": independent_p95,
+                    "all_samples_eligible": True,
+                }
+            },
+        ),
+        profile(
+            "role-slow-b",
+            "role-slow-model-b",
+            {
+                "independent_solver": {
+                    "p50_latency_ms": independent_p50,
+                    "p95_latency_ms": independent_p95,
+                    "all_samples_eligible": True,
+                }
+            },
+        ),
+    ]
+
+
+def test_role_calibrated_local_panel_rejects_p50_over_request_deadline():
+    profiles = _role_calibrated_local_panel_profiles(
+        independent_p50=4_000,
+        independent_p95=4_000,
+    )
+    request = canonicalize_payload(
+        {
+            "model": "axio-terra",
+            "max_latency_ms": 2_500,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Analyze a difficult scientific constraint and verify the conclusion.",
+                }
+            ],
+        }
+    )
+
+    route_plan = build_route_plan(request, profiles)
+    local_plan = route_plan["budget"]["local_consensus_plan"]
+
+    assert local_plan["feasible"] is False
+    assert local_plan["candidate_panel_evaluation_count"] == 0
+    assert route_plan["fusion_admission"]["activated"] is False
+
+
+def test_role_calibrated_provider_p95_three_x_guard_blocks_fusion():
+    profiles = _role_calibrated_local_panel_profiles(
+        independent_p50=100,
+        independent_p95=400,
+    )
+    request = canonicalize_payload(
+        {
+            "model": "axio-terra",
+            "max_latency_ms": 10_000,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Analyze a difficult scientific constraint and verify the conclusion.",
+                }
+            ],
+        }
+    )
+
+    route_plan = build_route_plan(request, profiles)
+    admission = route_plan["fusion_admission"]
+    local_plan = route_plan["budget"]["local_consensus_plan"]
+
+    assert admission["p95_latency_known"] is True
+    assert admission["p95_latency_multiplier_guard_blocked"] is True
+    assert "fusion_p95_latency_exceeds_3x_single_model_guard" in admission[
+        "provider_plan_blocked_reasons"
+    ]
+    assert local_plan["feasible"] is False
+    assert local_plan["candidate_panel_evaluation_count"] == 0
+    assert admission["activated"] is False
+
+
 def test_neutral_runtime_portfolio_uses_provider_diversity_and_one_parallel_backup():
     profiles = [
         normalize_profile(

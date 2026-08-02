@@ -1462,7 +1462,12 @@ def _local_consensus_plan(
     }
     if request.public_model not in {"axio-terra", "axio-pro"}:
         return [], [], default
-    if direct_profile is None or direct_profile.p50_latency_ms is None:
+    direct_latency_value = (
+        _role_latency_ms(direct_profile, "primary_solver", "p50_latency_ms")
+        if direct_profile is not None
+        else None
+    )
+    if direct_profile is None or direct_latency_value is None:
         default["reason"] = "direct_latency_telemetry_unknown"
         return [], [], default
 
@@ -1513,7 +1518,7 @@ def _local_consensus_plan(
         max_latency_ms = max(1, int(budget.get("max_latency_ms") or 1))
     except (TypeError, ValueError):
         max_latency_ms = 1
-    direct_latency = max(1.0, float(direct_profile.p50_latency_ms))
+    direct_latency = max(1.0, float(direct_latency_value))
     candidate_pool_by_identity: dict[str, ModelProfile] = {}
     # Score-first candidates preserve capability quality; fastest candidates
     # make the bounded search useful when the score-first panel contains a
@@ -1716,9 +1721,26 @@ def _local_consensus_plan(
             expert_profiles = [profile for profile in expert_profiles if profile is not None]
             if len(expert_profiles) < minimum_count:
                 continue
+            expert_role_profiles = _assigned_role_profile_pairs(
+                expert_roles,
+                panel,
+                role_names={*_FUSION_EXPERT_ROLE_NAMES, "backup_solver"},
+            )
+            if len(expert_role_profiles) < minimum_count:
+                continue
+            expert_p50_latencies = [
+                _role_latency_ms(profile, role, "p50_latency_ms")
+                for role, profile in expert_role_profiles
+            ]
+            if any(
+                latency is None or latency > max_latency_ms
+                for latency in expert_p50_latencies
+            ):
+                continue
             phase_latency = _parallel_expert_phase_latency_ms(
-                [float(profile.p50_latency_ms or 0.0) for profile in expert_profiles],
+                [float(latency) for latency in expert_p50_latencies],
                 max_parallel=max_parallel,
+                profiles=[profile for _, profile in expert_role_profiles],
             )
             estimated_latency = phase_latency + LOCAL_CONSENSUS_OVERHEAD_MS
             multiplier = estimated_latency / direct_latency
@@ -1735,20 +1757,29 @@ def _local_consensus_plan(
                 continue
             panel_p95_latency: float | None = None
             panel_p95_multiplier: float | None = None
+            direct_p95_latency = _role_latency_ms(
+                direct_profile,
+                "primary_solver",
+                "p95_latency_ms",
+            )
+            expert_p95_latencies = [
+                _role_latency_ms(profile, role, "p95_latency_ms")
+                for role, profile in expert_role_profiles
+            ]
             p95_known = bool(
-                direct_profile.p95_latency_ms is not None
-                and all(profile.p95_latency_ms is not None for profile in expert_profiles)
+                direct_p95_latency is not None
+                and all(latency is not None for latency in expert_p95_latencies)
             )
             if p95_known:
                 panel_p95_phase = _parallel_expert_phase_latency_ms(
-                    [float(profile.p95_latency_ms or 0.0) for profile in expert_profiles],
+                    [float(latency) for latency in expert_p95_latencies],
                     max_parallel=max_parallel,
-                    profiles=expert_profiles,
+                    profiles=[profile for _, profile in expert_role_profiles],
                 )
                 panel_p95_latency = panel_p95_phase + LOCAL_CONSENSUS_OVERHEAD_MS
                 panel_p95_multiplier = panel_p95_latency / max(
                     1.0,
-                    float(direct_profile.p95_latency_ms or 0.0),
+                    float(direct_p95_latency),
                 )
                 if panel_p95_latency > max_latency_ms:
                     continue
@@ -1800,17 +1831,26 @@ def _local_consensus_plan(
         panel_p95_latency,
         panel_p95_multiplier,
     ) = chosen
+    chosen_expert_role_profiles = _assigned_role_profile_pairs(
+        expert_roles,
+        panel,
+        role_names={*_FUSION_EXPERT_ROLE_NAMES, "backup_solver"},
+    )
     phase_latency = _parallel_expert_phase_latency_ms(
-        [float(profile.p50_latency_ms or 0.0) for profile in panel],
+        [
+            float(_role_latency_ms(profile, role, "p50_latency_ms") or 0.0)
+            for role, profile in chosen_expert_role_profiles
+        ],
         max_parallel=max_parallel,
+        profiles=[profile for _, profile in chosen_expert_role_profiles],
     )
     _chosen_cost, chosen_cost_receipt = _estimated_local_consensus_cost_usd(
-        panel,
+        [profile for _, profile in chosen_expert_role_profiles],
         analysis,
         max_output_tokens=request.max_output_tokens,
     )
     planned_execution = _fusion_latency_execution_receipt(
-        panel,
+        [profile for _, profile in chosen_expert_role_profiles],
         None,
         None,
         max_parallel=max_parallel,
@@ -1830,7 +1870,7 @@ def _local_consensus_plan(
         }
     )
     planned_p95_execution = _fusion_latency_execution_receipt(
-        panel,
+        [profile for _, profile in chosen_expert_role_profiles],
         None,
         None,
         max_parallel=max_parallel,
@@ -4160,7 +4200,13 @@ def _fusion_utility_estimate(
     )
     pricing_known = direct_cost is not None and fusion_cost is not None
     extra_cost = None if not pricing_known else max(0.0, float(fusion_cost) - float(direct_cost))
-    direct_latency, direct_latency_known = _estimated_route_latency_ms([direct_profile] if direct_profile is not None else [])
+    direct_latency_value = (
+        _role_latency_ms(direct_profile, "primary_solver", "p50_latency_ms")
+        if direct_profile is not None
+        else None
+    )
+    direct_latency = float(direct_latency_value or 0.0)
+    direct_latency_known = direct_latency_value is not None and direct_latency > 0.0
     fusion_latency, fusion_latency_known, fusion_latency_execution = _estimated_fusion_execution_latency_ms(
         selected,
         planned_fusion_roles,
@@ -4177,13 +4223,12 @@ def _fusion_utility_estimate(
     latency_multiplier_guard_blocked = bool(
         latency_known and latency_multiplier > FUSION_LATENCY_MULTIPLIER_GUARD
     )
-    direct_p95_latency = (
-        float(direct_profile.p95_latency_ms)
+    direct_p95_value = (
+        _role_latency_ms(direct_profile, "primary_solver", "p95_latency_ms")
         if direct_profile is not None
-        and direct_profile.p95_latency_ms is not None
-        and float(direct_profile.p95_latency_ms) > 0.0
-        else 0.0
+        else None
     )
+    direct_p95_latency = float(direct_p95_value or 0.0)
     direct_p95_latency_known = bool(direct_p95_latency > 0.0)
     fusion_p95_latency, fusion_p95_latency_known, fusion_p95_latency_execution = (
         _estimated_fusion_execution_latency_p95_ms(
@@ -4748,6 +4793,68 @@ def _profile_for_assigned_role(
     return None
 
 
+def _assigned_role_profile_pairs(
+    roles: Sequence[Mapping[str, Any]],
+    selected: Sequence[ModelProfile],
+    *,
+    role_names: set[str] | frozenset[str],
+    profile_pool: Sequence[ModelProfile] | None = None,
+) -> list[tuple[str, ModelProfile]]:
+    """Resolve the concrete profile and role for each assigned call."""
+
+    selected_by_id = {profile.profile_id: profile for profile in selected}
+    for profile in profile_pool or ():
+        selected_by_id.setdefault(profile.profile_id, profile)
+    normalized_names = {
+        " ".join(str(name or "").strip().casefold().split())
+        for name in role_names
+    }
+    pairs: list[tuple[str, ModelProfile]] = []
+    for row in roles:
+        if not isinstance(row, Mapping):
+            continue
+        role = " ".join(str(row.get("role") or "").strip().casefold().split())
+        if role not in normalized_names:
+            continue
+        model = row.get("model") if isinstance(row.get("model"), Mapping) else {}
+        profile = selected_by_id.get(str(model.get("profile_id") or ""))
+        if profile is not None:
+            pairs.append((role, profile))
+    return pairs
+
+
+def _role_latency_ms(
+    profile: ModelProfile,
+    role: str,
+    latency_attribute: str,
+) -> float | None:
+    """Return calibrated role latency, falling back to the profile latency."""
+
+    fallback = getattr(profile, latency_attribute, None)
+    admission = profile.screening_role_admission
+    admission = admission if isinstance(admission, Mapping) else {}
+    operational = admission.get("operational_role_probe")
+    operational = operational if isinstance(operational, Mapping) else {}
+    role_latency = operational.get("role_latency")
+    role_latency = role_latency if isinstance(role_latency, Mapping) else {}
+    normalized_role = " ".join(str(role or "").strip().casefold().split())
+    row = role_latency.get(normalized_role)
+    row = row if isinstance(row, Mapping) else {}
+    if row.get("all_samples_eligible") is True:
+        value = row.get(latency_attribute)
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            parsed = None
+        if parsed is not None and math.isfinite(parsed) and parsed > 0.0:
+            return parsed
+    try:
+        parsed_fallback = float(fallback)
+    except (TypeError, ValueError):
+        return None
+    return parsed_fallback if math.isfinite(parsed_fallback) and parsed_fallback > 0.0 else None
+
+
 def _merge_profile_pool(
     selected: Sequence[ModelProfile | None],
     profile_pool: Sequence[ModelProfile] | None,
@@ -4866,7 +4973,12 @@ def _estimated_fusion_execution_latency_quantile_ms(
             max_parallel=max_parallel,
             latency_quantile=latency_quantile,
         )
-    expert_profiles = _planned_expert_profiles(planned_roles, clean)
+    expert_role_profiles = _assigned_role_profile_pairs(
+        planned_roles,
+        clean,
+        role_names={*_FUSION_EXPERT_ROLE_NAMES, "backup_solver"},
+    )
+    expert_profiles = [profile for _, profile in expert_role_profiles]
     judge_profile = _profile_for_assigned_role(
         planned_roles,
         clean,
@@ -4884,25 +4996,43 @@ def _estimated_fusion_execution_latency_quantile_ms(
         latency_profiles.append(judge_profile)
     if synthesizer_profile is not None:
         latency_profiles.append(synthesizer_profile)
+    expert_latency_values = [
+        _role_latency_ms(profile, role, latency_attribute)
+        for role, profile in expert_role_profiles
+    ]
+    judge_latency_value = (
+        _role_latency_ms(judge_profile, "judge", latency_attribute)
+        if judge_profile is not None
+        else None
+    )
+    synthesizer_latency_value = (
+        _role_latency_ms(synthesizer_profile, "synthesizer", latency_attribute)
+        if synthesizer_profile is not None
+        else None
+    )
+    measured_values = [
+        *expert_latency_values,
+        *([judge_latency_value] if judge_profile is not None else []),
+        *([synthesizer_latency_value] if synthesizer_profile is not None else []),
+    ]
     known = bool(latency_profiles) and all(
-        getattr(profile, latency_attribute, None) is not None
-        and float(getattr(profile, latency_attribute)) > 0.0
-        for profile in latency_profiles
+        value is not None and value > 0.0 for value in measured_values
     )
 
-    def latency(profile: ModelProfile) -> float:
-        value = getattr(profile, latency_attribute, None)
-        return float(value) if value is not None and float(value) > 0.0 else 1500.0
+    def latency(value: float | None) -> float:
+        return float(value) if value is not None and value > 0.0 else 1500.0
 
-    expert_latencies = [latency(profile) for profile in expert_profiles]
+    expert_latencies = [latency(value) for value in expert_latency_values]
     provider_serialization_adjusted = _panel_contains_serialized_provider_pair(expert_profiles)
     expert_phase = _parallel_expert_phase_latency_ms(
         expert_latencies,
         max_parallel=max_parallel,
         profiles=expert_profiles,
     )
-    judge_latency = latency(judge_profile) if judge_profile is not None else 0.0
-    synthesis_latency = latency(synthesizer_profile) if synthesizer_profile is not None else 0.0
+    judge_latency = latency(judge_latency_value) if judge_profile is not None else 0.0
+    synthesis_latency = (
+        latency(synthesizer_latency_value) if synthesizer_profile is not None else 0.0
+    )
     total = expert_phase + judge_latency + synthesis_latency
     receipt = _fusion_latency_execution_receipt(
         expert_profiles,

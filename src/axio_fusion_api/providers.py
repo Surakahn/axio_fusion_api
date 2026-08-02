@@ -429,6 +429,7 @@ REASONING_PROBE_MARKER = "AXIO_REASONING_TRANSPORT_OK"
 ROLE_PROBE_SCHEMA = "axio_fusion_api.provider_role_probe.v1"
 ROLE_PROBE_CONTRACT = "axio_fusion_api.provider_role_probe.fixed_control_packet.v1"
 ROLE_PROBE_ROLES = (
+    "primary_solver",
     "critic",
     "judge",
     "synthesizer",
@@ -439,6 +440,7 @@ ROLE_PROBE_ROLES = (
 )
 ROLE_PROBE_JUDGE_MAX_OUTPUT_TOKENS = 512
 ROLE_PROBE_NARROW_MAX_OUTPUT_TOKENS = 256
+ROLE_PROBE_MAX_SAMPLES_PER_ROLE = 3
 
 _REASONING_PROBE_TRANSPORTS = {
     "chat": frozenset({"chat_reasoning_effort"}),
@@ -2100,6 +2102,7 @@ def probe_provider_models(
     max_models_per_provider: int | None = None,
     samples_per_profile: int = 1,
     role_probe_roles: Sequence[str] | None = None,
+    role_probe_samples_per_role: int = 1,
     redact_provider_identifiers: bool = False,
     isolate_live_requests: bool = False,
     deadline: float | None = None,
@@ -2121,6 +2124,9 @@ def probe_provider_models(
     )
     bounded_samples = _bounded_probe_sample_count(samples_per_profile)
     bounded_role_probe_roles = _normalized_role_probe_roles(role_probe_roles)
+    bounded_role_probe_samples = _bounded_role_probe_sample_count(
+        role_probe_samples_per_role
+    )
     if isinstance(client, HTTPProviderClient) and require_streaming and not client.require_streaming:
         # Do not let a compatibility client silently downgrade the admission
         # probe. Custom test doubles remain injectable, but their evidence is
@@ -2179,6 +2185,7 @@ def probe_provider_models(
                         samples_per_profile=bounded_samples,
                         require_streaming=bool(require_streaming),
                         role_probe_roles=bounded_role_probe_roles,
+                        role_probe_samples_per_role=bounded_role_probe_samples,
                         budget_deadline=profile_deadline,
                         deadline=min(
                             300.0,
@@ -2216,6 +2223,7 @@ def probe_provider_models(
                 samples_per_profile=bounded_samples,
                 require_streaming=bool(require_streaming),
                 role_probe_roles=bounded_role_probe_roles,
+                role_probe_samples_per_role=bounded_role_probe_samples,
                 budget_deadline=profile_deadline,
             )
 
@@ -2281,6 +2289,12 @@ def probe_provider_models(
             "schema": ROLE_PROBE_SCHEMA,
             "contract": ROLE_PROBE_CONTRACT,
             "requested_roles": list(bounded_role_probe_roles),
+            "samples_per_role": bounded_role_probe_samples,
+            "requires_all_samples_success": bool(bounded_role_probe_roles),
+            "requires_each_sample_latency_at_or_below_90_seconds": bool(
+                bounded_role_probe_roles
+            ),
+            "requires_each_sample_strict_streaming": bool(bounded_role_probe_roles),
             "expected_probe_count": role_probe_expected_count,
             "attempted_probe_count": len(role_probe_rows),
             "available_probe_count": sum(
@@ -2357,6 +2371,16 @@ def _bounded_probe_sample_count(value: Any) -> int:
     return max(1, min(5, count))
 
 
+def _bounded_role_probe_sample_count(value: Any) -> int:
+    """Bound role calibration without multiplying provider load indefinitely."""
+
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        count = 1
+    return max(1, min(ROLE_PROBE_MAX_SAMPLES_PER_ROLE, count))
+
+
 def _normalized_role_probe_roles(value: Sequence[str] | None) -> tuple[str, ...]:
     """Return the small fixed set of operational roles allowed by the caller."""
 
@@ -2390,6 +2414,16 @@ def _role_probe_packet(role: str) -> tuple[str, str, int]:
     """Build a deterministic, non-benchmark control packet for one role."""
 
     normalized = str(role or "").strip().casefold()
+    if normalized == "primary_solver":
+        return (
+            "You are an Axio Fusion primary solver capability probe. Solve the small "
+            "synthetic task directly and concisely. Do not call tools, claim external "
+            "sources, or expose hidden chain-of-thought. Return a useful answer with "
+            "one brief assumption when needed.",
+            "Synthetic task: A service has a 2-second deadline and a healthy fallback. "
+            "State the safest bounded retry policy in one or two sentences.",
+            ROLE_PROBE_NARROW_MAX_OUTPUT_TOKENS,
+        )
     if normalized == "critic":
         return (
             "You are an Axio Fusion critic capability probe. Inspect the synthetic "
@@ -2501,7 +2535,7 @@ def _role_probe_json_object(value: str) -> Mapping[str, Any] | None:
 def _role_probe_output_is_valid(role: str, output: str) -> bool:
     if not str(output or "").strip():
         return False
-    if role == "critic" or role == "synthesizer":
+    if role in {"primary_solver", "critic", "synthesizer"}:
         return True
     parsed = _role_probe_json_object(output)
     if not parsed:
@@ -2753,32 +2787,222 @@ def _probe_one_model_role(
         }
 
 
+def _role_probe_sample_is_eligible(row: Mapping[str, Any]) -> bool:
+    """Check one role sample before reducing it to a profile-level receipt."""
+
+    if str(row.get("status") or "").strip().casefold() != "available":
+        return False
+    if not is_sha256_digest(row.get("output_sha256")):
+        return False
+    if row.get("role_output_contract_valid") is not True:
+        return False
+    if row.get("role_streaming_contract_valid") is not True:
+        return False
+    try:
+        latency_ms = float(row.get("latency_ms") or 0.0)
+    except (TypeError, ValueError):
+        return False
+    return (
+        0.0 <= latency_ms <= PROVIDER_MAX_RESPONSE_LATENCY_MS
+        and _role_probe_streaming_is_valid(row)
+    )
+
+
+def _aggregate_role_probe_samples(
+    profile: ModelProfile,
+    role: str,
+    samples: Sequence[Mapping[str, Any]],
+    *,
+    requested_sample_count: int,
+) -> dict[str, Any]:
+    """Reduce repeated role probes while retaining quantile-only evidence."""
+
+    rows = [dict(row) for row in samples if isinstance(row, Mapping)]
+    requested = _bounded_role_probe_sample_count(requested_sample_count)
+    if not rows:
+        return _role_probe_budget_exhausted_row(profile, role)
+
+    latencies = [
+        float(row.get("latency_ms") or 0.0)
+        for row in rows
+        if _finite_nonnegative_number(row.get("latency_ms"))
+    ]
+    eligible = [row for row in rows if _role_probe_sample_is_eligible(row)]
+    all_eligible = len(rows) == requested and len(eligible) == requested
+    max_latency = round(max(latencies), 3) if latencies else 0.0
+    p50_latency = _probe_latency_percentile(latencies, 0.50)
+    p95_latency = _probe_latency_percentile(latencies, 0.95)
+    sample_receipts = [
+        {
+            "sample_index": index,
+            "status": str(row.get("status") or "unknown")[:80],
+            "latency_ms": round(float(row.get("latency_ms") or 0.0), 3),
+            "output_sha256": str(row.get("output_sha256") or ""),
+            "role_output_contract_valid": row.get("role_output_contract_valid") is True,
+            "role_streaming_contract_valid": row.get("role_streaming_contract_valid") is True,
+            "stream_requested": row.get("stream_requested") is True,
+            "stream_observed": row.get("stream_observed") is True,
+            "stream_fallback_used": row.get("stream_fallback_used") is True,
+            "stream_protocol": str(row.get("stream_protocol") or "")[:32],
+            "stream_frame_count": max(0, _safe_int(row.get("stream_frame_count"), default=0)),
+            "strict_streaming_requested": row.get("strict_streaming_requested") is True,
+            "error_code": str(row.get("error_code") or "")[:120],
+        }
+        for index, row in enumerate(rows, start=1)
+    ]
+    first = dict(rows[0])
+    first.update(
+        {
+            "status": (
+                "available"
+                if all_eligible
+                else "latency_ineligible"
+                if max_latency > PROVIDER_MAX_RESPONSE_LATENCY_MS
+                else "stability_ineligible"
+            ),
+            "latency_ms": max_latency,
+            "p50_latency_ms": p50_latency,
+            "p95_latency_ms": p95_latency,
+            "role_probe_sample_count": requested,
+            "role_probe_completed_sample_count": len(rows),
+            "role_probe_success_count": len(eligible),
+            "role_probe_failure_count": max(0, requested - len(eligible)),
+            "role_probe_all_samples_eligible": all_eligible,
+            "role_probe_sample_receipts_sha256": sha256_text(
+                stable_json(sample_receipts)
+            ),
+            "role_output_contract_valid": bool(rows)
+            and all(row.get("role_output_contract_valid") is True for row in rows),
+            "role_streaming_contract_valid": bool(rows)
+            and all(row.get("role_streaming_contract_valid") is True for row in rows),
+            "output_sha256": (
+                sha256_text(stable_json([row.get("output_sha256") for row in eligible]))
+                if all_eligible
+                else ""
+            ),
+            "stream_requested": bool(rows)
+            and all(row.get("stream_requested") is True for row in rows),
+            "stream_observed": bool(rows)
+            and all(row.get("stream_observed") is True for row in rows),
+            "stream_fallback_used": any(
+                row.get("stream_fallback_used") is True for row in rows
+            ),
+            "stream_protocol": (
+                str(rows[0].get("stream_protocol") or "")[:32]
+                if len(
+                    {
+                        str(row.get("stream_protocol") or "")
+                        for row in rows
+                    }
+                )
+                == 1
+                else ""
+            ),
+            "stream_frame_count": min(
+                max(0, _safe_int(row.get("stream_frame_count"), default=0))
+                for row in rows
+            ),
+            "strict_streaming_requested": bool(rows)
+            and all(row.get("strict_streaming_requested") is True for row in rows),
+            "provider_request_count": sum(
+                max(0, _safe_int(row.get("provider_request_count"), default=0))
+                for row in rows
+            ),
+            "provider_request_success_count": sum(
+                max(0, _safe_int(row.get("provider_request_success_count"), default=0))
+                for row in rows
+            ),
+            "provider_request_failure_count": sum(
+                max(0, _safe_int(row.get("provider_request_failure_count"), default=0))
+                for row in rows
+            ),
+            "key_attempt_count": sum(
+                max(0, _safe_int(row.get("key_attempt_count"), default=0))
+                for row in rows
+            ),
+            "transport_attempt_count": sum(
+                max(0, _safe_int(row.get("transport_attempt_count"), default=0))
+                for row in rows
+            ),
+            "retry_attempt_count": sum(
+                max(0, _safe_int(row.get("retry_attempt_count"), default=0))
+                for row in rows
+            ),
+            "http_status": None if all_eligible else first.get("http_status"),
+            "error_type": "" if all_eligible else str(
+                next(
+                    (
+                        row.get("error_type")
+                        for row in rows
+                        if str(row.get("error_type") or "")
+                    ),
+                    "RoleProbeStabilityError",
+                )
+            )[:120],
+            "error_code": "" if all_eligible else str(
+                next(
+                    (
+                        row.get("error_code")
+                        for row in rows
+                        if str(row.get("error_code") or "")
+                    ),
+                    "provider_role_probe_stability_incomplete",
+                )
+            )[:120],
+        }
+    )
+    first["latency_eligibility"] = latency_eligibility(
+        observed_latency_ms=max_latency,
+        p50_latency_ms=p50_latency,
+        p95_latency_ms=p95_latency,
+    )
+    return first
+
+
 def _probe_profile_roles(
     profile: ModelProfile,
     *,
     roles: Sequence[str],
     timeout: float,
     client: HTTPProviderClient,
+    samples_per_role: int = 1,
     budget_deadline: float | None = None,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     targets = _role_probe_targets(profile, roles)
-    for index, role in enumerate(targets):
-        effective_timeout = _probe_timeout_for_deadline(timeout, budget_deadline)
-        if effective_timeout is None:
-            rows.extend(
-                _role_probe_budget_exhausted_row(profile, pending_role)
-                for pending_role in targets[index:]
+    bounded_samples = _bounded_role_probe_sample_count(samples_per_role)
+    for role_index, role in enumerate(targets):
+        role_samples: list[dict[str, Any]] = []
+        for _sample_index in range(bounded_samples):
+            effective_timeout = _probe_timeout_for_deadline(timeout, budget_deadline)
+            if effective_timeout is None:
+                role_samples.append(_role_probe_budget_exhausted_row(profile, role))
+                break
+            role_samples.append(
+                _probe_one_model_role(
+                    profile,
+                    role,
+                    timeout=effective_timeout,
+                    client=client,
+                )
             )
-            break
         rows.append(
-            _probe_one_model_role(
+            _aggregate_role_probe_samples(
                 profile,
                 role,
-                timeout=effective_timeout,
-                client=client,
+                role_samples,
+                requested_sample_count=bounded_samples,
             )
         )
+        if (
+            budget_deadline is not None
+            and _probe_timeout_for_deadline(timeout, budget_deadline) is None
+        ):
+            rows.extend(
+                _role_probe_budget_exhausted_row(profile, pending_role)
+                for pending_role in targets[role_index + 1 :]
+            )
+            break
     return rows
 
 
@@ -2790,6 +3014,7 @@ def _probe_profile_samples(
     samples_per_profile: int,
     require_streaming: bool,
     role_probe_roles: Sequence[str] = (),
+    role_probe_samples_per_role: int = 1,
     budget_deadline: float | None = None,
 ) -> dict[str, Any]:
     samples: list[dict[str, Any]] = []
@@ -2833,6 +3058,7 @@ def _probe_profile_samples(
             roles=role_probe_roles,
             timeout=timeout,
             client=client,
+            samples_per_role=role_probe_samples_per_role,
             budget_deadline=budget_deadline,
         )
     else:
@@ -7443,6 +7669,27 @@ def _redact_role_probe_row(row: Mapping[str, Any]) -> dict[str, Any]:
         "role": str(row.get("role") or "")[:80],
         "status": str(row.get("status") or "")[:80],
         "latency_ms": _safe_float(row.get("latency_ms")),
+        "p50_latency_ms": _safe_float(row.get("p50_latency_ms")),
+        "p95_latency_ms": _safe_float(row.get("p95_latency_ms")),
+        "role_probe_sample_count": _safe_int(
+            row.get("role_probe_sample_count"), default=0
+        ),
+        "role_probe_completed_sample_count": _safe_int(
+            row.get("role_probe_completed_sample_count"), default=0
+        ),
+        "role_probe_success_count": _safe_int(
+            row.get("role_probe_success_count"), default=0
+        ),
+        "role_probe_failure_count": _safe_int(
+            row.get("role_probe_failure_count"), default=0
+        ),
+        "role_probe_all_samples_eligible": row.get(
+            "role_probe_all_samples_eligible"
+        )
+        is True,
+        "role_probe_sample_receipts_sha256": str(
+            row.get("role_probe_sample_receipts_sha256") or ""
+        ),
         "output_sha256": str(row.get("output_sha256") or ""),
         "role_output_contract_valid": row.get("role_output_contract_valid") is True,
         "role_streaming_contract_valid": row.get("role_streaming_contract_valid") is True,

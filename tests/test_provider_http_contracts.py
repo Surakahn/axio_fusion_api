@@ -1059,6 +1059,113 @@ def test_operational_judge_role_probe_rejects_non_json_even_with_sse():
     assert row["role_streaming_contract_valid"] is True
 
 
+def _role_probe_sample_fixture(profile, role, *, latency_ms, eligible=True):
+    return {
+        "schema": provider_module.ROLE_PROBE_SCHEMA,
+        "contract": provider_module.ROLE_PROBE_CONTRACT,
+        "profile_id": profile.profile_id,
+        "provider": profile.provider,
+        "model": profile.model,
+        "api_format": profile.api_format,
+        "role": role,
+        "status": "available" if eligible else "incompatible",
+        "latency_ms": latency_ms,
+        "output_sha256": provider_module.sha256_text(
+            f"{profile.profile_id}:{role}:{latency_ms}"
+        )
+        if eligible
+        else "",
+        "role_output_contract_valid": eligible,
+        "role_streaming_contract_valid": eligible,
+        "stream_requested": eligible,
+        "stream_observed": eligible,
+        "stream_fallback_used": False,
+        "stream_protocol": "sse" if eligible else "",
+        "stream_frame_count": 2 if eligible else 0,
+        "strict_streaming_requested": True,
+        "error_type": "" if eligible else "RoleProbeContractError",
+        "error_code": "" if eligible else "role_probe_output_contract_invalid",
+    }
+
+
+def test_repeated_role_probe_aggregates_quantiles_and_requires_every_sample():
+    profile = normalize_profile(
+        {
+            "provider": "role-calibration-fixture",
+            "model": "role-calibration-model",
+            "api_format": "chat",
+        }
+    )
+    samples = [
+        _role_probe_sample_fixture(profile, "primary_solver", latency_ms=value)
+        for value in (100, 200, 500)
+    ]
+
+    aggregate = provider_module._aggregate_role_probe_samples(
+        profile,
+        "primary_solver",
+        samples,
+        requested_sample_count=3,
+    )
+
+    assert aggregate["status"] == "available"
+    assert aggregate["role_probe_sample_count"] == 3
+    assert aggregate["role_probe_completed_sample_count"] == 3
+    assert aggregate["role_probe_success_count"] == 3
+    assert aggregate["role_probe_failure_count"] == 0
+    assert aggregate["role_probe_all_samples_eligible"] is True
+    assert aggregate["p50_latency_ms"] == 200.0
+    assert aggregate["p95_latency_ms"] == 470.0
+    assert aggregate["role_probe_sample_receipts_sha256"]
+    assert "primary_solver" == aggregate["role"]
+
+    failed = provider_module._aggregate_role_probe_samples(
+        profile,
+        "primary_solver",
+        [
+            samples[0],
+            _role_probe_sample_fixture(
+                profile,
+                "primary_solver",
+                latency_ms=250,
+                eligible=False,
+            ),
+            samples[2],
+        ],
+        requested_sample_count=3,
+    )
+    assert failed["status"] == "stability_ineligible"
+    assert failed["role_probe_all_samples_eligible"] is False
+    assert failed["role_probe_success_count"] == 2
+
+
+def test_role_probe_aggregation_rejects_stream_fallback_even_when_output_is_valid():
+    profile = normalize_profile(
+        {
+            "provider": "role-stream-fixture",
+            "model": "role-stream-model",
+            "api_format": "chat",
+        }
+    )
+    sample = _role_probe_sample_fixture(
+        profile,
+        "primary_solver",
+        latency_ms=120,
+    )
+    sample["stream_fallback_used"] = True
+
+    aggregate = provider_module._aggregate_role_probe_samples(
+        profile,
+        "primary_solver",
+        [sample],
+        requested_sample_count=1,
+    )
+
+    assert aggregate["status"] == "stability_ineligible"
+    assert aggregate["role_probe_all_samples_eligible"] is False
+    assert aggregate["role_probe_failure_count"] == 1
+
+
 @pytest.mark.parametrize(
     ("role", "output"),
     [
@@ -1089,6 +1196,7 @@ def test_narrow_role_probe_requires_its_fixed_json_shape(role, output):
 
 def test_role_probe_covers_high_impact_and_narrow_roles():
     assert provider_module.ROLE_PROBE_ROLES == (
+        "primary_solver",
         "critic",
         "judge",
         "synthesizer",

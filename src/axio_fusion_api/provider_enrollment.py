@@ -91,6 +91,7 @@ def enroll_runtime_channels(
     prefusion_research_batch_size: int | None = None,
     prefusion_research_max_workers: int | None = None,
     prefusion_stream_probe_samples: int | None = None,
+    prefusion_role_probe_samples_per_role: int | None = None,
     prefusion_total_budget_seconds: float | None = None,
 ) -> dict[str, Any]:
     """Discover and enroll arbitrary direct-credential channels in memory.
@@ -186,6 +187,15 @@ def enroll_runtime_channels(
             "probe_samples",
         )
     ) or 3
+    configured_role_probe_samples = _optional_positive_int(
+        prefusion_role_probe_samples_per_role
+        if prefusion_role_probe_samples_per_role is not None
+        else _prefusion_value(
+            prefusion_config,
+            "role_probe_samples_per_role",
+            "role_probe_samples",
+        )
+    ) or 2
     configured_total_budget_seconds = (
         prefusion_total_budget_seconds
         if prefusion_total_budget_seconds is not None
@@ -267,6 +277,7 @@ def enroll_runtime_channels(
             research_batch_size=configured_research_batch_size,
             research_max_workers=configured_research_max_workers,
             stream_probe_samples=configured_stream_probe_samples,
+            role_probe_samples_per_role=configured_role_probe_samples,
             total_budget_seconds=configured_total_budget_seconds,
             provider_client=active_client,
             research_client=active_client,

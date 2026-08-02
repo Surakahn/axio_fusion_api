@@ -1066,6 +1066,16 @@ def _role_probe_row(
         "role": role,
         "status": status,
         "latency_ms": 120,
+        "p50_latency_ms": 120,
+        "p95_latency_ms": 120,
+        "role_probe_sample_count": 1,
+        "role_probe_completed_sample_count": 1,
+        "role_probe_success_count": 1 if status == "available" else 0,
+        "role_probe_failure_count": 0 if status == "available" else 1,
+        "role_probe_all_samples_eligible": status == "available",
+        "role_probe_sample_receipts_sha256": sha256_text(
+            f"role-sample:{profile.profile_id}:{role}:{status}"
+        ),
         "output_sha256": output_sha256 or sha256_text(f"role:{profile.profile_id}:{role}"),
         "role_output_contract_valid": status == "available",
         "role_streaming_contract_valid": status == "available",
@@ -1153,6 +1163,7 @@ def test_operational_narrow_role_probe_removes_only_failed_narrow_role():
         "status": "ready",
         "requested_roles": requested_roles,
         "probes": [
+            _role_probe_row(profile, "primary_solver"),
             _role_probe_row(profile, "structured_extraction"),
             _role_probe_row(profile, "simple_classification", status="failed"),
             _role_probe_row(profile, "short_verification"),
@@ -1174,6 +1185,7 @@ def test_operational_narrow_role_probe_removes_only_failed_narrow_role():
     }.issubset(set(updated.screening_allowed_roles))
     receipt = updated.screening_role_admission["operational_role_probe"]
     assert receipt["passed_roles"] == [
+        "primary_solver",
         "short_verification",
         "single_tool_argument_validation",
         "structured_extraction",

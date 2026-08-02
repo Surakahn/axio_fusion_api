@@ -1369,6 +1369,150 @@ def test_standalone_role_latency_estimator_respects_channel_single_flight():
     assert latency_ms == 1000.0
 
 
+def test_standalone_role_latency_estimator_uses_calibrated_role_quantiles():
+    def calibrated_profile(index, role, p50, p95):
+        return normalize_profile(
+            {
+                "provider": f"calibrated-provider-{index}",
+                "model": f"calibrated-model-{index}",
+                "p50_latency_ms": 1_000,
+                "p95_latency_ms": 2_000,
+                "screening_role_admission": {
+                    "operational_role_probe": {
+                        "role_latency": {
+                            role: {
+                                "p50_latency_ms": p50,
+                                "p95_latency_ms": p95,
+                                "all_samples_eligible": True,
+                            }
+                        }
+                    }
+                },
+            }
+        )
+
+    profiles = [
+        calibrated_profile(index, role, p50, p95)
+        for index, (role, p50, p95) in enumerate(
+            (
+                ("primary_solver", 100, 110),
+                ("independent_solver", 200, 220),
+                ("critic", 300, 330),
+                ("domain_specialist", 400, 440),
+            )
+        )
+    ]
+    roles = [
+        {"role": role, "model": profiles[index].safe_dict()}
+        for index, role in enumerate(
+            ("primary_solver", "independent_solver", "critic", "domain_specialist")
+        )
+    ]
+    roles.extend(
+        [
+            {"role": "judge", "model": profiles[2].safe_dict()},
+            {"role": "synthesizer", "model": profiles[0].safe_dict()},
+        ]
+    )
+    profiles[2] = normalize_profile(
+        {
+            **profiles[2].safe_dict(),
+            "screening_role_admission": {
+                "operational_role_probe": {
+                    "role_latency": {
+                        "critic": {
+                            "p50_latency_ms": 300,
+                            "p95_latency_ms": 330,
+                            "all_samples_eligible": True,
+                        },
+                        "judge": {
+                            "p50_latency_ms": 500,
+                            "p95_latency_ms": 700,
+                            "all_samples_eligible": True,
+                        },
+                    }
+                }
+            },
+        }
+    )
+    profiles[0] = normalize_profile(
+        {
+            **profiles[0].safe_dict(),
+            "screening_role_admission": {
+                "operational_role_probe": {
+                    "role_latency": {
+                        "primary_solver": {
+                            "p50_latency_ms": 100,
+                            "p95_latency_ms": 110,
+                            "all_samples_eligible": True,
+                        },
+                        "synthesizer": {
+                            "p50_latency_ms": 600,
+                            "p95_latency_ms": 800,
+                            "all_samples_eligible": True,
+                        },
+                    }
+                }
+            },
+        }
+    )
+    roles[-2]["model"] = profiles[2].safe_dict()
+    roles[-1]["model"] = profiles[0].safe_dict()
+
+    p50_latency, p50_known, p50_receipt = router_module._estimated_fusion_execution_latency_ms(
+        profiles,
+        roles,
+        max_parallel=2,
+    )
+    p95_latency, p95_known, p95_receipt = router_module._estimated_fusion_execution_latency_p95_ms(
+        profiles,
+        roles,
+        max_parallel=2,
+    )
+
+    assert p50_known is True
+    assert p50_receipt["expert_phase_latency_ms"] == 600.0
+    assert p50_receipt["judge_latency_ms"] == 500.0
+    assert p50_receipt["synthesis_latency_ms"] == 600.0
+    assert p50_latency == 1700.0
+    assert p95_known is True
+    assert p95_receipt["expert_phase_latency_ms"] == 660.0
+    assert p95_receipt["judge_latency_ms"] == 700.0
+    assert p95_receipt["synthesis_latency_ms"] == 800.0
+    assert p95_latency == 2160.0
+
+
+def test_standalone_role_latency_estimator_keeps_missing_role_p95_unknown():
+    profile = normalize_profile(
+        {
+            "provider": "role-p95-provider",
+            "model": "role-p95-model",
+            "p50_latency_ms": 100,
+            "screening_role_admission": {
+                "operational_role_probe": {
+                    "role_latency": {
+                        "primary_solver": {
+                            "p50_latency_ms": 120,
+                            "p95_latency_ms": None,
+                            "all_samples_eligible": True,
+                        }
+                    }
+                }
+            },
+        }
+    )
+    roles = [{"role": "primary_solver", "model": profile.safe_dict()}]
+
+    latency, known, _receipt = router_module._estimated_fusion_execution_latency_p95_ms(
+        [profile],
+        roles,
+        max_parallel=1,
+    )
+
+    assert latency == 1500.0
+    assert known is False
+
+
 def test_standalone_fusion_utility_uses_only_assigned_initial_roles_for_cost_and_quality():
     profiles = [
         normalize_profile(

@@ -142,6 +142,7 @@ _SCREENING_FUSION_ROLES = (
     *_SMALL_MODEL_ROLES,
 )
 _PREFUSION_OPERATIONAL_ROLE_PROBE_ROLES = (
+    "primary_solver",
     "critic",
     "judge",
     "synthesizer",
@@ -232,6 +233,8 @@ _MAX_RESEARCH_RETRIES_PER_BATCH = 1
 _MAX_RESEARCH_TRANSPORT_RETRIES_PER_BATCH = 2
 _DEFAULT_PREFUSION_STABILITY_PROBE_SAMPLES = 3
 _MAX_PREFUSION_STABILITY_PROBE_SAMPLES = 5
+_DEFAULT_PREFUSION_ROLE_PROBE_SAMPLES = 2
+_MAX_PREFUSION_ROLE_PROBE_SAMPLES = 3
 _RESEARCH_RETRYABLE_ERROR_PREFIXES = (
     "prefusion_research_output_",
     "prefusion_capability_axis_coverage_",
@@ -437,6 +440,7 @@ def run_prefusion_model_screening(
     research_batch_size: int | None = None,
     research_max_workers: int | None = None,
     stream_probe_samples: int = _DEFAULT_PREFUSION_STABILITY_PROBE_SAMPLES,
+    role_probe_samples_per_role: int = _DEFAULT_PREFUSION_ROLE_PROBE_SAMPLES,
     provider_client: HTTPProviderClient | Any | None = None,
     research_client: HTTPProviderClient | Any | None = None,
     redact_provider_identifiers: bool = False,
@@ -623,6 +627,9 @@ def run_prefusion_model_screening(
     )
     configured_stream_probe_samples = _bounded_prefusion_stability_probe_samples(
         stream_probe_samples
+    )
+    configured_role_probe_samples = _bounded_prefusion_role_probe_samples(
+        role_probe_samples_per_role
     )
     if live and configured_stream_probe_samples < 2:
         blockers.append("prefusion_stream_probe_multi_sample_required")
@@ -831,6 +838,7 @@ def run_prefusion_model_screening(
             max_workers=max(1, min(32, int(max_workers or 1))),
             samples_per_profile=configured_stream_probe_samples,
             role_probe_roles=_PREFUSION_OPERATIONAL_ROLE_PROBE_ROLES,
+            role_probe_samples_per_role=configured_role_probe_samples,
             isolate_live_requests=bool(isolate_live_network),
             deadline=budget_deadline,
         )
@@ -1080,6 +1088,10 @@ def run_prefusion_model_screening(
             "stream_probe_samples_per_profile": configured_stream_probe_samples,
             "stream_probe_requires_all_samples_success": True,
             "stream_probe_requires_each_sample_within_90_seconds": True,
+            "role_probe_samples_per_role": configured_role_probe_samples,
+            "role_probe_requires_all_samples_success": True,
+            "role_probe_requires_each_sample_within_90_seconds": True,
+            "role_probe_requires_each_sample_strict_streaming": True,
             "reasoning_probe_requires_complete_candidate_cohort": True,
             "reasoning_probe_requires_control_and_each_declared_effort_or_budget": True,
             "reasoning_probe_requires_endpoint_bound_strict_streaming": True,
@@ -1134,6 +1146,8 @@ def run_prefusion_model_screening(
                 "requires_latency_at_or_below_90_seconds": True,
                 "samples_per_profile": configured_stream_probe_samples,
                 "requires_all_samples_success": True,
+                "role_probe_samples_per_role": configured_role_probe_samples,
+                "role_probe_requires_all_samples_success": True,
             },
         },
         "reasoning_probe": reasoning_probe_payload,
@@ -3238,6 +3252,29 @@ def _apply_operational_metadata(
     return result
 
 
+def _project_role_probe_latency(value: Any) -> dict[str, dict[str, Any]]:
+    """Keep role-specific quantiles without retaining role prompt/output text."""
+
+    payload = value if isinstance(value, Mapping) else {}
+    projected: dict[str, dict[str, Any]] = {}
+    for raw_role, raw_row in payload.items():
+        role = " ".join(str(raw_role or "").strip().casefold().split())
+        if not role or not isinstance(raw_row, Mapping):
+            continue
+        projected[role] = {
+            "p50_latency_ms": _bounded_optional_float(raw_row.get("p50_latency_ms")),
+            "p95_latency_ms": _bounded_optional_float(raw_row.get("p95_latency_ms")),
+            "sample_count": _safe_nonnegative_int(raw_row.get("sample_count")),
+            "completed_sample_count": _safe_nonnegative_int(
+                raw_row.get("completed_sample_count")
+            ),
+            "success_count": _safe_nonnegative_int(raw_row.get("success_count")),
+            "all_samples_eligible": raw_row.get("all_samples_eligible") is True,
+            "quantiles_measured": raw_row.get("quantiles_measured") is True,
+        }
+    return dict(sorted(projected.items()))
+
+
 def _project_operational_role_probe(value: Any) -> dict[str, Any]:
     """Project role-probe evidence into a bounded profile-local receipt."""
 
@@ -3264,6 +3301,17 @@ def _project_operational_role_probe(value: Any) -> dict[str, Any]:
         ),
         "failed_probe_count": max(0, int(payload.get("failed_probe_count") or 0)),
         "probe_receipt_sha256": str(payload.get("probe_receipt_sha256") or ""),
+        "samples_per_role": _safe_nonnegative_int(payload.get("samples_per_role")),
+        "requires_all_samples_success": payload.get("requires_all_samples_success") is True,
+        "requires_each_sample_latency_at_or_below_90_seconds": payload.get(
+            "requires_each_sample_latency_at_or_below_90_seconds"
+        )
+        is True,
+        "requires_each_sample_strict_streaming": payload.get(
+            "requires_each_sample_strict_streaming"
+        )
+        is True,
+        "role_latency": _project_role_probe_latency(payload.get("role_latency")),
         "streaming_required": payload.get("streaming_required") is True,
         "streaming_contract_verified": payload.get(
             "streaming_contract_verified"
@@ -3307,6 +3355,29 @@ def _operational_role_probe_row_is_available(row: Mapping[str, Any]) -> bool:
         return False
     if frame_count < 1 or latency_ms > PROVIDER_MAX_RESPONSE_LATENCY_MS:
         return False
+    try:
+        role_sample_count = int(row.get("role_probe_sample_count") or 0)
+        role_completed_count = int(
+            row.get("role_probe_completed_sample_count") or 0
+        )
+        role_success_count = int(row.get("role_probe_success_count") or 0)
+    except (TypeError, ValueError):
+        return False
+    if role_sample_count > 0 and (
+        role_completed_count != role_sample_count
+        or role_success_count != role_sample_count
+        or row.get("role_probe_all_samples_eligible") is not True
+    ):
+        return False
+    for quantile_key in ("p50_latency_ms", "p95_latency_ms"):
+        if quantile_key not in row:
+            continue
+        try:
+            quantile_value = float(row.get(quantile_key))
+        except (TypeError, ValueError):
+            return False
+        if not 0.0 <= quantile_value <= PROVIDER_MAX_RESPONSE_LATENCY_MS:
+            return False
     latency_receipt = row.get("latency_eligibility")
     if isinstance(latency_receipt, Mapping) and latency_receipt.get(
         "eligible"
@@ -3322,6 +3393,27 @@ def _role_probe_result_projection(row: Mapping[str, Any]) -> dict[str, Any]:
         "role": " ".join(str(row.get("role") or "").strip().casefold().split()),
         "status": str(row.get("status") or "")[:80],
         "latency_ms": row.get("latency_ms"),
+        "p50_latency_ms": row.get("p50_latency_ms"),
+        "p95_latency_ms": row.get("p95_latency_ms"),
+        "role_probe_sample_count": _safe_nonnegative_int(
+            row.get("role_probe_sample_count")
+        ),
+        "role_probe_completed_sample_count": _safe_nonnegative_int(
+            row.get("role_probe_completed_sample_count")
+        ),
+        "role_probe_success_count": _safe_nonnegative_int(
+            row.get("role_probe_success_count")
+        ),
+        "role_probe_failure_count": _safe_nonnegative_int(
+            row.get("role_probe_failure_count")
+        ),
+        "role_probe_all_samples_eligible": row.get(
+            "role_probe_all_samples_eligible"
+        )
+        is True,
+        "role_probe_sample_receipts_sha256": str(
+            row.get("role_probe_sample_receipts_sha256") or ""
+        ),
         "output_sha256": str(row.get("output_sha256") or ""),
         "role_output_contract_valid": row.get("role_output_contract_valid") is True,
         "role_streaming_contract_valid": row.get(
@@ -3418,6 +3510,16 @@ def _build_role_probe_registry_binding(
         "schema": "axio_fusion_api.provider_role_probe.binding.v1",
         "contract": str(payload.get("contract") or "")[:120],
         "requested_roles": requested_roles,
+        "samples_per_role": _safe_nonnegative_int(payload.get("samples_per_role")),
+        "requires_all_samples_success": payload.get("requires_all_samples_success") is True,
+        "requires_each_sample_latency_at_or_below_90_seconds": payload.get(
+            "requires_each_sample_latency_at_or_below_90_seconds"
+        )
+        is True,
+        "requires_each_sample_strict_streaming": payload.get(
+            "requires_each_sample_strict_streaming"
+        )
+        is True,
         "streaming_required": True,
         "latency_ceiling_ms": PROVIDER_MAX_RESPONSE_LATENCY_MS,
         "status": str(payload.get("status") or "")[:64],
@@ -3503,6 +3605,24 @@ def _apply_operational_role_probe_metadata(
         missing = targets.difference(tested)
         if contract_attempted:
             failed.update(missing)
+        role_latency = {
+            str(row.get("role") or ""): {
+                "p50_latency_ms": row.get("p50_latency_ms"),
+                "p95_latency_ms": row.get("p95_latency_ms"),
+                "sample_count": row.get("role_probe_sample_count"),
+                "completed_sample_count": row.get(
+                    "role_probe_completed_sample_count"
+                ),
+                "success_count": row.get("role_probe_success_count"),
+                "all_samples_eligible": row.get(
+                    "role_probe_all_samples_eligible"
+                )
+                is True,
+                "quantiles_measured": row.get("p95_latency_ms") is not None,
+            }
+            for row in own_rows
+            if str(row.get("role") or "")
+        }
         if not targets and not own_rows:
             # A role probe is a contract over the complete admitted profile
             # set. Profiles with no high-impact role target do not need a
@@ -3528,6 +3648,7 @@ def _apply_operational_role_probe_metadata(
                         ),
                         "streaming_required": True,
                         "streaming_contract_verified": True,
+                        "role_latency": {},
                     }
                 )
                 result.append(
@@ -3543,35 +3664,7 @@ def _apply_operational_role_probe_metadata(
         base_denied = set(_normalize_roles(profile.screening_disallowed_roles))
         effective_allowed = base_allowed.difference(failed)
         effective_denied = base_denied.union(failed)
-        safe_rows = [
-            {
-                "role": str(row.get("role") or "")[:80],
-                "status": str(row.get("status") or "")[:80],
-                "latency_ms": row.get("latency_ms"),
-                "output_sha256": str(row.get("output_sha256") or ""),
-                "role_output_contract_valid": row.get(
-                    "role_output_contract_valid"
-                )
-                is True,
-                "role_streaming_contract_valid": row.get(
-                    "role_streaming_contract_valid"
-                )
-                is True,
-                "stream_requested": row.get("stream_requested") is True,
-                "stream_observed": row.get("stream_observed") is True,
-                "stream_fallback_used": row.get("stream_fallback_used") is True,
-                "stream_protocol": str(row.get("stream_protocol") or "")[:32],
-                "stream_frame_count": max(
-                    0, int(row.get("stream_frame_count") or 0)
-                ),
-                "strict_streaming_requested": row.get(
-                    "strict_streaming_requested"
-                )
-                is True,
-                "error_code": str(row.get("error_code") or "")[:120],
-            }
-            for row in own_rows
-        ]
+        safe_rows = [_role_probe_result_projection(row) for row in own_rows]
         safe_rows.sort(key=lambda row: (str(row.get("role") or ""), str(row.get("status") or "")))
         projected_probe = _project_operational_role_probe(
             {
@@ -3593,6 +3686,7 @@ def _apply_operational_role_probe_metadata(
                         for row in own_rows
                     )
                 ),
+                "role_latency": role_latency,
             }
         )
         admission = dict(profile.screening_role_admission)
@@ -7812,6 +7906,22 @@ def _bounded_prefusion_stability_probe_samples(value: Any) -> int:
     if parsed < 1:
         raise ModelScreeningError("prefusion_stream_probe_sample_count_invalid")
     return min(_MAX_PREFUSION_STABILITY_PROBE_SAMPLES, parsed)
+
+
+def _bounded_prefusion_role_probe_samples(value: Any) -> int:
+    """Validate the repeated sample count for role-specific calibration."""
+
+    if value in (None, ""):
+        return _DEFAULT_PREFUSION_ROLE_PROBE_SAMPLES
+    if isinstance(value, bool):
+        raise ModelScreeningError("prefusion_role_probe_sample_count_invalid")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise ModelScreeningError("prefusion_role_probe_sample_count_invalid")
+    if parsed < 1:
+        raise ModelScreeningError("prefusion_role_probe_sample_count_invalid")
+    return min(_MAX_PREFUSION_ROLE_PROBE_SAMPLES, parsed)
 
 
 def _successful_source_slots(source_pack: Mapping[str, Any]) -> list[str]:
