@@ -39,6 +39,19 @@ SCREENING_STAGE_CAPABILITY_FLOOR = 0.55
 SCREENING_SYNTHESIZER_DOMAIN_FLOOR = 0.45
 ROUTING_POLICY_MAX_RULE_RECEIPTS = 24
 
+# These roles are evidence-producing calls in the initial Fusion wave.  A
+# short verifier is deliberately separate from full solver roles: it can add
+# one bounded check, but it must never be promoted into a complete solver or a
+# control-stage model.
+_FULL_EVIDENCE_ROLE_NAMES = (
+    "primary_solver",
+    "independent_solver",
+    "critic",
+    "domain_specialist",
+)
+_NARROW_EVIDENCE_ROLE_NAMES = ("short_verification",)
+_FUSION_EXPERT_ROLE_NAMES = (*_FULL_EVIDENCE_ROLE_NAMES, *_NARROW_EVIDENCE_ROLE_NAMES)
+
 
 def analyze_request(request: FusionRequest) -> dict[str, Any]:
     text = " ".join([request.task_type, request.prompt, *request.requested_capabilities]).lower()
@@ -854,12 +867,7 @@ def _initial_fusion_call_plan(
     the budget before its mandatory stages.
     """
 
-    expert_role_names = {
-        "primary_solver",
-        "independent_solver",
-        "critic",
-        "domain_specialist",
-    }
+    expert_role_names = set(_FUSION_EXPERT_ROLE_NAMES)
     expert_roles = [
         row
         for row in full_roles
@@ -1356,7 +1364,27 @@ def _local_consensus_plan(
         isinstance(row, Mapping) and str(row.get("role") or "") == "critic"
         for row in role_blueprint
     )
-    minimum_count = 3 if request.public_model == "axio-pro" and has_critic_target else 2
+    has_short_verification_target = any(
+        isinstance(row, Mapping)
+        and str(row.get("role") or "") == "short_verification"
+        for row in role_blueprint
+    )
+    has_full_second_role = any(
+        _screening_role_allowed(profile, role)
+        for profile, _score in scored
+        for role in ("independent_solver", "domain_specialist")
+    )
+    # Pro's original local-consensus contract requires a third verification
+    # seat whenever the task blueprint calls for a Critic.  A narrow verifier
+    # is the only deliberate two-seat exception: it is explicitly screened as
+    # the second evidence branch and cannot be treated as a full Critic.
+    minimum_count = (
+        3
+        if request.public_model == "axio-pro"
+        and has_critic_target
+        and (has_full_second_role or not has_short_verification_target)
+        else 2
+    )
     default["minimum_candidate_count"] = minimum_count
     try:
         max_total_calls = max(1, int(budget.get("max_total_model_calls") or 1))
@@ -1395,7 +1423,7 @@ def _local_consensus_plan(
             continue
         if not any(
             _screening_role_allowed(profile, role)
-            for role in ("primary_solver", "independent_solver", "critic", "domain_specialist")
+            for role in _FUSION_EXPERT_ROLE_NAMES
         ):
             continue
         if profile.p50_latency_ms is None or float(profile.p50_latency_ms) <= 0:
@@ -1480,7 +1508,7 @@ def _local_consensus_plan(
                     for row in roles
                     if isinstance(row, Mapping)
                     and str(row.get("role") or "")
-                    in {"primary_solver", "independent_solver", "critic", "domain_specialist"}
+                    in set(_FUSION_EXPERT_ROLE_NAMES)
                 }
                 backup_profile = next(
                     (
@@ -1507,10 +1535,7 @@ def _local_consensus_plan(
                 if isinstance(row, Mapping)
                 and str(row.get("role") or "")
                 in {
-                    "primary_solver",
-                    "independent_solver",
-                    "critic",
-                    "domain_specialist",
+                    *_FUSION_EXPERT_ROLE_NAMES,
                     "backup_solver",
                 }
             ]
@@ -2070,8 +2095,27 @@ def _select_panel(
     role_targets = [
         row
         for row in role_blueprint
-        if str(row.get("role")) in {"primary_solver", "independent_solver", "critic", "domain_specialist"}
+        if str(row.get("role")) in {
+            "primary_solver",
+            "independent_solver",
+            "critic",
+            "domain_specialist",
+        }
     ]
+    full_second_role_available = any(
+        any(
+            _screening_role_allowed(profile, role)
+            for role in ("independent_solver", "domain_specialist")
+        )
+        for profile, _score in scored
+    )
+    if not full_second_role_available:
+        role_targets.extend(
+            row
+            for row in role_blueprint
+            if isinstance(row, Mapping)
+            and str(row.get("role") or "") == "short_verification"
+        )
     if not role_targets:
         role_targets = [{"role": "primary_solver"}]
     for target in role_targets:
@@ -2082,7 +2126,8 @@ def _select_panel(
             scored,
             selected=selected,
             analysis=analysis,
-            prefer_new_provider=str(target.get("role")) in {"independent_solver", "critic", "domain_specialist"},
+            prefer_new_provider=str(target.get("role"))
+            in {"independent_solver", "critic", "domain_specialist", "short_verification"},
         )
         if profile is not None:
             add(profile)
@@ -2211,7 +2256,7 @@ def _latency_constrained_fusion_panel(
         for row in role_blueprint
         if isinstance(row, Mapping)
         and str(row.get("role") or "")
-        in {"independent_solver", "critic", "domain_specialist"}
+        in {"independent_solver", "critic", "domain_specialist", "short_verification"}
     }
     distinct_role_candidate_exists = bool(
         max_models > len(selected)
@@ -2348,10 +2393,17 @@ def _latency_constrained_fusion_panel(
         and (
             _screening_role_allowed(profile, "independent_solver")
             or _screening_role_allowed(profile, "critic")
+            or _screening_role_allowed(profile, "domain_specialist")
+            or _screening_role_allowed(profile, "short_verification")
         )
         for profile in other_profiles
     )
-    if request.public_model == "axio-pro" and distinct_verification_candidate and any(
+    distinct_critic_candidate = any(
+        profile.canonical_identity != anchor.canonical_identity
+        and _screening_role_allowed(profile, "critic")
+        for profile in other_profiles
+    )
+    if request.public_model == "axio-pro" and distinct_critic_candidate and any(
         isinstance(row, Mapping) and str(row.get("role") or "") == "critic"
         for row in role_blueprint
     ):
@@ -2371,7 +2423,7 @@ def _latency_constrained_fusion_panel(
                 for row in roles
                 if isinstance(row, Mapping)
                 and str(row.get("role") or "")
-                in {"independent_solver", "critic", "domain_specialist"}
+                in {"independent_solver", "critic", "domain_specialist", "short_verification"}
             }
             if not assigned_evidence_roles:
                 continue
@@ -2679,41 +2731,88 @@ def _augment_pro_role_blueprint_for_screened_specialist(
     """
 
     blueprint = [dict(row) for row in role_blueprint]
-    if request.public_model != "axio-pro":
+    if request.public_model not in {"axio-terra", "axio-pro"}:
         return blueprint
     if int(budget.get("max_models") or 1) < 2:
         return blueprint
-    if any(
+    has_domain_target = any(
         isinstance(row, Mapping)
         and str(row.get("role") or "") == "domain_specialist"
         for row in blueprint
-    ):
-        return blueprint
-    if not any(
+    )
+    has_screened_domain_specialist = any(
         _screening_role_contract_present(profile)
         and _screening_role_allowed(profile, "domain_specialist")
         and not _screening_role_allowed(profile, "primary_solver")
         for profile, _ in scored
-    ):
-        return blueprint
-    blueprint.append(
-        _role_target(
-            role="domain_specialist",
-            objective="cover_the_strongest_domain_specific_subtask_or_tool_plan",
-            required_capabilities=_domain_specialist_axes(analysis),
-            scoring_weights={
-                "domain": 0.56,
-                "structured_output": 0.12,
-                "critique": 0.08,
-                "reliability": 0.10,
-                "latency": 0.05,
-                "cost": 0.05,
-                "provider_diversity": 0.04,
-            },
-            context_scope="domain_subtask_nodes_only",
-            stop_condition="specialist_findings_with_evidence_and_unresolved_questions",
-        )
     )
+    if request.public_model == "axio-pro" and not has_domain_target and has_screened_domain_specialist:
+        blueprint.append(
+            _role_target(
+                role="domain_specialist",
+                objective="cover_the_strongest_domain_specific_subtask_or_tool_plan",
+                required_capabilities=_domain_specialist_axes(analysis),
+                scoring_weights={
+                    "domain": 0.56,
+                    "structured_output": 0.12,
+                    "critique": 0.08,
+                    "reliability": 0.10,
+                    "latency": 0.05,
+                    "cost": 0.05,
+                    "provider_diversity": 0.04,
+                },
+                context_scope="domain_subtask_nodes_only",
+                stop_condition="specialist_findings_with_evidence_and_unresolved_questions",
+            )
+        )
+
+    has_qualified_full_second_role = any(
+        _screening_role_contract_present(profile)
+        and (
+            _screening_role_allowed(profile, "independent_solver")
+            or _screening_role_allowed(profile, "domain_specialist")
+        )
+        for profile, _ in scored
+    )
+    has_short_target = any(
+        isinstance(row, Mapping)
+        and str(row.get("role") or "") == "short_verification"
+        for row in blueprint
+    )
+    has_screened_short_verifier = any(
+        _screening_role_contract_present(profile)
+        and _screening_role_allowed(profile, "short_verification")
+        and not any(
+            _screening_role_allowed(profile, role)
+            for role in (
+                "primary_solver",
+                "independent_solver",
+                "critic",
+                "domain_specialist",
+                "judge",
+                "synthesizer",
+            )
+        )
+        for profile, _ in scored
+    )
+    if not has_qualified_full_second_role and has_screened_short_verifier and not has_short_target:
+        blueprint.append(
+            _role_target(
+                role="short_verification",
+                objective="verify_one_critical_claim_constraint_or_risk_without_solving_the_full_task",
+                required_capabilities=["critique", "structured_output"],
+                scoring_weights={
+                    "critique": 0.46,
+                    "structured_output": 0.28,
+                    "reliability": 0.14,
+                    "latency": 0.07,
+                    "cost": 0.05,
+                    "provider_diversity": 0.04,
+                },
+                context_scope="one_key_claim_or_constraint_only",
+                stop_condition="short_structured_verdict_with_issues_and_check",
+            )
+        )
     return blueprint
 
 
@@ -2831,7 +2930,7 @@ def _role_assignment(
     analysis: Mapping[str, Any],
 ) -> dict[str, Any]:
     target = _role_blueprint_target(role_blueprint, role)
-    return {
+    assignment = {
         "role": role,
         "assignment": assignment,
         "model": profile.safe_dict(),
@@ -2856,6 +2955,16 @@ def _role_assignment(
             "raw_model_names_persisted": False,
         },
     }
+    if role == "short_verification":
+        assignment.update(
+            {
+                "evidence_scope": "narrow_verification_only",
+                "counts_as_full_independent_solver": False,
+                "native_tools_allowed": False,
+                "full_task_solution_allowed": False,
+            }
+        )
+    return assignment
 
 
 def _role_fit_score(
@@ -3142,6 +3251,11 @@ def _provider_fusion_required_roles(
             # narrow subtask.  It is not relabeled as an independent solver;
             # the receipt preserves the role actually admitted by research.
             required.append("domain_specialist")
+        elif "short_verification" in assigned_role_names:
+            # A narrow verifier is the last-resort second evidence seat.  It
+            # remains explicitly narrow in the gate; it is never renamed to a
+            # solver role or allowed to clear a missing solver contract.
+            required.append("short_verification")
         else:
             # Keep the blocker explicit when the panel has no second role.
             required.append("independent_solver")
@@ -3178,6 +3292,8 @@ def _local_consensus_required_roles(
         required.append("independent_solver")
     elif "domain_specialist" in assigned_role_names:
         required.append("domain_specialist")
+    elif "short_verification" in assigned_role_names:
+        required.append("short_verification")
     else:
         required.append("independent_solver")
     if request.public_model == "axio-pro" and len(selected) >= 3 and any(
@@ -3977,7 +4093,7 @@ def _estimated_fusion_execution_cost_usd(
     if not pricing_known:
         return None, receipt
     input_tokens = _estimated_input_tokens_for_route(analysis)
-    expert_roles = {"primary_solver", "independent_solver", "critic", "domain_specialist"}
+    expert_roles = set(_FUSION_EXPERT_ROLE_NAMES)
     total = 0.0
     role_costs: list[float] = []
     for role in planned_roles:
@@ -4166,7 +4282,7 @@ def _planned_expert_profiles(
     selected: Sequence[ModelProfile],
 ) -> list[ModelProfile]:
     selected_by_id = {profile.profile_id: profile for profile in selected}
-    expert_roles = {"primary_solver", "independent_solver", "critic", "domain_specialist"}
+    expert_roles = set(_FUSION_EXPERT_ROLE_NAMES)
     profiles: list[ModelProfile] = []
     for role in roles:
         if not isinstance(role, Mapping) or str(role.get("role") or "") not in expert_roles:
@@ -4471,6 +4587,46 @@ def _role_assignments(
                     analysis,
                 )
             )
+    has_full_second_evidence_role = any(
+        isinstance(row, Mapping)
+        and str(row.get("role") or "") in {"independent_solver", "domain_specialist"}
+        for row in roles
+    )
+    has_short_verification_target = any(
+        isinstance(row, Mapping)
+        and str(row.get("role") or "") == "short_verification"
+        for row in role_blueprint
+    )
+    screened_short_capacity = any(
+        _screening_role_contract_present(profile)
+        and _screening_role_allowed(profile, "short_verification")
+        for profile in selected
+    )
+    if (
+        activated
+        and len(selected) >= 2
+        and has_short_verification_target
+        and screened_short_capacity
+        and not has_full_second_evidence_role
+    ):
+        short_verifier = _assigned_profile_for_role(
+            "short_verification",
+            selected,
+            analysis,
+            role_blueprint,
+            used_profile_ids=used,
+        )
+        if short_verifier is not None:
+            used.add(short_verifier.profile_id)
+            roles.append(
+                _role_assignment(
+                    "short_verification",
+                    "verify_one_critical_claim_constraint_or_risk",
+                    short_verifier,
+                    role_blueprint,
+                    analysis,
+                )
+            )
     if activated:
         # Expert branches are deliberately assigned first. Judge and
         # Synthesizer may then draw from the pre-Fusion stage pool, including
@@ -4501,7 +4657,7 @@ def _role_assignments(
             )
             for row in roles
             if isinstance(row, Mapping)
-            and str(row.get("role") or "") in {"primary_solver", "independent_solver", "critic", "domain_specialist"}
+            and str(row.get("role") or "") in {*_FULL_EVIDENCE_ROLE_NAMES, "short_verification"}
         }
         unassigned_stage_profiles = [
             profile
@@ -4709,7 +4865,7 @@ def _latency_optimize_expert_roles(
     tolerance and satisfies that role's capability floor.
     """
 
-    expert_role_names = {"primary_solver", "independent_solver", "critic", "domain_specialist"}
+    expert_role_names = set(_FULL_EVIDENCE_ROLE_NAMES)
     selected_by_id = {profile.profile_id: profile for profile in selected}
     expert_rows = [
         row

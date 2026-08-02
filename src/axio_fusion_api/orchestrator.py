@@ -129,9 +129,23 @@ _RUNTIME_EXPERT_ROLE_PRIORITY = {
     "primary_solver": 40,
     "independent_solver": 30,
     "critic": 20,
+    "short_verification": 15,
     "domain_specialist": 10,
     "backup_solver": 5,
 }
+_NARROW_EVIDENCE_ROLES = frozenset({"short_verification"})
+_RUNTIME_EVIDENCE_ROLES = frozenset(
+    {
+        "primary_solver",
+        "independent_solver",
+        "critic",
+        "domain_specialist",
+        "short_verification",
+        "backup_solver",
+        "fallback_solver",
+        "targeted_escalation",
+    }
+)
 
 
 class FusionExecutionError(RuntimeError):
@@ -2008,6 +2022,7 @@ class FusionEngine:
                 "independent_solver",
                 "critic",
                 "domain_specialist",
+                "short_verification",
                 "backup_solver",
             }
         ]
@@ -2160,13 +2175,25 @@ class FusionEngine:
             independent_completed_before=_independent_candidate_count(completed),
             independent_completed_after=_independent_candidate_count(completed),
         )
+        panel_repair["narrow_verification_completed_before"] = sum(
+            1
+            for candidate in completed
+            if candidate.role in _NARROW_EVIDENCE_ROLES
+        )
+        panel_repair["narrow_verification_completed_after"] = panel_repair[
+            "narrow_verification_completed_before"
+        ]
+        panel_repair["fusion_evidence_completed_before"] = _fusion_evidence_candidate_count(completed)
+        panel_repair["fusion_evidence_completed_after"] = panel_repair[
+            "fusion_evidence_completed_before"
+        ]
         missing_required_roles = _missing_required_candidate_roles(route_plan, completed)
         missing_hermes_reference_roles = _missing_hermes_reference_roles(
             route_plan,
             completed,
         )
         if local_consensus_mode and required_min_candidates > 1 and (
-            _independent_candidate_count(completed) < required_min_candidates
+            _fusion_evidence_candidate_count(completed) < required_min_candidates
             or missing_required_roles
         ):
             panel_repair["enabled"] = False
@@ -2175,7 +2202,7 @@ class FusionEngine:
                 "local_consensus_does_not_expand_panel_after_initial_wave"
             ]
         elif required_min_candidates > 1 and (
-            _independent_candidate_count(completed) < required_min_candidates
+            _fusion_evidence_candidate_count(completed) < required_min_candidates
             or missing_required_roles
             or missing_hermes_reference_roles
         ):
@@ -2813,6 +2840,7 @@ class FusionEngine:
                             "independent_solver",
                             "critic",
                             "domain_specialist",
+                            "short_verification",
                             "backup_solver",
                         }
                     ],
@@ -3905,6 +3933,7 @@ class FusionEngine:
         prompt_budget: _PromptBudgetLedger | None = None,
     ) -> dict[str, Any]:
         independent_completed = _independent_candidate_count(completed)
+        fusion_evidence_completed = _fusion_evidence_candidate_count(completed)
         receipt = _panel_repair_receipt(
             enabled=True,
             required_min_candidate_count=required_min_candidate_count,
@@ -3913,11 +3942,21 @@ class FusionEngine:
             independent_completed_before=independent_completed,
             independent_completed_after=independent_completed,
         )
+        receipt["narrow_verification_completed_before"] = sum(
+            1
+            for candidate in completed
+            if candidate.role in _NARROW_EVIDENCE_ROLES
+        )
+        receipt["narrow_verification_completed_after"] = receipt[
+            "narrow_verification_completed_before"
+        ]
+        receipt["fusion_evidence_completed_before"] = fusion_evidence_completed
+        receipt["fusion_evidence_completed_after"] = fusion_evidence_completed
         fallback_roles = self._fallback_roles(request, route_plan, candidates)
         if not fallback_roles:
             receipt["blocked_reasons"].append("no_unused_equivalent_profile")
             receipt["degraded_mode"] = (
-                _independent_candidate_count(completed) < required_min_candidate_count
+                fusion_evidence_completed < required_min_candidate_count
             )
             receipt["missing_hermes_reference_roles_after"] = _missing_hermes_reference_roles(
                 route_plan,
@@ -3935,7 +3974,7 @@ class FusionEngine:
             # context projected to the acting aggregator, but they cannot turn
             # a completed independent quorum into an unbounded repair loop.
             return bool(
-                _independent_candidate_count(completed) >= required_min_candidate_count
+                _fusion_evidence_candidate_count(completed) >= required_min_candidate_count
                 and not _missing_required_candidate_roles(route_plan, completed)
             )
 
@@ -4003,6 +4042,7 @@ class FusionEngine:
                 break
         receipt["completed_after"] = len(completed)
         receipt["independent_completed_after"] = _independent_candidate_count(completed)
+        receipt["fusion_evidence_completed_after"] = _fusion_evidence_candidate_count(completed)
         missing_after = _missing_required_candidate_roles(route_plan, completed)
         receipt["missing_required_roles_after"] = missing_after
         receipt["missing_hermes_reference_roles_after"] = _missing_hermes_reference_roles(
@@ -4010,11 +4050,11 @@ class FusionEngine:
             completed,
         )
         receipt["success"] = (
-            _independent_candidate_count(completed) >= required_min_candidate_count
+            _fusion_evidence_candidate_count(completed) >= required_min_candidate_count
             and not missing_after
         )
         receipt["degraded_mode"] = (
-            _independent_candidate_count(completed) < required_min_candidate_count
+            _fusion_evidence_candidate_count(completed) < required_min_candidate_count
             or bool(missing_after)
         )
         if missing_after:
@@ -4772,6 +4812,7 @@ class FusionEngine:
                     "independent_solver",
                     "critic",
                     "domain_specialist",
+                    "short_verification",
                     "backup_solver",
                 }
             ],
@@ -5214,6 +5255,12 @@ def _expert_system(system: str, role: str, *, route_plan: Mapping[str, Any] | No
         "primary_solver": "You are the primary solver. Produce a complete candidate answer.",
         "independent_solver": "You are an independent solver. Use a different angle and expose assumptions.",
         "critic": "You are a critic. Focus on errors, omissions, counterexamples, and risks.",
+        "short_verification": (
+            "You are a narrow short verifier. Check only one critical claim, "
+            "constraint, risk, or conclusion selected by the route. Do not solve "
+            "the full task, call tools, or act as an independent solver. Return "
+            "a brief structured verdict with issues and the check performed."
+        ),
         "domain_specialist": "You are a domain specialist. Cover the strongest domain-specific subtask and evidence gaps.",
         "backup_solver": "You are a bounded backup solver. Independently cover the main task so a local consensus quorum can survive one unavailable branch.",
         "targeted_escalation": "You solve only the disputed or missing subtask. Be concise and evidence-aware.",
@@ -5225,6 +5272,13 @@ def _expert_system(system: str, role: str, *, route_plan: Mapping[str, Any] | No
         f"{system}\n\nAxio Fusion role: {role_instruction}\n"
         f"{role_context}"
         "Return JSON when possible with answer, reasoning_summary, evidence, assumptions, uncertainties, confidence."
+        + (
+            " For this narrow role, keep the output to one verification verdict, "
+            "a short issues list, and one check description; do not provide a "
+            "complete solution or hidden chain-of-thought."
+            if role == "short_verification"
+            else ""
+        )
     )
 
 
@@ -5239,6 +5293,15 @@ def _expert_prompt(
     role_contract = _role_execution_contract_prompt_fragment(route_plan, role)
     task_plan = _role_task_plan_prompt_fragment(route_plan, role)
     tool_plan = _tool_call_prompt_fragment(request, role)
+    narrow_scope = (
+        "Narrow verification scope:\n"
+        "Select and check only one material claim, constraint, risk, or conclusion. "
+        "Do not complete the original task, propose a tool call, or provide a broad "
+        "alternative solution. Return a compact JSON object with verdict, issues, "
+        "and check when possible.\n\n"
+        if role == "short_verification"
+        else ""
+    )
     return (
         "User task:\n"
         f"{request.prompt}\n\n"
@@ -5246,6 +5309,7 @@ def _expert_prompt(
         f"{search_policy}"
         f"{role_contract}"
         f"{task_plan}"
+        f"{narrow_scope}"
         f"{tool_plan}"
         "Return the required fields when possible: answer, reasoning_summary, evidence, assumptions, uncertainties, confidence. "
         "Keep reasoning_summary public and concise; never provide hidden chain-of-thought."
@@ -5319,7 +5383,13 @@ def _provider_request_for_role(
     calls.
     """
 
-    suppress_tools = role in {"judge", "synthesizer", "critic", "domain_specialist"}
+    suppress_tools = role in {
+        "judge",
+        "synthesizer",
+        "critic",
+        "domain_specialist",
+        "short_verification",
+    }
     if role == "synthesizer" and allow_aggregator_tools:
         suppress_tools = False
     if suppress_tools:
@@ -5769,12 +5839,18 @@ def _role_execution_contract_prompt_fragment(route_plan: Mapping[str, Any] | Non
     )
     if not intent and not scaffold and not cognitive:
         return ""
-    payload = {
-        "role": str(role or "")[:80],
-        "role_intent": intent,
-        "context_scaffold": scaffold,
-        "cognitive_budget": cognitive,
-        "output_contract": {
+    output_contract = (
+        {
+            "fields": ["verdict", "issues", "check"],
+            "verdict": "pass or fail for the one selected check",
+            "issues": "short JSON list of concrete issues",
+            "check": "one concise description of what was verified",
+            "tools": "forbidden",
+            "full_task_solution": "forbidden",
+            "reasoning_summary": "public concise rationale only; no hidden chain-of-thought",
+        }
+        if role == "short_verification"
+        else {
             "fields": [
                 "answer",
                 "reasoning_summary",
@@ -5786,7 +5862,14 @@ def _role_execution_contract_prompt_fragment(route_plan: Mapping[str, Any] | Non
             ],
             "reasoning_summary": "public concise rationale; no hidden chain-of-thought",
             "tool_calls": "only safe calls allowed by policy",
-        },
+        }
+    )
+    payload = {
+        "role": str(role or "")[:80],
+        "role_intent": intent,
+        "context_scaffold": scaffold,
+        "cognitive_budget": cognitive,
+        "output_contract": output_contract,
     }
     return (
         "Role execution contract:\n"
@@ -5889,6 +5972,7 @@ def _role_scoped_dag_nodes(nodes: Sequence[Any], role: str) -> list[Mapping[str,
     aliases = {
         "fallback_solver": {"primary_solver", "independent_solver", ""},
         "targeted_escalation": {"judge", "critic", "domain_specialist", ""},
+        "short_verification": {"short_verification"},
         "judge": {"judge", ""},
         "synthesizer": {"synthesizer", "judge", ""},
     }.get(role_name, {role_name, ""})
@@ -5997,7 +6081,7 @@ def _candidate_task_execution_receipt(route_plan: Mapping[str, Any] | None, role
 
 
 def _tool_call_prompt_fragment(request: FusionRequest, role: str) -> str:
-    if not request.tools:
+    if not request.tools or role == "short_verification":
         return ""
     tools = []
     for index, tool in enumerate(request.tools):
@@ -7002,6 +7086,7 @@ def _canonical_candidate_preference(candidate: CandidateResult) -> tuple[int, fl
         "independent_solver": 5,
         "domain_specialist": 4,
         "critic": 3,
+        "short_verification": 2,
         "targeted_escalation": 2,
         "fallback_solver": 1,
     }.get(candidate.role, 0)
@@ -7076,7 +7161,12 @@ def _dedupe_candidates_with_receipt(
         "enabled": True,
         "stage": str(stage or "unknown")[:80],
         "strategy": "normalized_answer_hash_plus_role_class",
-        "role_preservation_classes": ["fallback_solver", "domain_specialist", "targeted_escalation"],
+        "role_preservation_classes": [
+            "fallback_solver",
+            "domain_specialist",
+            "short_verification",
+            "targeted_escalation",
+        ],
         "candidate_count_before": before_count,
         "candidate_count_after": len(result),
         "duplicate_candidate_count": duplicate_count,
@@ -7095,7 +7185,16 @@ def _dedupe_candidates_with_receipt(
 def _candidate_dedupe_key(candidate: CandidateResult) -> tuple[str, str]:
     normalized_answer = " ".join(str(candidate.answer or "").strip().lower().split())
     answer_key = sha256_text(normalized_answer[:2000])
-    role_key = candidate.role if candidate.role in {"fallback_solver", "domain_specialist", "targeted_escalation"} else "answer_equivalent"
+    role_key = (
+        candidate.role
+        if candidate.role in {
+            "fallback_solver",
+            "domain_specialist",
+            "short_verification",
+            "targeted_escalation",
+        }
+        else "answer_equivalent"
+    )
     return answer_key, role_key
 
 
@@ -7280,7 +7379,12 @@ def _required_min_candidate_count(route_plan: Mapping[str, Any], expert_roles: S
 
 
 def _independent_candidate_count(candidates: Sequence[CandidateResult]) -> int:
-    """Count completed canonical model branches, excluding role reuse."""
+    """Count completed full-evidence canonical branches, excluding role reuse.
+
+    ``short_verification`` is intentionally omitted.  It has a separate
+    bounded evidence scope and must not inflate the historical independent
+    solver statistic used by operators and calibration consumers.
+    """
 
     return len(
         {
@@ -7288,6 +7392,27 @@ def _independent_candidate_count(candidates: Sequence[CandidateResult]) -> int:
             for candidate in candidates
             if candidate.status == "completed"
             and (candidate.answer.strip() or candidate.tool_calls)
+            and candidate.role not in _NARROW_EVIDENCE_ROLES
+        }
+    )
+
+
+def _fusion_evidence_candidate_count(candidates: Sequence[CandidateResult]) -> int:
+    """Count canonical branches eligible for the admitted Fusion quorum.
+
+    Narrow verification is valid as a second evidence branch only when the
+    route explicitly admitted that role.  This count is therefore distinct
+    from ``_independent_candidate_count`` while preserving the one-model-one-
+    vote rule across provider replicas.
+    """
+
+    return len(
+        {
+            _candidate_canonical_identity(candidate)
+            for candidate in candidates
+            if candidate.status == "completed"
+            and (candidate.answer.strip() or candidate.tool_calls)
+            and candidate.role in _RUNTIME_EVIDENCE_ROLES
         }
     )
 
@@ -7319,10 +7444,14 @@ def _panel_repair_receipt(
         "required_min_candidate_count": max(1, int(required_min_candidate_count)),
         "completed_before": max(0, int(completed_before)),
         "independent_completed_before": independent_before,
+        "narrow_verification_completed_before": 0,
+        "fusion_evidence_completed_before": independent_before,
         "repair_attempt_count": 0,
         "repair_attempt_limit": _MAX_PANEL_REPAIR_ATTEMPTS,
         "completed_after": max(0, int(completed_after)),
         "independent_completed_after": independent_after,
+        "narrow_verification_completed_after": 0,
+        "fusion_evidence_completed_after": independent_after,
         "success": bool(success),
         "degraded_mode": bool(enabled and not success),
         "blocked_reasons": [] if success or not enabled else ["not_enough_completed_candidates"],
@@ -7484,6 +7613,7 @@ def _candidate_local_score(
         "independent_solver": 0.03,
         "critic": 0.02,
         "domain_specialist": 0.035,
+        "short_verification": 0.01,
         "targeted_escalation": 0.06,
         "fallback_solver": 0.0,
     }.get(candidate.role, 0.0)
@@ -8141,7 +8271,14 @@ def _required_candidate_roles_from_route(route_plan: Mapping[str, Any]) -> list[
         str(row.get("role") or "")
         for row in roles
         if isinstance(row, Mapping)
-        and str(row.get("role") or "") in {"primary_solver", "independent_solver", "critic", "domain_specialist"}
+        and str(row.get("role") or "")
+        in {
+            "primary_solver",
+            "independent_solver",
+            "critic",
+            "domain_specialist",
+            "short_verification",
+        }
         and (
             str(row.get("role") or ""),
             _runtime_expert_role_identity(row)[0],
@@ -8225,7 +8362,13 @@ def _missing_required_candidate_roles(route_plan: Mapping[str, Any], candidates:
         not in completed_primary_identities
     )
     if fallback_count > 0 and missing:
-        missing = missing[fallback_count:]
+        # A generic fallback solver can replace a failed full evidence seat,
+        # but it cannot satisfy an explicitly admitted narrow-verification
+        # contract.  Keeping that role missing makes the route fail closed
+        # instead of presenting a broad fallback as a verifier.
+        removable = [role for role in missing if role not in _NARROW_EVIDENCE_ROLES]
+        preserved_narrow = [role for role in missing if role in _NARROW_EVIDENCE_ROLES]
+        missing = removable[fallback_count:] + preserved_narrow
     return missing
 
 
@@ -9755,6 +9898,7 @@ def _synthesis_selection_score(
     role_credit = {
         "critic": 0.08,
         "domain_specialist": 0.07,
+        "short_verification": 0.025,
         "targeted_escalation": 0.10,
         "independent_solver": 0.04,
         "primary_solver": 0.0,
@@ -9942,6 +10086,12 @@ def _candidate_prompt_packet(candidate: CandidateResult, *, answer_char_limit: i
     return {
         "candidate_id": candidate.candidate_id,
         "role": candidate.role,
+        "evidence_scope": (
+            "narrow_verification_only"
+            if candidate.role in _NARROW_EVIDENCE_ROLES
+            else "full_or_role_scoped_evidence"
+        ),
+        "counts_as_full_independent_solver": candidate.role not in _NARROW_EVIDENCE_ROLES,
         "content_trust": "untrusted_advisory_data",
         "instruction_authority": "none",
         "answer": answer_excerpt,

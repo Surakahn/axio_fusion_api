@@ -6,6 +6,10 @@ from axio_fusion_api.orchestrator import (
     _DeadlineBudget,
     FusionEngine,
     _extract_json_with_mode,
+    _candidate_prompt_packet,
+    _expert_prompt,
+    _expert_system,
+    _fusion_evidence_candidate_count,
     _independent_candidate_count,
     _mandatory_fusion_stage_deadline_reservations,
     _candidates_for_fusion_finalization,
@@ -13,6 +17,7 @@ from axio_fusion_api.orchestrator import (
     _normalize_provider_judge_result,
     _dedupe_runtime_expert_roles,
     _missing_required_candidate_roles,
+    _provider_request_for_role,
     _required_min_candidate_count,
 )
 from axio_fusion_api.compat import canonicalize_payload, render_response
@@ -381,6 +386,175 @@ def test_missing_screened_mandatory_stages_blocks_provider_fusion():
     assert route_plan["fusion_admission"]["activated"] is False
     assert "screening_role_gate_blocked_judge" in route_plan["fusion_admission"]["blocked_reasons"]
     assert "screening_role_gate_blocked_synthesizer" in route_plan["fusion_admission"]["blocked_reasons"]
+
+
+def _short_verification_profiles():
+    primary = _screened_profile(
+        "primary-for-short",
+        allowed_roles=("primary_solver",),
+    )
+    short = _screened_profile(
+        "short-only",
+        allowed_roles=("short_verification",),
+        disallowed_roles=(
+            "primary_solver",
+            "independent_solver",
+            "critic",
+            "domain_specialist",
+            "judge",
+            "synthesizer",
+        ),
+    )
+    return primary, short
+
+
+def test_short_verifier_opens_bounded_local_consensus_without_solver_promotion():
+    primary, short = _short_verification_profiles()
+    request = FusionRequest(
+        model="axio-pro",
+        prompt="Solve a complex scientific code task and verify the key constraint.",
+    )
+
+    route_plan = build_route_plan(request, [primary, short])
+    assigned_roles = {row["role"] for row in route_plan["roles"]}
+
+    assert assigned_roles == {"primary_solver", "short_verification"}
+    assert route_plan["fusion_admission"]["activated"] is True
+    assert route_plan["fusion_admission"]["fusion_finalization_mode"] == "local_consensus"
+    assert "independent_solver" not in assigned_roles
+    assert route_plan["role_gate"]["local_consensus"]["missing_roles"] == []
+    assert {"judge", "synthesizer"}.issubset(
+        set(route_plan["role_gate"]["provider_fusion"]["missing_roles"])
+    )
+
+
+def test_short_verifier_failure_remains_a_missing_required_role():
+    primary, short = _short_verification_profiles()
+    request = FusionRequest(
+        model="axio-terra",
+        prompt="Review a medical production code workflow and verify one critical constraint.",
+    )
+    route_plan = build_route_plan(request, [primary, short])
+    primary_candidate = CandidateResult(
+        "primary_solver",
+        "primary_solver",
+        primary.profile_id,
+        primary.provider,
+        primary.model,
+        "primary answer",
+        canonical_identity=primary.canonical_identity,
+    )
+
+    assert "short_verification" in _missing_required_candidate_roles(
+        route_plan,
+        [primary_candidate],
+    )
+    assert route_plan["fusion_admission"]["activated"] is True
+
+
+def test_short_verifier_is_evidence_but_not_independent_solver():
+    primary, short = _short_verification_profiles()
+    candidates = [
+        CandidateResult(
+            "primary_solver",
+            "primary_solver",
+            primary.profile_id,
+            primary.provider,
+            primary.model,
+            "primary answer",
+            canonical_identity=primary.canonical_identity,
+        ),
+        CandidateResult(
+            "short_verification",
+            "short_verification",
+            short.profile_id,
+            short.provider,
+            short.model,
+            "pass",
+            canonical_identity=short.canonical_identity,
+        ),
+    ]
+
+    assert _independent_candidate_count(candidates) == 1
+    assert _fusion_evidence_candidate_count(candidates) == 2
+
+
+def test_short_verifier_prompt_and_candidate_packet_are_narrow_and_tool_free():
+    primary, short = _short_verification_profiles()
+    request = FusionRequest(
+        model="axio-pro",
+        prompt="Verify the one critical condition.",
+        tools=(
+            {
+                "type": "function",
+                "function": {"name": "sensitive_external_action"},
+            },
+        ),
+    )
+    route_plan = build_route_plan(request, [primary, short])
+    prompt = _expert_prompt(request, "short_verification", route_plan=route_plan)
+    system = _expert_system(request.system, "short_verification", route_plan=route_plan)
+    provider_request = _provider_request_for_role(
+        request,
+        "short_verification",
+        route_plan=route_plan,
+    )
+    candidate = CandidateResult(
+        "short_verification",
+        "short_verification",
+        short.profile_id,
+        short.provider,
+        short.model,
+        "pass",
+        canonical_identity=short.canonical_identity,
+    )
+    packet = _candidate_prompt_packet(candidate, answer_char_limit=400)
+
+    assert "Narrow verification scope" in prompt
+    assert "sensitive_external_action" not in prompt
+    assert "do not solve" in system.lower()
+    assert provider_request.tools == ()
+    assert packet["evidence_scope"] == "narrow_verification_only"
+    assert packet["counts_as_full_independent_solver"] is False
+
+
+def test_provider_replicas_of_one_canonical_short_verifier_count_once():
+    first = _screened_profile(
+        "short-provider-a",
+        allowed_roles=("short_verification",),
+        disallowed_roles=("primary_solver", "independent_solver"),
+    )
+    second = normalize_profile(
+        {
+            **first.safe_dict(),
+            "provider": "short-provider-b",
+            "model": first.model,
+            "canonical_model_id": first.canonical_identity,
+            "profile_id": "short-provider-b/short-provider-a",
+        }
+    )
+    candidates = [
+        CandidateResult(
+            "short-a",
+            "short_verification",
+            first.profile_id,
+            first.provider,
+            first.model,
+            "pass",
+            canonical_identity=first.canonical_identity,
+        ),
+        CandidateResult(
+            "short-b",
+            "short_verification",
+            second.profile_id,
+            second.provider,
+            second.model,
+            "pass",
+            canonical_identity=first.canonical_identity,
+        ),
+    ]
+
+    assert _fusion_evidence_candidate_count(candidates) == 1
 
 
 def test_screening_prior_can_open_bounded_stage_without_overwriting_runtime_capability():

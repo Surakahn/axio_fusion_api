@@ -64,6 +64,15 @@ _PREFUSION_OPERATIONAL_ROLE_PROBE_ROLES = (
     "critic",
     "judge",
     "synthesizer",
+    "structured_extraction",
+    "simple_classification",
+    "short_verification",
+    "single_tool_argument_validation",
+)
+_LEGACY_OPERATIONAL_ROLE_PROBE_ROLES = (
+    "critic",
+    "judge",
+    "synthesizer",
 )
 
 
@@ -2586,7 +2595,10 @@ def _validate_prefusion_role_probe_binding(
         for item in role_probe.get("requested_roles", [])
         if str(item)
     ] if isinstance(role_probe.get("requested_roles"), list) else []
-    if requested_roles != list(_PREFUSION_OPERATIONAL_ROLE_PROBE_ROLES):
+    if requested_roles not in (
+        list(_PREFUSION_OPERATIONAL_ROLE_PROBE_ROLES),
+        list(_LEGACY_OPERATIONAL_ROLE_PROBE_ROLES),
+    ):
         issues.append("prefusion_registry_role_probe_roles_invalid")
     if role_probe.get("streaming_required") is not True:
         issues.append("prefusion_registry_role_probe_streaming_required_invalid")

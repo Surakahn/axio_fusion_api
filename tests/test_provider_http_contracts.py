@@ -1059,6 +1059,46 @@ def test_operational_judge_role_probe_rejects_non_json_even_with_sse():
     assert row["role_streaming_contract_valid"] is True
 
 
+@pytest.mark.parametrize(
+    ("role", "output"),
+    [
+        (
+            "structured_extraction",
+            '{"entity":"team-c","value":2,"confidence":0.9}',
+        ),
+        (
+            "simple_classification",
+            '{"label":"safe","confidence":0.9,"reason":"bounded"}',
+        ),
+        (
+            "short_verification",
+            '{"verdict":"pass","issues":[],"check":"deadline preserved"}',
+        ),
+        (
+            "single_tool_argument_validation",
+            '{"valid":true,"arguments":{"location":"archive","limit":3},"error":""}',
+        ),
+    ],
+)
+def test_narrow_role_probe_requires_its_fixed_json_shape(role, output):
+    assert provider_module._role_probe_output_is_valid(role, output) is True
+    parsed = json.loads(output)
+    parsed["unexpected"] = "not allowed"
+    assert provider_module._role_probe_output_is_valid(role, json.dumps(parsed)) is False
+
+
+def test_role_probe_covers_high_impact_and_narrow_roles():
+    assert provider_module.ROLE_PROBE_ROLES == (
+        "critic",
+        "judge",
+        "synthesizer",
+        "structured_extraction",
+        "simple_classification",
+        "short_verification",
+        "single_tool_argument_validation",
+    )
+
+
 def test_provider_adapters_omit_unspecified_temperature_but_preserve_explicit_zero(monkeypatch):
     profiles = {
         "chat": normalize_profile({"provider": "fixture", "model": "chat", "api_format": "chat"}),

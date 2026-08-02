@@ -428,8 +428,17 @@ REASONING_TRANSPORT_BINDING_SCHEMA = "axio_fusion_api.reasoning_transport_probe_
 REASONING_PROBE_MARKER = "AXIO_REASONING_TRANSPORT_OK"
 ROLE_PROBE_SCHEMA = "axio_fusion_api.provider_role_probe.v1"
 ROLE_PROBE_CONTRACT = "axio_fusion_api.provider_role_probe.fixed_control_packet.v1"
-ROLE_PROBE_ROLES = ("critic", "judge", "synthesizer")
+ROLE_PROBE_ROLES = (
+    "critic",
+    "judge",
+    "synthesizer",
+    "structured_extraction",
+    "simple_classification",
+    "short_verification",
+    "single_tool_argument_validation",
+)
 ROLE_PROBE_JUDGE_MAX_OUTPUT_TOKENS = 512
+ROLE_PROBE_NARROW_MAX_OUTPUT_TOKENS = 256
 
 _REASONING_PROBE_TRANSPORTS = {
     "chat": frozenset({"chat_reasoning_effort"}),
@@ -2418,6 +2427,51 @@ def _role_probe_packet(role: str) -> tuple[str, str, int]:
             "a deadline and allows failover.",
             96,
         )
+    if normalized == "structured_extraction":
+        return (
+            "You are an Axio Fusion structured extraction capability probe. Extract "
+            "only the requested synthetic fields. Return exactly one JSON object "
+            "with the keys entity, value, and confidence. Do not call tools, add "
+            "Markdown, expose hidden reasoning, or use external facts.",
+            "Synthetic record: relay owner is team-c and relay count is 2. "
+            "Extract the owner as entity and the count as value. Confidence must "
+            "be a number from 0 to 1.",
+            ROLE_PROBE_NARROW_MAX_OUTPUT_TOKENS,
+        )
+    if normalized == "simple_classification":
+        return (
+            "You are an Axio Fusion simple classification capability probe. Return "
+            "exactly one JSON object with the keys label, confidence, and reason. "
+            "Use only the synthetic record. Do not call tools, add Markdown, or "
+            "expose hidden reasoning.",
+            "Classify this synthetic request as safe or unsafe: bounded retries "
+            "stop at a deadline and switch to a healthy fallback. Return the label, "
+            "a confidence number from 0 to 1, and a short reason.",
+            ROLE_PROBE_NARROW_MAX_OUTPUT_TOKENS,
+        )
+    if normalized == "short_verification":
+        return (
+            "You are an Axio Fusion short verification capability probe. Check the "
+            "synthetic claim and return exactly one JSON object with the keys "
+            "verdict, issues, and check. Verdict must be pass or fail. Do not call "
+            "tools, add Markdown, or expose hidden reasoning.",
+            "Verify this claim: a bounded retry policy preserves a deadline, while "
+            "retrying forever does not. Return pass or fail, a JSON list of issues, "
+            "and one short check description.",
+            ROLE_PROBE_NARROW_MAX_OUTPUT_TOKENS,
+        )
+    if normalized == "single_tool_argument_validation":
+        return (
+            "You are an Axio Fusion single-tool-argument validation capability "
+            "probe. Validate only the synthetic arguments. Return exactly one JSON "
+            "object with the keys valid, arguments, and error. Do not call tools, "
+            "add Markdown, or expose hidden reasoning.",
+            "The tool expects an object with location as a string and limit as a "
+            "positive integer. Validate these arguments: {\"location\":\"archive\", "
+            "\"limit\":3}. Return valid as a boolean, the arguments object, and "
+            "an empty error string when valid.",
+            ROLE_PROBE_NARROW_MAX_OUTPUT_TOKENS,
+        )
     raise ValueError("unsupported_role_probe_role")
 
 
@@ -2447,12 +2501,13 @@ def _role_probe_json_object(value: str) -> Mapping[str, Any] | None:
 def _role_probe_output_is_valid(role: str, output: str) -> bool:
     if not str(output or "").strip():
         return False
-    if role != "judge":
+    if role == "critic" or role == "synthesizer":
         return True
     parsed = _role_probe_json_object(output)
-    return bool(
-        parsed
-        and {
+    if not parsed:
+        return False
+    if role == "judge":
+        return {
             "consensus",
             "contradictions",
             "unique_insights",
@@ -2462,7 +2517,99 @@ def _role_probe_output_is_valid(role: str, output: str) -> bool:
             "follow_up_tasks",
             "ready_for_synthesis",
         }.issubset(set(parsed))
-    )
+    if role == "structured_extraction":
+        return _role_probe_has_bounded_json_fields(
+            parsed,
+            required=("entity", "value", "confidence"),
+            numeric_fields=("confidence",),
+            scalar_fields=("value",),
+        )
+    if role == "simple_classification":
+        return _role_probe_has_bounded_json_fields(
+            parsed,
+            required=("label", "confidence", "reason"),
+            numeric_fields=("confidence",),
+            allowed_string_values={"label": {"safe", "unsafe"}},
+        )
+    if role == "short_verification":
+        return _role_probe_has_bounded_json_fields(
+            parsed,
+            required=("verdict", "issues", "check"),
+            allowed_string_values={"verdict": {"pass", "fail"}},
+            list_fields=("issues",),
+        )
+    if role == "single_tool_argument_validation":
+        return _role_probe_has_bounded_json_fields(
+            parsed,
+            required=("valid", "arguments", "error"),
+            bool_fields=("valid",),
+            mapping_fields=("arguments",),
+            allow_empty_string_fields=("error",),
+        )
+    return False
+
+
+def _role_probe_has_bounded_json_fields(
+    parsed: Mapping[str, Any],
+    *,
+    required: Sequence[str],
+    numeric_fields: Sequence[str] = (),
+    bool_fields: Sequence[str] = (),
+    list_fields: Sequence[str] = (),
+    mapping_fields: Sequence[str] = (),
+    scalar_fields: Sequence[str] = (),
+    allow_empty_string_fields: Sequence[str] = (),
+    allowed_string_values: Mapping[str, set[str]] | None = None,
+) -> bool:
+    """Validate the small role packets without accepting arbitrary JSON."""
+
+    if set(parsed) != set(required):
+        return False
+    allowed_values = allowed_string_values or {}
+    for field in numeric_fields:
+        value = parsed.get(field)
+        if isinstance(value, bool):
+            return False
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return False
+        if number != number or not 0.0 <= number <= 1.0:
+            return False
+    for field in bool_fields:
+        if not isinstance(parsed.get(field), bool):
+            return False
+    for field in list_fields:
+        if not isinstance(parsed.get(field), list):
+            return False
+    for field in mapping_fields:
+        if not isinstance(parsed.get(field), Mapping):
+            return False
+    for field, values in allowed_values.items():
+        value = parsed.get(field)
+        if not isinstance(value, str) or value.strip().casefold() not in values:
+            return False
+    for field in set(required).difference(
+        set(numeric_fields),
+        set(bool_fields),
+        set(list_fields),
+        set(mapping_fields),
+        set(scalar_fields),
+        set(allow_empty_string_fields),
+        set(allowed_values),
+    ):
+        if field in scalar_fields:
+            value = parsed.get(field)
+            if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+                return False
+            if isinstance(value, str) and not value.strip():
+                return False
+            continue
+        if not isinstance(parsed.get(field), str):
+            return False
+        if field not in allow_empty_string_fields and not parsed[field].strip():
+            return False
+    return True
 
 
 def _role_probe_streaming_is_valid(receipt: Mapping[str, Any]) -> bool:

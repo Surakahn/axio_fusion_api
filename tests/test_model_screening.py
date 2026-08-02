@@ -1134,6 +1134,53 @@ def test_operational_role_probe_http_400_removes_only_critic_role():
     assert receipt["passed_roles"] == ["judge", "synthesizer"]
 
 
+def test_operational_narrow_role_probe_removes_only_failed_narrow_role():
+    profile = _role_profile(
+        _profile("provider-a", "narrow", "narrow"),
+        allowed_roles=(
+            "primary_solver",
+            "structured_extraction",
+            "simple_classification",
+            "short_verification",
+            "single_tool_argument_validation",
+        ),
+        denied_roles=("critic", "judge", "synthesizer"),
+    )
+    requested_roles = list(provider_module.ROLE_PROBE_ROLES)
+    role_probe = {
+        "schema": "axio_fusion_api.provider_role_probe.v1",
+        "contract": "axio_fusion_api.provider_role_probe.fixed_control_packet.v1",
+        "status": "ready",
+        "requested_roles": requested_roles,
+        "probes": [
+            _role_probe_row(profile, "structured_extraction"),
+            _role_probe_row(profile, "simple_classification", status="failed"),
+            _role_probe_row(profile, "short_verification"),
+            _role_probe_row(profile, "single_tool_argument_validation"),
+        ],
+    }
+
+    updated = model_screening._apply_operational_role_probe_metadata(
+        [profile], role_probe
+    )[0]
+
+    assert "simple_classification" not in updated.screening_allowed_roles
+    assert "simple_classification" in updated.screening_disallowed_roles
+    assert {
+        "primary_solver",
+        "structured_extraction",
+        "short_verification",
+        "single_tool_argument_validation",
+    }.issubset(set(updated.screening_allowed_roles))
+    receipt = updated.screening_role_admission["operational_role_probe"]
+    assert receipt["passed_roles"] == [
+        "short_verification",
+        "single_tool_argument_validation",
+        "structured_extraction",
+    ]
+    assert receipt["failed_roles"] == ["simple_classification"]
+
+
 def test_operational_role_probe_binds_profiles_without_role_targets():
     profile = _role_profile(
         _profile("provider-a", "narrow", "narrow"),

@@ -145,6 +145,15 @@ _PREFUSION_OPERATIONAL_ROLE_PROBE_ROLES = (
     "critic",
     "judge",
     "synthesizer",
+    "structured_extraction",
+    "simple_classification",
+    "short_verification",
+    "single_tool_argument_validation",
+)
+_LEGACY_OPERATIONAL_ROLE_PROBE_ROLES = (
+    "critic",
+    "judge",
+    "synthesizer",
 )
 # These thresholds admit a role only as an operational capability prior. They
 # are intentionally lower than any quality claim and are paired with the
@@ -3464,7 +3473,7 @@ def _apply_operational_role_probe_metadata(
     for profile in profiles:
         targets = {
             role
-            for role in _PREFUSION_OPERATIONAL_ROLE_PROBE_ROLES
+            for role in requested_roles
             if role in requested_roles
             and role in set(_normalize_roles(profile.screening_allowed_roles))
             and role not in set(_normalize_roles(profile.screening_disallowed_roles))
