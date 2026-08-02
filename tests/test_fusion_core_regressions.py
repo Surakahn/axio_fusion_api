@@ -20,6 +20,7 @@ from axio_fusion_api.orchestrator import (
     _missing_required_candidate_roles,
     _provider_request_for_role,
     _required_min_candidate_count,
+    _timeout_seconds,
 )
 from axio_fusion_api.compat import canonicalize_payload, render_response
 from axio_fusion_api.evaluation import _fusion_provider_env_readiness
@@ -45,6 +46,7 @@ from axio_fusion_api.router import (
     build_route_plan,
 )
 from axio_fusion_api.schemas import CandidateResult, FusionRequest, FusionResponse, sha256_text
+from axio_fusion_api.latency_policy import PROVIDER_MAX_RESPONSE_SECONDS
 from axio_fusion_api.trace_store import safe_execution_trace
 from axio_fusion_api import orchestrator as orchestrator_module
 
@@ -124,6 +126,30 @@ def _screened_profile(
             "screening_disallowed_roles": list(disallowed_roles),
         }
     )
+
+
+def test_explicit_fusion_deadline_reaches_provider_ceiling_without_changing_default():
+    default_request = canonicalize_payload(
+        {"model": "axio-terra", "messages": [{"role": "user", "content": "ping"}]}
+    )
+    ninety_second_request = canonicalize_payload(
+        {
+            "model": "axio-pro",
+            "max_latency_ms": 90_000,
+            "messages": [{"role": "user", "content": "ping"}],
+        }
+    )
+    over_ceiling_request = canonicalize_payload(
+        {
+            "model": "axio-pro",
+            "max_latency_ms": 120_000,
+            "messages": [{"role": "user", "content": "ping"}],
+        }
+    )
+
+    assert _timeout_seconds(default_request) == 60.0
+    assert _timeout_seconds(ninety_second_request) == PROVIDER_MAX_RESPONSE_SECONDS
+    assert _timeout_seconds(over_ceiling_request) == PROVIDER_MAX_RESPONSE_SECONDS
 
 
 def test_required_runtime_quorum_does_not_count_reused_critic_as_independent_seat():

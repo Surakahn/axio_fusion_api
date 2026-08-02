@@ -14,7 +14,7 @@ from fractions import Fraction
 from typing import Any, Mapping, Sequence
 
 from .policy_control import load_active_routing_policy
-from .latency_policy import profile_latency_eligibility
+from .latency_policy import PROVIDER_MAX_RESPONSE_SECONDS, profile_latency_eligibility
 from .providers import HTTPProviderClient, ProviderCompletion, ProviderStreamObserver
 from .router import (
     _screening_role_allowed,
@@ -11601,7 +11601,10 @@ def _targeted_escalation_model_selection_receipt(
 
 def _timeout_seconds(request: FusionRequest) -> float:
     if request.policy.max_latency_ms:
-        return max(1.0, min(60.0, request.policy.max_latency_ms / 1000.0))
+        return max(
+            1.0,
+            min(PROVIDER_MAX_RESPONSE_SECONDS, request.policy.max_latency_ms / 1000.0),
+        )
     return 60.0
 
 

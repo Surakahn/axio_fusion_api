@@ -2346,7 +2346,11 @@ def build_fusion_deliberation_live_smoke(
     credentialed_profiles = [profile for profile in profiles if _profile_has_live_credentials(profile)]
     active_profiles = credentialed_profiles if require_live_credentials else list(profiles)
     active_client = ensure_strict_streaming_client(client)
-    bounded_latency_ms = max(3_000, min(60_000, int(max_latency_ms or 30_000)))
+    # Keep the operator smoke aligned with the runtime's hard 90-second
+    # provider eligibility ceiling. A lower caller-supplied bound remains
+    # respected, while a compliant near-ceiling chain is not cut off by the
+    # diagnostic wrapper itself.
+    bounded_latency_ms = max(3_000, min(90_000, int(max_latency_ms or 30_000)))
     bounded_output_tokens = max(32, min(256, int(max_output_tokens or 128)))
     bounded_call_count = max(4, min(8, int(max_total_model_calls or 6)))
     bounded_cost_usd = max(0.0001, min(0.05, float(max_cost_usd or 0.02)))
