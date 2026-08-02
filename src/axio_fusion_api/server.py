@@ -2373,7 +2373,6 @@ def build_fusion_deliberation_live_smoke(
                     "quality_target": 0.90,
                     "max_models": 3,
                     "max_depth": 1,
-                    "max_total_model_calls": bounded_call_count,
                     "max_latency_ms": bounded_latency_ms,
                     "max_output_tokens": bounded_output_tokens,
                     "max_cost_usd": bounded_cost_usd,
@@ -2480,6 +2479,8 @@ def build_fusion_deliberation_live_smoke(
             "requires_fusion_admission": True,
             "requires_multiple_completed_candidate_branches": True,
             "requires_provider_judge_call": True,
+            "requires_provider_judge_call_for_provider_stage_fusion": True,
+            "allows_local_consensus_finalization": True,
             # Retained for readers of the v1 additive schema. The explicit
             # fields below narrow controlled early exit to non-Hermes routes.
             "requires_synthesizer_call_or_controlled_early_exit": True,
@@ -2554,6 +2555,17 @@ def _fusion_deliberation_live_smoke_row(
     early_exit = trace.get("early_exit") if isinstance(trace.get("early_exit"), Mapping) else {}
     hermes_plan = route_plan.get("hermes_moa") if isinstance(route_plan.get("hermes_moa"), Mapping) else {}
     hermes_execution = trace.get("hermes_moa_execution") if isinstance(trace.get("hermes_moa_execution"), Mapping) else {}
+    budget = route_plan.get("budget") if isinstance(route_plan.get("budget"), Mapping) else {}
+    finalization_mode = str(
+        route_plan.get("fusion_finalization_mode")
+        or budget.get("fusion_finalization_mode")
+        or admission.get("fusion_finalization_mode")
+        or "direct"
+    )
+    local_consensus_finalized = bool(
+        finalization_mode == "local_consensus"
+        and runtime_outcome.get("local_consensus_finalized") is True
+    )
     fusion_activated = admission.get("activated") is True
     completed_candidate_count = max(0, _optional_int(runtime_outcome.get("completed_candidate_count")) or 0)
     judge_provider_call_count = max(0, _optional_int(trace.get("judge_provider_call_count")) or 0)
@@ -2583,7 +2595,10 @@ def _fusion_deliberation_live_smoke_row(
         reason_codes.append("fusion_not_activated")
     if completed_candidate_count < 2:
         reason_codes.append("insufficient_completed_candidate_branches")
-    if judge_provider_call_count < 1:
+    if finalization_mode == "local_consensus":
+        if not local_consensus_finalized:
+            reason_codes.append("local_consensus_not_finalized")
+    elif judge_provider_call_count < 1:
         reason_codes.append("provider_judge_not_executed")
     if hermes_process_contract_required and not hermes_execution_enabled:
         reason_codes.append("hermes_process_execution_missing")
@@ -2596,7 +2611,8 @@ def _fusion_deliberation_live_smoke_row(
     if hermes_process_contract_required and not hermes_process_contract_completed:
         reason_codes.append("hermes_process_contract_incomplete")
     if (
-        not hermes_process_contract_required
+        finalization_mode != "local_consensus"
+        and not hermes_process_contract_required
         and synthesis_provider_call_count < 1
         and not early_exit_triggered
     ):
@@ -2613,6 +2629,8 @@ def _fusion_deliberation_live_smoke_row(
         "fusion_activated": fusion_activated,
         "complete_admitted_fusion_finalized": complete_finalized,
         "completed_candidate_count": completed_candidate_count,
+        "fusion_finalization_mode": finalization_mode,
+        "local_consensus_finalized": local_consensus_finalized,
         "hermes_process_contract_required": hermes_process_contract_required,
         "hermes_execution_enabled": hermes_execution_enabled,
         "hermes_process_contract_completed": hermes_process_contract_completed,

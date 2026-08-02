@@ -353,7 +353,6 @@ def test_role_assignment_fails_closed_when_primary_role_is_denied():
     analysis = analyze_request(request)
     budget = _budget_for_request(request, analysis)
     blueprint = _role_blueprint(request, analysis, budget)
-
     assert _assigned_profile_for_role(
         "primary_solver",
         [denied],
@@ -426,6 +425,162 @@ def test_short_verifier_opens_bounded_local_consensus_without_solver_promotion()
     assert {"judge", "synthesizer"}.issubset(
         set(route_plan["role_gate"]["provider_fusion"]["missing_roles"])
     )
+
+
+def test_reused_critic_does_not_suppress_distinct_short_verifier():
+    primary = _screened_profile(
+        "primary-with-reused-critic",
+        allowed_roles=("primary_solver", "critic", "short_verification"),
+        disallowed_roles=(
+            "independent_solver",
+            "domain_specialist",
+            "judge",
+            "synthesizer",
+        ),
+    )
+    short_one = _screened_profile(
+        "short-one",
+        allowed_roles=("short_verification",),
+        disallowed_roles=(
+            "primary_solver",
+            "independent_solver",
+            "critic",
+            "domain_specialist",
+            "judge",
+            "synthesizer",
+        ),
+    )
+    short_two = _screened_profile(
+        "short-two",
+        allowed_roles=("short_verification",),
+        disallowed_roles=(
+            "primary_solver",
+            "independent_solver",
+            "critic",
+            "domain_specialist",
+            "judge",
+            "synthesizer",
+        ),
+    )
+
+    request = canonicalize_payload(
+        {
+            "model": "axio-pro",
+            "quality_target": 0.9,
+            "max_models": 3,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Solve a complex scientific code task and verify contradictions.",
+                }
+            ],
+        }
+    )
+    analysis = analyze_request(request)
+    budget = _budget_for_request(request, analysis)
+    blueprint = _role_blueprint(request, analysis, budget)
+    blueprint.append(
+        {
+            "role": "short_verification",
+            "objective": "verify one critical claim",
+            "required_capabilities": ["critique", "structured_output"],
+            "context_scope": "one_key_claim_only",
+        }
+    )
+    roles = _role_assignments(
+        request,
+        analysis,
+        [primary, short_one, short_two],
+        True,
+        blueprint,
+        budget=budget,
+    )
+
+    assert {row["role"] for row in roles} == {
+        "primary_solver",
+        "critic",
+        "short_verification",
+    }
+    critic = next(row for row in roles if row["role"] == "critic")
+    assert critic["role_profile_reuse"]["counts_as_independent_evidence"] is False
+
+
+def test_latency_repair_does_not_replace_narrow_evidence_with_roleless_fast_models():
+    def screened(name, latency, allowed, denied=()):
+        return normalize_profile(
+            {
+                "provider": f"latency-{name}",
+                "model": name,
+                "canonical_model_id": name,
+                "api_format": "chat",
+                "p50_latency_ms": latency,
+                "capabilities": {
+                    "science_knowledge": 0.8,
+                    "code": 0.8,
+                    "logic": 0.8,
+                    "daily_work": 0.8,
+                    "structured_output": 0.8,
+                    "critique": 0.8,
+                    "long_context": 0.8,
+                },
+                "screening_allowed_roles": list(allowed),
+                "screening_disallowed_roles": list(denied),
+            }
+        )
+
+    all_roles = (
+        "primary_solver",
+        "independent_solver",
+        "critic",
+        "domain_specialist",
+        "judge",
+        "synthesizer",
+        "short_verification",
+        "simple_classification",
+        "structured_extraction",
+        "single_tool_argument_validation",
+    )
+    profiles = [
+        screened("primary", 4_000, ("primary_solver", "short_verification")),
+        screened(
+            "short",
+            13_000,
+            ("short_verification",),
+            (
+                "primary_solver",
+                "independent_solver",
+                "critic",
+                "domain_specialist",
+                "judge",
+                "synthesizer",
+            ),
+        ),
+        screened("fast-roleless-a", 100, (), all_roles),
+        screened("fast-roleless-b", 110, (), all_roles),
+    ]
+    request = canonicalize_payload(
+        {
+            "model": "axio-terra",
+            "quality_target": 0.9,
+            "max_models": 3,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Analyze a complex high-risk code workflow and verify the key constraint.",
+                }
+            ],
+        }
+    )
+
+    route_plan = build_route_plan(request, profiles)
+
+    assert [row["model"] for row in route_plan["selected_models"]] == [
+        "primary",
+        "short",
+    ]
+    assert route_plan["latency_constrained_panel"]["applied"] is False
+    assert route_plan["latency_constrained_panel"]["reason"] == "no_distinct_candidate_panel"
+    assert route_plan["fusion_admission"]["activated"] is False
 
 
 def test_unused_domain_prior_does_not_suppress_short_verification_target():
@@ -971,6 +1126,96 @@ def test_neutral_runtime_portfolio_uses_provider_diversity_and_one_parallel_back
     assert len({*local_plan["panel_provider_hashes"]}) >= 3
     assert "backup_solver" in {row["role"] for row in route_plan["roles"]}
     assert local_plan["latency_multiplier_vs_direct"] <= 3.0
+
+
+def test_local_consensus_respects_channel_single_flight_and_uses_cross_provider_panel():
+    def profile(provider, model, latency, traffic_control):
+        return normalize_profile(
+            {
+                "provider": provider,
+                "model": model,
+                "canonical_model_id": model,
+                "api_format": "chat",
+                "p50_latency_ms": latency,
+                "health": "available",
+                "source": "runtime_channel_live_probe",
+                "traffic_control": traffic_control,
+                "capabilities": {
+                    "science_knowledge": 0.9,
+                    "logic": 0.9,
+                    "structured_output": 0.9,
+                    "critique": 0.9,
+                },
+            }
+        )
+
+    shared_nvidia = {
+        "scope": "channel",
+        "max_in_flight": 1,
+        "rate_limit_key_pool": "shared",
+    }
+    profiles = [
+        profile("nvidia", "nvidia-a", 100, shared_nvidia),
+        profile("nvidia", "nvidia-b", 110, shared_nvidia),
+        profile("tokenapis", "tokenapis-a", 130, {"scope": "profile"}),
+    ]
+
+    route_plan = build_route_plan(
+        FusionRequest(
+            model="axio-terra",
+            prompt="Analyze a difficult scientific constraint and verify the conclusion.",
+        ),
+        profiles,
+    )
+    local_plan = route_plan["budget"]["local_consensus_plan"]
+
+    assert local_plan["provider_serialization_detected"] is True
+    assert local_plan["provider_parallelism_constraint"] is True
+    assert local_plan["provider_diversity_required"] is True
+    assert local_plan["provider_diversity_requirement_reason"] == "channel_single_flight_parallelism"
+    assert local_plan["provider_serialization_group_count"] == 1
+    assert local_plan["provider_serialization_candidate_count"] == 2
+    assert local_plan["feasible"] is True
+    assert len(set(local_plan["panel_provider_hashes"])) == 2
+
+
+def test_local_consensus_blocks_when_only_one_channel_single_flight_pool_exists():
+    traffic_control = {
+        "scope": "channel",
+        "max_in_flight": 1,
+        "rate_limit_key_pool": "shared",
+    }
+    profiles = [
+        normalize_profile(
+            {
+                "provider": "nvidia",
+                "model": f"nvidia-{index}",
+                "canonical_model_id": f"nvidia-{index}",
+                "api_format": "chat",
+                "p50_latency_ms": 100 + index * 10,
+                "health": "available",
+                "source": "runtime_channel_live_probe",
+                "traffic_control": traffic_control,
+            }
+        )
+        for index in range(2)
+    ]
+
+    route_plan = build_route_plan(
+        FusionRequest(
+            model="axio-terra",
+            prompt="Analyze a difficult scientific constraint and verify the conclusion.",
+        ),
+        profiles,
+    )
+    local_plan = route_plan["budget"]["local_consensus_plan"]
+
+    assert local_plan["provider_serialization_detected"] is True
+    assert local_plan["provider_parallelism_constraint"] is True
+    assert local_plan["provider_diversity_required"] is False
+    assert local_plan["feasible"] is False
+    assert local_plan["reason"] == "no_local_consensus_panel_meets_latency_and_quality_guard"
+    assert route_plan["fusion_admission"]["activated"] is False
 
 
 def test_local_consensus_runtime_uses_only_parallel_experts_and_marks_complete():

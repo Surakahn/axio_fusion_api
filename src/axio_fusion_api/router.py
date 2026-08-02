@@ -1273,6 +1273,58 @@ def _budget_with_fusion_finalization_mode(
     return updated
 
 
+def _provider_serialization_signature(
+    profile: ModelProfile,
+) -> tuple[str, str, str, str, str] | None:
+    """Identify a channel-level single-flight transport group.
+
+    ``max_in_flight`` is meaningful across profiles only when the traffic
+    contract is channel-scoped and the key pool is shared.  A profile-scoped
+    limit must not suppress otherwise independent model calls.  The returned
+    tuple contains configuration identifiers only; it is used in-memory and
+    never enters a receipt.
+    """
+
+    raw = profile.traffic_control if isinstance(profile.traffic_control, Mapping) else {}
+    scope = str(raw.get("scope") or "profile").strip().casefold()
+    key_pool = str(raw.get("rate_limit_key_pool") or "shared").strip().casefold()
+    try:
+        max_in_flight = int(raw.get("max_in_flight") or 0)
+    except (TypeError, ValueError):
+        max_in_flight = 0
+    if scope != "channel" or key_pool != "shared" or max_in_flight != 1:
+        return None
+    return (
+        str(profile.provider),
+        str(profile.base_url_env or profile.runtime_base_url),
+        str(profile.api_key_env),
+        str(profile.api_format),
+        str(profile.auth_scheme),
+    )
+
+
+def _serializing_provider_groups(
+    profiles: Sequence[ModelProfile],
+) -> dict[tuple[str, str, str, str, str], tuple[ModelProfile, ...]]:
+    groups: dict[tuple[str, str, str, str, str], list[ModelProfile]] = {}
+    for profile in profiles:
+        signature = _provider_serialization_signature(profile)
+        if signature is not None:
+            groups.setdefault(signature, []).append(profile)
+    return {
+        signature: tuple(rows)
+        for signature, rows in groups.items()
+        if len(rows) >= 2
+    }
+
+
+def _panel_contains_serialized_provider_pair(
+    profiles: Sequence[ModelProfile],
+) -> bool:
+    groups = _serializing_provider_groups(profiles)
+    return any(len(rows) >= 2 for rows in groups.values())
+
+
 def _local_consensus_plan(
     *,
     request: FusionRequest,
@@ -1320,6 +1372,12 @@ def _local_consensus_plan(
         "candidate_panel_evaluation_count": 0,
         "provider_diversity_floor": 0,
         "provider_diversity_floor_met": False,
+        "provider_serialization_detected": False,
+        "provider_parallelism_constraint": False,
+        "provider_diversity_required": False,
+        "provider_serialization_group_count": 0,
+        "provider_serialization_candidate_count": 0,
+        "provider_diversity_requirement_reason": "",
         "capability_evidence_mode": "unknown",
         "redundancy_enabled": False,
         "redundancy_candidate_count": 0,
@@ -1463,11 +1521,38 @@ def _local_consensus_plan(
     available_provider_count = len({profile.provider for profile in candidate_pool})
     provider_diversity_floor = min(minimum_count, available_provider_count)
     default["provider_diversity_floor"] = provider_diversity_floor
+    serializing_groups = _serializing_provider_groups(candidate_pool)
+    serializing_candidate_count = sum(len(rows) for rows in serializing_groups.values())
+    provider_parallelism_constraint = bool(serializing_groups and minimum_count >= 2)
+    default.update(
+        {
+            "provider_serialization_detected": bool(serializing_groups),
+            "provider_parallelism_constraint": provider_parallelism_constraint,
+            "provider_serialization_group_count": len(serializing_groups),
+            "provider_serialization_candidate_count": serializing_candidate_count,
+        }
+    )
     # With only transport/protocol evidence, provider independence is the
     # strongest honest diversity signal available.  When a portfolio has
     # enough providers, do not let neutral capability defaults select several
     # near-identical replicas from one channel.
-    require_provider_diversity = not capability_evidence_available and provider_diversity_floor > 1
+    require_provider_diversity = bool(
+        provider_diversity_floor > 1
+        and (
+            not capability_evidence_available
+            or provider_parallelism_constraint
+        )
+    )
+    default["provider_diversity_required"] = require_provider_diversity
+    default["provider_diversity_requirement_reason"] = (
+        "channel_single_flight_parallelism"
+        if provider_parallelism_constraint and provider_diversity_floor > 1
+        else (
+            "neutral_capability_evidence"
+            if not capability_evidence_available and provider_diversity_floor > 1
+            else ""
+        )
+    )
     desired_panel_size = minimum_count
     if (
         not capability_evidence_available
@@ -1486,6 +1571,12 @@ def _local_consensus_plan(
         for panel_tuple in combinations(candidate_pool, panel_size):
             panel = tuple(panel_tuple)
             if len({profile.canonical_identity for profile in panel}) != len(panel):
+                continue
+            # The runtime traffic gate serializes profiles in the same
+            # channel-scoped shared pool.  A phase-length calculation that
+            # ignores this would overstate Fusion parallelism and could breach
+            # the 3x latency contract.
+            if _panel_contains_serialized_provider_pair(panel):
                 continue
             provider_count = len({profile.provider for profile in panel})
             if require_provider_diversity and provider_count < provider_diversity_floor:
@@ -1668,6 +1759,14 @@ def _local_consensus_plan(
             "provider_diversity_floor": provider_diversity_floor,
             "provider_diversity_floor_met": len({profile.provider for profile in panel})
             >= provider_diversity_floor,
+            "provider_serialization_detected": bool(serializing_groups),
+            "provider_parallelism_constraint": provider_parallelism_constraint,
+            "provider_diversity_required": require_provider_diversity,
+            "provider_serialization_group_count": len(serializing_groups),
+            "provider_serialization_candidate_count": serializing_candidate_count,
+            "provider_diversity_requirement_reason": str(
+                default.get("provider_diversity_requirement_reason") or ""
+            ),
             "capability_evidence_mode": capability_evidence_mode,
             "redundancy_enabled": bool(desired_panel_size > minimum_count),
             "redundancy_candidate_count": max(0, len(panel) - minimum_count),
@@ -1790,6 +1889,18 @@ def _safe_local_consensus_plan(value: Mapping[str, Any]) -> dict[str, Any]:
             value.get("provider_diversity_floor")
         ),
         "provider_diversity_floor_met": bool(value.get("provider_diversity_floor_met")),
+        "provider_serialization_detected": bool(value.get("provider_serialization_detected")),
+        "provider_parallelism_constraint": bool(value.get("provider_parallelism_constraint")),
+        "provider_diversity_required": bool(value.get("provider_diversity_required")),
+        "provider_serialization_group_count": _safe_nonnegative_int(
+            value.get("provider_serialization_group_count")
+        ),
+        "provider_serialization_candidate_count": _safe_nonnegative_int(
+            value.get("provider_serialization_candidate_count")
+        ),
+        "provider_diversity_requirement_reason": str(
+            value.get("provider_diversity_requirement_reason") or ""
+        )[:80],
         "capability_evidence_mode": str(
             value.get("capability_evidence_mode") or "unknown"
         )[:80],
@@ -2463,7 +2574,10 @@ def _latency_constrained_fusion_panel(
                 and str(row.get("role") or "")
                 in {"independent_solver", "critic", "domain_specialist", "short_verification"}
             }
-            if not assigned_evidence_roles:
+            if not assigned_evidence_roles or not _panel_has_distinct_evidence_shape(
+                request,
+                roles,
+            ):
                 continue
             if request.public_model != "axio-fast" and not {
                 "judge",
@@ -2954,6 +3068,74 @@ def _assigned_profile_for_role(
         reverse=True,
     )
     return ranked[0]
+
+
+def _role_runtime_identity(role: Mapping[str, Any]) -> str:
+    model = role.get("model") if isinstance(role.get("model"), Mapping) else {}
+    return str(
+        model.get("runtime_canonical_identity_sha256")
+        or model.get("canonical_model_id_sha256")
+        or model.get("profile_id")
+        or ""
+    ).strip()
+
+
+def _has_distinct_full_evidence_role(roles: Sequence[Mapping[str, Any]]) -> bool:
+    """Return whether a full-evidence role is a distinct canonical branch."""
+
+    primary_identity = next(
+        (
+            _role_runtime_identity(row)
+            for row in roles
+            if isinstance(row, Mapping)
+            and str(row.get("role") or "") == "primary_solver"
+        ),
+        "",
+    )
+    if not primary_identity:
+        return False
+    return any(
+        str(row.get("role") or "")
+        in {"independent_solver", "critic", "domain_specialist"}
+        and _role_runtime_identity(row)
+        and _role_runtime_identity(row) != primary_identity
+        for row in roles
+        if isinstance(row, Mapping)
+    )
+
+
+def _panel_has_distinct_evidence_shape(
+    request: FusionRequest,
+    roles: Sequence[Mapping[str, Any]],
+) -> bool:
+    """Keep latency repair from replacing evidence with role-less models."""
+
+    if request.public_model == "axio-fast":
+        return True
+    primary_identity = next(
+        (
+            _role_runtime_identity(row)
+            for row in roles
+            if isinstance(row, Mapping)
+            and str(row.get("role") or "") == "primary_solver"
+        ),
+        "",
+    )
+    if not primary_identity:
+        return False
+    return any(
+        str(row.get("role") or "")
+        in {
+            "independent_solver",
+            "critic",
+            "domain_specialist",
+            "short_verification",
+        }
+        and _role_runtime_identity(row)
+        and _role_runtime_identity(row) != primary_identity
+        for row in roles
+        if isinstance(row, Mapping)
+    )
 
 
 def _role_assignment(
@@ -4621,11 +4803,11 @@ def _role_assignments(
                     analysis,
                 )
             )
-    has_full_second_evidence_role = any(
-        isinstance(row, Mapping)
-        and str(row.get("role") or "") in {"independent_solver", "domain_specialist"}
-        for row in roles
-    )
+    # A reused Critic is a second instruction on the primary model, not a
+    # second evidence branch. Keep the narrow verifier available until a
+    # genuinely distinct canonical model has been assigned to a full-evidence
+    # role.
+    has_full_second_evidence_role = _has_distinct_full_evidence_role(roles)
     has_short_verification_target = any(
         isinstance(row, Mapping)
         and str(row.get("role") or "") == "short_verification"

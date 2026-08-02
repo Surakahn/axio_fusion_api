@@ -6036,6 +6036,99 @@ def test_standalone_fusion_deliberation_smoke_keeps_non_hermes_early_exit() -> N
     assert row["reason_codes"] == []
 
 
+def test_standalone_fusion_deliberation_smoke_accepts_local_consensus_finalization() -> None:
+    request = canonicalize_payload(
+        {
+            "model": "axio-pro",
+            "messages": [{"role": "user", "content": "synthetic private task"}],
+        }
+    )
+    response = FusionResponse(
+        text="local consensus answer",
+        request=request,
+        route_plan={
+            "fusion_admission": {
+                "activated": True,
+                "fusion_finalization_mode": "local_consensus",
+            },
+            "budget": {"fusion_finalization_mode": "local_consensus"},
+            "hermes_moa": {"enabled": False},
+        },
+        trace={
+            "runtime_fusion_stage_outcome": {
+                "completed_candidate_count": 2,
+                "fusion_finalization_mode": "local_consensus",
+                "local_consensus_finalized": True,
+                "complete_admitted_fusion_finalized": True,
+                "hermes_process_contract_required": False,
+            },
+            "early_exit": {"triggered": False},
+            "judge_provider_call_count": 0,
+            "synthesis_provider_call_count": 0,
+            "provider_call_count": 2,
+        },
+        provider_calls_recorded=True,
+    )
+
+    row = server_module._fusion_deliberation_live_smoke_row(
+        model="axio-pro",
+        response=response,
+        end_to_end_latency_ms=50.0,
+        max_total_model_calls=6,
+    )
+
+    assert row["deliberation_smoke_passed"] is True
+    assert row["fusion_finalization_mode"] == "local_consensus"
+    assert row["local_consensus_finalized"] is True
+    assert row["judge_provider_call_count"] == 0
+    assert row["synthesis_provider_call_count"] == 0
+    assert row["reason_codes"] == []
+
+
+def test_standalone_fusion_deliberation_smoke_rejects_planned_but_unfinished_local_consensus() -> None:
+    request = canonicalize_payload(
+        {
+            "model": "axio-pro",
+            "messages": [{"role": "user", "content": "synthetic private task"}],
+        }
+    )
+    response = FusionResponse(
+        text="degraded single candidate",
+        request=request,
+        route_plan={
+            "fusion_admission": {
+                "activated": True,
+                "fusion_finalization_mode": "local_consensus",
+            },
+            "budget": {"fusion_finalization_mode": "local_consensus"},
+            "hermes_moa": {"enabled": False},
+        },
+        trace={
+            "runtime_fusion_stage_outcome": {
+                "completed_candidate_count": 1,
+                "fusion_finalization_mode": "local_consensus",
+                "local_consensus_finalized": False,
+                "complete_admitted_fusion_finalized": False,
+            },
+            "early_exit": {"triggered": False},
+            "provider_call_count": 1,
+        },
+        provider_calls_recorded=True,
+    )
+
+    row = server_module._fusion_deliberation_live_smoke_row(
+        model="axio-pro",
+        response=response,
+        end_to_end_latency_ms=50.0,
+        max_total_model_calls=6,
+    )
+
+    assert row["deliberation_smoke_passed"] is False
+    assert row["local_consensus_finalized"] is False
+    assert "local_consensus_not_finalized" in row["reason_codes"]
+    assert "insufficient_completed_candidate_branches" in row["reason_codes"]
+
+
 def test_standalone_fusion_deliberation_live_smoke_cli_requires_explicit_live_and_credentials(monkeypatch, tmp_path):
     reset_runtime_state_for_tests()
     monkeypatch.delenv("AXIO_FUSION_API_KEYS", raising=False)
