@@ -69,6 +69,13 @@ The following order is the only path to a formal quality claim:
   impossible to pass, pending requests are cancelled and represented as
   transport failures in the complete denominator. The current r20 plan does
   not enable this policy and its digest remains unchanged.
+- A successor r21 plan has now been prepared offline at
+  `private/runs/2026-08-04-prefusion-cohort-r21/baseline_screening_plan.r21.failfast.safe.json`.
+  It is ready, serial, and fail-fast-enabled with digest
+  `34a1dc759271f3372204db96a41f929c185c60603670b3ed64f90586f23bf80f`.
+  This is only a pre-registered successor artifact: it does not supersede r20,
+  and it must not be started until r20 has reached a terminal state and its
+  complete evidence has passed through ranking conversion.
 
 ## Terminal Action
 
