@@ -1247,6 +1247,13 @@ def build_prefusion_probe_artifact(
         raise ModelScreeningError("prefusion_probe_export_requires_live_streaming")
     if streaming.get("network_calls_performed") is not True:
         raise ModelScreeningError("prefusion_probe_export_live_network_evidence_missing")
+    discovery = payload.get("provider_discovery")
+    provider_reports = (
+        [dict(row) for row in discovery.get("provider_reports", []) if isinstance(row, Mapping)]
+        if isinstance(discovery, Mapping)
+        and isinstance(discovery.get("provider_reports"), list)
+        else []
+    )
 
     artifact: dict[str, Any] = {
         "schema": "axio_fusion_api.provider_probe.v1",
@@ -1279,6 +1286,10 @@ def build_prefusion_probe_artifact(
         "stream_requested_count": streaming.get("stream_requested_count"),
         "stream_observed_count": streaming.get("stream_observed_count"),
         "stream_fallback_count": streaming.get("stream_fallback_count"),
+        # Provider catalog rows are needed for exact channel/model identity
+        # attestation during non-target baseline screening. They contain only
+        # discovery metadata and are redacted by the safe projection below.
+        "provider_reports": provider_reports,
         "probes": [dict(row) for row in probes],
         "raw_probe_prompt_persisted": False,
         "raw_provider_output_persisted": False,

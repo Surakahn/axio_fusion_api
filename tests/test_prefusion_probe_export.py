@@ -63,6 +63,19 @@ def _screening_payload(*, mode: str = "live", status: str = "ready") -> dict:
             "samples_per_profile": 3,
             "probes": rows,
         },
+        "provider_discovery": {
+            "provider_reports": [
+                {
+                    "provider": "fixture-provider",
+                    "status": "ok",
+                    "model_count": 2,
+                    "model_ids": ["fixture-model-a", "fixture-model-b"],
+                    "base_url_sha256": sha256_text("https://fixture.invalid/v1"),
+                    "raw_provider_response_persisted": False,
+                    "secrets_persisted": False,
+                }
+            ]
+        },
         "secrets_persisted": False,
         "raw_provider_output_persisted": False,
     }
@@ -77,6 +90,7 @@ def test_prefusion_probe_export_preserves_live_probe_contract_without_network():
     assert payload["model_count"] == 2
     assert payload["available_count"] == 2
     assert len(payload["probes"]) == 2
+    assert len(payload["provider_reports"]) == 1
     assert payload["source_screening_content_sha256"]
     assert payload["raw_provider_output_persisted"] is False
     assert payload["secrets_persisted"] is False
@@ -108,6 +122,7 @@ def test_prefusion_probe_export_redaction_and_cli_round_trip(tmp_path):
     assert payload["generated_from_prefusion_screening"] is True
     assert payload["provider_identifier_redaction"]["enabled"] is True
     assert payload["available_count"] == 2
+    assert payload["provider_reports"][0]["model_count"] == 2
     assert "fixture-provider" not in serialized
     assert "fixture-model-a" not in serialized
     assert "fixture-model-b" not in serialized

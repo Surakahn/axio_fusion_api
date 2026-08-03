@@ -12,6 +12,11 @@
   API-format, and path bindings.
 - [x] Generate a new ranking template from the exact r20 registry candidate
   set; it has 11 candidates and remains explicitly `template_only`.
+- [x] Generate a fresh r20 non-target screening plan from the same bound
+  registry and probe catalog: 11 canonical groups, 2 independent source
+  families, 22 units, 2,420 fixed calls, and `max_workers=1`.
+- [ ] Complete all 22 r20 screening units; retain every timeout or transport
+  failure in the denominator and do not reuse an older cohort checkpoint.
 - [ ] Complete and freeze the pre-registered external ranking for the complete
   11-model pool using at least two common independent source families, exact
   population counts, stable snapshots, and identity attestations.
