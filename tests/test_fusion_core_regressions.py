@@ -2049,6 +2049,32 @@ def test_local_consensus_never_overrides_explicit_call_latency_or_cost_caps():
     assert cost_plan["fusion_admission"]["activated"] is False
 
 
+def test_local_consensus_uses_an_explicit_budget_when_the_complete_floor_is_met():
+    profiles = _local_consensus_fixture_profiles()
+    request = canonicalize_payload(
+        {
+            "model": "axio-pro",
+            "max_total_model_calls": 5,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Analyze a high-risk production workflow and prove the routing constraints are logically consistent.",
+                }
+            ],
+        }
+    )
+
+    route_plan = build_route_plan(request, profiles)
+    admission = route_plan["fusion_admission"]
+    local_plan = route_plan["budget"]["local_consensus_plan"]
+
+    assert route_plan["budget"]["caller_max_total_model_calls_explicit"] is True
+    assert local_plan["feasible"] is True
+    assert admission["activated"] is True
+    assert admission["fusion_finalization_mode"] == "local_consensus"
+    assert route_plan["budget"]["fusion_finalization_mode"] == "local_consensus"
+
+
 def test_latency_optimization_replaces_slow_qualified_mandatory_stages():
     primary = _latency_profile("primary", 1_000)
     independent = _latency_profile("independent", 1_000)
@@ -2074,6 +2100,104 @@ def test_latency_optimization_replaces_slow_qualified_mandatory_stages():
     assert judge.profile_id == fast_stage.profile_id
     assert synthesizer.profile_id == fast_stage.profile_id
     assert receipt["estimated_latency_multiplier_vs_direct"] <= 3.0
+
+
+def test_latency_optimization_repairs_a_p95_only_guard_violation():
+    primary = _latency_profile("p95-primary", 1_000, p95_latency=1_000)
+    independent = _latency_profile("p95-independent", 1_000, p95_latency=1_000)
+    slow_judge = _latency_profile(
+        "p95-slow-judge",
+        500,
+        critique=0.96,
+        structured=0.96,
+        p95_latency=2_500,
+    )
+    slow_synthesizer = _latency_profile(
+        "p95-slow-synthesizer",
+        500,
+        critique=0.90,
+        structured=0.96,
+        p95_latency=2_500,
+    )
+    fast_stage = _latency_profile(
+        "p95-fast-stage",
+        400,
+        critique=0.82,
+        structured=0.86,
+        p95_latency=500,
+    )
+
+    judge, synthesizer, receipt = _latency_optimize_stage_profiles(
+        selected=[primary, independent, slow_judge, slow_synthesizer, fast_stage],
+        primary_profile=primary,
+        expert_roles=[
+            {"role": "primary_solver", "model": primary.safe_dict()},
+            {"role": "independent_solver", "model": independent.safe_dict()},
+        ],
+        judge=slow_judge,
+        synthesizer=slow_synthesizer,
+        analysis={"domains": ["daily_work"]},
+        budget={"max_parallel_experts": 2, "max_latency_ms": 30_000},
+    )
+
+    assert receipt["p95_guard_triggered"] is True
+    assert receipt["applied"] is True
+    assert receipt["optimization_basis"] == "p95"
+    assert judge.profile_id == fast_stage.profile_id
+    assert synthesizer.profile_id == fast_stage.profile_id
+    assert receipt["original_p95_latency_multiplier_vs_direct"] > 3.0
+    assert receipt["optimized_p95_latency_multiplier_vs_direct"] <= 3.0
+
+
+def test_latency_optimization_keeps_p95_fail_closed_when_no_safe_stage_pair_exists():
+    primary = _latency_profile("p95-block-primary", 1_000, p95_latency=1_000)
+    independent = _latency_profile("p95-block-independent", 1_000, p95_latency=1_000)
+    slow_judge = _latency_profile(
+        "p95-block-slow-judge",
+        500,
+        critique=0.96,
+        structured=0.96,
+        p95_latency=2_500,
+    )
+    slow_synthesizer = _latency_profile(
+        "p95-block-slow-synthesizer",
+        500,
+        critique=0.90,
+        structured=0.96,
+        p95_latency=2_500,
+    )
+    faster_but_tail_slow = _latency_profile(
+        "p95-block-faster-stage",
+        400,
+        critique=0.82,
+        structured=0.86,
+        p95_latency=2_000,
+    )
+
+    judge, synthesizer, receipt = _latency_optimize_stage_profiles(
+        selected=[
+            primary,
+            independent,
+            slow_judge,
+            slow_synthesizer,
+            faster_but_tail_slow,
+        ],
+        primary_profile=primary,
+        expert_roles=[
+            {"role": "primary_solver", "model": primary.safe_dict()},
+            {"role": "independent_solver", "model": independent.safe_dict()},
+        ],
+        judge=slow_judge,
+        synthesizer=slow_synthesizer,
+        analysis={"domains": ["daily_work"]},
+        budget={"max_parallel_experts": 2, "max_latency_ms": 30_000},
+    )
+
+    assert receipt["p95_guard_triggered"] is True
+    assert receipt["applied"] is False
+    assert receipt["reason"] == "no_faster_stage_pair_meets_latency_guard"
+    assert judge.profile_id == slow_judge.profile_id
+    assert synthesizer.profile_id == slow_synthesizer.profile_id
 
 
 def test_latency_optimization_uses_the_direct_route_baseline_not_fusion_primary():

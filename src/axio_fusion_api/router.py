@@ -1518,10 +1518,16 @@ def _local_consensus_plan(
         default["reason"] = "max_total_model_calls_below_local_consensus_floor"
         return [], [], default
     if bool(budget.get("caller_max_total_model_calls_explicit")):
-        # An explicit caller ceiling is a direct contract.  Do not silently
-        # replace an unavailable complete Fusion schedule with another shape.
-        default["reason"] = "explicit_call_budget_preserves_provider_stage_contract"
-        return [], [], default
+        # An explicit caller ceiling limits total provider calls, but it does
+        # not require the slower provider Judge/Synthesizer shape.  Permit the
+        # local shape only when the caller granted at least the complete
+        # provider Fusion floor; a smaller ceiling remains a hard refusal.
+        provider_stage_floor = minimum_count + 2
+        default["explicit_call_budget_floor"] = provider_stage_floor
+        if max_total_calls < provider_stage_floor:
+            default["reason"] = "explicit_call_budget_below_local_fallback_floor"
+            return [], [], default
+        default["reason"] = "explicit_call_budget_allows_latency_safe_local_consensus"
 
     try:
         max_latency_ms = max(1, int(budget.get("max_latency_ms") or 1))
@@ -2592,6 +2598,19 @@ def _latency_constrained_fusion_panel(
         max_parallel=max(1, int(budget.get("max_parallel_experts") or 1)),
         profile_pool=effective_stage_profile_pool,
     )
+    direct_p95_latency = (
+        _role_latency_ms(direct_profile, "primary_solver", "p95_latency_ms")
+        if direct_profile is not None
+        else None
+    )
+    initial_p95_latency, initial_p95_known, initial_p95_execution = (
+        _estimated_fusion_execution_latency_p95_ms(
+            selected,
+            initial_roles,
+            max_parallel=max(1, int(budget.get("max_parallel_experts") or 1)),
+            profile_pool=effective_stage_profile_pool,
+        )
+    )
     initial_quality = _fusion_utility_estimate(
         request,
         analysis,
@@ -2606,6 +2625,25 @@ def _latency_constrained_fusion_panel(
         if initial_known and direct_latency is not None
         else None
     )
+    initial_p95_multiplier = (
+        initial_p95_latency / max(1.0, float(direct_p95_latency))
+        if initial_p95_known and direct_p95_latency is not None
+        else None
+    )
+    try:
+        max_latency_ms = max(1, int(budget.get("max_latency_ms") or 1))
+    except (TypeError, ValueError):
+        max_latency_ms = 1
+    initial_p95_guard_blocked = bool(
+        initial_p95_known
+        and (
+            initial_p95_latency > max_latency_ms
+            or (
+                initial_p95_multiplier is not None
+                and initial_p95_multiplier > FUSION_LATENCY_MULTIPLIER_GUARD
+            )
+        )
+    )
     receipt: dict[str, Any] = {
         "schema": "axio_fusion_api.latency_constrained_panel.v1",
         "enabled": request.public_model != "axio-fast",
@@ -2618,6 +2656,9 @@ def _latency_constrained_fusion_panel(
         "direct_profile_latency_ms": round(float(direct_latency), 3)
         if direct_latency is not None
         else None,
+        "direct_profile_p95_latency_ms": round(float(direct_p95_latency), 3)
+        if direct_p95_latency is not None
+        else None,
         "initial_latency_known": bool(initial_known and direct_latency is not None),
         "initial_estimated_latency_ms": round(float(initial_latency), 3)
         if initial_known
@@ -2625,12 +2666,28 @@ def _latency_constrained_fusion_panel(
         "initial_latency_multiplier_vs_direct": round(float(initial_multiplier), 4)
         if initial_multiplier is not None
         else None,
+        "initial_p95_latency_known": bool(initial_p95_known and direct_p95_latency is not None),
+        "initial_estimated_p95_latency_ms": round(float(initial_p95_latency), 3)
+        if initial_p95_known
+        else None,
+        "initial_p95_latency_multiplier_vs_direct": round(float(initial_p95_multiplier), 4)
+        if initial_p95_multiplier is not None
+        else None,
+        "initial_p95_latency_guard_blocked": initial_p95_guard_blocked,
         "optimized_estimated_latency_ms": round(float(initial_latency), 3)
         if initial_known
         else None,
         "optimized_latency_multiplier_vs_direct": round(float(initial_multiplier), 4)
         if initial_multiplier is not None
         else None,
+        "optimized_estimated_p95_latency_ms": round(float(initial_p95_latency), 3)
+        if initial_p95_known
+        else None,
+        "optimized_p95_latency_multiplier_vs_direct": round(float(initial_p95_multiplier), 4)
+        if initial_p95_multiplier is not None
+        else None,
+        "optimized_p95_latency_guard_blocked": initial_p95_guard_blocked,
+        "p95_latency_optimization_triggered": False,
         "initial_panel_size": len(selected),
         "optimized_panel_size": len(selected),
         "initial_panel_provider_count": len({profile.provider for profile in selected}),
@@ -2683,6 +2740,7 @@ def _latency_constrained_fusion_panel(
         or (
             len(selected) >= 2
             and initial_multiplier <= FUSION_LATENCY_MULTIPLIER_GUARD
+            and not initial_p95_guard_blocked
         )
         or (len(selected) < 2 and not underfilled_panel_search)
     ):
@@ -2780,9 +2838,35 @@ def _latency_constrained_fusion_panel(
             planned_fusion_roles=roles,
             stage_profile_pool=effective_stage_profile_pool,
         )
+        p95_latency, p95_known, _p95_execution = _estimated_fusion_execution_latency_p95_ms(
+            panel,
+            roles,
+            max_parallel=max(1, int(budget.get("max_parallel_experts") or 1)),
+            profile_pool=effective_stage_profile_pool,
+        )
+        p95_multiplier = (
+            p95_latency / max(1.0, float(direct_p95_latency))
+            if p95_known and direct_p95_latency is not None
+            else None
+        )
+        p95_guard_blocked = bool(
+            p95_known
+            and (
+                p95_latency > max_latency_ms
+                or (
+                    p95_multiplier is not None
+                    and p95_multiplier > FUSION_LATENCY_MULTIPLIER_GUARD
+                )
+            )
+        )
         return multiplier, known, roles, quality, {
             "latency_ms": latency,
             "provider_count": len({profile.provider for profile in panel}),
+            "p50_deadline_blocked": bool(known and latency > max_latency_ms),
+            "p95_latency_ms": p95_latency if p95_known else None,
+            "p95_known": bool(p95_known and direct_p95_latency is not None),
+            "p95_multiplier": p95_multiplier,
+            "p95_guard_blocked": p95_guard_blocked,
         }
 
     evaluations: list[tuple[tuple[ModelProfile, ...], float, list[dict[str, Any]], dict[str, Any], dict[str, Any]]] = []
@@ -2863,6 +2947,8 @@ def _latency_constrained_fusion_panel(
             row
             for row in evaluations
             if row[1] <= FUSION_LATENCY_MULTIPLIER_GUARD
+            and not row[4].get("p50_deadline_blocked")
+            and not row[4].get("p95_guard_blocked")
             and float(row[3].get("fusion_expected_quality") or 0.0) >= quality_floor
         ]
         if feasible:
@@ -2895,6 +2981,18 @@ def _latency_constrained_fusion_panel(
             "reason": "bounded_candidate_panel_meets_latency_guard",
             "optimized_estimated_latency_ms": round(float(meta["latency_ms"]), 3),
             "optimized_latency_multiplier_vs_direct": round(float(multiplier), 4),
+            "optimized_estimated_p95_latency_ms": (
+                round(float(meta["p95_latency_ms"]), 3)
+                if meta.get("p95_latency_ms") is not None
+                else None
+            ),
+            "optimized_p95_latency_multiplier_vs_direct": (
+                round(float(meta["p95_multiplier"]), 4)
+                if meta.get("p95_multiplier") is not None
+                else None
+            ),
+            "optimized_p95_latency_guard_blocked": bool(meta.get("p95_guard_blocked")),
+            "p95_latency_optimization_triggered": initial_p95_guard_blocked,
             "optimized_panel_size": len(panel),
             "optimized_panel_provider_count": int(meta["provider_count"]),
             "optimized_fusion_expected_quality": quality.get("fusion_expected_quality"),
@@ -3858,7 +3956,13 @@ def _fusion_admission(
     # route.  Once the local shape is feasible, however, its role gate is hard.
     if local_consensus_plan.get("feasible") is True:
         blocked_reasons.extend(local_role_blockers)
-    if len(selected) < 2:
+    local_consensus_candidate_count = _safe_nonnegative_int(
+        local_consensus_plan.get("panel_size")
+    )
+    if len(selected) < 2 and not (
+        local_consensus_plan.get("feasible") is True
+        and local_consensus_candidate_count >= 2
+    ):
         blocked_reasons.append("insufficient_independent_models")
     if bool(initial_fusion_call_plan.get("blocked_by_call_budget")) or (
         initial_fusion_call_plan.get("call_budget_meets_complete_floor") is False
@@ -3919,7 +4023,16 @@ def _fusion_admission(
         local_consensus_plan.get("feasible")
         and local_provider_blocked_reasons
         and not local_disallowed_reasons
-        and not bool(budget.get("caller_max_total_model_calls_explicit"))
+        and (
+            not bool(budget.get("caller_max_total_model_calls_explicit"))
+            or int(budget.get("max_total_model_calls") or 0)
+            >= max(
+                _safe_nonnegative_int(local_consensus_plan.get("panel_size")) + 2,
+                _safe_nonnegative_int(
+                    initial_fusion_call_plan.get("minimum_complete_fusion_call_count")
+                ),
+            )
+        )
         and request.public_model in {"axio-terra", "axio-pro"}
     )
     finalization_mode = "local_consensus" if local_can_replace_provider_plan else (
@@ -5932,16 +6045,39 @@ def _latency_optimize_stage_profiles(
     budget: Mapping[str, Any],
     stage_profile_pool: Sequence[ModelProfile] | None = None,
 ) -> tuple[ModelProfile, ModelProfile, dict[str, Any]]:
-    """Use faster qualified mandatory-stage profiles only when the guard needs it."""
+    """Use faster qualified stage profiles for both p50 and p95 guard repairs."""
 
     direct_profile = direct_baseline_profile or primary_profile
     direct_latency = direct_profile.p50_latency_ms
     expert_profiles = _planned_expert_profiles(expert_roles, selected)
+    expert_role_profiles = _assigned_role_profile_pairs(
+        expert_roles,
+        selected,
+        role_names=set(_FUSION_EXPERT_ROLE_NAMES),
+    )
     current_stage_latencies = [judge.p50_latency_ms, synthesizer.p50_latency_ms]
     known = (
         direct_latency is not None
         and all(profile.p50_latency_ms is not None for profile in expert_profiles)
         and all(value is not None for value in current_stage_latencies)
+    )
+    direct_p95_latency = _role_latency_ms(
+        direct_profile,
+        "primary_solver",
+        "p95_latency_ms",
+    )
+    current_p95_expert_latencies = [
+        _role_latency_ms(profile, role, "p95_latency_ms")
+        for role, profile in expert_role_profiles
+    ]
+    current_p95_stage_latencies = [
+        _role_latency_ms(judge, "judge", "p95_latency_ms"),
+        _role_latency_ms(synthesizer, "synthesizer", "p95_latency_ms"),
+    ]
+    p95_known = bool(
+        direct_p95_latency is not None
+        and all(value is not None for value in current_p95_expert_latencies)
+        and all(value is not None for value in current_p95_stage_latencies)
     )
     base_receipt = {
         "schema": "axio_fusion_api.stage_latency_optimization.v1",
@@ -5949,7 +6085,15 @@ def _latency_optimize_stage_profiles(
         "applied": False,
         "reason": "unknown_latency_telemetry" if not known else "current_plan_within_operational_latency_target",
         "direct_profile_latency_ms": round(float(direct_latency), 3) if direct_latency is not None else None,
+        "direct_profile_p95_latency_ms": round(float(direct_p95_latency), 3) if direct_p95_latency is not None else None,
         "expert_phase_latency_ms": None,
+        "p95_latency_known": p95_known,
+        "original_p95_expert_phase_latency_ms": None,
+        "original_p95_latency_ms": None,
+        "optimized_p95_latency_ms": None,
+        "original_p95_latency_multiplier_vs_direct": None,
+        "optimized_p95_latency_multiplier_vs_direct": None,
+        "p95_guard_triggered": False,
         "original_judge_profile_sha256": sha256_text(judge.profile_id),
         "original_synthesizer_profile_sha256": sha256_text(synthesizer.profile_id),
         "selected_judge_profile_sha256": sha256_text(judge.profile_id),
@@ -5967,17 +6111,73 @@ def _latency_optimize_stage_profiles(
         max_parallel = max(1, int(budget.get("max_parallel_experts") or 1))
     except (TypeError, ValueError):
         max_parallel = 1
+    try:
+        max_latency_ms = max(1, int(budget.get("max_latency_ms") or 1))
+    except (TypeError, ValueError):
+        max_latency_ms = 1
     expert_phase = _parallel_expert_phase_latency_ms(
         [float(profile.p50_latency_ms) for profile in expert_profiles],
         max_parallel=max_parallel,
+        profiles=expert_profiles,
     )
     current_total = expert_phase + sum(float(value) for value in current_stage_latencies)
     direct = max(1.0, float(direct_latency))
     current_multiplier = current_total / direct
-    base_receipt["expert_phase_latency_ms"] = round(expert_phase, 3)
-    base_receipt["estimated_initial_latency_ms"] = round(current_total, 3)
-    base_receipt["estimated_latency_multiplier_vs_direct"] = round(current_multiplier, 4)
-    if current_multiplier <= FUSION_OPERATIONAL_LATENCY_TARGET:
+    current_p95_expert_phase = (
+        _parallel_expert_phase_latency_ms(
+            [float(value) for value in current_p95_expert_latencies],
+            max_parallel=max_parallel,
+            profiles=[profile for _, profile in expert_role_profiles],
+        )
+        if p95_known
+        else None
+    )
+    current_p95_total = (
+        float(current_p95_expert_phase) + sum(float(value) for value in current_p95_stage_latencies)
+        if p95_known and current_p95_expert_phase is not None
+        else None
+    )
+    current_p95_multiplier = (
+        current_p95_total / max(1.0, float(direct_p95_latency))
+        if current_p95_total is not None and direct_p95_latency is not None
+        else None
+    )
+    p50_guard_triggered = current_multiplier > FUSION_OPERATIONAL_LATENCY_TARGET
+    p95_guard_triggered = bool(
+        p95_known
+        and current_p95_total is not None
+        and (
+            current_p95_total > max_latency_ms
+            or (
+                current_p95_multiplier is not None
+                and current_p95_multiplier > FUSION_LATENCY_MULTIPLIER_GUARD
+            )
+        )
+    )
+    base_receipt.update(
+        {
+            "expert_phase_latency_ms": round(expert_phase, 3),
+            "estimated_initial_latency_ms": round(current_total, 3),
+            "estimated_latency_multiplier_vs_direct": round(current_multiplier, 4),
+            "original_p95_expert_phase_latency_ms": round(float(current_p95_expert_phase), 3)
+            if current_p95_expert_phase is not None
+            else None,
+            "original_p95_latency_ms": round(float(current_p95_total), 3)
+            if current_p95_total is not None
+            else None,
+            "optimized_p95_latency_ms": round(float(current_p95_total), 3)
+            if current_p95_total is not None
+            else None,
+            "original_p95_latency_multiplier_vs_direct": round(float(current_p95_multiplier), 4)
+            if current_p95_multiplier is not None
+            else None,
+            "optimized_p95_latency_multiplier_vs_direct": round(float(current_p95_multiplier), 4)
+            if current_p95_multiplier is not None
+            else None,
+            "p95_guard_triggered": p95_guard_triggered,
+        }
+    )
+    if not p50_guard_triggered and not p95_guard_triggered:
         return judge, synthesizer, base_receipt
 
     stage_candidates = _merge_stage_profile_pool(selected, stage_profile_pool)
@@ -6016,27 +6216,87 @@ def _latency_optimize_stage_profiles(
     if not eligible_judges or not eligible_synthesizers:
         base_receipt["reason"] = "no_qualified_stage_profile_pair"
         return judge, synthesizer, base_receipt
-    faster_judge = min(
-        eligible_judges,
-        key=lambda profile: (
-            float(profile.p50_latency_ms or 1500),
-            -profile.capability("critique") - profile.capability("structured_output"),
-            profile.profile_id,
-        ),
-    )
-    faster_synthesizer = min(
-        eligible_synthesizers,
-        key=lambda profile: (
-            float(profile.p50_latency_ms or 1500),
-            -profile.capability("structured_output") - profile.capability("long_context"),
-            profile.profile_id,
-        ),
-    )
-    optimized_total = expert_phase + float(faster_judge.p50_latency_ms) + float(faster_synthesizer.p50_latency_ms)
-    optimized_multiplier = optimized_total / direct
-    if optimized_total >= current_total or optimized_multiplier > FUSION_LATENCY_MULTIPLIER_GUARD:
+
+    stage_pairs: list[tuple[ModelProfile, ModelProfile, float, float | None]] = []
+    for candidate_judge in eligible_judges:
+        for candidate_synthesizer in eligible_synthesizers:
+            optimized_total = (
+                expert_phase
+                + float(candidate_judge.p50_latency_ms)
+                + float(candidate_synthesizer.p50_latency_ms)
+            )
+            optimized_multiplier = optimized_total / direct
+            if (
+                optimized_total >= current_total
+                or optimized_total > max_latency_ms
+                or optimized_multiplier > FUSION_LATENCY_MULTIPLIER_GUARD
+            ):
+                continue
+            optimized_p95_total: float | None = None
+            if p95_known:
+                candidate_p95_judge = _role_latency_ms(
+                    candidate_judge,
+                    "judge",
+                    "p95_latency_ms",
+                )
+                candidate_p95_synthesizer = _role_latency_ms(
+                    candidate_synthesizer,
+                    "synthesizer",
+                    "p95_latency_ms",
+                )
+                if (
+                    candidate_p95_judge is None
+                    or candidate_p95_synthesizer is None
+                    or current_p95_expert_phase is None
+                ):
+                    continue
+                optimized_p95_total = (
+                    float(current_p95_expert_phase)
+                    + float(candidate_p95_judge)
+                    + float(candidate_p95_synthesizer)
+                )
+                optimized_p95_multiplier = optimized_p95_total / max(
+                    1.0,
+                    float(direct_p95_latency or 0.0),
+                )
+                if (
+                    optimized_p95_total > max_latency_ms
+                    or optimized_p95_multiplier > FUSION_LATENCY_MULTIPLIER_GUARD
+                    or (
+                        p95_guard_triggered
+                        and current_p95_total is not None
+                        and optimized_p95_total >= current_p95_total
+                    )
+                ):
+                    continue
+            stage_pairs.append(
+                (
+                    candidate_judge,
+                    candidate_synthesizer,
+                    optimized_total,
+                    optimized_p95_total,
+                )
+            )
+    if not stage_pairs:
         base_receipt["reason"] = "no_faster_stage_pair_meets_latency_guard"
         return judge, synthesizer, base_receipt
+    faster_judge, faster_synthesizer, optimized_total, optimized_p95_total = min(
+        stage_pairs,
+        key=lambda row: (
+            float(row[3]) if p95_guard_triggered and row[3] is not None else float(row[2]),
+            float(row[2]),
+            -row[0].capability("critique") - row[0].capability("structured_output"),
+            -row[1].capability("structured_output") - row[1].capability("long_context"),
+            row[0].profile_id,
+            row[1].profile_id,
+        ),
+    )
+    optimized_multiplier = optimized_total / direct
+    optimized_p95_multiplier = (
+        optimized_p95_total / max(1.0, float(direct_p95_latency))
+        if optimized_p95_total is not None and direct_p95_latency is not None
+        else None
+    )
     base_receipt.update(
         {
             "applied": True,
@@ -6045,6 +6305,13 @@ def _latency_optimize_stage_profiles(
             "selected_synthesizer_profile_sha256": sha256_text(faster_synthesizer.profile_id),
             "estimated_initial_latency_ms": round(optimized_total, 3),
             "estimated_latency_multiplier_vs_direct": round(optimized_multiplier, 4),
+            "optimized_p95_latency_ms": round(float(optimized_p95_total), 3)
+            if optimized_p95_total is not None
+            else None,
+            "optimized_p95_latency_multiplier_vs_direct": round(float(optimized_p95_multiplier), 4)
+            if optimized_p95_multiplier is not None
+            else None,
+            "optimization_basis": "p95" if p95_guard_triggered else "p50",
         }
     )
     return faster_judge, faster_synthesizer, base_receipt
