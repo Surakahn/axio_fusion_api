@@ -779,6 +779,86 @@ def _configure_fusion_panel_phase(
     return receipt
 
 
+def _runtime_fusion_latency_budget(
+    route_plan: Mapping[str, Any],
+    requested_max_latency_ms: Any,
+) -> tuple[int, dict[str, Any]]:
+    """Apply the advertised Fusion-vs-direct latency guard at execution time."""
+
+    requested = max(1, _safe_int(requested_max_latency_ms, default=60_000))
+    budget = route_plan.get("budget") if isinstance(route_plan.get("budget"), Mapping) else {}
+    finalization_mode = str(
+        budget.get("fusion_finalization_mode")
+        or route_plan.get("fusion_finalization_mode")
+        or "direct"
+    )
+    guard = (
+        route_plan.get("runtime_guards", {}).get("latency_multiplier_guard")
+        if isinstance(route_plan.get("runtime_guards"), Mapping)
+        and isinstance(route_plan.get("runtime_guards", {}).get("latency_multiplier_guard"), Mapping)
+        else {}
+    )
+    receipt: dict[str, Any] = {
+        "schema": "axio_fusion_api.runtime_fusion_latency_budget.v1",
+        "enabled": False,
+        "applied": False,
+        "requested_max_latency_ms": requested,
+        "effective_max_latency_ms": requested,
+        "single_model_baseline_p95_ms": None,
+        "target_multiplier": None,
+        "guard_ceiling_ms": None,
+        "reason": "non_provider_fusion_route",
+        "raw_profile_ids_persisted": False,
+        "raw_model_names_persisted": False,
+        "raw_prompts_persisted": False,
+        "secrets_persisted": False,
+    }
+    if finalization_mode != "provider_judge_synthesis" or guard.get("enabled") is not True:
+        return requested, receipt
+    direct_candidate = (
+        route_plan.get("fusion_admission", {}).get("direct_candidate")
+        if isinstance(route_plan.get("fusion_admission"), Mapping)
+        and isinstance(route_plan.get("fusion_admission", {}).get("direct_candidate"), Mapping)
+        else {}
+    )
+    baseline = _safe_float(
+        direct_candidate.get("p95_estimated_latency_ms"),
+        default=0.0,
+    )
+    if baseline <= 0.0:
+        baseline = _safe_float(direct_candidate.get("estimated_latency_ms"), default=0.0)
+    try:
+        target_multiplier = float(guard.get("target_max_vs_single_model") or 3.0)
+    except (TypeError, ValueError):
+        target_multiplier = 3.0
+    target_multiplier = max(1.0, min(3.0, target_multiplier))
+    receipt.update(
+        {
+            "enabled": True,
+            "single_model_baseline_p95_ms": round(max(0.0, baseline), 3),
+            "target_multiplier": round(target_multiplier, 4),
+            "reason": "single_model_baseline_unavailable",
+        }
+    )
+    if baseline <= 0.0:
+        return requested, receipt
+    # Keep a small transport floor so an unusually optimistic probe does not
+    # create a sub-second Fusion deadline that cannot carry one real stream.
+    ceiling = max(3_000, int(baseline * target_multiplier))
+    effective = min(requested, ceiling)
+    receipt.update(
+        {
+            "guard_ceiling_ms": ceiling,
+            "effective_max_latency_ms": effective,
+            "applied": effective < requested,
+            "reason": "three_x_single_model_latency_guard"
+            if effective < requested
+            else "within_three_x_single_model_latency_guard",
+        }
+    )
+    return effective, receipt
+
+
 def _minimum_viable_fusion_candidate_count(route_plan: Mapping[str, Any]) -> int:
     """Return the smallest panel that can produce a degraded answer.
 
@@ -2604,8 +2684,19 @@ class FusionEngine:
             ),
         )
         cost_budget = _CostBudget(budget.get("max_cost_usd") or guards.get("max_cost_usd") or request.policy.max_cost_usd or 0.0)
+        requested_max_latency_ms = (
+            budget.get("max_latency_ms")
+            or guards.get("max_latency_ms")
+            or request.policy.max_latency_ms
+            or 60_000
+        )
+        effective_max_latency_ms, latency_budget_receipt = _runtime_fusion_latency_budget(
+            route_plan,
+            requested_max_latency_ms,
+        )
+        route_plan["runtime_fusion_latency_budget"] = latency_budget_receipt
         deadline_budget = _DeadlineBudget(
-            budget.get("max_latency_ms") or guards.get("max_latency_ms") or request.policy.max_latency_ms or 60_000,
+            effective_max_latency_ms,
             mandatory_stage_reservations_ms=_mandatory_fusion_stage_deadline_reservations(route_plan),
         )
         prompt_budget = _PromptBudgetLedger()
@@ -3746,6 +3837,17 @@ class FusionEngine:
                 return None
             if deadline_budget is not None and deadline_budget.expired:
                 return None
+            # A provider attempt that already consumed its hard stream
+            # deadline cannot be retried inside the same candidate branch
+            # without turning the panel into an unbounded serial cascade.
+            # Cross-model panel repair and the mandatory control-stage
+            # failover policy remain available when their own budgets admit
+            # them.
+            if str(reason or "") in {
+                "fusion_request_deadline_exhausted",
+                "provider_response_timeout_exceeded_90s",
+            }:
+                return None
             role_routing = (
                 role.get("replica_routing")
                 if isinstance(role.get("replica_routing"), Mapping)
@@ -4235,7 +4337,11 @@ class FusionEngine:
                 raise PublicStreamInterruptedError(
                     client_cancelled=public_stream_observer.cancellation_requested,
                 ) from exc
-            recovered = retry_same_canonical_replica(type(exc).__name__)
+            provider_error_code = _safe_runtime_error_code(
+                exc,
+                deadline_budget=deadline_budget,
+            )
+            recovered = retry_same_canonical_replica(provider_error_code)
             if recovered is not None:
                 return recovered
             return CandidateResult(
@@ -4251,7 +4357,7 @@ class FusionEngine:
                 error_type=type(exc).__name__,
                 task_execution={
                     **dict(task_execution),
-                    "provider_error_code": str(getattr(exc, "error_code", "") or "")[:120],
+                    "provider_error_code": provider_error_code,
                     "provider_http_status": getattr(exc, "http_status", None),
                     "replica_routing": {
                         **dict(replica_routing),
@@ -4266,7 +4372,7 @@ class FusionEngine:
                         "failover_used": False,
                         "successful_profile_sha256": "",
                         "terminal_reason": str(
-                            getattr(exc, "error_code", "") or type(exc).__name__
+                            provider_error_code
                         )[:120],
                     },
                 },
@@ -4784,7 +4890,10 @@ class FusionEngine:
                         attempt_scope=attempt_scope,
                         status="failed",
                         reason=type(exc).__name__,
-                        error_code=str(getattr(exc, "error_code", "") or ""),
+                        error_code=_safe_runtime_error_code(
+                            exc,
+                            deadline_budget=deadline_budget,
+                        ),
                         http_status=getattr(exc, "http_status", None),
                     )
                 )
@@ -10361,6 +10470,30 @@ def _judge_provider_call_count(judge_result: Mapping[str, Any]) -> int:
         return max(0, int(value))
     except (TypeError, ValueError):
         return int(bool(judge_result.get("judge_provider_call") or judge_result.get("judge_provider_call_attempted")))
+
+
+def _safe_runtime_error_code(
+    exc: BaseException,
+    *,
+    deadline_budget: _DeadlineBudget | None = None,
+) -> str:
+    """Classify a provider-boundary exception without retaining its message."""
+
+    declared = str(getattr(exc, "error_code", "") or "").strip()
+    if declared:
+        return declared[:120]
+    if deadline_budget is not None and deadline_budget.expired:
+        return "fusion_request_deadline_exhausted"
+    exception_name = type(exc).__name__
+    if exception_name == "ValueError":
+        return "provider_stage_value_error"
+    if exception_name in {
+        "TimeoutError",
+        "URLError",
+        "OSError",
+    }:
+        return exception_name
+    return exception_name[:120] or "provider_request_failed"
 
 
 def _stage_failure_error_type(routing: Mapping[str, Any]) -> str:

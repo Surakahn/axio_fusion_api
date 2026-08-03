@@ -5634,6 +5634,21 @@ def _open_stream_json_request(
                 else type(exc).__name__
             ),
         ) from exc
+    except ValueError as exc:
+        # A watchdog-closing HTTPResponse can raise a bare ValueError from
+        # its context-manager exit after the stream reader has already been
+        # interrupted. Keep that stdlib transport artifact inside the
+        # provider error contract instead of letting orchestration treat it
+        # as an unbounded application exception.
+        error_code = (
+            timeout_error_code
+            if deadline_expired.is_set() or _deadline_exhausted(deadline_at)
+            else "provider_stream_transport_error"
+        )
+        raise ProviderExecutionError(
+            _safe_provider_error_message(error_code),
+            error_code=error_code,
+        ) from exc
     if not accumulator.saw_payload:
         raise ProviderExecutionError(
             "provider stream contained no usable event",

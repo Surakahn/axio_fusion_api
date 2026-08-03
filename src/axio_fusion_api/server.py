@@ -2442,6 +2442,8 @@ def build_fusion_deliberation_live_smoke(
                 ],
                 "judge_provider_call_count": row["judge_provider_call_count"],
                 "synthesis_provider_call_count": row["synthesis_provider_call_count"],
+                "judge_stage": row["judge_stage"],
+                "synthesizer_stage": row["synthesizer_stage"],
                 "early_exit_triggered": row["early_exit_triggered"],
                 "provider_call_count": row["provider_call_count"],
                 "answer_sha256": row["answer_sha256"],
@@ -2627,6 +2629,18 @@ def _fusion_deliberation_live_smoke_row(
         if isinstance(synthesis_compression.get("synthesizer_replica_routing"), Mapping)
         else {}
     )
+    judge_result = (
+        trace.get("judge_result")
+        if isinstance(trace.get("judge_result"), Mapping)
+        else {}
+    )
+    judge_replica_routing = (
+        judge_result.get("judge_replica_routing")
+        if isinstance(judge_result.get("judge_replica_routing"), Mapping)
+        else {}
+    )
+    judge_stage = _safe_stage_attempt_summary(judge_replica_routing)
+    synthesizer_stage = _safe_stage_attempt_summary(synthesis_replica_routing)
     synthesis_attempt_receipts = [
         row
         for row in synthesis_replica_routing.get("stage_attempt_receipts", [])
@@ -2710,6 +2724,12 @@ def _fusion_deliberation_live_smoke_row(
     if provider_call_count > max(1, int(max_total_model_calls)):
         reason_codes.append("provider_call_budget_exceeded")
     public_route = public_route_summary(route_plan)
+    # Keep the live operator probe actionable without widening its privacy
+    # boundary.  The regular public error projection already reduces candidate
+    # receipts to allowlisted error classes/codes, hashes, and bounded counts;
+    # reuse that exact projection here so a successful-but-degraded Fusion run
+    # exposes why a panel or control stage did not complete.
+    error_trace_summary = _safe_error_trace_summary(trace)
     return {
         "schema": "axio_fusion_api.fusion_deliberation_live_smoke_row.v1",
         "public_model": str(model),
@@ -2758,6 +2778,8 @@ def _fusion_deliberation_live_smoke_row(
         "synthesis_http_status_counts": dict(
             sorted(synthesis_http_status_counts.items())
         ),
+        "judge_stage": judge_stage,
+        "synthesizer_stage": synthesizer_stage,
         "synthesis_cross_model_failover_attempted": bool(
             synthesis_replica_routing.get("cross_model_failover_attempted") is True
         ),
@@ -2780,6 +2802,7 @@ def _fusion_deliberation_live_smoke_row(
         "answer_sha256": sha256_text(str(response.text or "")),
         "answer_char_count": len(str(response.text or "")),
         "route_summary_digest_sha256": sha256_text(stable_json(_api_surface_route_digest_input(public_route))),
+        "error_trace_summary": error_trace_summary,
         "error_code": "",
         "reason_codes": sorted(set(reason_codes)),
         "raw_response_text_persisted": False,
@@ -2818,6 +2841,8 @@ def _fusion_deliberation_live_smoke_failure_row(
         "synthesis_stage_skipped_count": 0,
         "synthesis_stage_attempt_status_counts": {},
         "synthesis_http_status_counts": {},
+        "judge_stage": _safe_stage_attempt_summary({}),
+        "synthesizer_stage": _safe_stage_attempt_summary({}),
         "synthesis_cross_model_failover_attempted": False,
         "synthesis_cross_model_failover_used": False,
         "synthesis_fallback_reservation_admission_attempted": False,
@@ -2826,6 +2851,10 @@ def _fusion_deliberation_live_smoke_failure_row(
         "answer_sha256": "",
         "answer_char_count": 0,
         "route_summary_digest_sha256": "",
+        "error_trace_summary": {
+            "present": False,
+            "raw_trace_persisted": False,
+        },
         "error_code": error_code,
         "reason_codes": ["fusion_execution_failed"],
         "raw_response_text_persisted": False,
@@ -2840,6 +2869,69 @@ def _safe_fusion_smoke_error_code(value: Any) -> str:
     if code and all(character.isalnum() or character in {"_", "-", ":"} for character in code):
         return code
     return "fusion_execution_error"
+
+
+def _safe_stage_attempt_summary(routing: Mapping[str, Any]) -> dict[str, Any]:
+    """Project one internal control-stage receipt into safe bounded counts."""
+
+    attempts = (
+        routing.get("stage_attempt_receipts")
+        if isinstance(routing.get("stage_attempt_receipts"), list)
+        else []
+    )
+    status_counts: dict[str, int] = {}
+    reason_counts: dict[str, int] = {}
+    error_code_counts: dict[str, int] = {}
+    error_class_counts: dict[str, int] = {}
+    http_status_counts: dict[str, int] = {}
+    for attempt in attempts[:24]:
+        if not isinstance(attempt, Mapping):
+            continue
+        status = str(attempt.get("status") or "unknown")[:40]
+        status_counts[status] = status_counts.get(status, 0) + 1
+        reason = str(attempt.get("reason") or "")[:80]
+        if reason and all(
+            character.isalnum() or character in {"_", "-", ":"}
+            for character in reason
+        ):
+            reason_counts[reason] = reason_counts.get(reason, 0) + 1
+        http_status = safe_provider_http_status(attempt.get("http_status"))
+        if http_status is not None:
+            key = str(http_status)
+            http_status_counts[key] = http_status_counts.get(key, 0) + 1
+        safe_code = safe_provider_error_code(attempt.get("error_code"))
+        if safe_code:
+            error_code_counts[safe_code] = error_code_counts.get(safe_code, 0) + 1
+            error_class = safe_provider_error_class(safe_code, http_status)
+            if error_class:
+                error_class_counts[error_class] = error_class_counts.get(error_class, 0) + 1
+    return {
+        "schema": "axio_fusion_api.safe_stage_attempt_summary.v1",
+        "attempt_count": len(attempts[:24]),
+        "status_counts": dict(sorted(status_counts.items())),
+        "reason_counts": dict(sorted(reason_counts.items())),
+        "error_code_counts": dict(sorted(error_code_counts.items())),
+        "error_class_counts": dict(sorted(error_class_counts.items())),
+        "http_status_counts": dict(sorted(http_status_counts.items())),
+        "provider_attempt_count": max(
+            0,
+            _optional_int(routing.get("stage_attempt_count")) or len(attempts[:24]),
+        ),
+        "terminal_reason": (
+            _safe_fusion_smoke_error_code(routing.get("terminal_reason"))
+            if routing.get("terminal_reason")
+            else ""
+        ),
+        "cross_model_failover_attempted": routing.get("cross_model_failover_attempted") is True,
+        "cross_model_failover_used": routing.get("cross_model_failover_used") is True,
+        "same_canonical_retry_admission_count": max(
+            0,
+            _optional_int(routing.get("same_canonical_retry_admission_count")) or 0,
+        ),
+        "raw_stage_output_persisted": False,
+        "raw_provider_identifiers_persisted": False,
+        "secrets_persisted": False,
+    }
 
 
 def _selected_api_surface_models(models: Sequence[str]) -> list[str]:

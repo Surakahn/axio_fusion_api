@@ -27,6 +27,7 @@ from axio_fusion_api.orchestrator import (
     _stage_prompt_deadline_extension_ms,
     _timeout_seconds,
     _timeout_for_role,
+    _runtime_fusion_latency_budget,
 )
 from axio_fusion_api.compat import canonicalize_payload, render_response
 from axio_fusion_api.evaluation import _fusion_provider_env_readiness
@@ -78,6 +79,54 @@ def _profile(index: int, *, critique: float = 0.8, structured: float = 0.84):
             "p50_latency_ms": 120,
         }
     )
+
+
+def test_runtime_fusion_latency_budget_enforces_three_x_direct_p95_guard():
+    route_plan = {
+        "budget": {"fusion_finalization_mode": "provider_judge_synthesis"},
+        "runtime_guards": {
+            "latency_multiplier_guard": {
+                "enabled": True,
+                "target_max_vs_single_model": 3.0,
+            }
+        },
+        "fusion_admission": {
+            "direct_candidate": {
+                "p95_estimated_latency_ms": 15_062,
+            }
+        },
+    }
+
+    effective, receipt = _runtime_fusion_latency_budget(route_plan, 90_000)
+
+    assert effective == 45_186
+    assert receipt["enabled"] is True
+    assert receipt["applied"] is True
+    assert receipt["guard_ceiling_ms"] == 45_186
+    assert receipt["reason"] == "three_x_single_model_latency_guard"
+
+
+def test_runtime_fusion_latency_budget_preserves_tighter_caller_cap():
+    route_plan = {
+        "budget": {"fusion_finalization_mode": "provider_judge_synthesis"},
+        "runtime_guards": {
+            "latency_multiplier_guard": {
+                "enabled": True,
+                "target_max_vs_single_model": 3.0,
+            }
+        },
+        "fusion_admission": {
+            "direct_candidate": {
+                "p95_estimated_latency_ms": 15_062,
+            }
+        },
+    }
+
+    effective, receipt = _runtime_fusion_latency_budget(route_plan, 30_000)
+
+    assert effective == 30_000
+    assert receipt["applied"] is False
+    assert receipt["reason"] == "within_three_x_single_model_latency_guard"
 
 
 def _latency_profile(

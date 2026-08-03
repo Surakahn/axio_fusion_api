@@ -423,6 +423,49 @@ def test_stream_reader_normalizes_watchdog_value_error_as_deadline_timeout():
     assert "closed file" not in str(exc_info.value)
 
 
+def test_stream_reader_normalizes_context_manager_value_error_as_transport_error(monkeypatch):
+    class ClosedAfterReadResponse:
+        headers = {"Content-Type": "text/event-stream"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            del exc_type, exc_value, traceback
+            raise ValueError("I/O operation on closed file")
+
+        def readline(self):
+            if not hasattr(self, "read_once"):
+                self.read_once = True
+                return b'data: {"choices":[{"delta":{"content":"ok"}}]}\n'
+            return b""
+
+    monkeypatch.setattr(
+        provider_module,
+        "_open_provider_url",
+        lambda request, timeout: ClosedAfterReadResponse(),
+    )
+    profile = normalize_profile(
+        {
+            "provider": "context-exit-fixture",
+            "model": "context-exit-model",
+            "api_format": "chat",
+        }
+    )
+
+    with pytest.raises(provider_module.ProviderExecutionError) as exc_info:
+        provider_module._open_stream_json_request(
+            urllib.request.Request("https://context-exit.fixture/v1/chat/completions"),
+            profile=profile,
+            api_format="chat",
+            timeout=1.0,
+            require_streaming=True,
+        )
+
+    assert exc_info.value.error_code == "provider_stream_transport_error"
+    assert "closed file" not in str(exc_info.value)
+
+
 def test_multi_sample_stream_probe_aggregates_independent_receipts(monkeypatch) -> None:
     profile = normalize_profile(
         {

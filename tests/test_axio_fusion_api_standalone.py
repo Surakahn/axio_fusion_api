@@ -6507,6 +6507,80 @@ def test_standalone_fusion_deliberation_smoke_classifies_synthesizer_http_failur
     assert row["raw_provider_outputs_persisted"] is False
 
 
+def test_standalone_fusion_deliberation_smoke_projects_safe_control_stage_diagnostics() -> None:
+    request = canonicalize_payload(
+        {
+            "model": "axio-terra",
+            "messages": [{"role": "user", "content": "SECRET_STAGE_DIAGNOSTIC_PROMPT"}],
+        }
+    )
+    response = FusionResponse(
+        text="safe degraded answer",
+        request=request,
+        route_plan={"fusion_admission": {"activated": True}},
+        trace={
+            "runtime_fusion_stage_outcome": {
+                "completed_candidate_count": 2,
+                "complete_admitted_fusion_finalized": False,
+                "hermes_process_contract_required": False,
+                "judge_output_accepted": False,
+                "synthesis_output_accepted": False,
+            },
+            "judge_result": {
+                "judge_parse_failed": False,
+                "judge_replica_routing": {
+                    "stage_attempt_count": 2,
+                    "stage_attempt_receipts": [
+                        {
+                            "status": "failed",
+                            "reason": "TimeoutError",
+                            "error_code": "provider_request_timeout",
+                        },
+                        {
+                            "status": "failed",
+                            "reason": "provider_capacity_fixture",
+                            "http_status": 529,
+                        },
+                    ],
+                    "terminal_reason": "same_canonical_model_replica_failed",
+                },
+            },
+            "synthesis_compression": {
+                "synthesizer_replica_routing": {
+                    "stage_attempt_count": 1,
+                    "stage_attempt_receipts": [
+                        {"status": "skipped", "reason": "max_total_model_calls_exhausted"}
+                    ],
+                    "terminal_reason": "max_total_model_calls_exhausted",
+                }
+            },
+            "candidate_receipts": [],
+            "judge_provider_call_count": 2,
+            "synthesis_provider_call_count": 1,
+            "provider_call_count": 5,
+        },
+        provider_calls_recorded=True,
+    )
+
+    row = server_module._fusion_deliberation_live_smoke_row(
+        model="axio-terra",
+        response=response,
+        end_to_end_latency_ms=50.0,
+        max_total_model_calls=6,
+    )
+
+    assert row["judge_stage"]["status_counts"] == {"failed": 2}
+    assert row["judge_stage"]["error_code_counts"] == {
+        "provider_request_timeout": 1,
+    }
+    assert row["judge_stage"]["http_status_counts"] == {"529": 1}
+    assert row["synthesizer_stage"]["status_counts"] == {"skipped": 1}
+    serialized = json.dumps(row, ensure_ascii=False)
+    assert "SECRET_STAGE_DIAGNOSTIC_PROMPT" not in serialized
+    assert row["error_trace_summary"]["raw_prompt_persisted"] is False
+    assert row["error_trace_summary"]["raw_provider_outputs_persisted"] is False
+
+
 def test_standalone_fusion_deliberation_smoke_rejects_planned_but_unfinished_local_consensus() -> None:
     request = canonicalize_payload(
         {

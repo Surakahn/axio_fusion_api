@@ -533,6 +533,8 @@ SAFE_PROVIDER_ERROR_CODES = frozenset(
         "provider_request_failed",
         "provider_request_timeout",
         "provider_response_timeout_exceeded_90s",
+        "provider_stage_value_error",
+        "provider_stream_transport_error",
         "proxy_unavailable",
         "rate_limit_cooldown_exceeded",
         "stream_framing_unverified",
@@ -594,8 +596,16 @@ def safe_provider_error_class(
         "provider_response_timeout_exceeded_90s",
     }:
         return "timeout"
-    if code in {"URLError", "OSError", "proxy_unavailable", "network_mode_invalid"}:
+    if code in {
+        "OSError",
+        "URLError",
+        "provider_stream_transport_error",
+        "proxy_unavailable",
+        "network_mode_invalid",
+    }:
         return "transport_or_network_policy"
+    if code == "provider_stage_value_error":
+        return "provider_runtime_error"
     if code in {
         "invalid_json",
         "invalid_stream_json",
