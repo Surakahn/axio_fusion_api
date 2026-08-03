@@ -2389,6 +2389,17 @@ class FusionEngine:
         )
         if finalization_mode != "provider_judge_synthesis" or contract.get("required") is not True:
             return receipt
+        # An explicit caller call ceiling may admit the complete initial
+        # expert/Judge/Synthesizer shape while deliberately leaving no
+        # optional fallback allowance. Do not reserve cross-model control
+        # failover slots in that case: those dynamic holds would consume
+        # capacity and deadline headroom needed by the initial shape.
+        if (
+            "fallback_call_allowance" in budget
+            and _safe_int(budget.get("fallback_call_allowance"), default=0) <= 0
+        ):
+            receipt["reason"] = "fallback_call_allowance_exhausted"
+            return receipt
 
         requested: dict[str, int] = {}
         roles = route_plan.get("roles") if isinstance(route_plan.get("roles"), list) else []

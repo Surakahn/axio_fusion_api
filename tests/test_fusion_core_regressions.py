@@ -129,6 +129,45 @@ def test_runtime_fusion_latency_budget_preserves_tighter_caller_cap():
     assert receipt["reason"] == "within_three_x_single_model_latency_guard"
 
 
+def test_initial_stage_failover_does_not_consume_explicitly_reserved_initial_shape():
+    engine = FusionEngine([])
+    route_plan = {
+        "budget": {
+            "fusion_finalization_mode": "provider_judge_synthesis",
+            "fallback_call_allowance": 0,
+            "initial_fusion_call_plan": {"complete_fusion_feasible": True},
+        },
+        "judge_contract": {
+            "required": True,
+            "provider_stage_calls_reserved": True,
+        },
+        "roles": [
+            {"role": "judge", "model": {}},
+            {"role": "synthesizer", "model": {}},
+        ],
+    }
+    call_budget = _CallBudget(
+        6,
+        mandatory_stage_reservations={"judge": 1, "synthesizer": 1},
+    )
+    deadline_budget = _DeadlineBudget(
+        45_000,
+        mandatory_stage_reservations_ms={"judge": 8_000, "synthesizer": 12_000},
+    )
+
+    receipt = engine._reserve_initial_stage_failover_deadline_headroom(
+        route_plan,
+        deadline_budget,
+        call_budget,
+    )
+
+    assert receipt["reserved"] is False
+    assert receipt["call_reserved"] is False
+    assert receipt["reason"] == "fallback_call_allowance_exhausted"
+    assert call_budget.safe_dict()["reserved_mandatory_stage_call_count"] == 2
+    assert deadline_budget.safe_dict()["mandatory_stage_deadline_pending_ms"] == 20_000
+
+
 def _latency_profile(
     name: str,
     latency: int,

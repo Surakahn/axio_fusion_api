@@ -6581,6 +6581,29 @@ def test_standalone_fusion_deliberation_smoke_projects_safe_control_stage_diagno
     assert row["error_trace_summary"]["raw_provider_outputs_persisted"] is False
 
 
+def test_standalone_fusion_deliberation_failure_row_matches_digest_contract() -> None:
+    row = server_module._fusion_deliberation_live_smoke_failure_row(
+        model="axio-pro",
+        error_code="provider_execution_failed",
+        end_to_end_latency_ms=1234.5,
+    )
+
+    required_digest_fields = {
+        "judge_output_accepted",
+        "synthesis_output_accepted",
+        "hermes_process_contract_required",
+        "hermes_process_contract_completed",
+        "hermes_aggregator_output_accepted",
+        "judge_stage",
+        "synthesizer_stage",
+    }
+    assert required_digest_fields <= row.keys()
+    assert row["deliberation_smoke_passed"] is False
+    assert row["error_code"] == "provider_execution_failed"
+    assert row["judge_output_accepted"] is False
+    assert row["synthesis_output_accepted"] is False
+
+
 def test_standalone_fusion_deliberation_smoke_rejects_planned_but_unfinished_local_consensus() -> None:
     request = canonicalize_payload(
         {
