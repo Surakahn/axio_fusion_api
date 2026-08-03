@@ -716,6 +716,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Freeze the per-unit provider-call concurrency for this plan (1-16).",
     )
     screening_plan.add_argument(
+        "--fail-fast-transport-failure-gate",
+        action="store_true",
+        help=(
+            "Pre-register serial fail-fast when the transport failure rate "
+            "can no longer pass; unattempted cases remain denominator failures."
+        ),
+    )
+    screening_plan.add_argument(
         "--operational-admission-file",
         default=None,
         help="Private long-request admission receipt; formal baseline screening uses only its eligible profiles.",
@@ -2310,6 +2318,7 @@ def cmd_baseline_screening_plan(args: argparse.Namespace) -> int:
         private_probe_files=args.private_probe_file,
         min_cases_per_source=args.min_cases_per_source,
         max_workers=args.max_workers,
+        fail_fast_transport_failure_gate=bool(args.fail_fast_transport_failure_gate),
         operational_admission_path=args.operational_admission_file,
     )
     _emit_json(payload, output=args.output)

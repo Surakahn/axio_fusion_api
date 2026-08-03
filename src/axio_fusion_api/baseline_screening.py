@@ -66,6 +66,22 @@ DEFAULT_MIN_CASES_PER_SOURCE = 100
 DEFAULT_SCREENING_MAX_WORKERS = 1
 MAX_SCREENING_MAX_WORKERS = 16
 DEFAULT_MAX_TRANSPORT_FAILURE_RATE = 0.02
+SCREENING_FAIL_FAST_POLICY_SCHEMA = (
+    "axio_fusion_api.non_target_screening_fail_fast_policy.v1"
+)
+# The optional fail-fast gate changes only unit scheduling. Keep already frozen
+# r20 plans resumable while allowing later scorer/parser changes to produce a
+# new adapter hash. The current hash is intentionally exact, not a wildcard.
+_SCREENING_NON_SEMANTIC_ADAPTER_HASH_MIGRATIONS = {
+    "mmlu_pro": {
+        "current": "fe9fcd9e34532143f6217d32af48eb878ab5997dda9826ac54d48a145b9cfca2",
+        "legacy": "e101d12f57e7144c1e2faa1dedda4bd1be029a0ba04733069c1010d84e636776",
+    },
+    "livebench_official": {
+        "current": "06465c0a4d9bd302b773e972770526d07b91038d7f556d4ff01a8d1390a3176c",
+        "legacy": "169509680ba7e1b9076644a700f5f05f6587795413bf9ce06b0ee62cfde2288d",
+    },
+}
 DEFAULT_BOOTSTRAP_RESAMPLES = 10_000
 SCREENING_EXCEPTION_RETRY_POLICY_SCHEMA = (
     "axio_fusion_api.non_target_screening_exception_retry_policy.v1"
@@ -169,6 +185,7 @@ def build_non_target_screening_plan(
     private_probe_files: Sequence[str | Path] = (),
     min_cases_per_source: int = DEFAULT_MIN_CASES_PER_SOURCE,
     max_workers: int = DEFAULT_SCREENING_MAX_WORKERS,
+    fail_fast_transport_failure_gate: bool = False,
     operational_admission_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Pre-register a complete-pool, non-target provider screening matrix.
@@ -400,6 +417,15 @@ def build_non_target_screening_plan(
         "raw_provider_outputs_persisted": False,
         "secrets_persisted": False,
     }
+    if fail_fast_transport_failure_gate:
+        plan["fail_fast_policy"] = {
+            "schema": SCREENING_FAIL_FAST_POLICY_SCHEMA,
+            "enabled": True,
+            "rule": "cancel_pending_after_impossible_transport_failure_rate",
+            "failure_denominator": "complete_registered_case_set",
+            "unattempted_cases_are_transport_failures": True,
+            "requires_max_workers": 1,
+        }
     blockers.extend(_screening_execution_schedule_errors(plan))
     blockers.extend(_screening_safe_artifact_leakage_errors(plan))
     plan["blockers"] = sorted(set(blockers))
@@ -519,6 +545,25 @@ def _screening_execution_schedule_errors(
     errors: list[str] = []
     if _bounded_screening_max_workers(plan.get("max_workers")) is None:
         errors.append("screening_plan_max_workers_invalid")
+    fail_fast = plan.get("fail_fast_policy")
+    if fail_fast is not None:
+        if not isinstance(fail_fast, Mapping):
+            errors.append("screening_fail_fast_policy_invalid")
+        else:
+            if fail_fast.get("schema") != SCREENING_FAIL_FAST_POLICY_SCHEMA:
+                errors.append("screening_fail_fast_policy_schema_invalid")
+            if fail_fast.get("enabled") is not True:
+                errors.append("screening_fail_fast_policy_disabled")
+            if fail_fast.get("rule") != "cancel_pending_after_impossible_transport_failure_rate":
+                errors.append("screening_fail_fast_policy_rule_invalid")
+            if fail_fast.get("failure_denominator") != "complete_registered_case_set":
+                errors.append("screening_fail_fast_policy_denominator_invalid")
+            if fail_fast.get("unattempted_cases_are_transport_failures") is not True:
+                errors.append("screening_fail_fast_policy_denominator_mode_invalid")
+            if _optional_int(fail_fast.get("requires_max_workers")) != 1:
+                errors.append("screening_fail_fast_policy_worker_requirement_invalid")
+            if _bounded_screening_max_workers(plan.get("max_workers")) != 1:
+                errors.append("screening_fail_fast_requires_serial_execution")
     if schedule.get("strategy") != "seeded_paired_reverse_source_interleave_v1":
         errors.append("screening_execution_schedule_strategy_invalid")
     expected_count = int(plan.get("task_count") or 0)
@@ -1852,6 +1897,7 @@ def _safe_screening_case_receipt(value: Mapping[str, Any]) -> dict[str, Any]:
             attempts,
             value.get("retry_receipts"),
         ),
+        "fail_fast_unattempted": value.get("fail_fast_unattempted") is True,
         "raw_prompt_persisted": False,
         "raw_label_persisted": False,
         "raw_provider_output_persisted": False,
@@ -2044,7 +2090,13 @@ def _screening_adapter_implementation_sha256(adapter: str) -> str:
         ],
         "livebench_supported_tasks": sorted(_LIVEBENCH_SUPPORTED_TASKS),
     }
-    return sha256_text(stable_json(contract))
+    computed = sha256_text(stable_json(contract))
+    migration = _SCREENING_NON_SEMANTIC_ADAPTER_HASH_MIGRATIONS.get(
+        str(adapter or "")
+    )
+    if isinstance(migration, Mapping) and computed == migration.get("current"):
+        return str(migration["legacy"])
+    return computed
 
 
 def _screening_plan_digest_input(plan: Mapping[str, Any]) -> dict[str, Any]:
@@ -2396,6 +2448,10 @@ def run_non_target_screening_campaign(
             if planned_max_workers is not None
             else DEFAULT_SCREENING_MAX_WORKERS
         ),
+        fail_fast_transport_failure_gate=(
+            isinstance(plan.get("fail_fast_policy"), Mapping)
+            and plan["fail_fast_policy"].get("enabled") is True
+        ),
         operational_admission_path=operational_admission_path,
     )
     plan_digest = str(plan.get("plan_digest_sha256") or "")
@@ -2745,6 +2801,10 @@ def run_non_target_screening_campaign(
                     private_root=output_root,
                     client=active_client,
                     max_workers=planned_max_workers or DEFAULT_SCREENING_MAX_WORKERS,
+                    fail_fast_transport_failure_gate=(
+                        isinstance(plan.get("fail_fast_policy"), Mapping)
+                        and plan["fail_fast_policy"].get("enabled") is True
+                    ),
                     previous_unit=previous,
                 )
         units.append(unit)
@@ -2876,6 +2936,10 @@ def build_external_ranking_manifest_from_screening(
             planned_max_workers
             if planned_max_workers is not None
             else DEFAULT_SCREENING_MAX_WORKERS
+        ),
+        fail_fast_transport_failure_gate=(
+            isinstance(plan.get("fail_fast_policy"), Mapping)
+            and plan["fail_fast_policy"].get("enabled") is True
         ),
         operational_admission_path=operational_admission_path,
     )
@@ -3164,6 +3228,7 @@ def _run_screening_unit(
     private_root: Path,
     client: HTTPProviderClient,
     max_workers: int,
+    fail_fast_transport_failure_gate: bool = False,
     previous_unit: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     started = time.monotonic()
@@ -3197,6 +3262,16 @@ def _run_screening_unit(
     ]
     workers = max(1, min(int(max_workers), len(pending_cases) or 1))
     case_results: list[dict[str, Any]] = list(preserved_results.values())
+    expected_count = len(cases)
+    max_failure_rate = _bounded_failure_rate(
+        source_receipt.get("max_transport_failure_rate")
+    )
+    fail_fast_failure_cutoff = (
+        math.floor(max_failure_rate * expected_count) + 1
+        if fail_fast_transport_failure_gate and expected_count
+        else None
+    )
+    fail_fast_triggered = False
     # Keep an independent private checkpoint while a unit is in flight.  The
     # public/safe unit is written only after the complete frozen case set has
     # been answered, but an interrupted process must not discard answers that
@@ -3210,43 +3285,91 @@ def _run_screening_unit(
         case_results=case_results,
         expected_case_count=len(cases),
     )
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {
-            pool.submit(
-                _run_screening_case,
+    def run_case(case: ScreeningCase) -> dict[str, Any]:
+        try:
+            return _run_screening_case(
                 case=case,
                 source=source,
                 replicas=replicas,
                 client=client,
                 decoding=decoding,
                 system_prompt=system_prompt,
-            ): case.case_id
-            for case in pending_cases
+            )
+        except Exception:  # noqa: BLE001
+            return {
+                "case_id": case.case_id,
+                "status": "internal_error",
+                "score": None,
+                "output": "",
+                "output_sha256": sha256_text(""),
+                "latency_ms": 0.0,
+                "attempts": [],
+                "selected_replica_profile_id_sha256": "",
+                "retry_receipts": [],
+                "error_type": "internal_screening_error",
+            }
+
+    def record_case(result: Mapping[str, Any]) -> int:
+        case_results.append(dict(result))
+        _persist_screening_private_checkpoint(
+            _screening_checkpoint_path(private_root, task),
+            task=task,
+            private_source_id=private_source_id,
+            case_results=case_results,
+            expected_case_count=len(cases),
+        )
+        return sum(
+            1
+            for row in case_results
+            if row.get("status") == "transport_failed"
+        )
+
+    if fail_fast_failure_cutoff is not None:
+        # Run this opt-in policy serially so the next request cannot start
+        # between the irreversible failure and the threshold check.
+        for case in pending_cases:
+            transport_failures = record_case(run_case(case))
+            if transport_failures >= fail_fast_failure_cutoff:
+                fail_fast_triggered = True
+                break
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {
+                pool.submit(run_case, case): case.case_id
+                for case in pending_cases
+            }
+            for future in as_completed(futures):
+                record_case(future.result())
+    if fail_fast_triggered:
+        observed_case_ids = {
+            str(row.get("case_id") or "") for row in case_results
         }
-        for future in as_completed(futures):
-            try:
-                result = future.result()
-            except Exception:  # noqa: BLE001
-                result = {
-                    "case_id": futures[future],
-                    "status": "internal_error",
+        for case in pending_cases:
+            if case.case_id in observed_case_ids:
+                continue
+            case_results.append(
+                {
+                    "case_id": case.case_id,
+                    "status": "transport_failed",
                     "score": None,
                     "output": "",
                     "output_sha256": sha256_text(""),
                     "latency_ms": 0.0,
                     "attempts": [],
-                    "selected_replica_profile_id_sha256": "",
                     "retry_receipts": [],
-                    "error_type": "internal_screening_error",
+                    "selected_replica_profile_id_sha256": "",
+                    "error_type": "screening_fail_fast_transport_gate",
+                    "transport_failure_class": "screening_fail_fast_gate",
+                    "fail_fast_unattempted": True,
                 }
-            case_results.append(result)
-            _persist_screening_private_checkpoint(
-                _screening_checkpoint_path(private_root, task),
-                task=task,
-                private_source_id=private_source_id,
-                case_results=case_results,
-                expected_case_count=len(cases),
             )
+        _persist_screening_private_checkpoint(
+            _screening_checkpoint_path(private_root, task),
+            task=task,
+            private_source_id=private_source_id,
+            case_results=case_results,
+            expected_case_count=len(cases),
+        )
     case_results.sort(key=lambda row: sha256_text(str(row.get("case_id") or "")))
     scoring_errors = sum(
         1
@@ -3262,12 +3385,8 @@ def _run_screening_unit(
         for row in case_results
         if row.get("status") == "completed" and row.get("score") is not None
     ]
-    expected_count = len(cases)
     transport_failure_rate = (
         transport_failures / expected_count if expected_count else 1.0
-    )
-    max_failure_rate = _bounded_failure_rate(
-        source_receipt.get("max_transport_failure_rate")
     )
     reason_codes: list[str] = []
     if expected_count != int(source_receipt.get("selected_case_count") or 0):
@@ -3343,6 +3462,12 @@ def _run_screening_unit(
         "p50_latency_ms": _percentile(latencies, 0.50),
         "p95_latency_ms": _percentile(latencies, 0.95),
         "provider_failure_telemetry": provider_failure_telemetry,
+        "fail_fast_policy_enabled": bool(fail_fast_transport_failure_gate),
+        "fail_fast_triggered": bool(fail_fast_triggered),
+        "fail_fast_failure_cutoff": fail_fast_failure_cutoff,
+        "fail_fast_unattempted_case_count": sum(
+            1 for row in case_results if row.get("fail_fast_unattempted") is True
+        ),
         "case_results": safe_cases,
         "private_unit_content_sha256": private_sha256,
         "status": "completed" if not reason_codes else "failed",
@@ -3736,6 +3861,10 @@ def _verify_screening_unit_private_artifact(
             expected_safe_case["attempt_count"]
         ):
             errors.append("screening_ranking_safe_case_attempt_count_mismatch")
+        if bool(safe_row.get("fail_fast_unattempted")) is not bool(
+            expected_safe_case["fail_fast_unattempted"]
+        ):
+            errors.append("screening_ranking_safe_case_fail_fast_binding_mismatch")
         if stable_json(safe_row.get("failure_telemetry")) != stable_json(
             expected_safe_case["failure_telemetry"]
         ):
@@ -4020,6 +4149,9 @@ def _private_resume_case_results(
             continue
         status = str(raw_row.get("status") or "")
         if status == "completed" and raw_row.get("score") is not None:
+            preserved[case_id] = dict(raw_row)
+            continue
+        if status == "transport_failed" and raw_row.get("fail_fast_unattempted") is True:
             preserved[case_id] = dict(raw_row)
             continue
         # A scorer can fail after the provider has already returned a valid

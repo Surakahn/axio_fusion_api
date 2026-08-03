@@ -26,6 +26,9 @@
   bindings are hash-only in the pin artifact.
 - [x] Record the single canonical convergence path and terminal command in
   `docs/operations/convergence_execution_path_r20.md`.
+- [x] Add an opt-in, serial, pre-registered transport-failure fail-fast gate
+  for future screening cohorts; preserve complete failure denominators,
+  resumable checkpoints, and r20 plan-digest compatibility.
 - [ ] Complete all 22 r20 screening units; retain every timeout or transport
   failure in the denominator and do not reuse an older cohort checkpoint.
 - [ ] Complete and freeze the pre-registered external ranking for the complete

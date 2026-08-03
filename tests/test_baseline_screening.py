@@ -765,6 +765,119 @@ def test_plan_digest_binds_frozen_worker_limit(tmp_path):
     assert serial["plan_digest_sha256"] != parallel["plan_digest_sha256"]
 
 
+def test_fail_fast_transport_gate_is_explicit_and_serial_only(tmp_path):
+    registry_path, probe_path, manifest_path = _screening_fixture(tmp_path)
+    serial = build_non_target_screening_plan(
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        min_cases_per_source=4,
+        max_workers=1,
+    )
+    fail_fast = build_non_target_screening_plan(
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        min_cases_per_source=4,
+        max_workers=1,
+        fail_fast_transport_failure_gate=True,
+    )
+    parallel = build_non_target_screening_plan(
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        min_cases_per_source=4,
+        max_workers=2,
+        fail_fast_transport_failure_gate=True,
+    )
+
+    assert serial["ready"] is True, serial["blockers"]
+    assert fail_fast["ready"] is True, fail_fast["blockers"]
+    assert fail_fast["fail_fast_policy"]["enabled"] is True
+    assert fail_fast["plan_digest_sha256"] != serial["plan_digest_sha256"]
+    assert parallel["ready"] is False
+    assert "screening_fail_fast_requires_serial_execution" in parallel["blockers"]
+
+
+def test_fail_fast_transport_gate_preserves_complete_failure_denominator(tmp_path):
+    profile = normalize_profile(_registry_rows()[2])
+    source = {
+        "source_id": "fail-fast-source",
+        "adapter": "jsonl_multiple_choice",
+        "prompt_protocol": {"system_prompt": ""},
+        "decoding": {"max_exception_attempt_rounds": 1, "max_output_tokens": 8},
+    }
+    cases = [
+        ScreeningCase(f"fail-fast-{index}", "Choose A or B.", "A", "fixture", {})
+        for index in range(4)
+    ]
+    profile_hash = sha256_text(profile.profile_id)
+    task = {
+        "task_id": sha256_text("fail-fast-task"),
+        "source_id_sha256": sha256_text(source["source_id"]),
+        "source_snapshot_sha256": sha256_text("fail-fast-snapshot"),
+        "case_set_digest_sha256": sha256_text("fail-fast-cases"),
+        "canonical_identity_sha256": profile.canonical_identity_sha256,
+        "candidate_id_sha256": sha256_text("fail-fast-candidate"),
+        "representative_profile_id_sha256": profile_hash,
+        "replica_profile_id_sha256s": [profile_hash],
+    }
+    client = _SequenceClient(
+        [RuntimeError("transport fixture") for _ in range(3)]
+    )
+
+    unit = _run_screening_unit(
+        task=task,
+        private_source_id=source["source_id"],
+        source=source,
+        source_receipt={
+            "selected_case_count": 4,
+            "max_transport_failure_rate": 0.5,
+        },
+        cases=cases,
+        replicas=[profile],
+        private_root=tmp_path / "private-units",
+        client=client,
+        max_workers=1,
+        fail_fast_transport_failure_gate=True,
+    )
+
+    assert len(client.calls) == 3
+    assert unit["status"] == "failed"
+    assert unit["fail_fast_policy_enabled"] is True
+    assert unit["fail_fast_triggered"] is True
+    assert unit["fail_fast_failure_cutoff"] == 3
+    assert unit["fail_fast_unattempted_case_count"] == 1
+    assert unit["transport_failure_count"] == 4
+    assert unit["transport_failure_rate"] == 1.0
+    assert sum(
+        row["fail_fast_unattempted"] for row in unit["case_results"]
+    ) == 1
+
+    resumed_client = _SequenceClient(
+        [RuntimeError("transport fixture") for _ in range(3)]
+    )
+    resumed = _run_screening_unit(
+        task=task,
+        private_source_id=source["source_id"],
+        source=source,
+        source_receipt={
+            "selected_case_count": 4,
+            "max_transport_failure_rate": 0.5,
+        },
+        cases=cases,
+        replicas=[profile],
+        private_root=tmp_path / "private-units",
+        client=resumed_client,
+        max_workers=1,
+        fail_fast_transport_failure_gate=True,
+        previous_unit=unit,
+    )
+    assert len(resumed_client.calls) == 3
+    assert resumed["transport_failure_count"] == 4
+    assert resumed["fail_fast_unattempted_case_count"] == 1
+
+
 def test_identity_attestation_requires_exact_catalog_alias(tmp_path):
     registry_path, probe_path, _ = _screening_fixture(tmp_path)
     profiles = load_registry(registry_path)

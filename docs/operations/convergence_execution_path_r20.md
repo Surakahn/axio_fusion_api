@@ -64,6 +64,11 @@ The following order is the only path to a formal quality claim:
   `/mnt/storage/axio_fusion_benchmarks/manifests/harness_pin_manifest.assembled.r20.safe.json`.
 - These manifests improve provenance readiness only. They do not authorize a
   target benchmark request while provider baseline screening is incomplete.
+- A future screening cohort may explicitly register the serial fail-fast
+  transport gate. Once the first failure count makes the pre-registered rate
+  impossible to pass, pending requests are cancelled and represented as
+  transport failures in the complete denominator. The current r20 plan does
+  not enable this policy and its digest remains unchanged.
 
 ## Terminal Action
 
@@ -94,6 +99,8 @@ Only these changes are permitted before the r20 terminal action:
 
 - offline manifest/harness binding and hash validation;
 - documentation and operator receipts;
+- isolated, tested control-plane fixes that preserve the digest of a currently
+  frozen plan when their optional policy is disabled;
 - isolated regression fixes proven by tests and unrelated to the active
   campaign's frozen plan or prompts;
 - read-only monitoring of the active process.
