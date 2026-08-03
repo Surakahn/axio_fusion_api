@@ -92,6 +92,7 @@ from .available_model_generation import (
 )
 from .model_screening import (
     ModelScreeningError,
+    build_prefusion_probe_artifact,
     run_prefusion_model_screening,
 )
 from .official_harness import (
@@ -575,6 +576,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pre_fusion.add_argument("--redact-provider-identifiers", action="store_true")
     pre_fusion.set_defaults(func=cmd_pre_fusion_screen)
+
+    prefusion_probe_export = sub.add_parser(
+        "prefusion-probe-export",
+        help=(
+            "Project a ready pre-Fusion screening artifact into the standard "
+            "offline provider probe contract."
+        ),
+    )
+    prefusion_probe_export.add_argument(
+        "--screening-file",
+        required=True,
+        help="Private pre-Fusion screening artifact produced by pre-fusion-screen.",
+    )
+    prefusion_probe_export.add_argument("--redact-provider-identifiers", action="store_true")
+    prefusion_probe_export.add_argument("--output", required=True)
+    prefusion_probe_export.set_defaults(func=cmd_prefusion_probe_export)
 
     available_models = sub.add_parser(
         "generate-available-models",
@@ -2090,6 +2107,29 @@ def cmd_pre_fusion_screen(args: argparse.Namespace) -> int:
             handoff["registry_artifact_published"] = False
     _emit_json(payload, output=args.output)
     return 0 if payload.get("status") == "ready" else 2
+
+
+def cmd_prefusion_probe_export(args: argparse.Namespace) -> int:
+    """Project a ready pre-Fusion report into the standard probe artifact."""
+
+    try:
+        payload = build_prefusion_probe_artifact(
+            args.screening_file,
+            redact_provider_identifiers=bool(args.redact_provider_identifiers),
+        )
+    except ModelScreeningError as exc:
+        payload = {
+            "schema": "axio_fusion_api.provider_probe.v1",
+            "status": "blocked",
+            "blockers": [exc.code],
+            "generated_from_prefusion_screening": False,
+            "raw_provider_output_persisted": False,
+            "secrets_persisted": False,
+        }
+        _emit_json(payload, output=args.output)
+        return 2
+    _emit_json(payload, output=args.output)
+    return 0
 
 
 def cmd_generate_available_models(args: argparse.Namespace) -> int:

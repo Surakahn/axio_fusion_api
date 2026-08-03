@@ -470,6 +470,28 @@ write the matching private handoff artifact in the same publication step.
 remains available as the lower-level diagnostic/report command; production
 Fusion should consume only the ready handoff produced by the new wrapper.
 
+When the screening report is stored as a private artifact, its strict stream
+probe can be projected into the standard provider-evidence contract without a
+new network call. This keeps the pre-Fusion report, probe audit, and registry
+binding on one exact source artifact:
+
+```bash
+axio-fusion-api-standalone prefusion-probe-export \
+  --screening-file <PRIVATE_PREFUSION_SCREENING.json> \
+  --output <PRIVATE_PROVIDER_PROBE.json>
+axio-fusion-api-standalone prefusion-probe-export \
+  --screening-file <PRIVATE_PREFUSION_SCREENING.json> \
+  --redact-provider-identifiers \
+  --output <SAFE_PROVIDER_PROBE.json>
+```
+
+The export is fail-closed unless the source report is ready, performed live
+network calls, and contains physical streaming rows. It only projects the
+existing probe rows; it does not rank models, call an LLM, or make a benchmark
+claim. The private export can then be passed to `registry-bind-probe`, while
+the redacted export and its registry evidence can be passed to
+`provider-probe-evidence-audit`.
+
 Fresh production admission uses three independent strict-stream health samples
 per physical profile by default. Configure `prefusion.stream_probe_samples` in
 the non-secret channel manifest or pass `--prefusion-stream-probe-samples` to

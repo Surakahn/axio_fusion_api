@@ -1,5 +1,23 @@
 # Axio Fusion API Checklist
 
+## Current Execution Gate (2026-08-03, r20)
+
+- [x] Validate the active r20 pre-Fusion report: 18 physical candidates and 11
+  logical models admitted after three strict streaming samples and the 90-second
+  latency gate.
+- [x] Export the nested pre-Fusion stream evidence through the reusable
+  `prefusion-probe-export` command; no network call is performed by the export.
+- [x] Bind the exported probe to the current private registry and pass the
+  hash-only provider-probe evidence audit with matching profile, status, mode,
+  API-format, and path bindings.
+- [x] Generate a new ranking template from the exact r20 registry candidate
+  set; it has 11 candidates and remains explicitly `template_only`.
+- [ ] Complete and freeze the pre-registered external ranking for the complete
+  11-model pool using at least two common independent source families, exact
+  population counts, stable snapshots, and identity attestations.
+- [ ] Run the independent 9-category/21-suite campaign only after the provider
+  baseline freeze and all official/audited harness imports are ready.
+
 ## Current Live Gate (2026-07-29, full cohort r1)
 
 - [x] Complete fresh full-cohort enrollment: 35 strict-streaming text profiles

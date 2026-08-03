@@ -31,6 +31,30 @@ Build `axio_fusion_api` as a standalone, ASciFS-decoupled Fusion API service tha
 12. Keep a top-level completion audit after evidence-pack/final-audit generation, mapping every product, provider, API-surface, benchmark, statistical, latency, contamination, and final-claim requirement to concrete hash-only evidence or a precise blocker.
 13. Treat system development readiness and LLM benchmark validation as separate phases: engineering readiness is proven by standalone code-test receipts, dry protocol/adapter self-tests, runtime construction, and operator runbook templates; model superiority is proven only later by the separate 9-category 21-suite live benchmark campaign.
 
+## Current Execution Checkpoint (2026-08-03)
+
+The current `r20` pre-Fusion cohort is the active serving input for this
+workspace. Its ready screening report contains 18 physical candidates; 11
+logical models passed the three-sample strict-stream admission and the hard
+90-second ceiling. The private registry, probe projection, redacted probe,
+redacted registry evidence, and provider-probe evidence audit are bound to the
+same cohort and pass their integrity checks.
+
+The next gate is deliberately narrow: complete the private, pre-registered
+non-target external ranking for all 11 admitted logical models, including two
+independent common source families and identity attestations. The newly
+generated ranking input is still `template_only`; the baseline freeze is
+therefore correctly blocked. No target benchmark request may start until that
+freeze is ready. The user's tier mapping remains the intended comparison
+policy (`axio-pro`/rank 1, `axio-terra`/rank 2, `axio-fast`/rank 3), but it is
+not evidence that can replace the required pool-wide ranking.
+
+The `prefusion-probe-export` command now turns a ready screening artifact into
+the standard provider probe contract offline. This removes the last manual
+projection step in the current evidence chain and is reusable for future
+arbitrary channel configurations. It does not alter Fusion runtime code or
+use benchmark data.
+
 ## Pre-Fusion Model Generation
 
 The pre-Fusion control plane now generates the handoff in two distinct

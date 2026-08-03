@@ -49,6 +49,7 @@ from .providers import (
     discover_provider_profiles,
     probe_provider_models,
     probe_provider_reasoning_support,
+    redact_provider_probe_artifact,
     profile_credential_readiness,
     reasoning_transport_probe_binding,
 )
@@ -1205,6 +1206,94 @@ def run_prefusion_model_screening(
     if redact_provider_identifiers:
         return build_prefusion_screening_report(report, redact_provider_identifiers=True)
     return report
+
+
+def build_prefusion_probe_artifact(
+    screening: Mapping[str, Any] | str | Path,
+    *,
+    redact_provider_identifiers: bool = False,
+) -> dict[str, Any]:
+    """Project a ready pre-Fusion report into the standard probe contract.
+
+    Pre-Fusion screening already records the exact physical stream probes, but
+    it nests them under ``streaming_probe`` because the report also contains
+    research and routing-control-plane data.  The provider evidence and
+    registry binding gates consume the smaller ``provider_probe.v1`` contract.
+    Keeping this projection in the product removes ad-hoc operator scripts
+    while preserving the original probe rows and their evidence hashes.
+
+    This is an offline control-plane operation.  It never sends a request and
+    it does not copy prompts, provider output, URLs, or credentials.
+    """
+
+    payload = (
+        dict(screening)
+        if isinstance(screening, Mapping)
+        else _load_optional_mapping(screening)
+    )
+    if str(payload.get("schema") or "") != PREFUSION_SCREENING_SCHEMA:
+        raise ModelScreeningError("prefusion_probe_export_screening_schema_invalid")
+    if str(payload.get("status") or "").casefold() != "ready":
+        raise ModelScreeningError("prefusion_probe_export_screening_not_ready")
+    streaming = payload.get("streaming_probe")
+    if not isinstance(streaming, Mapping):
+        raise ModelScreeningError("prefusion_probe_export_streaming_probe_missing")
+    probes = streaming.get("probes")
+    if not isinstance(probes, list) or not probes or any(
+        not isinstance(row, Mapping) for row in probes
+    ):
+        raise ModelScreeningError("prefusion_probe_export_probe_rows_invalid")
+    if str(streaming.get("mode") or "").casefold() != "live":
+        raise ModelScreeningError("prefusion_probe_export_requires_live_streaming")
+    if streaming.get("network_calls_performed") is not True:
+        raise ModelScreeningError("prefusion_probe_export_live_network_evidence_missing")
+
+    artifact: dict[str, Any] = {
+        "schema": "axio_fusion_api.provider_probe.v1",
+        "standalone_product": True,
+        "decoupled_from_asci_fs": True,
+        "generated_from_prefusion_screening": True,
+        "source_screening_schema": PREFUSION_SCREENING_SCHEMA,
+        "source_screening_content_sha256": sha256_text(stable_json(payload)),
+        "mode": "live",
+        "network_calls_performed": True,
+        "max_response_latency_ms": streaming.get("max_response_latency_ms"),
+        "max_response_seconds": streaming.get("max_response_seconds"),
+        "model_count": streaming.get("model_count"),
+        "candidate_model_count_before_selection": streaming.get(
+            "candidate_model_count_before_selection"
+        ),
+        "available_count": streaming.get("available_count"),
+        "samples_per_profile": streaming.get("samples_per_profile"),
+        "stability_contract": dict(streaming.get("stability_contract") or {})
+        if isinstance(streaming.get("stability_contract"), Mapping)
+        else {},
+        "selection_policy": dict(streaming.get("selection_policy") or {})
+        if isinstance(streaming.get("selection_policy"), Mapping)
+        else {},
+        "streaming_evidence_contract": dict(
+            streaming.get("streaming_evidence_contract") or {}
+        )
+        if isinstance(streaming.get("streaming_evidence_contract"), Mapping)
+        else {},
+        "stream_requested_count": streaming.get("stream_requested_count"),
+        "stream_observed_count": streaming.get("stream_observed_count"),
+        "stream_fallback_count": streaming.get("stream_fallback_count"),
+        "probes": [dict(row) for row in probes],
+        "raw_probe_prompt_persisted": False,
+        "raw_provider_output_persisted": False,
+        "raw_provider_outputs_persisted": False,
+        "secrets_persisted": False,
+    }
+    if redact_provider_identifiers:
+        redacted = redact_provider_probe_artifact(artifact)
+        redacted["generated_from_prefusion_screening"] = True
+        redacted["source_screening_schema"] = PREFUSION_SCREENING_SCHEMA
+        redacted["source_screening_content_sha256"] = artifact[
+            "source_screening_content_sha256"
+        ]
+        return redacted
+    return artifact
 
 
 def load_prefusion_focus_manifest(
