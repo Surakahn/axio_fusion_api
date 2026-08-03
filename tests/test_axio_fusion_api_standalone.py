@@ -5147,7 +5147,10 @@ def test_standalone_targeted_escalation_prefers_cross_provider_answer_claim_veri
         {
             "model": "axio-pro",
             "max_models": 3,
-            "max_total_model_calls": 7,
+            # The route has an admitted cross-model Synthesizer recovery
+            # profile. Reserve one additional slot so the feedback wave can
+            # never consume the only recovery budget.
+            "max_total_model_calls": 8,
             "messages": [{"role": "user", "content": "Choose option A or B for the deployment decision."}],
         }
     )
@@ -6279,6 +6282,74 @@ def test_standalone_fusion_deliberation_smoke_accepts_local_consensus_finalizati
     assert row["judge_provider_call_count"] == 0
     assert row["synthesis_provider_call_count"] == 0
     assert row["reason_codes"] == []
+
+
+def test_standalone_fusion_deliberation_smoke_classifies_synthesizer_http_failure_without_raw_output() -> None:
+    request = canonicalize_payload(
+        {
+            "model": "axio-pro",
+            "messages": [{"role": "user", "content": "synthetic private task"}],
+        }
+    )
+    response = FusionResponse(
+        text="degraded reference answer",
+        request=request,
+        route_plan={
+            "fusion_admission": {"activated": True},
+            "hermes_moa": {"enabled": False},
+        },
+        trace={
+            "runtime_fusion_stage_outcome": {
+                "completed_candidate_count": 2,
+                "complete_admitted_fusion_finalized": False,
+                "hermes_process_contract_required": False,
+                "judge_output_accepted": True,
+                "synthesis_output_accepted": False,
+            },
+            "synthesis_compression": {
+                "provider_synthesis_output_accepted": False,
+                "synthesizer_replica_routing": {
+                    "stage_attempt_count": 1,
+                    "stage_attempt_receipts": [
+                        {
+                            "status": "failed",
+                            "http_status": 529,
+                            "reason": "provider_capacity_fixture",
+                        }
+                    ],
+                    "terminal_reason": "cross_model_stage_fallback_failed",
+                    "cross_model_failover_attempted": True,
+                    "cross_model_failover_used": False,
+                },
+            },
+            "feedback_stage_admission": {
+                "synthesizer_fallback_admission_attempted": True,
+                "synthesizer_fallback_reservation_admitted": True,
+            },
+            "early_exit": {"triggered": False},
+            "judge_provider_call_count": 1,
+            "synthesis_provider_call_count": 1,
+            "provider_call_count": 4,
+        },
+        provider_calls_recorded=True,
+    )
+
+    row = server_module._fusion_deliberation_live_smoke_row(
+        model="axio-pro",
+        response=response,
+        end_to_end_latency_ms=50.0,
+        max_total_model_calls=6,
+    )
+
+    assert row["deliberation_smoke_passed"] is False
+    assert row["synthesis_terminal_category"] == "provider_http_error_5xx"
+    assert row["synthesis_stage_attempt_count"] == 1
+    assert row["synthesis_stage_failure_count"] == 1
+    assert row["synthesis_http_status_counts"] == {"529": 1}
+    assert row["synthesis_cross_model_failover_attempted"] is True
+    assert row["synthesis_cross_model_failover_used"] is False
+    assert row["synthesis_fallback_reservation_admitted"] is True
+    assert row["raw_provider_outputs_persisted"] is False
 
 
 def test_standalone_fusion_deliberation_smoke_rejects_planned_but_unfinished_local_consensus() -> None:

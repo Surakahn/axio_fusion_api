@@ -1585,6 +1585,112 @@ def test_hermes_feedback_call_budget_blocks_reference_and_rejudge_atomically() -
     assert client.judge_calls == 2
 
 
+def test_hermes_feedback_call_budget_also_preserves_synthesizer_recovery_slot() -> None:
+    client = _FeedbackAdmissionProbeClient()
+    request = _feedback_admission_request(max_total_model_calls=7)
+    response = FusionEngine(
+        _feedback_admission_profiles(),
+        client=client,
+        cache_enabled=False,
+    ).complete(request, live=True)
+
+    admission = response.trace["feedback_stage_admission"]
+    outcome = response.trace["runtime_fusion_stage_outcome"]
+
+    assert admission["status"] == "blocked"
+    assert admission["blocked_reasons"] == [
+        "max_total_model_calls_insufficient"
+    ]
+    assert admission["synthesizer_fallback_admission_attempted"] is True
+    assert admission["synthesizer_fallback_reservation_admitted"] is False
+    assert "feedback_reference" not in client.calls
+    assert client.judge_calls == 1
+    assert client.calls.count("synthesizer") == 1
+    assert outcome["complete_admitted_fusion_finalized"] is False
+    assert outcome["runtime_degraded"] is True
+
+
+def test_hermes_feedback_admission_reserves_and_uses_synthesizer_cross_model_recovery() -> None:
+    class SynthesizerFailoverClient:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+            self.judge_calls = 0
+
+        def complete(self, profile, request, *, prompt, system, timeout=None):
+            del system, timeout
+            self.calls.append(profile.profile_id)
+            metadata = request.metadata if isinstance(request.metadata, dict) else {}
+            if metadata.get("_axio_hermes_feedback_reference") is True:
+                return json.dumps(
+                    {
+                        "answer": "bounded feedback verification",
+                        "evidence": [{"claim": "checked", "source": "fixture"}],
+                        "confidence": 0.82,
+                    }
+                )
+            lowered = str(prompt).lower()
+            if "compare these axio fusion candidate answers" in lowered:
+                self.judge_calls += 1
+                if self.judge_calls == 1:
+                    return json.dumps(
+                        {
+                            "missing_coverage": ["targeted_evidence_check"],
+                            "collective_blind_spots": ["targeted_evidence_check"],
+                            "follow_up_tasks": ["targeted_evidence_check"],
+                            "contradictions": [],
+                            "ready_for_synthesis": False,
+                        }
+                    )
+                return json.dumps(
+                    {
+                        "missing_coverage": [],
+                        "collective_blind_spots": [],
+                        "follow_up_tasks": [],
+                        "contradictions": [],
+                        "ready_for_synthesis": True,
+                    }
+                )
+            if "synthesize one final answer" in lowered:
+                if profile.provider == "admission-provider-0":
+                    raise RuntimeError("simulated synthesizer 529 recovery fixture")
+                return "recovered synthesis from an admitted cross-model stage"
+            return json.dumps(
+                {
+                    "answer": "independent bounded reference",
+                    "evidence": [{"claim": "bounded", "source": "fixture"}],
+                    "confidence": 0.84,
+                }
+            )
+
+    client = SynthesizerFailoverClient()
+    response = FusionEngine(
+        _feedback_admission_profiles(),
+        client=client,
+        cache_enabled=False,
+    ).complete(
+        _feedback_admission_request(max_total_model_calls=8),
+        live=True,
+    )
+
+    admission = response.trace["feedback_stage_admission"]
+    routing = response.trace["synthesis_compression"][
+        "synthesizer_replica_routing"
+    ]
+    outcome = response.trace["runtime_fusion_stage_outcome"]
+
+    assert response.text == "recovered synthesis from an admitted cross-model stage"
+    assert admission["status"] == "admitted"
+    assert admission["synthesizer_fallback_admission_attempted"] is True
+    assert admission["synthesizer_fallback_reservation_admitted"] is True
+    assert routing["cross_model_failover_attempted"] is True
+    assert routing["cross_model_failover_used"] is True
+    assert routing["stage_attempt_count"] == 2
+    assert routing["stage_attempt_receipts"][0]["status"] == "failed"
+    assert routing["stage_attempt_receipts"][1]["status"] == "completed"
+    assert outcome["complete_admitted_fusion_finalized"] is True
+    assert outcome["runtime_degraded"] is False
+
+
 def test_hermes_feedback_cost_budget_rolls_back_partial_reservation() -> None:
     client = _FeedbackAdmissionProbeClient()
     # The control prompts are intentionally compact. Keep enough budget for

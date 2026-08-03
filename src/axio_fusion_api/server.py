@@ -2566,6 +2566,11 @@ def _fusion_deliberation_live_smoke_row(
     early_exit = trace.get("early_exit") if isinstance(trace.get("early_exit"), Mapping) else {}
     hermes_plan = route_plan.get("hermes_moa") if isinstance(route_plan.get("hermes_moa"), Mapping) else {}
     hermes_execution = trace.get("hermes_moa_execution") if isinstance(trace.get("hermes_moa_execution"), Mapping) else {}
+    feedback_stage_admission = (
+        trace.get("feedback_stage_admission")
+        if isinstance(trace.get("feedback_stage_admission"), Mapping)
+        else {}
+    )
     budget = route_plan.get("budget") if isinstance(route_plan.get("budget"), Mapping) else {}
     finalization_mode = str(
         route_plan.get("fusion_finalization_mode")
@@ -2622,6 +2627,51 @@ def _fusion_deliberation_live_smoke_row(
         if isinstance(synthesis_compression.get("synthesizer_replica_routing"), Mapping)
         else {}
     )
+    synthesis_attempt_receipts = [
+        row
+        for row in synthesis_replica_routing.get("stage_attempt_receipts", [])
+        if isinstance(row, Mapping)
+    ]
+    synthesis_attempt_status_counts: dict[str, int] = {}
+    synthesis_http_status_counts: dict[str, int] = {}
+    for attempt in synthesis_attempt_receipts:
+        status = str(attempt.get("status") or "unknown")[:40]
+        synthesis_attempt_status_counts[status] = (
+            synthesis_attempt_status_counts.get(status, 0) + 1
+        )
+        http_status = _optional_int(attempt.get("http_status"))
+        if http_status is not None and 100 <= http_status <= 599:
+            key = str(http_status)
+            synthesis_http_status_counts[key] = (
+                synthesis_http_status_counts.get(key, 0) + 1
+            )
+    synthesis_stage_failure_count = synthesis_attempt_status_counts.get("failed", 0)
+    synthesis_stage_empty_count = synthesis_attempt_status_counts.get("empty", 0)
+    synthesis_stage_skipped_count = synthesis_attempt_status_counts.get("skipped", 0)
+    if synthesis_output_accepted:
+        synthesis_terminal_category = "completed"
+    elif synthesis_replica_routing.get("terminal_reason") == "max_total_model_calls_exhausted":
+        synthesis_terminal_category = "call_budget_exhausted"
+    elif synthesis_replica_routing.get("terminal_reason") == "max_latency_ms_exhausted":
+        synthesis_terminal_category = "deadline_exhausted"
+    elif synthesis_replica_routing.get("terminal_reason") == "max_cost_usd_exhausted":
+        synthesis_terminal_category = "cost_budget_exhausted"
+    elif any(
+        500 <= (_optional_int(attempt.get("http_status")) or 0) <= 599
+        for attempt in synthesis_attempt_receipts
+        if attempt.get("status") == "failed"
+    ):
+        synthesis_terminal_category = "provider_http_error_5xx"
+    elif synthesis_stage_failure_count:
+        synthesis_terminal_category = "provider_error"
+    elif synthesis_stage_empty_count:
+        synthesis_terminal_category = "empty_provider_output"
+    elif synthesis_stage_skipped_count:
+        synthesis_terminal_category = "stage_attempt_skipped"
+    elif synthesis_provider_call_count <= 0:
+        synthesis_terminal_category = "not_attempted"
+    else:
+        synthesis_terminal_category = "unknown"
     reason_codes: list[str] = []
     if not str(response.text or "").strip():
         reason_codes.append("response_text_missing")
@@ -2693,6 +2743,35 @@ def _fusion_deliberation_live_smoke_row(
         "synthesis_terminal_reason": str(
             synthesis_replica_routing.get("terminal_reason") or ""
         )[:120],
+        "synthesis_terminal_category": synthesis_terminal_category,
+        "synthesis_stage_attempt_count": max(
+            0,
+            _optional_int(synthesis_replica_routing.get("stage_attempt_count"))
+            or len(synthesis_attempt_receipts),
+        ),
+        "synthesis_stage_failure_count": synthesis_stage_failure_count,
+        "synthesis_stage_empty_count": synthesis_stage_empty_count,
+        "synthesis_stage_skipped_count": synthesis_stage_skipped_count,
+        "synthesis_stage_attempt_status_counts": dict(
+            sorted(synthesis_attempt_status_counts.items())
+        ),
+        "synthesis_http_status_counts": dict(
+            sorted(synthesis_http_status_counts.items())
+        ),
+        "synthesis_cross_model_failover_attempted": bool(
+            synthesis_replica_routing.get("cross_model_failover_attempted") is True
+        ),
+        "synthesis_cross_model_failover_used": bool(
+            synthesis_replica_routing.get("cross_model_failover_used") is True
+        ),
+        "synthesis_fallback_reservation_admission_attempted": bool(
+            feedback_stage_admission.get("synthesizer_fallback_admission_attempted")
+            is True
+        ),
+        "synthesis_fallback_reservation_admitted": bool(
+            feedback_stage_admission.get("synthesizer_fallback_reservation_admitted")
+            is True
+        ),
         "judge_provider_call_count": judge_provider_call_count,
         "synthesis_provider_call_count": synthesis_provider_call_count,
         "early_exit_triggered": early_exit_triggered,
@@ -2731,6 +2810,18 @@ def _fusion_deliberation_live_smoke_failure_row(
         "synthesis_provider_call_count": 0,
         "early_exit_triggered": False,
         "provider_call_count": 0,
+        "synthesis_terminal_reason": "",
+        "synthesis_terminal_category": "not_attempted",
+        "synthesis_stage_attempt_count": 0,
+        "synthesis_stage_failure_count": 0,
+        "synthesis_stage_empty_count": 0,
+        "synthesis_stage_skipped_count": 0,
+        "synthesis_stage_attempt_status_counts": {},
+        "synthesis_http_status_counts": {},
+        "synthesis_cross_model_failover_attempted": False,
+        "synthesis_cross_model_failover_used": False,
+        "synthesis_fallback_reservation_admission_attempted": False,
+        "synthesis_fallback_reservation_admitted": False,
         "end_to_end_latency_ms": round(max(0.0, float(end_to_end_latency_ms)), 3),
         "answer_sha256": "",
         "answer_char_count": 0,

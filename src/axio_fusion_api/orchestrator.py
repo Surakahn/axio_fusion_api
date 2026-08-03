@@ -4045,8 +4045,16 @@ class FusionEngine:
                 if deadline_budget is not None
                 else 0
             )
+            released_cost_count = (
+                cost_budget.release_dynamic_stage_reservations(
+                    reason="stage_succeeded_without_cross_model_failover",
+                    roles=(role_name,),
+                )
+                if cost_budget is not None
+                else 0
+            )
             routing["cross_model_failover_headroom_released"] = bool(
-                released_call_count or released_deadline_ms
+                released_call_count or released_deadline_ms or released_cost_count
             )
 
         if deadline_budget is not None and fallback_profiles:
@@ -5019,12 +5027,15 @@ class FusionEngine:
     ) -> dict[str, Any]:
         """Atomically admit Hermes' feedback reference and re-Judge stages.
 
-        The first Judge makes the feedback decision, so these two calls are
+        The first Judge makes the feedback decision, so these calls are
         control-flow-dependent rather than part of initial route admission.
-        They are nevertheless a single process obligation: admitting only
-        the reference would allow a partial wave to consume the budget that
-        the required re-Judge needs.  All three hard resources therefore get
-        reserved before the feedback provider is contacted.
+        They are nevertheless one process obligation: admitting only the
+        reference would allow a partial wave to consume the budget that the
+        re-Judge and the final acting Synthesizer need.  When a cross-model
+        Synthesizer recovery profile is already admitted by the route, its
+        one recovery call is reserved in the same transaction.  All three
+        hard resources therefore get reserved before the feedback provider is
+        contacted.
         """
 
         base = _feedback_stage_admission_receipt(required=True)
@@ -5062,6 +5073,44 @@ class FusionEngine:
                 "status": "blocked",
                 "blocked_reasons": ["rejudge_profile_unavailable"],
             }
+
+        synthesizer_role = next(
+            (row for row in roles if str(row.get("role") or "") == "synthesizer"),
+            None,
+        )
+        synthesizer_value = (
+            synthesizer_role.get("model")
+            if isinstance(synthesizer_role, Mapping)
+            and isinstance(synthesizer_role.get("model"), Mapping)
+            else None
+        )
+        synthesizer_routed_profile = (
+            _profile_from_safe_dict(synthesizer_value)
+            if isinstance(synthesizer_value, Mapping)
+            else None
+        )
+        synthesizer_profile = (
+            self._registered_profile_for_id(synthesizer_routed_profile.profile_id)
+            if synthesizer_routed_profile is not None
+            else None
+        ) or synthesizer_routed_profile
+        synthesizer_fallback_profiles = (
+            self._cross_model_stage_fallback_profiles(
+                synthesizer_profile,
+                route_plan,
+                role_name="synthesizer",
+            )
+            if synthesizer_profile is not None
+            else []
+        )
+        synthesizer_fallback_profile = (
+            synthesizer_fallback_profiles[0]
+            if synthesizer_fallback_profiles
+            else None
+        )
+        synthesizer_fallback_admission_attempted = (
+            synthesizer_fallback_profile is not None
+        )
 
         feedback_request = feedback_context.get("request")
         if not isinstance(feedback_request, FusionRequest):
@@ -5118,73 +5167,133 @@ class FusionEngine:
                 "judge",
             ),
         )
+        synthesizer_prompt = ""
+        synthesizer_system = ""
+        synthesizer_request: FusionRequest | None = None
+        synthesizer_estimate: Mapping[str, Any] | None = None
+        if synthesizer_fallback_profile is not None:
+            synthesis_candidates, synthesis_compression = _rank_first_synthesis_candidates(
+                route_plan,
+                candidates,
+                judge_result,
+            )
+            synthesizer_prompt = _synthesis_prompt(
+                request,
+                synthesis_candidates,
+                judge_result,
+                route_plan=route_plan,
+                compression_receipt=synthesis_compression,
+            )
+            synthesizer_request = _provider_request_for_role(
+                _assembled_provider_request(request, synthesizer_prompt),
+                "synthesizer",
+                route_plan=route_plan,
+                prompt_is_already_assembled=True,
+                allow_aggregator_tools=False,
+            )
+            synthesizer_system = _synthesizer_system(request.system)
+            synthesizer_estimate = _estimate_provider_call_cost(
+                synthesizer_fallback_profile,
+                prompt=synthesizer_prompt,
+                system=synthesizer_system,
+                expected_output_tokens=_expected_output_tokens_for_call(
+                    synthesizer_request,
+                    "synthesizer",
+                ),
+            )
         deadline_reservations = {
             "targeted_escalation": _dynamic_stage_deadline_estimate_ms(fallback),
             "judge": _dynamic_stage_deadline_estimate_ms(judge_profile),
         }
         call_reservations = {"targeted_escalation": 1, "judge": 1}
+        if synthesizer_fallback_profile is not None:
+            call_reservations["synthesizer"] = 1
+            deadline_reservations["synthesizer"] = _dynamic_stage_deadline_estimate_ms(
+                synthesizer_fallback_profile
+            )
         cost_reserved_roles: list[str] = []
         deadline_reserved = False
         call_reserved = False
+        blocked_reason = ""
         try:
             call_reserved = call_budget.reserve_mandatory_stage_reservations(
                 call_reservations,
                 reason="hermes_feedback_reference_and_rejudge",
             )
             if not call_reserved:
-                return {
-                    **base,
-                    "status": "blocked",
-                    "blocked_reasons": ["max_total_model_calls_insufficient"],
-                }
-            deadline_reserved = deadline_budget.reserve_stage_reservations(
-                deadline_reservations,
-                reason="hermes_feedback_reference_and_rejudge",
-            )
-            if not deadline_reserved:
-                return {
-                    **base,
-                    "status": "blocked",
-                    "blocked_reasons": ["max_latency_ms_insufficient"],
-                }
-            if not cost_budget.reserve_stage(
-                kind="targeted_escalation",
-                role="targeted_escalation",
-                profile=fallback,
-                prompt=feedback_prompt,
-                system=feedback_system,
-                expected_output_tokens=_expected_output_tokens_for_call(
-                    feedback_request,
-                    "model_role",
-                ),
-                reason="hermes_feedback_reference_and_rejudge",
-            ):
-                return {
-                    **base,
-                    "status": "blocked",
-                    "blocked_reasons": ["max_cost_usd_insufficient"],
-                }
-            cost_reserved_roles.append("targeted_escalation")
-            if not cost_budget.reserve_stage(
-                kind="judge",
-                role="judge",
-                profile=judge_profile,
-                prompt=judge_prompt,
-                system=_judge_system(),
-                expected_output_tokens=_expected_output_tokens_for_call(
-                    judge_request,
-                    "judge",
-                ),
-                reason="hermes_feedback_reference_and_rejudge",
-            ):
-                return {
-                    **base,
-                    "status": "blocked",
-                    "blocked_reasons": ["max_cost_usd_insufficient"],
-                }
-            cost_reserved_roles.append("judge")
+                blocked_reason = "max_total_model_calls_insufficient"
+            else:
+                deadline_reserved = deadline_budget.reserve_stage_reservations(
+                    deadline_reservations,
+                    reason="hermes_feedback_reference_and_rejudge",
+                )
+                if not deadline_reserved:
+                    blocked_reason = "max_latency_ms_insufficient"
+                else:
+                    cost_stage_specs: list[tuple[str, str, ModelProfile, str, str, int]] = [
+                        (
+                            "targeted_escalation",
+                            "targeted_escalation",
+                            fallback,
+                            feedback_prompt,
+                            feedback_system,
+                            _expected_output_tokens_for_call(
+                                feedback_request,
+                                "model_role",
+                            ),
+                        ),
+                        (
+                            "judge",
+                            "judge",
+                            judge_profile,
+                            judge_prompt,
+                            _judge_system(),
+                            _expected_output_tokens_for_call(
+                                judge_request,
+                                "judge",
+                            ),
+                        ),
+                    ]
+                    if (
+                        synthesizer_fallback_profile is not None
+                        and synthesizer_request is not None
+                        and synthesizer_estimate is not None
+                    ):
+                        cost_stage_specs.append(
+                            (
+                                "synthesizer",
+                                "synthesizer",
+                                synthesizer_fallback_profile,
+                                synthesizer_prompt,
+                                synthesizer_system,
+                                _expected_output_tokens_for_call(
+                                    synthesizer_request,
+                                    "synthesizer",
+                                ),
+                            )
+                        )
+                    for kind, role, profile, prompt, system, expected_output_tokens in cost_stage_specs:
+                        if not cost_budget.reserve_stage(
+                            kind=kind,
+                            role=role,
+                            profile=profile,
+                            prompt=prompt,
+                            system=system,
+                            expected_output_tokens=expected_output_tokens,
+                            reason="hermes_feedback_reference_and_rejudge",
+                        ):
+                            blocked_reason = "max_cost_usd_insufficient"
+                            break
+                        cost_reserved_roles.append(role)
         finally:
-            admitted = len(cost_reserved_roles) == 2 and deadline_reserved and call_reserved
+            expected_cost_reservation_count = 2 + int(
+                synthesizer_fallback_profile is not None
+            )
+            admitted = (
+                len(cost_reserved_roles) == expected_cost_reservation_count
+                and deadline_reserved
+                and call_reserved
+            )
             if not admitted:
                 if cost_reserved_roles:
                     cost_budget.release_dynamic_stage_reservations(
@@ -5201,11 +5310,23 @@ class FusionEngine:
                         reason="hermes_feedback_admission_rollback",
                         roles=tuple(call_reservations),
                     )
-        if len(cost_reserved_roles) != 2 or not deadline_reserved or not call_reserved:
+        if (
+            len(cost_reserved_roles) != expected_cost_reservation_count
+            or not deadline_reserved
+            or not call_reserved
+        ):
+            if synthesizer_fallback_profile is not None and not blocked_reason:
+                blocked_reason = "hermes_feedback_admission_rollback"
             return {
                 **base,
                 "status": "blocked",
-                "blocked_reasons": ["hermes_feedback_admission_rollback"],
+                "blocked_reasons": [blocked_reason or "hermes_feedback_admission_rollback"],
+                "synthesizer_fallback_admission_attempted": synthesizer_fallback_admission_attempted,
+                "synthesizer_fallback_profile_sha256": (
+                    sha256_text(synthesizer_fallback_profile.profile_id)
+                    if synthesizer_fallback_profile is not None
+                    else ""
+                ),
             }
         return {
             **base,
@@ -5214,9 +5335,22 @@ class FusionEngine:
             "call_reservations": call_reservations,
             "deadline_reservations_ms": deadline_reservations,
             "cost_reservation_roles": cost_reserved_roles,
+            "synthesizer_fallback_admission_attempted": synthesizer_fallback_admission_attempted,
+            "synthesizer_fallback_reservation_admitted": (
+                synthesizer_fallback_profile is not None
+            ),
+            "synthesizer_fallback_profile_sha256": (
+                sha256_text(synthesizer_fallback_profile.profile_id)
+                if synthesizer_fallback_profile is not None
+                else ""
+            ),
             "pricing_known": bool(
                 feedback_estimate.get("pricing_known")
                 and judge_estimate.get("pricing_known")
+                and (
+                    synthesizer_estimate is None
+                    or synthesizer_estimate.get("pricing_known")
+                )
             ),
         }
 
@@ -9841,6 +9975,9 @@ def _feedback_stage_admission_receipt(
         "call_reservations": {},
         "deadline_reservations_ms": {},
         "cost_reservation_roles": [],
+        "synthesizer_fallback_admission_attempted": False,
+        "synthesizer_fallback_reservation_admitted": False,
+        "synthesizer_fallback_profile_sha256": "",
         "feedback_execution_attempted": False,
         "raw_prompt_persisted": False,
         "raw_profile_id_persisted": False,
