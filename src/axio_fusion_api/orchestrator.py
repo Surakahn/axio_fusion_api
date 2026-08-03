@@ -255,6 +255,12 @@ def _stage_failover_deadline_reservation_ms(
     return min(_MANDATORY_STAGE_DEADLINE_MAX_RESERVATION_MS, sum(reservations))
 
 
+def _stage_replica_retry_deadline_reservation_ms(profile: ModelProfile) -> int:
+    """Price one same-model physical retry without widening the stage contract."""
+
+    return _stage_failover_deadline_reservation_ms((profile,))
+
+
 class FusionExecutionError(RuntimeError):
     def __init__(self, code: str, message: str, trace: Mapping[str, Any] | None = None) -> None:
         super().__init__(message)
@@ -471,6 +477,7 @@ class _CallBudget:
         *,
         reason: str,
         roles: Sequence[str] | None = None,
+        max_count: int | None = None,
     ) -> int:
         """Release only runtime-added call holds.
 
@@ -481,17 +488,26 @@ class _CallBudget:
         """
 
         role_filter = {str(role)[:80] for role in roles or () if str(role)}
+        remaining_limit = (
+            max(0, int(max_count)) if max_count is not None else None
+        )
         released = 0
         with self._lock:
             for role_name, available in list(
                 self._remaining_dynamic_mandatory_stage_reservations.items()
             ):
+                if remaining_limit is not None and released >= remaining_limit:
+                    break
                 if role_filter and role_name not in role_filter:
                     continue
                 count = max(0, int(available))
+                if remaining_limit is not None:
+                    count = min(count, remaining_limit - released)
                 if count <= 0:
                     continue
-                self._remaining_dynamic_mandatory_stage_reservations[role_name] = 0
+                self._remaining_dynamic_mandatory_stage_reservations[role_name] = (
+                    max(0, int(available) - count)
+                )
                 aggregate = self._remaining_mandatory_stage_reservations.get(
                     role_name, 0
                 )
@@ -1862,6 +1878,7 @@ class _DeadlineBudget:
         *,
         reason: str,
         roles: Sequence[str] | None = None,
+        max_count: int | None = None,
     ) -> int:
         """Release only runtime-added deadline holds.
 
@@ -1871,17 +1888,26 @@ class _DeadlineBudget:
         """
 
         role_filter = {str(role)[:80] for role in roles or () if str(role)}
+        remaining_limit = (
+            max(0, int(max_count)) if max_count is not None else None
+        )
         released = 0
         with self._lock:
             for role_name, dynamic_pending in list(
                 self._dynamic_pending_stage_reservations_ms.items()
             ):
+                if remaining_limit is not None and released >= remaining_limit:
+                    break
                 if role_filter and role_name not in role_filter:
                     continue
                 amount = max(0, int(dynamic_pending))
+                if remaining_limit is not None:
+                    amount = min(amount, remaining_limit - released)
                 if amount <= 0:
                     continue
-                self._dynamic_pending_stage_reservations_ms[role_name] = 0
+                self._dynamic_pending_stage_reservations_ms[role_name] = max(
+                    0, int(dynamic_pending) - amount
+                )
                 aggregate = self._pending_stage_reservations_ms.get(role_name, 0)
                 self._pending_stage_reservations_ms[role_name] = max(
                     0, aggregate - amount
@@ -4373,15 +4399,64 @@ class FusionEngine:
             "cross_model_failover_deadline_headroom_reserved": False,
             "cross_model_failover_deadline_headroom_ms": 0,
             "cross_model_failover_headroom_released": False,
+            "same_canonical_retry_admission_attempted": False,
+            "same_canonical_retry_admission_count": 0,
+            "same_canonical_retry_admission_receipts": [],
         }
         attempts: list[dict[str, Any]] = []
         provider_attempt_count = 0
         terminal_reason = "no_eligible_canonical_replica"
+        same_canonical_retry_blocked = False
         attempt_plan = [
             ("same_canonical", item) for item in replicas
         ] + [
             ("cross_model", item) for item in fallback_profiles
         ]
+
+        def admit_same_canonical_retry(replica: ModelProfile) -> dict[str, Any]:
+            """Admit one physical retry as a first-class bounded stage attempt."""
+
+            reservation_ms = _stage_replica_retry_deadline_reservation_ms(replica)
+            receipt = {
+                "attempted": True,
+                "admitted": False,
+                "call_slot_admitted": False,
+                "deadline_admitted": False,
+                "reservation_ms": reservation_ms,
+                "reason": "same_canonical_retry_budget_unavailable",
+            }
+            call_admitted = True
+            if call_budget is not None:
+                call_admitted = call_budget.reserve_mandatory_stage_reservations(
+                    {role_name: 1},
+                    reason="same_canonical_stage_replica_retry",
+                )
+                receipt["call_slot_admitted"] = bool(call_admitted)
+            if not call_admitted:
+                receipt["reason"] = "same_canonical_retry_call_budget_unavailable"
+                return receipt
+
+            deadline_admitted = True
+            if deadline_budget is not None and reservation_ms > 0:
+                deadline_admitted = deadline_budget.reserve_stage_reservations(
+                    {role_name: reservation_ms},
+                    reason="same_canonical_stage_replica_retry",
+                )
+                receipt["deadline_admitted"] = bool(deadline_admitted)
+            else:
+                receipt["deadline_admitted"] = True
+            if not deadline_admitted:
+                if call_budget is not None:
+                    call_budget.release_dynamic_stage_reservations(
+                        reason="same_canonical_retry_deadline_unavailable",
+                        roles=(role_name,),
+                        max_count=1,
+                    )
+                receipt["reason"] = "same_canonical_retry_deadline_unavailable"
+                return receipt
+            receipt["admitted"] = True
+            receipt["reason"] = "same_canonical_retry_slot_reserved"
+            return receipt
 
         def release_unused_failover_headroom() -> None:
             # A successful initial stage no longer needs its already-admitted
@@ -4437,6 +4512,51 @@ class FusionEngine:
                 raise PublicStreamInterruptedError(client_cancelled=True)
             if attempt_scope == "cross_model":
                 routing["cross_model_failover_attempted"] = True
+            if attempt_scope == "same_canonical" and replica_index > 1:
+                if same_canonical_retry_blocked:
+                    attempts.append(
+                        _canonical_replica_stage_attempt_receipt(
+                            replica,
+                            replica_index=replica_index,
+                            attempt_scope=attempt_scope,
+                            status="skipped",
+                            reason="same_canonical_retry_not_admitted_after_budget_block",
+                        )
+                    )
+                    continue
+                retry_receipt = admit_same_canonical_retry(replica)
+                routing["same_canonical_retry_admission_attempted"] = True
+                routing["same_canonical_retry_admission_count"] = (
+                    _safe_int(
+                        routing.get("same_canonical_retry_admission_count"),
+                        default=0,
+                    )
+                    + 1
+                )
+                routing["same_canonical_retry_admission_receipts"] = [
+                    *(
+                        routing.get("same_canonical_retry_admission_receipts")
+                        if isinstance(
+                            routing.get("same_canonical_retry_admission_receipts"),
+                            list,
+                        )
+                        else []
+                    ),
+                    retry_receipt,
+                ][: _MAX_CANONICAL_REPLICA_ATTEMPTS]
+                if not retry_receipt["admitted"]:
+                    same_canonical_retry_blocked = True
+                    attempts.append(
+                        _canonical_replica_stage_attempt_receipt(
+                            replica,
+                            replica_index=replica_index,
+                            attempt_scope=attempt_scope,
+                            status="skipped",
+                            reason=str(retry_receipt["reason"]),
+                        )
+                    )
+                    terminal_reason = str(retry_receipt["reason"])
+                    continue
             if deadline_budget is not None and not deadline_budget.acquire(
                 kind=kind,
                 role=role_name,

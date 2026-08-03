@@ -3671,6 +3671,164 @@ def test_stage_cross_model_failover_gets_a_new_bounded_deadline_window(monkeypat
     assert deadline_budget.remaining_seconds() == 8.75
 
 
+def test_stage_same_canonical_retry_gets_its_own_call_and_deadline_slot(monkeypatch):
+    clock = {"now": 0.0}
+    monkeypatch.setattr(orchestrator_module.time, "monotonic", lambda: clock["now"])
+    primary = normalize_profile(
+        {
+            "provider": "same-model-primary",
+            "model": "same-model-primary-alias",
+            "canonical_model_id": "same-model-v1",
+            "api_format": "chat",
+            "p50_latency_ms": 800,
+            "p95_latency_ms": 1_000,
+        }
+    )
+    replica = normalize_profile(
+        {
+            "provider": "same-model-replica",
+            "model": "same-model-replica-alias",
+            "canonical_model_id": "same-model-v1",
+            "api_format": "responses",
+            "p50_latency_ms": 820,
+            "p95_latency_ms": 1_000,
+        }
+    )
+
+    class SameCanonicalRetryClient:
+        def __init__(self):
+            self.calls = []
+            self.timeouts = []
+
+        def complete(self, profile, request, *, prompt, system, timeout=None):
+            del request, prompt, system
+            self.calls.append(profile.profile_id)
+            self.timeouts.append(timeout)
+            if profile.profile_id == primary.profile_id:
+                clock["now"] += float(timeout or 0.0)
+                raise TimeoutError("fixture same-model channel timeout")
+            clock["now"] += 0.25
+            return "same-model replica output"
+
+    client = SameCanonicalRetryClient()
+    engine = FusionEngine([primary, replica], client=client, cache_enabled=False)
+    deadline_budget = _DeadlineBudget(
+        10_000,
+        mandatory_stage_reservations_ms={"judge": 1_000, "synthesizer": 1_000},
+    )
+    call_budget = _CallBudget(
+        3,
+        mandatory_stage_reservations={"judge": 1, "synthesizer": 1},
+    )
+    output, selected, routing, attempt_count = engine._complete_stage_with_replica_failover(
+        primary,
+        FusionRequest(model="axio-pro", prompt="same-model retry fixture"),
+        route_plan={},
+        kind="judge",
+        role_name="judge",
+        prompt="judge fixture",
+        system="judge system fixture",
+        call_budget=call_budget,
+        cost_budget=None,
+        deadline_budget=deadline_budget,
+        prompt_budget=None,
+    )
+
+    assert output == "same-model replica output"
+    assert selected.profile_id == replica.profile_id
+    assert client.calls == [primary.profile_id, replica.profile_id]
+    assert client.timeouts[0] == 1.0
+    assert abs(client.timeouts[1] - 1.43) < 1e-9
+    assert attempt_count == 2
+    assert routing["same_canonical_retry_admission_attempted"] is True
+    assert routing["same_canonical_retry_admission_count"] == 1
+    assert routing["same_canonical_retry_admission_receipts"] == [
+        {
+            "attempted": True,
+            "admitted": True,
+            "call_slot_admitted": True,
+            "deadline_admitted": True,
+            "reservation_ms": 1_430,
+            "reason": "same_canonical_retry_slot_reserved",
+        }
+    ]
+    assert deadline_budget.safe_dict()["mandatory_stage_deadline_pending_ms"] == 1_000
+    assert call_budget.safe_dict()["consumed_dynamic_mandatory_stage_call_count"] == 1
+
+
+def test_stage_same_canonical_retry_fails_closed_without_borrowing_synthesizer_window(
+    monkeypatch,
+):
+    clock = {"now": 0.0}
+    monkeypatch.setattr(orchestrator_module.time, "monotonic", lambda: clock["now"])
+    primary = normalize_profile(
+        {
+            "provider": "tight-primary",
+            "model": "tight-primary-alias",
+            "canonical_model_id": "tight-model-v1",
+            "api_format": "chat",
+            "p50_latency_ms": 800,
+            "p95_latency_ms": 1_000,
+        }
+    )
+    replica = normalize_profile(
+        {
+            "provider": "tight-replica",
+            "model": "tight-replica-alias",
+            "canonical_model_id": "tight-model-v1",
+            "api_format": "responses",
+            "p50_latency_ms": 820,
+            "p95_latency_ms": 1_000,
+        }
+    )
+
+    class FailingSameCanonicalClient:
+        def __init__(self):
+            self.calls = []
+
+        def complete(self, profile, request, *, prompt, system, timeout=None):
+            del request, prompt, system
+            self.calls.append(profile.profile_id)
+            clock["now"] += float(timeout or 0.0)
+            raise TimeoutError("fixture tight stage timeout")
+
+    client = FailingSameCanonicalClient()
+    engine = FusionEngine([primary, replica], client=client, cache_enabled=False)
+    deadline_budget = _DeadlineBudget(
+        2_200,
+        mandatory_stage_reservations_ms={"judge": 1_000, "synthesizer": 1_000},
+    )
+    call_budget = _CallBudget(
+        3,
+        mandatory_stage_reservations={"judge": 1, "synthesizer": 1},
+    )
+    output, _, routing, attempt_count = engine._complete_stage_with_replica_failover(
+        primary,
+        FusionRequest(model="axio-pro", prompt="tight same-model retry fixture"),
+        route_plan={},
+        kind="judge",
+        role_name="judge",
+        prompt="judge fixture",
+        system="judge system fixture",
+        call_budget=call_budget,
+        cost_budget=None,
+        deadline_budget=deadline_budget,
+        prompt_budget=None,
+    )
+
+    assert output == ""
+    assert client.calls == [primary.profile_id]
+    assert attempt_count == 1
+    assert routing["same_canonical_retry_admission_receipts"][0]["admitted"] is False
+    assert routing["same_canonical_retry_admission_receipts"][0]["reason"] == (
+        "same_canonical_retry_deadline_unavailable"
+    )
+    assert routing["terminal_reason"] == "same_canonical_retry_deadline_unavailable"
+    assert deadline_budget.safe_dict()["mandatory_stage_deadline_pending_ms"] == 1_000
+    assert call_budget.safe_dict()["reserved_mandatory_stage_call_count"] == 1
+    assert call_budget.safe_dict()["used_model_call_count"] == 1
+
+
 def test_failed_judge_cross_model_fallback_remains_unaccepted_and_safe():
     canonical_profiles = _canonical_replica_profiles()
     cross_model = _profile(30)
