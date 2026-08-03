@@ -11,6 +11,7 @@ import threading
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import Mapping
 
 import pytest
 
@@ -2476,6 +2477,160 @@ def test_standalone_zero_candidate_panel_releases_mandatory_slots_for_bounded_de
     assert secret_prompt not in serialized
     assert '"raw_prompt_persisted": true' not in serialized
     assert '"raw_provider_model_ids_persisted": true' not in serialized
+
+
+def test_standalone_zero_candidate_fusion_recovers_panel_before_control_stages():
+    class RecoveryPanelClient:
+        def __init__(self):
+            self.calls = []
+
+        def complete(self, profile, request, *, prompt, system, timeout=None):
+            del system, timeout
+            self.calls.append((profile.profile_id, request.metadata.copy(), prompt))
+            if "Compare these Axio Fusion candidate answers" in prompt:
+                return json.dumps(
+                    {
+                        "consensus": [],
+                        "contradictions": [],
+                        "missing_coverage": [],
+                        "collective_blind_spots": [],
+                        "ranked_candidates": [
+                            {"candidate_id": "fallback_solver", "score": 0.92}
+                        ],
+                        "follow_up_tasks": [],
+                        "ready_for_synthesis": True,
+                    }
+                )
+            if "Synthesize one final answer" in prompt:
+                return "recovered fusion final"
+            if request.metadata.get("_axio_runtime_recovery_reference") is True:
+                return json.dumps(
+                    {
+                        "answer": f"recovery evidence from {profile.model}",
+                        "evidence": [{"claim": "recovered", "source": "fixture"}],
+                        "assumptions": [],
+                        "uncertainties": [],
+                        "confidence": 0.84,
+                    }
+                )
+            raise RuntimeError("initial panel branch unavailable")
+
+    profiles = [
+        normalize_profile(
+            {
+                "provider": f"recovery-provider-{index}",
+                "model": f"recovery-model-{index}",
+                "canonical_model_id": f"recovery-model-{index}",
+                "p50_latency_ms": 120,
+                "p95_latency_ms": 180,
+                "capabilities": {
+                    "science_knowledge": 0.9,
+                    "logic": 0.9,
+                    "critique": 0.9,
+                    "structured_output": 0.9,
+                },
+            }
+        )
+        for index in range(8)
+    ]
+    expert_roles = [
+        {"role": role, "model": profiles[index].safe_dict()}
+        for index, role in enumerate(
+            ("primary_solver", "independent_solver", "critic")
+        )
+    ]
+    recovery_pool = [
+        {
+            "profile_id_sha256": sha256_text(profile.profile_id),
+            "runtime_canonical_identity_sha256": profile.canonical_identity_sha256,
+            "fallback_rank": index + 1,
+            "routing_score": 0.9 - index * 0.01,
+        }
+        for index, profile in enumerate(profiles[5:8])
+    ]
+    route_plan = {
+        "strategy": "pro_panel_judge_escalation",
+        "fusion_finalization_mode": "provider_judge_synthesis",
+        "judge_contract": {
+            "required": True,
+            "provider_stage_calls_reserved": True,
+        },
+        "budget": {
+            "max_total_model_calls": 12,
+            "max_latency_ms": 90_000,
+            "max_parallel_experts": 1,
+            "min_judge_candidate_count": 3,
+            "fusion_finalization_mode": "provider_judge_synthesis",
+            "initial_fusion_call_plan": {
+                "complete_fusion_feasible": True,
+                "planned_initial_fusion_call_count": 8,
+                "judge_reserved": True,
+                "synthesizer_reserved": True,
+            },
+        },
+        "runtime_guards": {"max_total_model_calls": 12, "max_latency_ms": 90_000},
+        "roles": [
+            *expert_roles,
+            {"role": "judge", "model": profiles[3].safe_dict()},
+            {"role": "synthesizer", "model": profiles[4].safe_dict()},
+        ],
+        "selected_models": [profile.safe_dict() for profile in profiles[:5]],
+        "provider_routing_policy": {
+            "fallback_pool": recovery_pool,
+            "fallback_enabled": True,
+        },
+        "hermes_moa": {
+            "enabled": True,
+            "reference_roles": ["primary_solver", "independent_solver", "critic"],
+            "reference_max_tokens": 512,
+            "recursion_guard": {"max_process_depth": 1},
+        },
+        "task_dag": {"nodes": [], "checkpoints": []},
+        "request_analysis": {"domains": ["daily_work"]},
+    }
+    request = canonicalize_payload(
+        {
+            "model": "axio-pro",
+            "max_latency_ms": 90_000,
+            "messages": [{"role": "user", "content": "recover a fusion panel"}],
+        }
+    )
+    client = RecoveryPanelClient()
+    response = FusionEngine(profiles, client=client, cache_enabled=False)._complete_live(
+        request,
+        route_plan,
+    )
+    assert response.text == "recovered fusion final"
+    assert response.trace["provider_call_count"] == 8
+    assert response.trace["judge_provider_call_count"] == 1
+    assert response.trace["synthesis_provider_call_count"] == 1
+    assert response.trace["panel_repair"]["runtime_recovery_mode"] is True
+    assert response.trace["panel_repair"]["success"] is True
+    assert response.trace["panel_repair"]["repair_attempt_count"] == 3
+    assert response.trace["panel_repair"]["runtime_recovery_role_order_policy"] == (
+        "fresh_canonical_identity_then_provider_diversity_then_latency"
+    )
+    assert response.trace["runtime_fusion_stage_outcome"][
+        "complete_admitted_fusion_finalized"
+    ] is True
+    hermes_execution = response.trace["hermes_moa_execution"]
+    assert hermes_execution["runtime_recovery_reference_attempt_count"] == 3
+    assert hermes_execution["runtime_recovery_reference_completed_count"] == 3
+    assert hermes_execution["process_contract_completed"] is True
+    assert response.trace["budget_lock"]["consumed_mandatory_stage_call_count"] == 2
+    recovery_timeout_receipts = [
+        candidate.task_execution.get("provider_timeout", {})
+        for candidate in response.candidates
+        if isinstance(candidate.task_execution, Mapping)
+        and candidate.task_execution.get("runtime_recovery_reference") is True
+    ]
+    assert recovery_timeout_receipts
+    assert all(
+        receipt.get("runtime_panel_recovery") is True
+        and receipt.get("runtime_recovery_timeout_cap_ms") == 15_000
+        for receipt in recovery_timeout_receipts
+    )
+    assert len(client.calls) == 8
 
 
 def test_standalone_all_provider_failures_close_mandatory_stage_reservations_in_error_receipt():

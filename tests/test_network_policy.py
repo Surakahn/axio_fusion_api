@@ -209,6 +209,37 @@ def test_https_connection_watchdog_closes_blocked_proxy_socket(monkeypatch):
     assert time.monotonic() - started < 0.5
 
 
+def test_response_header_watchdog_closes_blocked_http_socket(monkeypatch):
+    closed = threading.Event()
+
+    class BlockingSocket:
+        def close(self):
+            closed.set()
+
+    connection = network._DeadlineHTTPConnection(
+        "provider.invalid",
+        timeout=0.03,
+    )
+    connection.sock = BlockingSocket()
+
+    def blocked_getresponse(_connection):
+        if not closed.wait(1.0):
+            raise AssertionError("response-header watchdog did not close the socket")
+        raise OSError("response header deadline expired")
+
+    monkeypatch.setattr(
+        network.http.client.HTTPConnection,
+        "getresponse",
+        blocked_getresponse,
+    )
+    started = time.monotonic()
+    with pytest.raises(OSError, match="deadline"):
+        connection.getresponse()
+
+    assert closed.is_set()
+    assert time.monotonic() - started < 0.5
+
+
 def test_network_opener_installs_bounded_https_handler(monkeypatch):
     monkeypatch.setenv("AXIO_FUSION_NETWORK_MODE", "off")
     captured = _capture_opener(monkeypatch)
@@ -217,5 +248,9 @@ def test_network_opener_installs_bounded_https_handler(monkeypatch):
 
     assert any(
         isinstance(handler, network._DeadlineHTTPSHandler)
+        for handler in captured["handlers"]
+    )
+    assert any(
+        isinstance(handler, network._DeadlineHTTPHandler)
         for handler in captured["handlers"]
     )

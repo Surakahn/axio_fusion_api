@@ -765,6 +765,8 @@ def _safe_candidate_task_execution(value: Mapping[str, Any]) -> dict[str, Any]:
             "node_receipts": [],
             "checkpoint_receipts": [],
             "replica_routing": _safe_replica_routing({}),
+            "hermes_process_stage": "",
+            "runtime_recovery_reference": False,
             "raw_prompt_persisted": False,
             "raw_candidate_text_persisted": False,
             "secrets_persisted": False,
@@ -809,6 +811,8 @@ def _safe_candidate_task_execution(value: Mapping[str, Any]) -> dict[str, Any]:
             if isinstance(value.get("replica_routing"), Mapping)
             else {}
         ),
+        "hermes_process_stage": str(value.get("hermes_process_stage") or "")[:40],
+        "runtime_recovery_reference": bool(value.get("runtime_recovery_reference")),
         "raw_prompt_persisted": False,
         "raw_candidate_text_persisted": False,
         "secrets_persisted": False,
@@ -1411,6 +1415,12 @@ def _safe_hermes_moa_execution(value: Mapping[str, Any]) -> dict[str, Any]:
         )[:120],
         "enabled": bool(value.get("enabled")),
         "reference_role_count": _optional_int(value.get("reference_role_count")),
+        "runtime_recovery_reference_attempt_count": _optional_int(
+            value.get("runtime_recovery_reference_attempt_count")
+        ),
+        "runtime_recovery_reference_completed_count": _optional_int(
+            value.get("runtime_recovery_reference_completed_count")
+        ),
         "reference_attempt_count": _optional_int(value.get("reference_attempt_count")),
         "reference_completed_count": _optional_int(value.get("reference_completed_count")),
         "reference_failed_or_empty_count": _optional_int(
@@ -1614,6 +1624,13 @@ def _safe_panel_repair(value: Mapping[str, Any]) -> dict[str, Any]:
         "completed_after": _optional_int(value.get("completed_after")),
         "success": bool(value.get("success")),
         "degraded_mode": bool(value.get("degraded_mode")),
+        "runtime_recovery_mode": bool(value.get("runtime_recovery_mode")),
+        "runtime_recovery_reference_requested": bool(
+            value.get("runtime_recovery_reference_requested")
+        ),
+        "runtime_recovery_role_order_policy": str(
+            value.get("runtime_recovery_role_order_policy") or ""
+        )[:120],
         "optional_hermes_enrichment_skipped": bool(value.get("optional_hermes_enrichment_skipped")),
         "optional_hermes_enrichment_skip_reason": str(value.get("optional_hermes_enrichment_skip_reason") or "")[:120],
         "blocked_reasons": [str(item)[:120] for item in value.get("blocked_reasons", [])[:24] if str(item)] if isinstance(value.get("blocked_reasons"), list) else [],
@@ -2406,6 +2423,17 @@ def _safe_deadline_budget(value: Mapping[str, Any]) -> dict[str, Any]:
         if isinstance(value.get("mandatory_stage_deadline_reservations_ms"), Mapping)
         else {}
     )
+    phase_deadlines = (
+        value.get("phase_deadlines_ms")
+        if isinstance(value.get("phase_deadlines_ms"), Mapping)
+        else {}
+    )
+    phase_remaining = (
+        value.get("phase_remaining_ms")
+        if isinstance(value.get("phase_remaining_ms"), Mapping)
+        else {}
+    )
+    phase_receipts = value.get("phase_receipts") if isinstance(value.get("phase_receipts"), list) else []
     return {
         "schema": value.get("schema") or "axio_fusion_api.deadline_budget.v1",
         "max_latency_ms": _optional_int(value.get("max_latency_ms")),
@@ -2439,6 +2467,27 @@ def _safe_deadline_budget(value: Mapping[str, Any]) -> dict[str, Any]:
             )
             or 0,
         ),
+        "phase_deadline_enabled": value.get("phase_deadline_enabled") is True,
+        "phase_deadlines_ms": {
+            str(phase)[:80]: max(0, _optional_int(budget_ms) or 0)
+            for phase, budget_ms in phase_deadlines.items()
+            if str(phase)
+        },
+        "phase_remaining_ms": {
+            str(phase)[:80]: max(0.0, _optional_float(remaining_ms) or 0.0)
+            for phase, remaining_ms in phase_remaining.items()
+            if str(phase)
+        },
+        "phase_receipts": [
+            {
+                "status": str(row.get("status") or "")[:40],
+                "phase": str(row.get("phase") or "")[:80],
+                "budget_ms": max(0, _optional_int(row.get("budget_ms")) or 0),
+                "reason": str(row.get("reason") or "")[:160],
+            }
+            for row in phase_receipts[:12]
+            if isinstance(row, Mapping)
+        ],
         "enforced": bool(value.get("enforced")),
         "skipped_call_receipts": [
             {

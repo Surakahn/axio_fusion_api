@@ -13,6 +13,7 @@ from axio_fusion_api.orchestrator import (
     _fusion_evidence_candidate_count,
     _independent_candidate_count,
     _mandatory_fusion_stage_deadline_reservations,
+    _configure_fusion_panel_phase,
     _dynamic_stage_deadline_estimate_ms,
     _candidates_for_fusion_finalization,
     _local_judge_candidates,
@@ -171,6 +172,168 @@ def test_explicit_fusion_deadline_reaches_provider_ceiling_without_changing_defa
     fast_budget = _budget_for_request(fast_request, analyze_request(fast_request))
     assert pro_budget["max_latency_ms"] == 90_000
     assert fast_budget["max_latency_ms"] == 60_000
+
+
+def test_runtime_adaptive_control_routing_reuses_only_proven_route_candidate():
+    successful = normalize_profile(
+        {
+            "provider": "adaptive-good-provider",
+            "model": "adaptive-good-model",
+            "p50_latency_ms": 120,
+            "capabilities": {
+                "daily_work": 0.9,
+                "logic": 0.9,
+                "critique": 0.92,
+                "structured_output": 0.94,
+            },
+        }
+    )
+    failed = normalize_profile(
+        {
+            "provider": "adaptive-failed-provider",
+            "model": "adaptive-failed-model",
+            "p50_latency_ms": 150,
+            "capabilities": {
+                "daily_work": 0.9,
+                "logic": 0.9,
+                "critique": 0.92,
+                "structured_output": 0.94,
+            },
+        }
+    )
+    candidate = CandidateResult(
+        candidate_id="primary_solver",
+        role="primary_solver",
+        profile_id=successful.profile_id,
+        provider=successful.provider,
+        model=successful.model,
+        answer="proven candidate answer",
+        confidence=0.9,
+        latency_ms=120,
+        canonical_identity=successful.canonical_identity,
+    )
+    route_plan = {
+        "roles": [
+            {"role": "judge", "model": failed.safe_dict()},
+            {"role": "synthesizer", "model": failed.safe_dict()},
+            {"role": "primary_solver", "model": successful.safe_dict()},
+        ],
+        "selected_models": [successful.safe_dict(), failed.safe_dict()],
+        "provider_routing_policy": {
+            "fallback_pool": [
+                {"profile_id_sha256": sha256_text(successful.profile_id)},
+            ],
+        },
+        "request_analysis": {"domains": ["daily_work"]},
+        "budget": {"max_latency_ms": 90_000},
+    }
+    engine = FusionEngine([successful, failed], cache_enabled=False)
+
+    unchanged, unchanged_receipt = engine._runtime_adaptive_control_profile(
+        failed,
+        route_plan,
+        role_name="judge",
+        candidates=[],
+    )
+    assert unchanged.profile_id == failed.profile_id
+    assert unchanged_receipt["applied"] is False
+    assert unchanged_receipt["selection_reason"] == "no_runtime_failure_evidence"
+
+    selected, receipt = engine._runtime_adaptive_control_profile(
+        failed,
+        route_plan,
+        role_name="judge",
+        candidates=[candidate],
+        prior_stage_failed=True,
+    )
+    assert selected.profile_id == successful.profile_id
+    assert receipt["applied"] is True
+    assert receipt["selection_reason"] == "successful_candidate_reused_after_control_failure"
+    assert receipt["original_profile_sha256"] == sha256_text(failed.profile_id)
+    assert receipt["selected_profile_sha256"] == sha256_text(successful.profile_id)
+    serialized = json.dumps(receipt, ensure_ascii=False)
+    assert successful.profile_id not in serialized
+    assert failed.profile_id not in serialized
+
+
+def test_judge_stage_uses_successful_panel_fallback_after_control_profile_failure():
+    first = _profile(0, critique=0.92, structured=0.94)
+    second = _profile(1, critique=0.90, structured=0.92)
+
+    class JudgeFailoverClient:
+        def __init__(self):
+            self.calls = []
+
+        def complete(self, profile, request, *, prompt, system, timeout=None):
+            del request, prompt, system, timeout
+            self.calls.append(profile.profile_id)
+            if profile.profile_id == first.profile_id:
+                raise RuntimeError("control profile unavailable")
+            return json.dumps(
+                {
+                    "consensus": [],
+                    "contradictions": [],
+                    "missing_coverage": [],
+                    "collective_blind_spots": [],
+                    "ranked_candidates": [
+                        {"candidate_id": "primary_solver", "score": 0.91},
+                    ],
+                    "follow_up_tasks": [],
+                    "ready_for_synthesis": True,
+                }
+            )
+
+    candidates = [
+        CandidateResult(
+            "primary_solver",
+            "primary_solver",
+            first.profile_id,
+            first.provider,
+            first.model,
+            "first proven answer",
+            confidence=0.88,
+            latency_ms=120,
+            canonical_identity=first.canonical_identity,
+        ),
+        CandidateResult(
+            "independent_solver",
+            "independent_solver",
+            second.profile_id,
+            second.provider,
+            second.model,
+            "second proven answer",
+            confidence=0.87,
+            latency_ms=150,
+            canonical_identity=second.canonical_identity,
+        ),
+    ]
+    route_plan = {
+        "judge_contract": {"required": True},
+        "roles": [{"role": "judge", "model": first.safe_dict()}],
+        "selected_models": [first.safe_dict(), second.safe_dict()],
+        "provider_routing_policy": {
+            "fallback_pool": [
+                {"profile_id_sha256": sha256_text(second.profile_id)},
+            ],
+        },
+        "request_analysis": {"domains": ["daily_work"]},
+        "budget": {"max_latency_ms": 90_000},
+    }
+    client = JudgeFailoverClient()
+    result = FusionEngine([first, second], client=client, cache_enabled=False)._judge_candidates(
+        FusionRequest(model="axio-pro", prompt="judge this panel"),
+        route_plan,
+        candidates,
+        call_budget=_CallBudget(2),
+    )
+
+    assert result["judge_provider_call"] is True
+    assert result["judge_parse_failed"] is False
+    assert result["judge_provider_call_count"] == 2
+    assert client.calls == [first.profile_id, second.profile_id]
+    routing = result["judge_replica_routing"]
+    assert routing["runtime_adaptive_fallback_routing"]["applied"] is True
+    assert routing["cross_model_failover_used"] is True
 
 
 def test_failed_streaming_role_probe_cannot_be_promoted_into_a_control_stage():
@@ -971,6 +1134,166 @@ def test_deadline_budget_reserves_measured_mandatory_stages_from_optional_work(m
     assert receipt["skipped_calls"][0]["reason"] == "mandatory_stage_deadline_reservation"
 
 
+def test_fusion_panel_phase_preserves_a_fractional_control_window(monkeypatch):
+    clock = {"now": 0.0}
+    monkeypatch.setattr(orchestrator_module.time, "monotonic", lambda: clock["now"])
+    budget = _DeadlineBudget(
+        90_000,
+        mandatory_stage_reservations_ms={"judge": 12_000, "synthesizer": 12_000},
+    )
+    route_plan = {
+        "judge_contract": {"required": True},
+        "budget": {"fusion_finalization_mode": "provider_judge_synthesis"},
+    }
+
+    receipt = _configure_fusion_panel_phase(route_plan, budget)
+
+    assert receipt["enabled"] is True
+    assert receipt["configured"] is True
+    assert receipt["measured_control_reservation_ms"] == 24_000
+    assert receipt["fractional_control_window_ms"] == 31_500
+    assert receipt["control_window_ms"] == 31_500
+    assert receipt["panel_phase_budget_ms"] == 58_500
+    assert budget.safe_dict()["phase_deadlines_ms"] == {"fusion_panel": 58_500}
+
+
+def test_fusion_panel_phase_timeout_and_admission_stop_at_phase_boundary(monkeypatch):
+    clock = {"now": 0.0}
+    monkeypatch.setattr(orchestrator_module.time, "monotonic", lambda: clock["now"])
+    budget = _DeadlineBudget(1_000)
+    assert budget.configure_phase(
+        name="fusion_panel",
+        budget_ms=600,
+        reason="phase_contract_test",
+    ) is True
+    request = FusionRequest(model="axio-pro", prompt="task")
+
+    clock["now"] = 0.1
+    assert budget.acquire_in_phase(
+        kind="model_role",
+        role="primary_solver",
+        profile_id="panel-profile",
+        phase="fusion_panel",
+    ) is True
+    assert budget.timeout_seconds(
+        request,
+        role="primary_solver",
+        kind="model_role",
+        phase="fusion_panel",
+    ) == 0.5
+
+    clock["now"] = 0.61
+    assert budget.acquire_in_phase(
+        kind="model_role",
+        role="late_solver",
+        profile_id="late-profile",
+        phase="fusion_panel",
+    ) is False
+    assert budget.safe_dict()["skipped_calls"][-1]["reason"] == (
+        "fusion_panel_phase_deadline_exhausted"
+    )
+
+
+def test_phase_aware_role_timeout_is_forwarded_without_changing_outer_deadline(
+    monkeypatch,
+):
+    monkeypatch.setattr(orchestrator_module.time, "monotonic", lambda: 0.0)
+    budget = _DeadlineBudget(90_000)
+    assert budget.configure_phase(
+        name="fusion_panel",
+        budget_ms=2_000,
+        reason="role_timeout_contract_test",
+    ) is True
+    profile = normalize_profile(
+        {
+            "provider": "phase-provider",
+            "model": "phase-model",
+            "p95_latency_ms": 500,
+        }
+    )
+    request = canonicalize_payload(
+        {
+            "model": "axio-pro",
+            "max_latency_ms": 90_000,
+            "messages": [{"role": "user", "content": "task"}],
+        }
+    )
+
+    timeout, receipt = _timeout_for_role(
+        request,
+        budget,
+        route_plan={
+            "strategy": "pro_panel_judge_escalation",
+            "budget": {
+                "max_total_model_calls": 8,
+                "fusion_finalization_mode": "provider_judge_synthesis",
+            },
+        },
+        role_name="primary_solver",
+        profile=profile,
+        phase="fusion_panel",
+    )
+
+    # The phase leaves two seconds, and the screened cap has a four-second
+    # minimum for this short-latency profile. The phase is therefore the
+    # effective bound while the candidate-specific cap remains visible but
+    # does not further shorten it.
+    assert timeout == 2.0
+    assert receipt["phase"] == "fusion_panel"
+    assert receipt["fusion_candidate_timeout_applied"] is False
+
+
+def test_safe_trace_exports_phase_budget_without_runtime_secrets():
+    request = FusionRequest(model="axio-pro", prompt="phase trace task")
+    response = FusionResponse(
+        text="answer",
+        request=request,
+        route_plan={},
+        candidates=(),
+        judge_result={},
+        trace={
+            "deadline_budget": {
+                "schema": "axio_fusion_api.deadline_budget.v1",
+                "phase_deadline_enabled": True,
+                "phase_deadlines_ms": {"fusion_panel": 58_500},
+                "phase_remaining_ms": {"fusion_panel": 12_345.5},
+                "phase_receipts": [
+                    {
+                        "status": "configured",
+                        "phase": "fusion_panel",
+                        "budget_ms": 58_500,
+                        "reason": "bounded_expert_panel",
+                        "PRIVATE_API_KEY": "must-not-escape",
+                    }
+                ],
+                "raw_prompt_persisted": False,
+                "raw_profile_id_persisted": False,
+                "secrets_persisted": False,
+            }
+        },
+        provider_calls_recorded=True,
+    )
+
+    safe = safe_execution_trace(response, tenant_key="phase-trace")
+
+    assert safe["deadline_budget"]["phase_deadline_enabled"] is True
+    assert safe["deadline_budget"]["phase_deadlines_ms"] == {
+        "fusion_panel": 58_500
+    }
+    assert safe["deadline_budget"]["phase_remaining_ms"] == {
+        "fusion_panel": 12_345.5
+    }
+    assert safe["deadline_budget"]["phase_receipts"] == [
+        {
+            "status": "configured",
+            "phase": "fusion_panel",
+            "budget_ms": 58_500,
+            "reason": "bounded_expert_panel",
+        }
+    ]
+    assert "PRIVATE_API_KEY" not in json.dumps(safe, ensure_ascii=False)
+
+
 def test_deadline_budget_caps_judge_to_its_own_reservation(monkeypatch):
     clock = {"now": 0.0}
     monkeypatch.setattr(orchestrator_module.time, "monotonic", lambda: clock["now"])
@@ -1368,6 +1691,50 @@ def test_fusion_candidate_timeout_uses_screened_tail_without_consuming_control_w
     assert deadline_budget.acquire(
         kind="synthesizer", role="synthesizer", profile_id="synthesizer"
     ) is True
+
+
+def test_fusion_candidate_timeout_adds_bounded_runtime_context_allowance():
+    profile = normalize_profile(
+        {
+            "provider": "screened-provider",
+            "model": "screened-expert",
+            "p50_latency_ms": 8_000,
+            "p95_latency_ms": 10_000,
+        }
+    )
+    request = canonicalize_payload(
+        {
+            "model": "axio-pro",
+            "max_latency_ms": 90_000,
+            "messages": [{"role": "user", "content": "task"}],
+        }
+    )
+
+    timeout, receipt = _timeout_for_role(
+        request,
+        _DeadlineBudget(90_000),
+        route_plan={
+            "strategy": "pro_panel_judge_escalation",
+            "budget": {
+                "max_total_model_calls": 8,
+                "fusion_finalization_mode": "provider_judge_synthesis",
+            },
+        },
+        role_name="primary_solver",
+        profile=profile,
+        context_chars=12_000,
+    )
+
+    # The short probe cap remains 13.25s. A long runtime packet uses the
+    # bounded 1.75x shape multiplier plus two 750ms context steps and never
+    # changes the outer 90s deadline.
+    assert timeout == 19.75
+    assert receipt["fusion_candidate_timeout_base_cap_ms"] == 13_250
+    assert receipt["fusion_candidate_timeout_cap_ms"] == 19_750
+    assert receipt["fusion_candidate_context_chars"] == 12_000
+    assert receipt["fusion_candidate_context_extension_ms"] == 1_500
+    assert receipt["fusion_candidate_context_shape_applied"] is True
+    assert receipt["fusion_candidate_timeout_multiplier"] == 1.75
 
 
 def test_fusion_candidate_timeout_leaves_unknown_profiles_and_fast_cascade_unchanged(

@@ -114,6 +114,11 @@ _CONTEXT_PLAYBOOK_INSTRUCTIONS = {
     "concise_synthesis": "Prefer the strongest supported answer and compress repeated branch content without discarding unique verified findings.",
 }
 _RUNTIME_TELEMETRY_MIN_OBSERVATIONS = 3
+# A p95 estimate is a tail admission signal, so it needs more observations
+# than the p50 route hint. This prevents one fast request containing several
+# internal role calls from replacing a screened remote-provider tail with an
+# unstable sub-millisecond sample.
+_RUNTIME_TELEMETRY_MIN_P95_OBSERVATIONS = 5
 _RUNTIME_TELEMETRY_PRIOR_WEIGHT = 3.0
 _RUNTIME_TELEMETRY_MAX_LATENCY_SAMPLES = 64
 _MAX_CANONICAL_REPLICA_ATTEMPTS = 3
@@ -136,6 +141,15 @@ _MANDATORY_STAGE_DEADLINE_TAIL_NUMERATOR = 5
 _MANDATORY_STAGE_DEADLINE_TAIL_DENOMINATOR = 4
 _MANDATORY_STAGE_DEADLINE_MIN_RESERVATION_MS = 250
 _MANDATORY_STAGE_DEADLINE_MAX_RESERVATION_MS = 12_000
+# Provider Fusion needs an explicit panel phase boundary.  The existing
+# stage reservations protect measured tails, while this fraction keeps a
+# long recovery wave from consuming every remaining second when the live tail
+# is worse than its screened p95.  The outer request ceiling remains the
+# final authority.
+_FUSION_CONTROL_WINDOW_FRACTION_NUMERATOR = 35
+_FUSION_CONTROL_WINDOW_FRACTION_DENOMINATOR = 100
+_FUSION_PANEL_PHASE_NAME = "fusion_panel"
+_FUSION_PANEL_PHASE_MIN_WINDOW_MS = 5_000
 # An expert branch is optional relative to the already-admitted Judge and
 # Synthesizer stages.  Its shared-deadline timeout therefore uses the screened
 # p95 as a single-attempt operating cap instead of allowing one provider tail
@@ -146,6 +160,21 @@ _FUSION_CANDIDATE_TIMEOUT_MULTIPLIER_DENOMINATOR = 4
 _FUSION_CANDIDATE_TIMEOUT_MARGIN_MS = 750
 _FUSION_CANDIDATE_TIMEOUT_MIN_MS = 4_000
 _FUSION_CANDIDATE_TIMEOUT_MAX_MS = 45_000
+# Recovery is already a bounded substitution wave. Keep each replacement
+# short enough that several screened alternatives can be tried before the
+# protected Judge/Synthesizer window, while the initial panel retains its
+# model-specific p95 allowance.
+_FUSION_RECOVERY_CANDIDATE_TIMEOUT_MAX_MS = 15_000
+# Prefusion latency probes use a short prompt. Runtime expert branches carry
+# the bounded DAG and role contract, so their measured p95 needs a small,
+# shape-aware allowance. This is deliberately capped and applies only to the
+# candidate attempt; the outer request deadline remains authoritative.
+_FUSION_CANDIDATE_CONTEXT_BASELINE_CHARS = 4_000
+_FUSION_CANDIDATE_CONTEXT_STEP_CHARS = 4_000
+_FUSION_CANDIDATE_CONTEXT_STEP_EXTENSION_MS = 750
+_FUSION_CANDIDATE_CONTEXT_MAX_EXTENSION_MS = 6_000
+_FUSION_CANDIDATE_SHAPED_TIMEOUT_MULTIPLIER_NUMERATOR = 7
+_FUSION_CANDIDATE_SHAPED_TIMEOUT_MULTIPLIER_DENOMINATOR = 4
 # Provider latency probes use a short task, while Judge/Synthesizer prompts
 # contain bounded candidate packets and routing contracts. Keep a small
 # context-sensitive allowance for that known input work without allowing a
@@ -668,6 +697,70 @@ def _mandatory_fusion_stage_deadline_reservations(
             continue
         reservations[role_name] = _stage_deadline_reservation_ms(latency_ms)
     return reservations
+
+
+def _configure_fusion_panel_phase(
+    route_plan: Mapping[str, Any],
+    deadline_budget: _DeadlineBudget,
+) -> dict[str, Any]:
+    """Admit expert and recovery work inside a bounded pre-control phase."""
+
+    receipt: dict[str, Any] = {
+        "schema": "axio_fusion_api.fusion_panel_phase_admission.v1",
+        "enabled": False,
+        "phase": _FUSION_PANEL_PHASE_NAME,
+        "outer_budget_ms": int(deadline_budget.max_latency_ms),
+        "control_window_ms": 0,
+        "measured_control_reservation_ms": deadline_budget.pending_stage_reservation_ms(),
+        "fractional_control_window_ms": 0,
+        "panel_phase_budget_ms": 0,
+        "configured": False,
+        "minimum_panel_phase_window_ms": _FUSION_PANEL_PHASE_MIN_WINDOW_MS,
+        "reason": "not_a_provider_fusion_route",
+        "raw_profile_ids_persisted": False,
+        "raw_prompts_persisted": False,
+        "secrets_persisted": False,
+    }
+    budget = route_plan.get("budget") if isinstance(route_plan.get("budget"), Mapping) else {}
+    contract = route_plan.get("judge_contract") if isinstance(route_plan.get("judge_contract"), Mapping) else {}
+    finalization_mode = str(
+        budget.get("fusion_finalization_mode")
+        or route_plan.get("fusion_finalization_mode")
+        or "direct"
+    )
+    if finalization_mode != "provider_judge_synthesis" or contract.get("required") is not True:
+        return receipt
+
+    outer_ms = max(1, int(deadline_budget.max_latency_ms))
+    measured_control_ms = deadline_budget.pending_stage_reservation_ms()
+    fractional_control_ms = (
+        outer_ms * _FUSION_CONTROL_WINDOW_FRACTION_NUMERATOR
+        + _FUSION_CONTROL_WINDOW_FRACTION_DENOMINATOR
+        - 1
+    ) // _FUSION_CONTROL_WINDOW_FRACTION_DENOMINATOR
+    control_window_ms = max(measured_control_ms, fractional_control_ms)
+    panel_phase_ms = max(0, outer_ms - control_window_ms)
+    receipt.update(
+        {
+            "enabled": True,
+            "control_window_ms": control_window_ms,
+            "fractional_control_window_ms": fractional_control_ms,
+            "panel_phase_budget_ms": panel_phase_ms,
+            "reason": "measured_control_tail_or_fractional_window",
+        }
+    )
+    if panel_phase_ms <= 0:
+        receipt["reason"] = "no_panel_phase_budget_after_control_window"
+        return receipt
+    if panel_phase_ms < _FUSION_PANEL_PHASE_MIN_WINDOW_MS:
+        receipt["reason"] = "panel_phase_below_minimum_window"
+        return receipt
+    receipt["configured"] = deadline_budget.configure_phase(
+        name=_FUSION_PANEL_PHASE_NAME,
+        budget_ms=panel_phase_ms,
+        reason="bounded_expert_panel_before_mandatory_control_stages",
+    )
+    return receipt
 
 
 def _minimum_viable_fusion_candidate_count(route_plan: Mapping[str, Any]) -> int:
@@ -1395,17 +1488,108 @@ class _DeadlineBudget:
         self._stage_release_receipts: list[dict[str, Any]] = []
         self._dynamic_stage_receipts: list[dict[str, Any]] = []
         self._stage_reservation_skip_count = 0
+        self._phase_deadlines: dict[str, float] = {}
+        self._phase_budget_ms: dict[str, int] = {}
+        self._phase_receipts: list[dict[str, Any]] = []
         self._lock = threading.Lock()
 
+    def configure_phase(self, *, name: str, budget_ms: Any, reason: str) -> bool:
+        """Install one request-local phase deadline inside the outer budget.
+
+        A phase deadline is a scheduling boundary, not a second request
+        timeout.  It is used for optional panel work so mandatory control
+        stages still have a deterministic window after the phase closes.
+        """
+
+        phase_name = str(name or "")[:80]
+        requested = max(0, _safe_int(budget_ms, default=0))
+        if not phase_name or requested <= 0:
+            return False
+        with self._lock:
+            outer_deadline = self.started_at + self.max_latency_ms / 1000.0
+            phase_deadline = min(
+                outer_deadline,
+                self.started_at + requested / 1000.0,
+            )
+            effective_ms = max(
+                0,
+                int(round((phase_deadline - self.started_at) * 1000)),
+            )
+            self._phase_deadlines[phase_name] = phase_deadline
+            self._phase_budget_ms[phase_name] = effective_ms
+            self._phase_receipts.append(
+                {
+                    "status": "configured",
+                    "phase": phase_name,
+                    "budget_ms": effective_ms,
+                    "reason": str(reason or "phase_deadline")[:160],
+                }
+            )
+            return effective_ms > 0
+
+    def phase_remaining_seconds(self, name: str, *, minimum: float = 0.0) -> float:
+        phase_name = str(name or "")[:80]
+        with self._lock:
+            phase_deadline = self._phase_deadlines.get(phase_name)
+            if phase_deadline is None:
+                remaining = self._remaining_seconds_unlocked()
+            else:
+                remaining = min(
+                    self._remaining_seconds_unlocked(),
+                    max(0.0, phase_deadline - time.monotonic()),
+                )
+        if remaining <= 0.0:
+            return 0.0
+        return max(float(minimum), remaining)
+
+    def phase_expired(self, name: str) -> bool:
+        return self.phase_remaining_seconds(name) <= 0.0
+
+    def pending_stage_reservation_ms(self) -> int:
+        """Return the current protected control-stage headroom."""
+
+        with self._lock:
+            return max(0, int(sum(self._pending_stage_reservations_ms.values())))
+
     def acquire(self, *, kind: str, role: str = "", profile_id: str = "") -> bool:
+        return self.acquire_in_phase(
+            kind=kind,
+            role=role,
+            profile_id=profile_id,
+            phase="",
+        )
+
+    def acquire_in_phase(
+        self,
+        *,
+        kind: str,
+        role: str = "",
+        profile_id: str = "",
+        phase: str = "",
+    ) -> bool:
         role_name = str(role or "")[:80]
+        phase_name = str(phase or "")[:80]
         with self._lock:
             remaining_seconds = self._remaining_seconds_unlocked()
+            phase_deadline = self._phase_deadlines.get(phase_name) if phase_name else None
+            if phase_deadline is not None:
+                remaining_seconds = min(
+                    remaining_seconds,
+                    max(0.0, phase_deadline - time.monotonic()),
+                )
             protected_seconds = self._pending_stage_reservation_seconds_unlocked(
                 exclude_role=role_name,
             )
+            if phase_deadline is not None:
+                # The configured phase deadline already reserves the control
+                # window. Subtracting the same stage holds again would make
+                # the panel phase needlessly short.
+                protected_seconds = 0.0
             if remaining_seconds <= 0.0 or remaining_seconds <= protected_seconds:
                 reason = (
+                    "fusion_panel_phase_deadline_exhausted"
+                    if phase_deadline is not None and remaining_seconds <= 0.0
+                    else
                     "mandatory_stage_deadline_reservation"
                     if protected_seconds > 0.0 and remaining_seconds > 0.0
                     else "max_latency_ms_exhausted"
@@ -1765,17 +1949,27 @@ class _DeadlineBudget:
         *,
         role: str = "",
         kind: str = "",
+        phase: str = "",
     ) -> float:
         request_timeout = _timeout_seconds(request)
         role_name = str(role or "")[:80]
         with self._lock:
             now = time.monotonic()
             remaining = self._remaining_seconds_unlocked()
+            phase_name = str(phase or "")[:80]
+            phase_deadline = self._phase_deadlines.get(phase_name) if phase_name else None
+            if phase_deadline is not None:
+                remaining = min(
+                    remaining,
+                    max(0.0, phase_deadline - now),
+                )
             if remaining <= 0.0:
                 return 0.001
             protected = self._pending_stage_reservation_seconds_unlocked(
                 exclude_role=role_name,
             )
+            if phase_deadline is not None:
+                protected = 0.0
             active_deadline = self._active_stage_deadlines.get(role_name)
             active_remaining = (
                 active_deadline - now
@@ -1860,6 +2054,26 @@ class _DeadlineBudget:
                 "mandatory_stage_deadline_dynamic_receipts": list(
                     self._dynamic_stage_receipts[:12]
                 ),
+                "phase_deadline_enabled": bool(self._phase_deadlines),
+                "phase_deadlines_ms": {
+                    phase: budget_ms
+                    for phase, budget_ms in sorted(self._phase_budget_ms.items())
+                },
+                "phase_remaining_ms": {
+                    phase: round(
+                        max(
+                            0.0,
+                            min(
+                                self._remaining_seconds_unlocked(),
+                                max(0.0, deadline - time.monotonic()),
+                            )
+                        )
+                        * 1000,
+                        3,
+                    )
+                    for phase, deadline in sorted(self._phase_deadlines.items())
+                },
+                "phase_receipts": list(self._phase_receipts[:12]),
                 "mandatory_stage_deadline_reservation_skip_count": self._stage_reservation_skip_count,
                 "enforced": True,
                 "raw_prompt_persisted": False,
@@ -2381,6 +2595,10 @@ class FusionEngine:
                 call_budget,
             )
         )
+        route_plan["runtime_fusion_panel_phase"] = _configure_fusion_panel_phase(
+            route_plan,
+            deadline_budget,
+        )
         local_consensus_mode = finalization_mode == "local_consensus"
         max_parallel = max(1, int(budget.get("max_parallel_experts") or 1))
         configured_expert_roles = [
@@ -2420,9 +2638,10 @@ class FusionEngine:
         }
         if max_parallel <= 1 or len(expert_roles) <= 1:
             for role in expert_roles:
+                panel_role = {**dict(role), "runtime_panel_phase": True}
                 candidate = self._run_role(
                     request,
-                    role,
+                    panel_role,
                     route_plan=route_plan,
                     call_budget=call_budget,
                     cost_budget=cost_budget,
@@ -2432,7 +2651,7 @@ class FusionEngine:
                 candidates.append(candidate)
                 if candidate.status == "completed" and not fusion_required:
                     break
-                if deadline_budget.expired:
+                if deadline_budget.phase_expired(_FUSION_PANEL_PHASE_NAME):
                     break
         else:
             parallel_cancel_event = threading.Event()
@@ -2443,11 +2662,12 @@ class FusionEngine:
                 # role a private context copy so a public stream observer and
                 # its cancellation signal remain visible in worker threads.
                 role_context = copy_context()
+                panel_role = {**dict(role), "runtime_panel_phase": True}
                 future = executor.submit(
                     role_context.run,
                     self._run_role,
                     request,
-                    role,
+                    panel_role,
                     route_plan=route_plan,
                     call_budget=call_budget,
                     cost_budget=cost_budget,
@@ -2461,7 +2681,13 @@ class FusionEngine:
             ]
             seen_futures = set()
             try:
-                for future in as_completed(futures, timeout=deadline_budget.remaining_seconds(minimum=0.001)):
+                for future in as_completed(
+                    futures,
+                    timeout=deadline_budget.phase_remaining_seconds(
+                        _FUSION_PANEL_PHASE_NAME,
+                        minimum=0.001,
+                    ),
+                ):
                     seen_futures.add(future)
                     candidate = future.result()
                     if candidate.error_type == "ParallelDeadlineCancelled":
@@ -2488,7 +2714,11 @@ class FusionEngine:
                             kind="model_role",
                             role=str(role.get("role") or "primary_solver"),
                             profile_id=profile.profile_id,
-                            reason="parallel_deadline_wait_exhausted",
+                            reason=(
+                                "fusion_panel_phase_deadline_exhausted"
+                                if deadline_budget.phase_expired(_FUSION_PANEL_PHASE_NAME)
+                                else "parallel_deadline_wait_exhausted"
+                            ),
                         )
                         if future.cancel():
                             parallel_wave_receipt["future_cancelled_count"] += 1
@@ -2629,31 +2859,63 @@ class FusionEngine:
                 missing_hermes_reference_roles
             )
         if not completed:
-            released_mandatory_stage_calls = call_budget.release_pending_mandatory_stage_reservations(
-                reason="zero_candidate_panel_requires_degraded_fallback_recovery",
-            )
-            fallback_roles = self._fallback_roles(request, route_plan, candidates)
-            fallback_attempt_limit = (
-                max(1, released_mandatory_stage_calls)
-                if fusion_required
-                else len(fallback_roles)
-            )
-            for role in fallback_roles[:fallback_attempt_limit]:
-                candidate = self._run_role(
+            if fusion_required and required_min_candidates > 1:
+                # Keep the admitted Judge/Synthesizer reservations alive while
+                # a bounded recovery panel tries to rebuild independent
+                # evidence. A single successful fallback is a degraded answer,
+                # not a completed Fusion pass, so recovery must reach the same
+                # quorum that the route was admitted for.
+                panel_repair = self._repair_panel(
                     request,
-                    role,
-                    route_plan=route_plan,
+                    route_plan,
+                    candidates,
+                    completed,
+                    required_min_candidate_count=required_min_candidates,
                     call_budget=call_budget,
                     cost_budget=cost_budget,
                     deadline_budget=deadline_budget,
                     prompt_budget=prompt_budget,
+                    runtime_recovery_reference=True,
                 )
-                candidates.append(candidate)
-                if candidate.status == "completed" and (candidate.answer.strip() or candidate.tool_calls):
-                    completed.append(candidate)
-                    break
-                if deadline_budget.expired:
-                    break
+                panel_repair["runtime_recovery_mode"] = True
+                panel_repair["runtime_recovery_reference_requested"] = bool(
+                    _effective_hermes_plan(route_plan).get("enabled") is True
+                )
+                completed = [
+                    candidate
+                    for candidate in candidates
+                    if candidate.status == "completed"
+                    and (candidate.answer.strip() or candidate.tool_calls)
+                ]
+            if not completed:
+                # The recovery panel is allowed to fail closed. Only after it
+                # is exhausted do we release the protected control stages and
+                # attempt the ordinary bounded degraded fallback path.
+                released_mandatory_stage_calls = call_budget.release_pending_mandatory_stage_reservations(
+                    reason="runtime_recovery_panel_exhausted_before_degraded_fallback",
+                )
+                fallback_roles = self._fallback_roles(request, route_plan, candidates)
+                fallback_attempt_limit = (
+                    max(1, released_mandatory_stage_calls)
+                    if fusion_required
+                    else len(fallback_roles)
+                )
+                for role in fallback_roles[:fallback_attempt_limit]:
+                    candidate = self._run_role(
+                        request,
+                        role,
+                        route_plan=route_plan,
+                        call_budget=call_budget,
+                        cost_budget=cost_budget,
+                        deadline_budget=deadline_budget,
+                        prompt_budget=prompt_budget,
+                    )
+                    candidates.append(candidate)
+                    if candidate.status == "completed" and (candidate.answer.strip() or candidate.tool_calls):
+                        completed.append(candidate)
+                        break
+                    if deadline_budget.expired:
+                        break
         if not completed:
             call_budget.release_pending_mandatory_stage_reservations(
                 reason="provider_recovery_exhausted_before_fusion_finalization",
@@ -2728,7 +2990,7 @@ class FusionEngine:
         hermes_reference_candidates = [
             candidate
             for candidate in fusion_panel_candidates
-            if hermes_is_reference_role(hermes_plan, candidate.role)
+            if _candidate_is_hermes_reference(hermes_plan, candidate)
         ]
         provider_fusion_candidate_threshold = _provider_fusion_candidate_threshold(
             route_plan,
@@ -2749,13 +3011,34 @@ class FusionEngine:
         feedback_reference_required = False
         feedback_stage_admission = _feedback_stage_admission_receipt()
         if not fusion_panel_viable:
+            fusion_panel_skip_reason = (
+                "max_latency_ms_exhausted"
+                if deadline_budget.expired
+                else "insufficient_candidate_quorum_for_fusion_finalization"
+            )
+            if deadline_budget.expired:
+                # The local degraded answer remains useful to the caller, but
+                # the mandatory control stages did not execute. Record both
+                # skips explicitly so traces and cache admission can
+                # distinguish a deadline terminal state from an ordinary
+                # low-quorum route.
+                deadline_budget.record_skip(
+                    kind="judge",
+                    role="judge",
+                    reason="max_latency_ms_exhausted",
+                )
+                deadline_budget.record_skip(
+                    kind="synthesizer",
+                    role="synthesizer",
+                    reason="max_latency_ms_exhausted",
+                )
             call_budget.release_pending_mandatory_stage_reservations(
                 reason="insufficient_candidate_quorum_for_fusion_finalization",
             )
             judge_result = _local_judge_candidates(deduped, route_plan=route_plan)
             judge_result = _judge_skip_without_provider(
                 judge_result,
-                reason="insufficient_candidate_quorum_for_fusion_finalization",
+                reason=fusion_panel_skip_reason,
             )
             judge_call_count = 0
             early_exit = _early_exit_decision(route_plan, deduped, judge_result)
@@ -3257,7 +3540,7 @@ class FusionEngine:
                 hermes_reference_completed_count=sum(
                     1
                     for candidate in candidates
-                    if hermes_is_reference_role(hermes_plan, candidate.role)
+                    if _candidate_is_hermes_reference(hermes_plan, candidate)
                     and candidate.status == "completed"
                     and (candidate.answer.strip() or candidate.tool_calls)
                 ),
@@ -3330,9 +3613,14 @@ class FusionEngine:
             role_name,
             requested=hermes_feedback_requested,
         )
+        runtime_recovery_reference = bool(
+            role.get("runtime_recovery_reference") is True
+            and hermes_plan.get("enabled") is True
+        )
         hermes_reference_requested = bool(
             hermes_is_reference_role(hermes_plan, role_name)
             or hermes_feedback_reference
+            or runtime_recovery_reference
         )
         hermes_reference = bool(
             hermes_reference_requested
@@ -3357,6 +3645,7 @@ class FusionEngine:
                         if hermes_feedback_reference
                         else "reference"
                     ),
+                    "runtime_recovery_reference": runtime_recovery_reference,
                     "hermes_recursion_blocked": True,
                 },
             )
@@ -3373,6 +3662,7 @@ class FusionEngine:
                 "_axio_hermes_moa_depth": hermes_depth + 1,
                 "_axio_hermes_reference_role": role_name,
                 "_axio_hermes_feedback_reference": bool(hermes_feedback_reference),
+                "_axio_runtime_recovery_reference": runtime_recovery_reference,
                 "_axio_prompt_already_assembled": True,
                 "_axio_current_prompt_in_history": current_prompt_in_history,
             }
@@ -3406,6 +3696,7 @@ class FusionEngine:
                 "hermes_process_stage": (
                     "feedback_reference" if hermes_feedback_reference else "reference"
                 ),
+                "runtime_recovery_reference": runtime_recovery_reference,
                 "hermes_reference_tool_free": True,
                 "hermes_context_projection": (
                     "user_assistant_text_with_inert_tool_evidence"
@@ -3596,7 +3887,18 @@ class FusionEngine:
                 error_type="ParallelDeadlineCancelled",
                 task_execution=task_execution,
             )
-        if deadline_budget is not None and not deadline_budget.acquire(kind="model_role", role=role_name, profile_id=profile.profile_id):
+        runtime_panel_phase = (
+            _FUSION_PANEL_PHASE_NAME
+            if role.get("runtime_panel_phase") is True
+            or role.get("runtime_panel_recovery") is True
+            else ""
+        )
+        if deadline_budget is not None and not deadline_budget.acquire_in_phase(
+            kind="model_role",
+            role=role_name,
+            profile_id=profile.profile_id,
+            phase=runtime_panel_phase,
+        ):
             return CandidateResult(
                 candidate_id=str(role_name),
                 role=role_name,
@@ -3740,7 +4042,33 @@ class FusionEngine:
                 route_plan=route_plan,
                 role_name=role_name,
                 profile=profile,
+                context_chars=len(prompt) + len(system),
+                phase=(
+                    _FUSION_PANEL_PHASE_NAME
+                    if role.get("runtime_panel_phase") is True
+                    or role.get("runtime_panel_recovery") is True
+                    else ""
+                ),
             )
+            if role.get("runtime_panel_recovery") is True:
+                recovery_cap_ms = _FUSION_RECOVERY_CANDIDATE_TIMEOUT_MAX_MS
+                recovery_timeout = min(
+                    provider_timeout,
+                    recovery_cap_ms / 1000.0,
+                )
+                timeout_receipt = {
+                    **timeout_receipt,
+                    "runtime_panel_recovery": True,
+                    "runtime_recovery_timeout_cap_ms": recovery_cap_ms,
+                    "runtime_recovery_timeout_cap_applied": (
+                        recovery_timeout < provider_timeout
+                    ),
+                    "runtime_recovery_timeout_before_cap_ms": round(
+                        float(provider_timeout) * 1000,
+                        3,
+                    ),
+                }
+                provider_timeout = recovery_timeout
             task_execution = {
                 **dict(task_execution),
                 "provider_timeout": timeout_receipt,
@@ -3755,9 +4083,40 @@ class FusionEngine:
                 timeout=provider_timeout,
                 deadline_bound=deadline_budget is not None,
                 stream_observer=public_stream_observer,
-                cancellation_event=public_stream_cancellation,
+                cancellation_event=cancellation_event or public_stream_cancellation,
             )
+            # The provider did return a response even when the panel phase
+            # closed during the final read.  Mark that transport attempt as
+            # received before discarding the late result so the circuit
+            # breaker does not treat a scheduling cutoff as provider failure.
             provider_response_received = True
+            if (
+                deadline_budget is not None
+                and runtime_panel_phase
+                and deadline_budget.phase_expired(runtime_panel_phase)
+            ):
+                if cost_budget is not None:
+                    cost_budget.release(cost_reservation)
+                return CandidateResult(
+                    candidate_id=str(role_name),
+                    role=role_name,
+                    profile_id=profile.profile_id,
+                    provider=profile.provider,
+                    model=profile.model,
+                    canonical_identity=profile.canonical_identity,
+                    answer="",
+                    status="skipped",
+                    latency_ms=(time.monotonic() - started) * 1000,
+                    error_type="DeadlineExceeded",
+                    task_execution={
+                        **dict(task_execution),
+                        "runtime_panel_phase": runtime_panel_phase,
+                        "runtime_panel_phase_result_discarded": True,
+                        "runtime_panel_phase_discard_reason": (
+                            "fusion_panel_phase_deadline_exhausted_after_provider_response"
+                        ),
+                    },
+                )
             self._record_success(
                 profile.profile_id,
                 latency_ms=(time.monotonic() - provider_call_started_at) * 1000,
@@ -4411,6 +4770,173 @@ class FusionEngine:
             reverse=True,
         )[:_MAX_CROSS_MODEL_STAGE_FAILOVER_ATTEMPTS]
 
+    def _runtime_adaptive_control_profile(
+        self,
+        profile: ModelProfile,
+        route_plan: Mapping[str, Any],
+        *,
+        role_name: str,
+        candidates: Sequence[CandidateResult],
+        failed_profile_hashes: Sequence[str] = (),
+        failed_provider_hashes: Sequence[str] = (),
+        prior_stage_failed: bool = False,
+    ) -> tuple[ModelProfile, dict[str, Any]]:
+        """Select a request-local control profile from proven panel evidence.
+
+        The route remains authoritative: only profiles already present in the
+        route's selected roles or fallback pool can be considered.  This
+        helper changes neither the registry nor the global router.  It only
+        lets a Judge/Synthesizer use a panel profile that has already returned
+        a valid answer when the statically routed control branch has produced
+        failure evidence in this request.
+        """
+
+        routed = self._registered_profile_for_id(profile.profile_id) or profile
+        failed_profile_set = {
+            str(value) for value in failed_profile_hashes if str(value)
+        }
+        failed_provider_set = {
+            str(value) for value in failed_provider_hashes if str(value)
+        }
+        failed_profile_set.update(
+            sha256_text(candidate.profile_id)
+            for candidate in candidates
+            if candidate.status != "completed"
+            or not (candidate.answer.strip() or candidate.tool_calls)
+        )
+        failed_provider_set.update(
+            sha256_text(candidate.provider)
+            for candidate in candidates
+            if candidate.status != "completed"
+            or not (candidate.answer.strip() or candidate.tool_calls)
+        )
+        historical_failure = False
+        with self._lock:
+            historical_failure = self._failure_counts.get(routed.profile_id, 0) > 0
+        trigger_reasons: list[str] = []
+        if sha256_text(routed.profile_id) in failed_profile_set:
+            trigger_reasons.append("routed_profile_failed_in_request")
+        if sha256_text(routed.provider) in failed_provider_set:
+            trigger_reasons.append("routed_provider_failed_in_request")
+        if historical_failure or self._circuit_open(routed.profile_id):
+            trigger_reasons.append("routed_profile_runtime_failure_history")
+        if prior_stage_failed:
+            trigger_reasons.append("previous_control_stage_output_not_accepted")
+        receipt: dict[str, Any] = {
+            "schema": "axio_fusion_api.runtime_adaptive_control_routing.v1",
+            "enabled": True,
+            "applied": False,
+            "role": str(role_name or "")[:40],
+            "triggered": bool(trigger_reasons),
+            "trigger_reasons": list(dict.fromkeys(trigger_reasons))[:8],
+            "original_profile_sha256": sha256_text(routed.profile_id),
+            "selected_profile_sha256": sha256_text(routed.profile_id),
+            "candidate_success_count": 0,
+            "eligible_success_count": 0,
+            "failed_profile_hash_count": len(failed_profile_set),
+            "failed_provider_hash_count": len(failed_provider_set),
+            "selection_policy": (
+                "route_admitted_successful_candidate_then_latency_then_quality"
+            ),
+            "selection_reason": "no_runtime_failure_evidence",
+            "raw_profile_ids_persisted": False,
+            "raw_provider_names_persisted": False,
+            "raw_model_names_persisted": False,
+            "raw_prompts_persisted": False,
+            "secrets_persisted": False,
+        }
+        if not trigger_reasons:
+            return routed, receipt
+
+        route_admitted_hashes: set[str] = set()
+        for row in route_plan.get("roles", []):
+            if isinstance(row, Mapping) and isinstance(row.get("model"), Mapping):
+                candidate_profile = _profile_from_safe_dict(row["model"])
+                if candidate_profile.profile_id:
+                    route_admitted_hashes.add(sha256_text(candidate_profile.profile_id))
+        for row in route_plan.get("selected_models", []):
+            if isinstance(row, Mapping):
+                profile_id = str(row.get("profile_id") or "")
+                if profile_id:
+                    route_admitted_hashes.add(sha256_text(profile_id))
+        policy = route_plan.get("provider_routing_policy")
+        fallback_pool = policy.get("fallback_pool") if isinstance(policy, Mapping) else ()
+        for row in fallback_pool or ():
+            if isinstance(row, Mapping):
+                profile_hash = str(row.get("profile_id_sha256") or "")
+                if profile_hash:
+                    route_admitted_hashes.add(profile_hash)
+
+        analysis = route_plan.get("request_analysis")
+        analysis = analysis if isinstance(analysis, Mapping) else {}
+        budget = route_plan.get("budget")
+        budget = budget if isinstance(budget, Mapping) else {}
+        successful_candidates = [
+            candidate
+            for candidate in candidates
+            if candidate.status == "completed"
+            and (candidate.answer.strip() or candidate.tool_calls)
+        ]
+        receipt["candidate_success_count"] = len(successful_candidates)
+        eligible: list[tuple[tuple[Any, ...], ModelProfile]] = []
+        seen_profile_ids: set[str] = set()
+        for candidate in successful_candidates:
+            candidate_profile = self._registered_profile_for_id(candidate.profile_id)
+            if candidate_profile is None or candidate_profile.profile_id in seen_profile_ids:
+                continue
+            candidate_hash = sha256_text(candidate_profile.profile_id)
+            if route_admitted_hashes and candidate_hash not in route_admitted_hashes:
+                continue
+            if candidate_hash in failed_profile_set:
+                continue
+            if sha256_text(candidate_profile.provider) in failed_provider_set:
+                continue
+            if self._circuit_open(candidate_profile.profile_id):
+                continue
+            if str(candidate_profile.health or "unknown") == "unavailable":
+                continue
+            stage_eligible, _basis = _stage_profile_eligibility(
+                candidate_profile,
+                role_name,
+                analysis,
+                budget,
+            )
+            if not stage_eligible:
+                continue
+            seen_profile_ids.add(candidate_profile.profile_id)
+            latency = _optional_float(candidate.latency_ms)
+            if latency is None or latency <= 0:
+                latency = _optional_float(candidate_profile.p50_latency_ms) or 2**31 - 1
+            quality = (
+                candidate_profile.capability("critique")
+                if role_name == "judge"
+                else candidate_profile.capability("structured_output")
+            )
+            eligible.append(
+                (
+                    (
+                        latency,
+                        -quality,
+                        -float(candidate.confidence or 0.0),
+                        candidate_profile.profile_id,
+                    ),
+                    candidate_profile,
+                )
+            )
+        receipt["eligible_success_count"] = len(eligible)
+        if not eligible:
+            receipt["selection_reason"] = "no_route_admitted_successful_candidate"
+            return routed, receipt
+        eligible.sort(key=lambda item: item[0])
+        selected = eligible[0][1]
+        receipt["selected_profile_sha256"] = sha256_text(selected.profile_id)
+        if selected.profile_id == routed.profile_id:
+            receipt["selection_reason"] = "routed_profile_remains_best_proven_candidate"
+            return selected, receipt
+        receipt["applied"] = True
+        receipt["selection_reason"] = "successful_candidate_reused_after_control_failure"
+        return selected, receipt
+
     def _fallback_roles(
         self,
         request: FusionRequest,
@@ -4555,6 +5081,7 @@ class FusionEngine:
         cost_budget: _CostBudget | None = None,
         deadline_budget: _DeadlineBudget | None = None,
         prompt_budget: _PromptBudgetLedger | None = None,
+        runtime_recovery_reference: bool = False,
     ) -> dict[str, Any]:
         independent_completed = _independent_candidate_count(completed)
         fusion_evidence_completed = _fusion_evidence_candidate_count(completed)
@@ -4576,7 +5103,20 @@ class FusionEngine:
         ]
         receipt["fusion_evidence_completed_before"] = fusion_evidence_completed
         receipt["fusion_evidence_completed_after"] = fusion_evidence_completed
+        receipt["runtime_recovery_mode"] = bool(runtime_recovery_reference)
+        receipt["runtime_recovery_reference_requested"] = bool(
+            runtime_recovery_reference
+            and _effective_hermes_plan(route_plan).get("enabled") is True
+        )
         fallback_roles = self._fallback_roles(request, route_plan, candidates)
+        if runtime_recovery_reference:
+            fallback_roles = self._order_runtime_recovery_roles(
+                fallback_roles,
+                candidates,
+            )
+            receipt["runtime_recovery_role_order_policy"] = (
+                "fresh_canonical_identity_then_provider_diversity_then_latency"
+            )
         if not fallback_roles:
             receipt["blocked_reasons"].append("no_unused_equivalent_profile")
             receipt["degraded_mode"] = (
@@ -4613,14 +5153,39 @@ class FusionEngine:
             and _missing_hermes_reference_roles(route_plan, completed)
             and not _has_completed_hermes_reference(route_plan, completed)
         )
+
+        def panel_phase_expired() -> bool:
+            if deadline_budget is None:
+                return False
+            phase = route_plan.get("runtime_fusion_panel_phase")
+            phase_configured = bool(
+                isinstance(phase, Mapping) and phase.get("configured") is True
+            )
+            return (
+                deadline_budget.phase_expired(_FUSION_PANEL_PHASE_NAME)
+                if phase_configured
+                else deadline_budget.expired
+            )
+
+        def panel_phase_block_reason() -> str:
+            phase = route_plan.get("runtime_fusion_panel_phase")
+            phase_configured = bool(
+                isinstance(phase, Mapping) and phase.get("configured") is True
+            )
+            return (
+                "fusion_panel_phase_deadline_exhausted"
+                if phase_configured
+                else "max_latency_ms_exhausted"
+            )
+
         for role in fallback_roles:
             if quorum_reached() and not optional_hermes_enrichment_pending:
                 break
             if receipt["repair_attempt_count"] >= _MAX_PANEL_REPAIR_ATTEMPTS:
                 receipt["blocked_reasons"].append("repair_attempt_limit_reached")
                 break
-            if deadline_budget is not None and deadline_budget.expired:
-                receipt["blocked_reasons"].append("max_latency_ms_exhausted")
+            if deadline_budget is not None and panel_phase_expired():
+                receipt["blocked_reasons"].append(panel_phase_block_reason())
                 break
             model = role.get("model") if isinstance(role.get("model"), Mapping) else {}
             profile = _profile_from_safe_dict(model)
@@ -4634,9 +5199,22 @@ class FusionEngine:
             attempted_profile_ids.add(profile.profile_id)
             receipt["attempted_profile_hashes"].append(sha256_text(profile.profile_id))
             receipt["attempted_provider_hashes"].append(sha256_text(profile.provider))
+            execution_role = (
+                {
+                    **dict(role),
+                    "runtime_recovery_reference": True,
+                    "assignment": "runtime_recovery_panel_reference",
+                }
+                if runtime_recovery_reference
+                else role
+            )
+            execution_role = {
+                **dict(execution_role),
+                "runtime_panel_recovery": True,
+            }
             candidate = self._run_role(
                 request,
-                role,
+                execution_role,
                 route_plan=route_plan,
                 call_budget=call_budget,
                 cost_budget=cost_budget,
@@ -4651,19 +5229,21 @@ class FusionEngine:
                 completed.append(candidate)
             else:
                 receipt["blocked_reasons"].append(_panel_repair_block_reason(candidate))
-            if candidate.error_type in {
-                "BudgetExhausted",
-                "CostBudgetExhausted",
-                "DeadlineExceeded",
-                "ParallelDeadlineCancelled",
-            }:
-                # _run_role has already recorded the safe reason. Calling
-                # every remaining fallback profile would only create receipt
-                # noise and consume wall-clock time without a possible state
-                # transition.
+            if candidate.error_type in {"BudgetExhausted", "CostBudgetExhausted"}:
+                # No later profile can change a hard call/cost admission
+                # failure. Keep the recovery wave closed under those budgets.
                 break
-            if deadline_budget is not None and deadline_budget.expired:
-                receipt["blocked_reasons"].append("max_latency_ms_exhausted")
+            if candidate.error_type in {"DeadlineExceeded", "ParallelDeadlineCancelled"}:
+                # A single provider attempt may hit its own screened tail cap
+                # while the outer request still has time for another admitted
+                # profile. Continue in that case; only an exhausted shared
+                # deadline makes further recovery impossible.
+                if deadline_budget is None or deadline_budget.expired:
+                    break
+                receipt.setdefault("continued_after_candidate_deadline_count", 0)
+                receipt["continued_after_candidate_deadline_count"] += 1
+            if deadline_budget is not None and panel_phase_expired():
+                receipt["blocked_reasons"].append(panel_phase_block_reason())
                 break
         receipt["completed_after"] = len(completed)
         receipt["independent_completed_after"] = _independent_candidate_count(completed)
@@ -4695,6 +5275,65 @@ class FusionEngine:
             ]
         return receipt
 
+    def _order_runtime_recovery_roles(
+        self,
+        roles: Sequence[Mapping[str, Any]],
+        candidates: Sequence[CandidateResult],
+    ) -> list[dict[str, Any]]:
+        """Prefer new logical models while retaining screened fallback order.
+
+        Same-model replicas are excellent transport recovery, but they cannot
+        add an independent Fusion vote. When the initial panel is empty, the
+        recovery wave therefore spends its bounded calls on fresh canonical
+        identities first, then considers same-model replicas if the fresh pool
+        is exhausted. Within each class the screened latency and routing score
+        remain the tie breakers.
+        """
+
+        failed_identity_hashes = {
+            _candidate_canonical_identity_sha256(candidate)
+            for candidate in candidates
+            if candidate.profile_id
+        }
+        attempted_provider_hashes = {
+            sha256_text(candidate.provider)
+            for candidate in candidates
+            if candidate.provider
+        }
+        ranked: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+        for index, role in enumerate(roles):
+            if not isinstance(role, Mapping):
+                continue
+            model = role.get("model") if isinstance(role.get("model"), Mapping) else {}
+            profile = _profile_from_safe_dict(model)
+            identity_hash = str(
+                model.get("runtime_canonical_identity_sha256")
+                or profile.canonical_identity_sha256
+                or ""
+            )
+            provider_hash = sha256_text(profile.provider) if profile.provider else ""
+            p95 = _safe_int(profile.p95_latency_ms, default=0)
+            p50 = _safe_int(profile.p50_latency_ms, default=0)
+            latency = p95 or p50 or 2**31 - 1
+            routing = role.get("provider_routing") if isinstance(role.get("provider_routing"), Mapping) else {}
+            routing_score = _safe_float(routing.get("routing_score"), default=0.0)
+            fallback_rank = _safe_int(routing.get("fallback_rank"), default=index + 1)
+            ranked.append(
+                (
+                    (
+                        1 if identity_hash in failed_identity_hashes else 0,
+                        1 if provider_hash in attempted_provider_hashes else 0,
+                        latency,
+                        -routing_score,
+                        fallback_rank,
+                        profile.profile_id,
+                    ),
+                    dict(role),
+                )
+            )
+        ranked.sort(key=lambda item: item[0])
+        return [role for _key, role in ranked]
+
     def _judge_candidates(
         self,
         request: FusionRequest,
@@ -4722,6 +5361,29 @@ class FusionEngine:
             else {}
         )
         profile = self._registered_profile_for_id(routed_profile.profile_id) or routed_profile
+        profile, runtime_adaptive_routing = self._runtime_adaptive_control_profile(
+            profile,
+            route_plan,
+            role_name="judge",
+            candidates=candidates,
+        )
+        runtime_fallback_profile, runtime_fallback_routing = (
+            self._runtime_adaptive_control_profile(
+                profile,
+                route_plan,
+                role_name="judge",
+                candidates=candidates,
+                failed_profile_hashes=(sha256_text(profile.profile_id),),
+                prior_stage_failed=True,
+            )
+            if candidates
+            else (profile, {})
+        )
+        runtime_fallback_profiles = (
+            [runtime_fallback_profile]
+            if runtime_fallback_profile.profile_id != profile.profile_id
+            else []
+        )
         if not profile.profile_id.strip("/"):
             return local
         prompt = _judge_prompt(request, candidates, local, route_plan=route_plan)
@@ -4757,13 +5419,21 @@ class FusionEngine:
                 cost_budget=cost_budget,
                 deadline_budget=deadline_budget,
                 prompt_budget=prompt_budget,
-                cross_model_fallback_profiles=self._cross_model_stage_fallback_profiles(
-                    profile,
-                    route_plan,
-                    role_name="judge",
-                ),
+                cross_model_fallback_profiles=[
+                    *runtime_fallback_profiles,
+                    *self._cross_model_stage_fallback_profiles(
+                        profile,
+                        route_plan,
+                        role_name="judge",
+                    ),
+                ],
             )
         )
+        replica_routing = {
+            **replica_routing,
+            "runtime_adaptive_control_routing": runtime_adaptive_routing,
+            "runtime_adaptive_fallback_routing": runtime_fallback_routing,
+        }
         if not output:
             if provider_attempt_count <= 0:
                 return _judge_skip_result(
@@ -5586,7 +6256,7 @@ class FusionEngine:
         hermes_plan = _effective_hermes_plan(route_plan)
         hermes_reference_available = any(
             candidate.answer.strip()
-            and hermes_is_reference_role(hermes_plan, candidate.role)
+            and _candidate_is_hermes_reference(hermes_plan, candidate)
             for candidate in candidates
         )
         if (
@@ -5611,6 +6281,65 @@ class FusionEngine:
                 else {}
             )
             profile = self._registered_profile_for_id(routed_profile.profile_id) or routed_profile
+            judge_routing = (
+                judge_result.get("judge_replica_routing")
+                if isinstance(judge_result.get("judge_replica_routing"), Mapping)
+                else {}
+            )
+            judge_failed_profile_hashes: list[str] = []
+            judge_failed_provider_hashes: list[str] = []
+            for attempt in judge_routing.get("stage_attempt_receipts", []):
+                if not isinstance(attempt, Mapping):
+                    continue
+                if str(attempt.get("status") or "") not in {
+                    "failed",
+                    "empty",
+                    "skipped",
+                }:
+                    continue
+                profile_hash = str(attempt.get("profile_id_sha256") or "")
+                provider_hash = str(attempt.get("provider_sha256") or "")
+                if profile_hash:
+                    judge_failed_profile_hashes.append(profile_hash)
+                if provider_hash:
+                    judge_failed_provider_hashes.append(provider_hash)
+            if not _judge_output_accepted(judge_result):
+                judge_profile_hash = str(judge_result.get("judge_profile_sha256") or "")
+                if judge_profile_hash:
+                    judge_failed_profile_hashes.append(judge_profile_hash)
+            profile, runtime_adaptive_routing = self._runtime_adaptive_control_profile(
+                profile,
+                route_plan,
+                role_name="synthesizer",
+                candidates=candidates,
+                failed_profile_hashes=judge_failed_profile_hashes,
+                failed_provider_hashes=judge_failed_provider_hashes,
+                prior_stage_failed=(
+                    _judge_provider_call_count(judge_result) > 0
+                    and not _judge_output_accepted(judge_result)
+                ),
+            )
+            runtime_fallback_profile, runtime_fallback_routing = (
+                self._runtime_adaptive_control_profile(
+                    profile,
+                    route_plan,
+                    role_name="synthesizer",
+                    candidates=candidates,
+                    failed_profile_hashes=(
+                        *judge_failed_profile_hashes,
+                        sha256_text(profile.profile_id),
+                    ),
+                    failed_provider_hashes=judge_failed_provider_hashes,
+                    prior_stage_failed=True,
+                )
+                if candidates
+                else (profile, {})
+            )
+            runtime_fallback_profiles = (
+                [runtime_fallback_profile]
+                if runtime_fallback_profile.profile_id != profile.profile_id
+                else []
+            )
             prompt = _synthesis_prompt(
                 request,
                 prompt_candidates,
@@ -5650,16 +6379,23 @@ class FusionEngine:
                     ),
                     stream_observer=public_stream_observer,
                     cancellation_event=public_stream_cancellation,
-                    cross_model_fallback_profiles=self._cross_model_stage_fallback_profiles(
-                        profile,
-                        route_plan,
-                        role_name="synthesizer",
-                    ),
+                    cross_model_fallback_profiles=[
+                        *runtime_fallback_profiles,
+                        *self._cross_model_stage_fallback_profiles(
+                            profile,
+                            route_plan,
+                            role_name="synthesizer",
+                        ),
+                    ],
                 )
             )
             compression_receipt = {
                 **compression_receipt,
-                "synthesizer_replica_routing": replica_routing,
+                "synthesizer_replica_routing": {
+                    **replica_routing,
+                    "runtime_adaptive_control_routing": runtime_adaptive_routing,
+                    "runtime_adaptive_fallback_routing": runtime_fallback_routing,
+                },
             }
             if isinstance(stage_output, ProviderCompletion):
                 if stage_output.tool_calls:
@@ -5749,6 +6485,9 @@ def _profile_with_runtime_telemetry(
     latency_samples = _runtime_telemetry_latency_samples(values.get("latencies_ms"))
     calibration_applied = observation_count >= _RUNTIME_TELEMETRY_MIN_OBSERVATIONS
     latency_calibration_applied = len(latency_samples) >= _RUNTIME_TELEMETRY_MIN_OBSERVATIONS
+    p95_latency_calibration_applied = (
+        len(latency_samples) >= _RUNTIME_TELEMETRY_MIN_P95_OBSERVATIONS
+    )
     observed_success_rate = (
         round(success_count / observation_count, 6) if observation_count else None
     )
@@ -5767,6 +6506,7 @@ def _profile_with_runtime_telemetry(
         )
         if latency_calibration_applied:
             p50_latency_ms = _runtime_telemetry_latency_quantile(latency_samples, 0.50)
+        if p95_latency_calibration_applied:
             p95_latency_ms = _runtime_telemetry_latency_quantile(latency_samples, 0.95)
         health = _runtime_telemetry_health(profile.health, observed_success_rate, observation_count)
         effective_profile = replace(
@@ -5794,6 +6534,7 @@ def _profile_with_runtime_telemetry(
         "effective_health": health,
         "calibration_applied": calibration_applied,
         "latency_calibration_applied": latency_calibration_applied,
+        "p95_latency_calibration_applied": p95_latency_calibration_applied,
         "raw_profile_id_persisted": False,
         "raw_provider_name_persisted": False,
         "raw_model_name_persisted": False,
@@ -8137,6 +8878,25 @@ def _required_min_candidate_count(route_plan: Mapping[str, Any], expert_roles: S
         return 1
     budget = route_plan.get("budget") if isinstance(route_plan.get("budget"), Mapping) else {}
     configured = _safe_int(budget.get("min_judge_candidate_count"), default=2)
+    finalization_mode = str(
+        budget.get("fusion_finalization_mode")
+        or route_plan.get("fusion_finalization_mode")
+        or "direct"
+    )
+    if finalization_mode == "local_consensus":
+        # Local consensus is admitted with its own latency-feasible panel
+        # shape. Do not reapply the provider Judge policy (for example Pro's
+        # three-candidate critic floor) to a route that intentionally has no
+        # provider Judge/Synthesizer stages.
+        local_plan = (
+            budget.get("local_consensus_plan")
+            if isinstance(budget.get("local_consensus_plan"), Mapping)
+            else {}
+        )
+        configured = _safe_int(
+            local_plan.get("minimum_candidate_count"),
+            default=configured,
+        )
     # A role-reused Critic is a useful second-pass instruction, but it is not
     # a new independent model vote. Count canonical model identities for the
     # runtime quorum so a panel with Primary + Independent + reused Critic can
@@ -8234,6 +8994,9 @@ def _panel_repair_receipt(
         "fusion_evidence_completed_after": independent_after,
         "success": bool(success),
         "degraded_mode": bool(enabled and not success),
+        "runtime_recovery_mode": False,
+        "runtime_recovery_reference_requested": False,
+        "runtime_recovery_role_order_policy": "",
         "blocked_reasons": [] if success or not enabled else ["not_enough_completed_candidates"],
         "optional_hermes_enrichment_skipped": False,
         "optional_hermes_enrichment_skip_reason": "",
@@ -8275,6 +9038,13 @@ def _panel_repair_block_reason(candidate: CandidateResult) -> str:
     if candidate.error_type == "CostBudgetExhausted":
         return "max_cost_usd_exhausted"
     if candidate.error_type == "DeadlineExceeded":
+        task_execution = (
+            candidate.task_execution
+            if isinstance(candidate.task_execution, Mapping)
+            else {}
+        )
+        if task_execution.get("runtime_panel_phase_result_discarded") is True:
+            return "fusion_panel_phase_deadline_exhausted"
         return "max_latency_ms_exhausted"
     if candidate.error_type == "CircuitOpen":
         return "circuit_open"
@@ -9114,8 +9884,33 @@ def _has_completed_hermes_reference(
     return any(
         candidate.status == "completed"
         and candidate.answer.strip()
-        and hermes_is_reference_role(hermes_plan, candidate.role)
+        and _candidate_is_hermes_reference(hermes_plan, candidate)
         for candidate in candidates
+    )
+
+
+def _candidate_is_hermes_reference(
+    hermes_plan: Mapping[str, Any] | None,
+    candidate: CandidateResult,
+) -> bool:
+    """Recognize static Hermes seats and explicitly marked recovery references.
+
+    Runtime recovery deliberately keeps the public candidate role as
+    ``fallback_solver`` so normal fallback accounting and prompt contracts are
+    preserved. Its task receipt carries the stronger reference marker only
+    when the recovery path explicitly requested it; ordinary fallback output
+    therefore cannot silently satisfy the Hermes reference contract.
+    """
+
+    if not isinstance(hermes_plan, Mapping) or hermes_plan.get("enabled") is not True:
+        return False
+    if hermes_is_reference_role(hermes_plan, candidate.role):
+        return True
+    task_execution = candidate.task_execution
+    return bool(
+        isinstance(task_execution, Mapping)
+        and task_execution.get("runtime_recovery_reference") is True
+        and task_execution.get("hermes_process_stage") == "reference"
     )
 
 
@@ -9540,8 +10335,12 @@ def _judge_prompt(
     *,
     route_plan: Mapping[str, Any] | None = None,
 ) -> str:
+    # Control stages must remain portable across providers with different
+    # context limits. Preserve the full candidate count and structured receipts
+    # while shrinking only the free-form answer excerpt as the panel widens.
+    answer_char_limit = 3_200 if len(candidates) > 3 else 4_000
     candidate_packet = [
-        _candidate_prompt_packet(candidate, answer_char_limit=6000)
+        _candidate_prompt_packet(candidate, answer_char_limit=answer_char_limit)
         for candidate in candidates
     ]
     task_plan = _role_task_plan_prompt_fragment(route_plan, "judge")
@@ -10934,12 +11733,13 @@ def _synthesis_prompt(
     route_plan: Mapping[str, Any] | None = None,
     compression_receipt: Mapping[str, Any],
 ) -> str:
+    answer_char_limit = 3_600 if len(candidates) > 3 else 4_000
     candidate_packet = [
         # Synthesis already receives the structured Judge record. A bounded
         # head/tail excerpt preserves answer substance and hashes while
         # preventing repeated long candidate outputs from consuming the stage
         # deadline.
-        _candidate_prompt_packet(candidate, answer_char_limit=6000)
+        _candidate_prompt_packet(candidate, answer_char_limit=answer_char_limit)
         for candidate in candidates
     ]
     task_plan = _role_task_plan_prompt_fragment(route_plan, "synthesizer")
@@ -11067,6 +11867,8 @@ def _safe_candidate_task_execution_control_prompt(
         ][:8],
         "hermes_cognitive_budget": base.get("hermes_cognitive_budget") if isinstance(base.get("hermes_cognitive_budget"), Mapping) else {},
         "hermes_reference_fanout_cadence": str(base.get("hermes_reference_fanout_cadence") or "")[:80],
+        "hermes_process_stage": str(base.get("hermes_process_stage") or "")[:40],
+        "runtime_recovery_reference": bool(base.get("runtime_recovery_reference")),
         "raw_prompt_persisted": False,
         "raw_candidate_text_persisted": False,
     }
@@ -11231,6 +12033,8 @@ def _safe_candidate_task_execution_for_prompt(value: Mapping[str, Any]) -> dict[
             "checkpoint_receipts": [],
             "hermes_cognitive_budget": {},
             "hermes_reference_fanout_cadence": "",
+            "hermes_process_stage": "",
+            "runtime_recovery_reference": False,
             "raw_prompt_persisted": False,
             "raw_candidate_text_persisted": False,
         }
@@ -11277,6 +12081,8 @@ def _safe_candidate_task_execution_for_prompt(value: Mapping[str, Any]) -> dict[
         "hermes_reference_fanout_cadence": str(
             value.get("hermes_reference_fanout_cadence") or ""
         )[:80],
+        "hermes_process_stage": str(value.get("hermes_process_stage") or "")[:40],
+        "runtime_recovery_reference": bool(value.get("runtime_recovery_reference")),
         "provider_error_code": str(value.get("provider_error_code") or "")[:120],
         "provider_http_status": value.get("provider_http_status"),
         "raw_prompt_persisted": False,
@@ -11359,6 +12165,7 @@ def _response_cache_origin_completion_receipt(
     """Build a hash-safe, fail-closed receipt for one cacheable final answer."""
 
     trace = response.trace if isinstance(response.trace, Mapping) else {}
+    request = response.request
     route_plan = response.route_plan if isinstance(response.route_plan, Mapping) else {}
     stage_outcome = (
         trace.get("runtime_fusion_stage_outcome")
@@ -11385,6 +12192,11 @@ def _response_cache_origin_completion_receipt(
         judge_contract.get("required") is True
         or stage_outcome.get("fusion_requested") is True
     )
+    fusion_admission = (
+        route_plan.get("fusion_admission")
+        if isinstance(route_plan.get("fusion_admission"), Mapping)
+        else {}
+    )
     hermes_required = bool(
         configured_hermes_plan.get("enabled") is True
         or effective_hermes_plan.get("enabled") is True
@@ -11408,6 +12220,33 @@ def _response_cache_origin_completion_receipt(
         reason_codes.append("runtime_fusion_stage_outcome_missing")
     if stage_outcome.get("runtime_degraded") is True:
         reason_codes.append("runtime_degraded")
+
+    # A direct answer produced because an admitted public Fusion tier was
+    # blocked by a hard resource/latency gate must not become a cache hit for
+    # later requests. Caching it would turn a transient admission failure into
+    # a stable bypass of the Fusion contract. Ordinary low-risk Terra direct
+    # routing remains cacheable; only hard Fusion blockers are covered here.
+    hard_fusion_blockers = {
+        "fusion_latency_exceeds_3x_single_model_guard",
+        "fusion_p95_latency_exceeds_request_deadline",
+        "fusion_p95_latency_exceeds_3x_single_model_guard",
+        "initial_fusion_cost_exceeds_request_budget",
+        "initial_fusion_latency_exceeds_request_deadline",
+        "max_total_model_calls_below_complete_fusion_floor",
+        "insufficient_independent_models",
+        "max_fusion_depth_reached",
+    }
+    admission_blockers = {
+        str(reason)
+        for reason in fusion_admission.get("blocked_reasons", [])
+        if str(reason)
+    }
+    if (
+        not fusion_requested
+        and request.public_model in {"axio-pro", "axio-terra"}
+        and admission_blockers.intersection(hard_fusion_blockers)
+    ):
+        reason_codes.append("fusion_admission_degraded_direct_not_cacheable")
 
     execution_mode = str(stage_outcome.get("execution_mode") or "")[:120]
     if fusion_requested:
@@ -12274,10 +13113,16 @@ def _timeout_for_request(
     *,
     role: str = "",
     kind: str = "",
+    phase: str = "",
 ) -> float:
     if deadline_budget is None:
         return _timeout_seconds(request)
-    return deadline_budget.timeout_seconds(request, role=role, kind=kind)
+    return deadline_budget.timeout_seconds(
+        request,
+        role=role,
+        kind=kind,
+        phase=phase,
+    )
 
 
 def _stage_prompt_deadline_extension_ms(prompt: str, *, role_name: str) -> int:
@@ -12304,6 +13149,8 @@ def _timeout_for_role(
     route_plan: Mapping[str, Any] | None,
     role_name: str,
     profile: ModelProfile,
+    context_chars: int = 0,
+    phase: str = "",
 ) -> tuple[float, dict[str, Any]]:
     """Bound one provider attempt while preserving a Fast cascade fallback.
 
@@ -12320,21 +13167,53 @@ def _timeout_for_role(
         deadline_budget,
         role=role_name,
         kind="model_role",
+        phase=phase,
     )
+    try:
+        bounded_context_chars = max(0, int(context_chars))
+    except (TypeError, ValueError):
+        bounded_context_chars = 0
+    context_excess = max(
+        0,
+        bounded_context_chars - _FUSION_CANDIDATE_CONTEXT_BASELINE_CHARS,
+    )
+    context_steps = (
+        (context_excess + _FUSION_CANDIDATE_CONTEXT_STEP_CHARS - 1)
+        // _FUSION_CANDIDATE_CONTEXT_STEP_CHARS
+        if context_excess
+        else 0
+    )
+    context_extension_ms = min(
+        _FUSION_CANDIDATE_CONTEXT_MAX_EXTENSION_MS,
+        context_steps * _FUSION_CANDIDATE_CONTEXT_STEP_EXTENSION_MS,
+    )
+    shaped_context = context_excess > 0
     receipt: dict[str, Any] = {
         "schema": "axio_fusion_api.provider_timeout_policy.v1",
         "role": str(role_name or "")[:80],
         "timeout_ms": round(float(ordinary_timeout) * 1000, 3),
         "fusion_candidate_timeout_applied": False,
         "fusion_candidate_timeout_basis_ms": None,
+        "fusion_candidate_timeout_base_cap_ms": None,
         "fusion_candidate_timeout_cap_ms": None,
         "fusion_candidate_timeout_basis": "ordinary_deadline",
+        "fusion_candidate_context_chars": bounded_context_chars,
+        "fusion_candidate_context_extension_ms": context_extension_ms,
+        "fusion_candidate_context_shape_applied": shaped_context,
+        "fusion_candidate_timeout_multiplier": (
+            _FUSION_CANDIDATE_SHAPED_TIMEOUT_MULTIPLIER_NUMERATOR
+            / _FUSION_CANDIDATE_SHAPED_TIMEOUT_MULTIPLIER_DENOMINATOR
+            if shaped_context
+            else _FUSION_CANDIDATE_TIMEOUT_MULTIPLIER_NUMERATOR
+            / _FUSION_CANDIDATE_TIMEOUT_MULTIPLIER_DENOMINATOR
+        ),
         "fast_cascade_reservation_applied": False,
         "fast_cascade_headroom_available": None,
         "fast_cascade_projected_latency_ms": None,
         "fast_cascade_reservation_skip_reason": "",
         "fallback_expected_latency_known": False,
         "fallback_reserve_ms": 0.0,
+        "phase": str(phase or "")[:80],
         "raw_profile_id_persisted": False,
     }
     if deadline_budget is None or not isinstance(route_plan, Mapping):
@@ -12352,7 +13231,7 @@ def _timeout_for_role(
             default=0,
         )
         if observed_latency_ms > 0:
-            cap_ms = max(
+            base_cap_ms = max(
                 _FUSION_CANDIDATE_TIMEOUT_MIN_MS,
                 min(
                     _FUSION_CANDIDATE_TIMEOUT_MAX_MS,
@@ -12366,12 +13245,41 @@ def _timeout_for_role(
                     + _FUSION_CANDIDATE_TIMEOUT_MARGIN_MS,
                 ),
             )
+            multiplier_numerator = (
+                _FUSION_CANDIDATE_SHAPED_TIMEOUT_MULTIPLIER_NUMERATOR
+                if shaped_context
+                else _FUSION_CANDIDATE_TIMEOUT_MULTIPLIER_NUMERATOR
+            )
+            multiplier_denominator = (
+                _FUSION_CANDIDATE_SHAPED_TIMEOUT_MULTIPLIER_DENOMINATOR
+                if shaped_context
+                else _FUSION_CANDIDATE_TIMEOUT_MULTIPLIER_DENOMINATOR
+            )
+            cap_ms = max(
+                _FUSION_CANDIDATE_TIMEOUT_MIN_MS,
+                min(
+                    _FUSION_CANDIDATE_TIMEOUT_MAX_MS,
+                    (
+                        observed_latency_ms
+                        * multiplier_numerator
+                        + multiplier_denominator
+                        - 1
+                    )
+                    // multiplier_denominator
+                    + _FUSION_CANDIDATE_TIMEOUT_MARGIN_MS,
+                ),
+            )
+            cap_ms = min(
+                _FUSION_CANDIDATE_TIMEOUT_MAX_MS,
+                cap_ms + context_extension_ms,
+            )
             bounded_timeout = min(ordinary_timeout, cap_ms / 1000.0)
             receipt.update(
                 {
                     "timeout_ms": round(float(bounded_timeout) * 1000, 3),
                     "fusion_candidate_timeout_applied": bounded_timeout < ordinary_timeout,
                     "fusion_candidate_timeout_basis_ms": observed_latency_ms,
+                    "fusion_candidate_timeout_base_cap_ms": base_cap_ms,
                     "fusion_candidate_timeout_cap_ms": cap_ms,
                     "fusion_candidate_timeout_basis": (
                         "screened_p95_plus_margin"

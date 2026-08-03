@@ -59,7 +59,91 @@ class NetworkPolicyError(RuntimeError):
         super().__init__(f"fusion_network_policy_failed:{self.reason_code}")
 
 
-class _DeadlineHTTPSConnection(http.client.HTTPSConnection):
+class _DeadlineResponseMixin:
+    """Bound the response-header read that happens before urllib returns.
+
+    The provider stream watchdog starts after ``opener.open`` returns.  A
+    stalled upstream can block earlier in ``HTTPConnection.getresponse`` while
+    waiting for the first response-header byte, so that watchdog cannot wake
+    it.  Closing the connection socket from a daemon timer makes this phase
+    obey the same request deadline without introducing a second request loop.
+    """
+
+    def getresponse(self):
+        deadline_at = getattr(self, "_axio_request_deadline_at", None)
+        timeout = _finite_connection_timeout(getattr(self, "timeout", None))
+        if deadline_at is not None:
+            timeout = _remaining_connection_timeout(deadline_at, timeout)
+        if timeout is None:
+            return super().getresponse()
+
+        def expire_response_header_read() -> None:
+            sock = getattr(self, "sock", None)
+            if sock is None:
+                return
+            try:
+                sock.close()
+            except Exception:
+                return
+
+        watchdog = threading.Timer(max(0.001, timeout), expire_response_header_read)
+        watchdog.daemon = True
+        watchdog.start()
+        try:
+            return super().getresponse()
+        finally:
+            watchdog.cancel()
+
+
+class _DeadlineHTTPConnection(_DeadlineResponseMixin, http.client.HTTPConnection):
+    """HTTP connection with one deadline across connect and response headers."""
+
+    def connect(self) -> None:
+        timeout = _finite_connection_timeout(self.timeout)
+        deadline_at = time.monotonic() + timeout if timeout is not None else None
+        self._axio_request_deadline_at = deadline_at
+
+        def expire_connection() -> None:
+            sock = getattr(self, "sock", None)
+            if sock is None:
+                return
+            try:
+                sock.close()
+            except Exception:
+                return
+
+        watchdog = None
+        if timeout is not None:
+            watchdog = threading.Timer(timeout, expire_connection)
+            watchdog.daemon = True
+            watchdog.start()
+        try:
+            self.sock = self._create_connection(
+                (self.host, self.port),
+                timeout,
+                self.source_address,
+            )
+            try:
+                self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            except OSError as exc:
+                if exc.errno != errno.ENOPROTOOPT:
+                    raise
+            if self._tunnel_host:
+                _set_connection_socket_timeout(
+                    self.sock,
+                    _remaining_connection_timeout(deadline_at, timeout),
+                )
+                self._tunnel()
+            _set_connection_socket_timeout(
+                self.sock,
+                _remaining_connection_timeout(deadline_at, timeout),
+            )
+        finally:
+            if watchdog is not None:
+                watchdog.cancel()
+
+
+class _DeadlineHTTPSConnection(_DeadlineResponseMixin, http.client.HTTPSConnection):
     """HTTPS connection that bounds the proxy tunnel's TLS handshake.
 
     ``urllib`` forwards its timeout to ``HTTPSConnection``.  A few local HTTP
@@ -73,6 +157,7 @@ class _DeadlineHTTPSConnection(http.client.HTTPSConnection):
     def connect(self) -> None:
         timeout = _finite_connection_timeout(self.timeout)
         deadline_at = time.monotonic() + timeout if timeout is not None else None
+        self._axio_request_deadline_at = deadline_at
 
         def expire_connection() -> None:
             sock = getattr(self, "sock", None)
@@ -159,6 +244,13 @@ class _DeadlineHTTPSHandler(urllib.request.HTTPSHandler):
             context=self._context,
             check_hostname=self._check_hostname,
         )
+
+
+class _DeadlineHTTPHandler(urllib.request.HTTPHandler):
+    """Use the bounded HTTP connection for direct and HTTP-proxy requests."""
+
+    def http_open(self, req):
+        return self.do_open(_DeadlineHTTPConnection, req)
 
 
 @dataclass(frozen=True)
@@ -365,6 +457,7 @@ def build_network_opener(*handlers: Any):
         proxy_handler = urllib.request.ProxyHandler({})
     return urllib.request.build_opener(
         proxy_handler,
+        _DeadlineHTTPHandler(),
         _DeadlineHTTPSHandler(),
         *tuple(handlers),
     )

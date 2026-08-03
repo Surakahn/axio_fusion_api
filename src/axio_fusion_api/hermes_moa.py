@@ -623,10 +623,21 @@ def execution_receipt(
 
     enabled = bool(isinstance(plan, Mapping) and plan.get("enabled") is True)
     reference_roles = set(plan.get("reference_roles", [])) if isinstance(plan, Mapping) else set()
+    runtime_recovery_references = [
+        candidate
+        for candidate in candidates
+        if isinstance(getattr(candidate, "task_execution", None), Mapping)
+        and getattr(candidate, "task_execution", {}).get(
+            "runtime_recovery_reference"
+        ) is True
+        and getattr(candidate, "task_execution", {}).get("hermes_process_stage")
+        == "reference"
+    ]
     references = [
         candidate
         for candidate in candidates
         if str(getattr(candidate, "role", "")) in reference_roles
+        or candidate in runtime_recovery_references
     ]
     feedback_references = [
         candidate
@@ -714,6 +725,13 @@ def execution_receipt(
         "schema": "axio_fusion_api.hermes_moa_execution.v2",
         "enabled": enabled,
         "reference_role_count": len(reference_roles),
+        "runtime_recovery_reference_attempt_count": len(runtime_recovery_references),
+        "runtime_recovery_reference_completed_count": sum(
+            1
+            for candidate in runtime_recovery_references
+            if str(getattr(candidate, "status", "")) == "completed"
+            and bool(str(getattr(candidate, "answer", "")).strip())
+        ),
         "reference_attempt_count": len(references),
         "reference_completed_count": len(completed),
         "reference_failed_or_empty_count": len(failed),
