@@ -6015,6 +6015,7 @@ def test_standalone_fusion_deliberation_live_smoke_exercises_complete_panel_with
                     "prompt": prompt,
                     "system": system,
                     "timeout": timeout,
+                    "max_total_model_calls": request.policy.max_total_model_calls,
                 }
             )
             lowered_system = system.lower()
@@ -6107,6 +6108,9 @@ def test_standalone_fusion_deliberation_live_smoke_exercises_complete_panel_with
     assert row["fusion_activated"] is True
     assert row["complete_admitted_fusion_finalized"] is True
     assert row["completed_candidate_count"] >= 2
+    assert row["judge_output_accepted"] is True
+    assert row["synthesis_output_accepted"] is True
+    assert row["judge_parse_failed"] is False
     assert row["hermes_process_contract_required"] is True
     assert row["hermes_execution_enabled"] is True
     assert row["hermes_process_contract_completed"] is True
@@ -6119,6 +6123,7 @@ def test_standalone_fusion_deliberation_live_smoke_exercises_complete_panel_with
     assert client.judge_calls >= 1
     assert client.synthesis_calls >= 1
     assert len(client.calls) == row["provider_call_count"]
+    assert all(call["max_total_model_calls"] == 6 for call in client.calls)
     assert secret_prompt not in serialized
     assert "FUSION_SMOKE_SYNTHESIS_OUTPUT_MUST_NOT_PERSIST" not in serialized
     assert "synthetic fixture evidence" not in serialized
@@ -6203,6 +6208,8 @@ def test_standalone_fusion_deliberation_smoke_keeps_non_hermes_early_exit() -> N
                 "complete_admitted_fusion_finalized": True,
                 "hermes_process_contract_required": False,
                 "hermes_process_contract_completed": False,
+                "judge_output_accepted": True,
+                "synthesis_output_accepted": False,
             },
             "early_exit": {"triggered": True},
             "judge_provider_call_count": 1,

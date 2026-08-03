@@ -2352,7 +2352,11 @@ def build_fusion_deliberation_live_smoke(
     # diagnostic wrapper itself.
     bounded_latency_ms = max(3_000, min(90_000, int(max_latency_ms or 30_000)))
     bounded_output_tokens = max(32, min(256, int(max_output_tokens or 128)))
-    bounded_call_count = max(4, min(8, int(max_total_model_calls or 6)))
+    # A complete three-branch Fusion pass may need two bounded panel repairs
+    # plus one same-request cross-model fallback for each mandatory control
+    # stage. Keep the diagnostic ceiling high enough to exercise that admitted
+    # recovery shape while the runtime's global call budget remains authoritative.
+    bounded_call_count = max(4, min(10, int(max_total_model_calls or 6)))
     bounded_cost_usd = max(0.0001, min(0.05, float(max_cost_usd or 0.02)))
     preflight_reason_codes: list[str] = []
     if not live:
@@ -2379,6 +2383,7 @@ def build_fusion_deliberation_live_smoke(
                     "max_depth": 1,
                     "max_latency_ms": bounded_latency_ms,
                     "max_output_tokens": bounded_output_tokens,
+                    "max_total_model_calls": bounded_call_count,
                     "max_cost_usd": bounded_cost_usd,
                 },
                 api_format="chat/completions",
@@ -2424,6 +2429,8 @@ def build_fusion_deliberation_live_smoke(
                 "deliberation_smoke_passed": row["deliberation_smoke_passed"],
                 "fusion_activated": row["fusion_activated"],
                 "complete_admitted_fusion_finalized": row["complete_admitted_fusion_finalized"],
+                "judge_output_accepted": row["judge_output_accepted"],
+                "synthesis_output_accepted": row["synthesis_output_accepted"],
                 "hermes_process_contract_required": row[
                     "hermes_process_contract_required"
                 ],
@@ -2587,8 +2594,33 @@ def _fusion_deliberation_live_smoke_row(
         and hermes_execution.get("process_contract_completed") is True
         and runtime_outcome.get("hermes_process_contract_completed") is True
     )
+    judge_output_accepted = runtime_outcome.get("judge_output_accepted") is True
+    synthesis_output_accepted = runtime_outcome.get("synthesis_output_accepted") is True
+    hermes_reference_completed_count = max(
+        0,
+        _optional_int(runtime_outcome.get("hermes_reference_completed_count")) or 0,
+    )
+    hermes_feedback_reference_required = (
+        hermes_execution.get("feedback_reference_required") is True
+    )
+    hermes_feedback_reference_completed = (
+        hermes_execution.get("feedback_reference_completed") is True
+    )
+    hermes_rejudge_after_feedback_completed = (
+        hermes_execution.get("rejudge_after_feedback_completed") is True
+    )
     hermes_aggregator_output_accepted = bool(
         hermes_execution.get("aggregator_output_accepted") is True
+    )
+    synthesis_compression = (
+        trace.get("synthesis_compression")
+        if isinstance(trace.get("synthesis_compression"), Mapping)
+        else {}
+    )
+    synthesis_replica_routing = (
+        synthesis_compression.get("synthesizer_replica_routing")
+        if isinstance(synthesis_compression.get("synthesizer_replica_routing"), Mapping)
+        else {}
     )
     reason_codes: list[str] = []
     if not str(response.text or "").strip():
@@ -2604,6 +2636,8 @@ def _fusion_deliberation_live_smoke_row(
             reason_codes.append("local_consensus_not_finalized")
     elif judge_provider_call_count < 1:
         reason_codes.append("provider_judge_not_executed")
+    elif not judge_output_accepted:
+        reason_codes.append("provider_judge_output_not_accepted")
     if hermes_process_contract_required and not hermes_execution_enabled:
         reason_codes.append("hermes_process_execution_missing")
     if hermes_process_contract_required and synthesis_provider_call_count < 1:
@@ -2635,10 +2669,30 @@ def _fusion_deliberation_live_smoke_row(
         "completed_candidate_count": completed_candidate_count,
         "fusion_finalization_mode": finalization_mode,
         "local_consensus_finalized": local_consensus_finalized,
+        "judge_output_accepted": judge_output_accepted,
+        "synthesis_output_accepted": synthesis_output_accepted,
+        "judge_parse_failed": bool(
+            (trace.get("judge_result") or {}).get("judge_parse_failed") is True
+            if isinstance(trace.get("judge_result"), Mapping)
+            else False
+        ),
+        "hermes_reference_completed_count": hermes_reference_completed_count,
+        "hermes_feedback_reference_required": hermes_feedback_reference_required,
+        "hermes_feedback_reference_completed": hermes_feedback_reference_completed,
+        "hermes_rejudge_after_feedback_completed": hermes_rejudge_after_feedback_completed,
         "hermes_process_contract_required": hermes_process_contract_required,
         "hermes_execution_enabled": hermes_execution_enabled,
         "hermes_process_contract_completed": hermes_process_contract_completed,
         "hermes_aggregator_output_accepted": hermes_aggregator_output_accepted,
+        "synthesis_provider_output_accepted": bool(
+            synthesis_compression.get("provider_synthesis_output_accepted") is True
+        ),
+        "synthesis_provider_fallback_used": bool(
+            synthesis_compression.get("provider_synthesis_fallback_used") is True
+        ),
+        "synthesis_terminal_reason": str(
+            synthesis_replica_routing.get("terminal_reason") or ""
+        )[:120],
         "judge_provider_call_count": judge_provider_call_count,
         "synthesis_provider_call_count": synthesis_provider_call_count,
         "early_exit_triggered": early_exit_triggered,

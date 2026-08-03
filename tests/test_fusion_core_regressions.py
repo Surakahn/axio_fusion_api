@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 
 from axio_fusion_api.orchestrator import (
     _CallBudget,
@@ -20,7 +21,11 @@ from axio_fusion_api.orchestrator import (
     _missing_required_candidate_roles,
     _provider_request_for_role,
     _required_min_candidate_count,
+    _safe_judge_result_for_synthesis,
+    _safe_local_judge_for_prompt,
+    _stage_prompt_deadline_extension_ms,
     _timeout_seconds,
+    _timeout_for_role,
 )
 from axio_fusion_api.compat import canonicalize_payload, render_response
 from axio_fusion_api.evaluation import _fusion_provider_env_readiness
@@ -41,6 +46,7 @@ from axio_fusion_api.router import (
     _latency_optimize_stage_profiles,
     _role_assignments,
     _role_blueprint,
+    _screening_role_allowed,
     _stage_profile_eligibility,
     analyze_request,
     build_route_plan,
@@ -150,6 +156,42 @@ def test_explicit_fusion_deadline_reaches_provider_ceiling_without_changing_defa
     assert _timeout_seconds(default_request) == 60.0
     assert _timeout_seconds(ninety_second_request) == PROVIDER_MAX_RESPONSE_SECONDS
     assert _timeout_seconds(over_ceiling_request) == PROVIDER_MAX_RESPONSE_SECONDS
+
+    fast_request = canonicalize_payload(
+        {
+            "model": "axio-fast",
+            "max_latency_ms": 90_000,
+            "messages": [{"role": "user", "content": "ping"}],
+        }
+    )
+    pro_budget = _budget_for_request(
+        ninety_second_request,
+        analyze_request(ninety_second_request),
+    )
+    fast_budget = _budget_for_request(fast_request, analyze_request(fast_request))
+    assert pro_budget["max_latency_ms"] == 90_000
+    assert fast_budget["max_latency_ms"] == 60_000
+
+
+def test_failed_streaming_role_probe_cannot_be_promoted_into_a_control_stage():
+    profile = _screened_profile(
+        "role-probe-failure",
+        allowed_roles=("judge", "synthesizer"),
+    )
+    profile = replace(
+        profile,
+        screening_role_admission={
+            "operational_role_probe": {
+                "status": "ready",
+                "tested_roles": ["judge", "synthesizer"],
+                "passed_roles": ["synthesizer"],
+                "failed_roles": ["judge"],
+            }
+        },
+    )
+
+    assert _screening_role_allowed(profile, "judge") is False
+    assert _screening_role_allowed(profile, "synthesizer") is True
 
 
 def test_required_runtime_quorum_does_not_count_reused_critic_as_independent_seat():
@@ -1087,6 +1129,174 @@ def test_deadline_budget_keeps_initial_and_dynamic_same_role_reservations_separa
     assert receipt["mandatory_stage_deadline_pending_ms"] == 500
 
 
+def test_large_control_prompt_extension_uses_only_unreserved_deadline_slack(monkeypatch):
+    clock = {"now": 0.0}
+    monkeypatch.setattr(orchestrator_module.time, "monotonic", lambda: clock["now"])
+    budget = _DeadlineBudget(
+        10_000,
+        mandatory_stage_reservations_ms={"judge": 2_000, "synthesizer": 2_000},
+    )
+
+    assert budget.acquire(kind="judge", role="judge", profile_id="judge") is True
+    clock["now"] = 0.5
+    assert budget.extend_active_stage_reservation(
+        role="judge",
+        extension_ms=1_500,
+        reason="large_mandatory_stage_prompt",
+    ) is True
+    # The extension lengthens only the active Judge window; the pending
+    # Synthesizer reservation remains protected from optional work.
+    assert budget.timeout_seconds(
+        FusionRequest(model="axio-pro", prompt="prompt"),
+        role="judge",
+        kind="judge",
+    ) == 3.0
+    receipt = budget.safe_dict()
+    assert receipt["mandatory_stage_deadline_active_extensions_ms"] == {"judge": 1_500}
+    assert receipt["mandatory_stage_deadline_pending_ms"] == 2_000
+    assert _stage_prompt_deadline_extension_ms("x" * 24_000, role_name="judge") == 0
+    assert _stage_prompt_deadline_extension_ms("x" * 28_000, role_name="judge") == 750
+    assert _stage_prompt_deadline_extension_ms("x" * 100_000, role_name="judge") == 8_000
+
+
+def test_control_stage_prompts_compact_local_execution_receipts():
+    diagnostic = {
+        "candidate_id": "primary_solver",
+        "role": "primary_solver",
+        "answer_sha256": "a" * 64,
+        "answer_char_count": 1200,
+        "local_score": 0.91,
+        "answer_claim_support_fraction": 0.8,
+        "confidence": 0.88,
+        "confidence_calibration": {
+            "calibrated_confidence": 0.84,
+            "calibration_delta": -0.04,
+            "overconfidence_risk": False,
+            "reason_codes": ["evidence_supported"],
+        },
+        "reasoning_step_count": 4,
+        "evidence_count": 3,
+        "assumption_count": 1,
+        "uncertainty_count": 1,
+        "tool_success_count": 0,
+        "task_execution": {
+            "assigned_node_count": 8,
+            "verification_node_count": 3,
+            "dependency_count": 7,
+            "checkpoint_count": 2,
+            "node_receipts": [{"id": f"node-{index}"} for index in range(12)],
+        },
+        "escalation_plan": {
+            "triggered": True,
+            "selected_subtask_count": 2,
+            "requires_cross_provider_verifier": True,
+            "subtasks": [{"focus": "x" * 2000}],
+        },
+        "standardization": {
+            "parsed": True,
+            "parse_mode": "json_object",
+            "normalized_field_count": 6,
+            "missing_required_fields": [],
+            "raw_candidate_text_persisted": False,
+        },
+    }
+    local = _safe_local_judge_for_prompt(
+        {
+            "ranked_candidates": [{"candidate_id": "primary_solver", "score": 0.91}],
+            "candidate_diagnostics": [diagnostic],
+            "ready_for_synthesis": True,
+        }
+    )
+    compact = local["candidate_diagnostics"][0]
+    assert compact["dag"] == {
+        "assigned_node_count": 8,
+        "verification_node_count": 3,
+        "dependency_count": 7,
+        "checkpoint_count": 2,
+    }
+    assert "node_receipts" not in json.dumps(local, ensure_ascii=False)
+    assert "subtasks" not in json.dumps(local, ensure_ascii=False)
+    judge_record = _safe_judge_result_for_synthesis(
+        {"candidate_diagnostics": [diagnostic], "ready_for_synthesis": True}
+    )
+    assert "node_receipts" not in json.dumps(judge_record, ensure_ascii=False)
+    assert judge_record["candidate_diagnostics"][0]["candidate_id"] == "primary_solver"
+
+
+def test_idempotent_stage_failover_reservation_protects_control_window_from_optional_work(
+    monkeypatch,
+):
+    clock = {"now": 0.0}
+    monkeypatch.setattr(orchestrator_module.time, "monotonic", lambda: clock["now"])
+    budget = _DeadlineBudget(
+        5_000,
+        mandatory_stage_reservations_ms={"judge": 900, "synthesizer": 900},
+    )
+
+    assert budget.reserve_stage_reservations(
+        {"judge": 900, "synthesizer": 900},
+        reason="initial_cross_model_stage_failover_headroom",
+        idempotent=True,
+    ) is True
+    # The stage executor sees the same admission contract later. It must not
+    # double the dynamic hold before the first Judge call starts.
+    assert budget.reserve_stage_reservations(
+        {"judge": 900, "synthesizer": 900},
+        reason="cross_model_stage_failover_headroom",
+        idempotent=True,
+    ) is True
+    receipt = budget.safe_dict()
+    assert receipt["mandatory_stage_deadline_dynamic_reservations_ms"] == {
+        "judge": 900,
+        "synthesizer": 900,
+    }
+    assert receipt["mandatory_stage_deadline_pending_ms"] == 3_600
+
+    clock["now"] = 1.4
+    assert budget.acquire(
+        kind="model_role",
+        role="primary_solver",
+        profile_id="optional-expert",
+    ) is False
+    assert budget.safe_dict()["skipped_calls"][-1]["reason"] == (
+        "mandatory_stage_deadline_reservation"
+    )
+
+
+def test_call_budget_reserves_admitted_stage_failover_until_stage_success():
+    budget = _CallBudget(
+        10,
+        mandatory_stage_reservations={"judge": 1, "synthesizer": 1},
+    )
+    assert budget.reserve_mandatory_stage_reservations(
+        {"judge": 1, "synthesizer": 1},
+        reason="initial_cross_model_stage_failover_calls",
+    ) is True
+
+    for index in range(6):
+        assert budget.acquire(
+            kind="model_role",
+            role="optional_expert",
+            profile_id=f"optional-{index}",
+        ) is True
+    assert budget.acquire(
+        kind="model_role",
+        role="optional_expert",
+        profile_id="optional-over-budget",
+    ) is False
+
+    assert budget.acquire(kind="judge", role="judge", profile_id="judge") is True
+    assert budget.release_dynamic_stage_reservations(
+        reason="stage_succeeded_without_cross_model_failover",
+        roles=("judge",),
+    ) == 1
+    assert budget.acquire(
+        kind="model_role",
+        role="optional_after_judge",
+        profile_id="optional-after-judge",
+    ) is True
+
+
 def test_mandatory_stage_deadline_reservations_prefer_p95_and_have_bounded_margin():
     route_plan = {
         "judge_contract": {"required": True},
@@ -1102,6 +1312,129 @@ def test_mandatory_stage_deadline_reservations_prefer_p95_and_have_bounded_margi
     reservations = _mandatory_fusion_stage_deadline_reservations(route_plan)
 
     assert reservations == {"judge": 1_305, "synthesizer": 555}
+
+
+def test_fusion_candidate_timeout_uses_screened_tail_without_consuming_control_window(
+    monkeypatch,
+):
+    clock = {"now": 0.0}
+    monkeypatch.setattr(orchestrator_module.time, "monotonic", lambda: clock["now"])
+    deadline_budget = _DeadlineBudget(
+        90_000,
+        mandatory_stage_reservations_ms={"judge": 12_000, "synthesizer": 12_000},
+    )
+    profile = normalize_profile(
+        {
+            "provider": "screened-provider",
+            "model": "screened-expert",
+            "p50_latency_ms": 8_000,
+            "p95_latency_ms": 10_000,
+        }
+    )
+    request = canonicalize_payload(
+        {
+            "model": "axio-pro",
+            "max_latency_ms": 90_000,
+            "messages": [{"role": "user", "content": "task"}],
+        }
+    )
+
+    timeout, receipt = _timeout_for_role(
+        request,
+        deadline_budget,
+        route_plan={
+            "strategy": "pro_panel_judge_escalation",
+            "budget": {
+                "max_total_model_calls": 8,
+                "fusion_finalization_mode": "provider_judge_synthesis",
+            },
+        },
+        role_name="primary_solver",
+        profile=profile,
+    )
+
+    # p95 * 1.25 + 750ms = 13.25s.  The ordinary shared-deadline timeout is
+    # much larger, so one slow expert cannot consume the Judge/Synthesizer
+    # reservation before the control stages start.
+    assert timeout == 13.25
+    assert receipt["fusion_candidate_timeout_applied"] is True
+    assert receipt["fusion_candidate_timeout_basis"] == "screened_p95_plus_margin"
+    assert receipt["fusion_candidate_timeout_basis_ms"] == 10_000
+    assert receipt["fusion_candidate_timeout_cap_ms"] == 13_250
+
+    clock["now"] = 13.25
+    assert deadline_budget.remaining_seconds() == 76.75
+    assert deadline_budget.acquire(kind="judge", role="judge", profile_id="judge") is True
+    assert deadline_budget.acquire(
+        kind="synthesizer", role="synthesizer", profile_id="synthesizer"
+    ) is True
+
+
+def test_fusion_candidate_timeout_leaves_unknown_profiles_and_fast_cascade_unchanged(
+    monkeypatch,
+):
+    monkeypatch.setattr(orchestrator_module.time, "monotonic", lambda: 0.0)
+    request = canonicalize_payload(
+        {
+            "model": "axio-pro",
+            "max_latency_ms": 90_000,
+            "messages": [{"role": "user", "content": "task"}],
+        }
+    )
+    unknown = normalize_profile(
+        {
+            "provider": "unknown-provider",
+            "model": "unknown-expert",
+        }
+    )
+    unknown_budget = _DeadlineBudget(90_000)
+    unknown_timeout, unknown_receipt = _timeout_for_role(
+        request,
+        unknown_budget,
+        route_plan={
+            "strategy": "pro_panel_judge_escalation",
+            "budget": {
+                "max_total_model_calls": 8,
+                "fusion_finalization_mode": "provider_judge_synthesis",
+            },
+        },
+        role_name="primary_solver",
+        profile=unknown,
+    )
+    assert unknown_timeout == 90.0
+    assert unknown_receipt["fusion_candidate_timeout_applied"] is False
+    assert unknown_receipt["fusion_candidate_timeout_basis"] == (
+        "ordinary_deadline_unknown_latency"
+    )
+
+    fast = normalize_profile(
+        {
+            "provider": "fast-provider",
+            "model": "fast-expert",
+            "p50_latency_ms": 8_000,
+            "p95_latency_ms": 10_000,
+        }
+    )
+    fast_budget = _DeadlineBudget(60_000)
+    fast_timeout, fast_receipt = _timeout_for_role(
+        canonicalize_payload(
+            {
+                "model": "axio-fast",
+                "max_latency_ms": 60_000,
+                "messages": [{"role": "user", "content": "task"}],
+            }
+        ),
+        fast_budget,
+        route_plan={
+            "strategy": "fast_direct_cascade",
+            "budget": {"max_total_model_calls": 2, "fallback_call_allowance": 1},
+            "provider_routing_policy": {"fallback_pool": []},
+        },
+        role_name="primary_solver",
+        profile=fast,
+    )
+    assert fast_timeout == 60.0
+    assert fast_receipt["fusion_candidate_timeout_applied"] is False
 
 
 def test_dynamic_stage_deadline_estimate_uses_the_same_bounded_tail_policy():
@@ -2772,6 +3105,79 @@ def test_stage_cross_model_failover_is_one_shot_and_budgeted_after_canonical_rep
     assert budget_routing["cross_model_failover_used"] is False
     assert budget_routing["terminal_reason"] == "max_total_model_calls_exhausted"
     assert budget_routing["stage_attempt_receipts"][-1]["status"] == "skipped"
+
+
+def test_stage_cross_model_failover_gets_a_new_bounded_deadline_window(monkeypatch):
+    clock = {"now": 0.0}
+    monkeypatch.setattr(orchestrator_module.time, "monotonic", lambda: clock["now"])
+    primary = normalize_profile(
+        {
+            "provider": "stage-primary",
+            "model": "stage-primary-model",
+            "canonical_model_id": "stage-primary-model",
+            "api_format": "chat",
+            "p50_latency_ms": 800,
+            "p95_latency_ms": 1_000,
+        }
+    )
+    fallback = normalize_profile(
+        {
+            "provider": "stage-fallback",
+            "model": "stage-fallback-model",
+            "canonical_model_id": "stage-fallback-model",
+            "api_format": "responses",
+            "p50_latency_ms": 800,
+            "p95_latency_ms": 1_000,
+        }
+    )
+
+    class DeadlineFailoverClient:
+        def __init__(self):
+            self.calls = []
+            self.timeouts = []
+
+        def complete(self, profile, request, *, prompt, system, timeout=None):
+            del request, prompt, system
+            self.calls.append(profile.profile_id)
+            self.timeouts.append(timeout)
+            if profile.profile_id == primary.profile_id:
+                clock["now"] += float(timeout or 0.0)
+                raise TimeoutError("fixture primary stage timeout")
+            assert float(timeout or 0.0) > 1.0
+            clock["now"] += 0.25
+            return "bounded cross-model stage output"
+
+    client = DeadlineFailoverClient()
+    engine = FusionEngine([primary, fallback], client=client, cache_enabled=False)
+    deadline_budget = _DeadlineBudget(
+        10_000,
+        mandatory_stage_reservations_ms={"judge": 1_000},
+    )
+    output, selected, routing, attempt_count = engine._complete_stage_with_replica_failover(
+        primary,
+        FusionRequest(model="axio-pro", prompt="deadline failover fixture"),
+        route_plan={},
+        kind="judge",
+        role_name="judge",
+        prompt="judge fixture",
+        system="judge system fixture",
+        call_budget=None,
+        cost_budget=None,
+        deadline_budget=deadline_budget,
+        prompt_budget=None,
+        cross_model_fallback_profiles=[fallback],
+    )
+
+    assert output == "bounded cross-model stage output"
+    assert selected.profile_id == fallback.profile_id
+    assert client.calls == [primary.profile_id, fallback.profile_id]
+    assert client.timeouts[0] == 1.0
+    assert abs(client.timeouts[1] - 1.43) < 1e-9
+    assert attempt_count == 2
+    assert routing["cross_model_failover_deadline_headroom_reserved"] is True
+    assert routing["cross_model_failover_deadline_headroom_ms"] == 1_430
+    assert routing["cross_model_failover_used"] is True
+    assert deadline_budget.remaining_seconds() == 8.75
 
 
 def test_failed_judge_cross_model_fallback_remains_unaccepted_and_safe():

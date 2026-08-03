@@ -5821,6 +5821,22 @@ def _iter_stream_events(
                 _safe_provider_error_message(timeout_error_code),
                 error_code=timeout_error_code,
             ) from exc
+        except ValueError as exc:
+            # Closing a stdlib HTTP response from the deadline watchdog can
+            # surface as a bare ValueError from http.client.readline(). It is
+            # a transport artifact, not a parser or provider-content error.
+            deadline_expired = time.monotonic() >= deadline_at
+            error_code = (
+                timeout_error_code
+                if deadline_expired
+                else "provider_stream_transport_error"
+            )
+            message = (
+                _safe_provider_error_message(timeout_error_code)
+                if deadline_expired
+                else _safe_provider_error_message(error_code)
+            )
+            raise ProviderExecutionError(message, error_code=error_code) from exc
         if not raw_line:
             item = flush()
             if item is not None:

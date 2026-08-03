@@ -6,7 +6,7 @@ from typing import Any, Mapping, Sequence
 
 from .content_contract import content_parts_supported_by_format
 from .hermes_moa import build_process_plan, safe_plan
-from .latency_policy import profile_latency_eligibility
+from .latency_policy import PROVIDER_MAX_RESPONSE_LATENCY_MS, profile_latency_eligibility
 from .policy_control import resolve_routing_policy
 from .schemas import CAPABILITY_AXES, FusionRequest, ModelProfile, sha256_text, stable_json
 
@@ -727,9 +727,15 @@ def _budget_for_request(
         # A caller deadline is an upper bound for this request, while the
         # tier's implicit default is only an operating target. Do not let a
         # smaller internal default silently override an explicit but still
-        # bounded caller deadline.
+        # bounded caller deadline. Fast has a separate direct-cascade product
+        # ceiling; Fusion tiers use the shared provider eligibility ceiling.
+        deadline_ceiling_ms = (
+            FAST_DIRECT_MAX_DEADLINE_MS
+            if model == "axio-fast"
+            else PROVIDER_MAX_RESPONSE_LATENCY_MS
+        )
         max_latency = min(
-            FAST_DIRECT_MAX_DEADLINE_MS,
+            deadline_ceiling_ms,
             max(1, int(request.policy.max_latency_ms)),
         )
     # Judge and synthesis are part of every admitted Fusion route, including
@@ -2248,11 +2254,15 @@ def _screening_prior_score(profile: ModelProfile, max_rank: int) -> float:
 
 
 def _screening_role_allowed(profile: ModelProfile, role: str) -> bool:
-    """Apply only explicit screening role constraints.
+    """Apply screening role constraints and completed role-probe failures.
 
     Legacy registries have empty role metadata and remain compatible. A
     screened profile with an allow-list is intentionally fail-closed for
     roles outside that list, while an explicit deny-list always wins.
+    A completed operational role probe is a stronger serving signal than a
+    research-time capability promotion: a role that the strict streaming
+    probe failed must not be admitted merely because the research Agent
+    inferred that the model might perform it well.
     """
 
     role_name = " ".join(str(role or "").strip().casefold().split())
@@ -2262,7 +2272,34 @@ def _screening_role_allowed(profile: ModelProfile, role: str) -> bool:
     if role_name in denied:
         return False
     allowed = {str(item).strip().casefold() for item in profile.screening_allowed_roles}
-    return not allowed or role_name in allowed
+    if allowed and role_name not in allowed:
+        return False
+
+    admission = profile.screening_role_admission
+    admission = admission if isinstance(admission, Mapping) else {}
+    operational = admission.get("operational_role_probe")
+    operational = operational if isinstance(operational, Mapping) else {}
+    if operational:
+        failed_roles = {
+            " ".join(str(item or "").strip().casefold().split())
+            for item in operational.get("failed_roles", [])
+            if str(item)
+        }
+        if role_name in failed_roles:
+            return False
+        tested_roles = {
+            " ".join(str(item or "").strip().casefold().split())
+            for item in operational.get("tested_roles", [])
+            if str(item)
+        }
+        passed_roles = {
+            " ".join(str(item or "").strip().casefold().split())
+            for item in operational.get("passed_roles", [])
+            if str(item)
+        }
+        if role_name in tested_roles and role_name not in passed_roles:
+            return False
+    return True
 
 
 def _screening_role_contract_present(profile: ModelProfile) -> bool:
@@ -5423,12 +5460,45 @@ def _role_assignments(
             and profile_latency_eligibility(profile).get("eligible") is not False
             and min(profile.capability("critique"), profile.capability("structured_output")) >= 0.50
         ]
+        eligible_judge_operational_unassigned_profiles = [
+            profile
+            for profile in eligible_judge_profiles
+            if _stage_profile_has_operational_evidence(
+                profile,
+                "judge",
+                analysis,
+                stage_budget,
+            )
+        ]
+        eligible_judge_operational_stage_profiles = [
+            profile
+            for profile in eligible_stage_judge_profiles
+            if _stage_profile_has_operational_evidence(
+                profile,
+                "judge",
+                analysis,
+                stage_budget,
+            )
+        ]
+        eligible_judge_operational_reuse_profiles = [
+            profile
+            for profile in eligible_judge_all_profiles
+            if _stage_profile_has_operational_evidence(
+                profile,
+                "judge",
+                analysis,
+                stage_budget,
+            )
+        ]
         # Keep a role-capable stage visible to the resource admission receipt
         # even when its known p50/cost exceeds the caller's hard budget.  The
         # admission layer then records the concrete blocker and prevents
         # activation; this is different from bypassing an explicit role deny.
         judge = _best_judge(
-            eligible_judge_profiles
+            eligible_judge_operational_unassigned_profiles
+            or eligible_judge_operational_stage_profiles
+            or eligible_judge_operational_reuse_profiles
+            or eligible_judge_profiles
             or eligible_stage_judge_profiles
             or eligible_judge_all_profiles
             or role_capable_judge_profiles
@@ -5461,8 +5531,41 @@ def _role_assignments(
             and profile.capability("structured_output") >= 0.50
             and _domain_average(profile, _analysis_capability_axes(analysis)) >= 0.35
         ]
+        eligible_synthesizer_operational_unassigned_profiles = [
+            profile
+            for profile in eligible_synthesizer_profiles
+            if _stage_profile_has_operational_evidence(
+                profile,
+                "synthesizer",
+                analysis,
+                stage_budget,
+            )
+        ]
+        eligible_synthesizer_operational_stage_profiles = [
+            profile
+            for profile in eligible_stage_synthesizer_profiles
+            if _stage_profile_has_operational_evidence(
+                profile,
+                "synthesizer",
+                analysis,
+                stage_budget,
+            )
+        ]
+        eligible_synthesizer_operational_reuse_profiles = [
+            profile
+            for profile in eligible_synthesizer_all_profiles
+            if _stage_profile_has_operational_evidence(
+                profile,
+                "synthesizer",
+                analysis,
+                stage_budget,
+            )
+        ]
         synthesizer = _best_synthesizer(
-            eligible_synthesizer_profiles
+            eligible_synthesizer_operational_unassigned_profiles
+            or eligible_synthesizer_operational_stage_profiles
+            or eligible_synthesizer_operational_reuse_profiles
+            or eligible_synthesizer_profiles
             or eligible_stage_synthesizer_profiles
             or eligible_synthesizer_all_profiles
             or role_capable_synthesizer_profiles,
@@ -5890,6 +5993,26 @@ def _latency_optimize_stage_profiles(
         if profile.p50_latency_ms is not None
         and _stage_profile_eligibility(profile, "synthesizer", analysis, budget)[0]
     ]
+    operational_judges = [
+        profile
+        for profile in eligible_judges
+        if _stage_profile_has_operational_evidence(profile, "judge", analysis, budget)
+    ]
+    operational_synthesizers = [
+        profile
+        for profile in eligible_synthesizers
+        if _stage_profile_has_operational_evidence(
+            profile,
+            "synthesizer",
+            analysis,
+            budget,
+        )
+    ]
+    # A screening-only profile remains a valid last-resort stage candidate,
+    # but a faster such prior must not replace a slower profile with measured
+    # role capability merely to optimize the p50 estimate.
+    eligible_judges = operational_judges or eligible_judges
+    eligible_synthesizers = operational_synthesizers or eligible_synthesizers
     if not eligible_judges or not eligible_synthesizers:
         base_receipt["reason"] = "no_qualified_stage_profile_pair"
         return judge, synthesizer, base_receipt
@@ -6011,6 +6134,18 @@ def _stage_profile_eligibility(
         if estimated_cost > max_cost_usd:
             return False, "stage_call_cost_exceeds_request_budget"
     return True, capability_basis
+
+
+def _stage_profile_has_operational_evidence(
+    profile: ModelProfile,
+    role: str,
+    analysis: Mapping[str, Any],
+    budget: Mapping[str, Any],
+) -> bool:
+    """Return whether a stage admit is backed by runtime capability evidence."""
+
+    eligible, basis = _stage_profile_eligibility(profile, role, analysis, budget)
+    return bool(eligible and basis == "operational_capability")
 
 
 def _stage_axis_eligibility(

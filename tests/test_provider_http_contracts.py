@@ -402,6 +402,27 @@ def test_stream_reader_watchdog_closes_a_response_that_ignores_socket_timeout(mo
     assert socket_closed.is_set()
 
 
+def test_stream_reader_normalizes_watchdog_value_error_as_deadline_timeout():
+    deadline_at = time.monotonic() + 0.01
+
+    class ClosedByWatchdogResponse:
+        def readline(self):
+            time.sleep(0.02)
+            raise ValueError("I/O operation on closed file")
+
+    with pytest.raises(provider_module.ProviderExecutionError) as exc_info:
+        list(
+            provider_module._iter_stream_events(
+                ClosedByWatchdogResponse(),
+                deadline_at,
+                timeout_error_code="fusion_request_deadline_exhausted",
+            )
+        )
+
+    assert exc_info.value.error_code == "fusion_request_deadline_exhausted"
+    assert "closed file" not in str(exc_info.value)
+
+
 def test_multi_sample_stream_probe_aggregates_independent_receipts(monkeypatch) -> None:
     profile = normalize_profile(
         {

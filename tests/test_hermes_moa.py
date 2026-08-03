@@ -1185,7 +1185,10 @@ def test_hermes_empty_aggregator_output_is_explicitly_degraded() -> None:
     safe_execution = safe_execution_trace(response)["hermes_moa_execution"]
 
     assert response.text == "surviving reference answer"
-    assert response.trace["synthesis_provider_call_count"] == 1
+    # An empty acting-aggregator result is eligible for the bounded
+    # cross-model synthesizer fallback. The fixture returns empty output from
+    # both profiles, so the process still degrades after the second attempt.
+    assert response.trace["synthesis_provider_call_count"] == 2
     assert execution["aggregator_required_to_own_final_answer"] is True
     assert execution["aggregator_output_accepted"] is False
     assert execution["aggregator_owns_final_answer"] is False
@@ -1584,7 +1587,10 @@ def test_hermes_feedback_call_budget_blocks_reference_and_rejudge_atomically() -
 
 def test_hermes_feedback_cost_budget_rolls_back_partial_reservation() -> None:
     client = _FeedbackAdmissionProbeClient()
-    request = _feedback_admission_request(max_cost_usd=0.008)
+    # The control prompts are intentionally compact. Keep enough budget for
+    # the initial Judge, but less than the atomic feedback-reference plus
+    # re-Judge reservation.
+    request = _feedback_admission_request(max_cost_usd=0.0047)
     engine = FusionEngine(
         _feedback_admission_profiles(cost=0.2),
         client=client,

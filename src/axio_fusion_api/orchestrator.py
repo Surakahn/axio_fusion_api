@@ -136,6 +136,24 @@ _MANDATORY_STAGE_DEADLINE_TAIL_NUMERATOR = 5
 _MANDATORY_STAGE_DEADLINE_TAIL_DENOMINATOR = 4
 _MANDATORY_STAGE_DEADLINE_MIN_RESERVATION_MS = 250
 _MANDATORY_STAGE_DEADLINE_MAX_RESERVATION_MS = 12_000
+# An expert branch is optional relative to the already-admitted Judge and
+# Synthesizer stages.  Its shared-deadline timeout therefore uses the screened
+# p95 as a single-attempt operating cap instead of allowing one provider tail
+# to consume the whole remaining Fusion window.  Unknown telemetry keeps the
+# ordinary deadline behavior and is handled by pre-Fusion admission policy.
+_FUSION_CANDIDATE_TIMEOUT_MULTIPLIER_NUMERATOR = 5
+_FUSION_CANDIDATE_TIMEOUT_MULTIPLIER_DENOMINATOR = 4
+_FUSION_CANDIDATE_TIMEOUT_MARGIN_MS = 750
+_FUSION_CANDIDATE_TIMEOUT_MIN_MS = 4_000
+_FUSION_CANDIDATE_TIMEOUT_MAX_MS = 45_000
+# Provider latency probes use a short task, while Judge/Synthesizer prompts
+# contain bounded candidate packets and routing contracts. Keep a small
+# context-sensitive allowance for that known input work without allowing a
+# stage to borrow the pending failover or later-control reservations.
+_STAGE_PROMPT_CONTEXT_BASELINE_CHARS = 24_000
+_STAGE_PROMPT_CONTEXT_STEP_CHARS = 4_000
+_STAGE_PROMPT_CONTEXT_STEP_EXTENSION_MS = 750
+_STAGE_PROMPT_CONTEXT_MAX_EXTENSION_MS = 8_000
 _RUNTIME_EXPERT_ROLE_PRIORITY = {
     "primary_solver": 40,
     "independent_solver": 30,
@@ -181,6 +199,31 @@ def _stage_deadline_reservation_ms(latency_ms: Any) -> int:
             tail + _MANDATORY_STAGE_DEADLINE_MARGIN_MS,
         ),
     )
+
+
+def _stage_failover_deadline_reservation_ms(
+    profiles: Sequence[ModelProfile],
+) -> int:
+    """Reserve bounded headroom for already-admitted stage failover calls.
+
+    The initial Judge/Synthesizer reservation protects one planned call. A
+    cross-model fallback is a second physical call that is already allowed by
+    the route, so it needs its own bounded hold before the first attempt starts.
+    Missing telemetry contributes no extra hold; admission has already gated
+    unknown profiles and the outer request deadline remains authoritative.
+    """
+
+    reservations = [
+        _stage_deadline_reservation_ms(
+            _safe_int(profile.p95_latency_ms or profile.p50_latency_ms, default=0)
+        )
+        for profile in profiles
+        if isinstance(profile, ModelProfile)
+        and _safe_int(profile.p95_latency_ms or profile.p50_latency_ms, default=0) > 0
+    ]
+    if not reservations:
+        return 0
+    return min(_MANDATORY_STAGE_DEADLINE_MAX_RESERVATION_MS, sum(reservations))
 
 
 class FusionExecutionError(RuntimeError):
@@ -1343,6 +1386,8 @@ class _DeadlineBudget:
         self._active_stage_deadlines: dict[str, float] = {}
         self._active_stage_reservation_ms: dict[str, int] = {}
         self._active_stage_reservation_classes: dict[str, str] = {}
+        self._active_stage_extension_ms: dict[str, int] = {}
+        self._stage_extension_receipts: list[dict[str, Any]] = []
         self._consumed_stage_reservations_ms: dict[str, int] = {}
         self._consumed_dynamic_stage_reservations_ms: dict[str, int] = {}
         self._released_stage_reservations_ms: dict[str, int] = {}
@@ -1427,11 +1472,78 @@ class _DeadlineBudget:
                     self._active_stage_reservation_classes[role_name] = reservation_class
             return True
 
+    def extend_active_stage_reservation(
+        self,
+        *,
+        role: str,
+        extension_ms: Any,
+        reason: str,
+    ) -> bool:
+        """Use unreserved slack to account for a large internal stage prompt."""
+
+        role_name = str(role or "")[:80]
+        requested = max(0, _safe_int(extension_ms, default=0))
+        if requested <= 0:
+            return False
+        with self._lock:
+            current_deadline = self._active_stage_deadlines.get(role_name)
+            if current_deadline is None:
+                self._stage_extension_receipts.append(
+                    {
+                        "status": "blocked",
+                        "role": role_name,
+                        "requested_ms": requested,
+                        "reason": str(reason or "stage_prompt_extension")[:160],
+                        "blocked_reason": "stage_not_active",
+                    }
+                )
+                return False
+            now = time.monotonic()
+            remaining = self._remaining_seconds_unlocked()
+            protected = self._pending_stage_reservation_seconds_unlocked(
+                exclude_role=role_name,
+            )
+            maximum_deadline = now + max(0.0, remaining - protected)
+            target_deadline = min(
+                maximum_deadline,
+                current_deadline + requested / 1000.0,
+            )
+            added_ms = max(0, int(round((target_deadline - current_deadline) * 1000)))
+            if added_ms <= 0:
+                self._stage_extension_receipts.append(
+                    {
+                        "status": "blocked",
+                        "role": role_name,
+                        "requested_ms": requested,
+                        "reason": str(reason or "stage_prompt_extension")[:160],
+                        "blocked_reason": "no_unreserved_deadline_slack",
+                    }
+                )
+                return False
+            self._active_stage_deadlines[role_name] = target_deadline
+            self._active_stage_reservation_ms[role_name] = (
+                self._active_stage_reservation_ms.get(role_name, 0) + added_ms
+            )
+            self._active_stage_extension_ms[role_name] = (
+                self._active_stage_extension_ms.get(role_name, 0) + added_ms
+            )
+            self._stage_extension_receipts.append(
+                {
+                    "status": "extended",
+                    "role": role_name,
+                    "requested_ms": requested,
+                    "added_ms": added_ms,
+                    "reason": str(reason or "stage_prompt_extension")[:160],
+                }
+            )
+            return True
+
     def reserve_stage_reservations(
         self,
         reservations_ms: Mapping[str, Any],
         *,
         reason: str,
+        idempotent: bool = False,
     ) -> bool:
         """Atomically protect newly discovered future stages from deadline use."""
 
@@ -1448,8 +1560,30 @@ class _DeadlineBudget:
         }
         if not requested:
             return True
-        requested_ms = sum(requested.values())
         with self._lock:
+            if idempotent:
+                # Initial admission and the stage executor both know about an
+                # already-admitted cross-model fallback. Do not add the same
+                # hold twice when the executor reaches the stage later.
+                requested = {
+                    role_name: reservation - min(
+                        reservation,
+                        self._dynamic_pending_stage_reservations_ms.get(role_name, 0),
+                    )
+                    for role_name, reservation in requested.items()
+                    if reservation
+                    > self._dynamic_pending_stage_reservations_ms.get(role_name, 0)
+                }
+                if not requested:
+                    self._dynamic_stage_receipts.append(
+                        {
+                            "status": "already_reserved",
+                            "roles": {},
+                            "reason": str(reason or "dynamic_stage_deadline_reservation")[:160],
+                        }
+                    )
+                    return True
+            requested_ms = sum(requested.values())
             remaining_ms = self._remaining_seconds_unlocked() * 1000.0
             pending_ms = sum(self._pending_stage_reservations_ms.values())
             if remaining_ms <= pending_ms + requested_ms:
@@ -1695,6 +1829,12 @@ class _DeadlineBudget:
                 "mandatory_stage_deadline_active_reservation_classes": dict(
                     sorted(self._active_stage_reservation_classes.items())
                 ),
+                "mandatory_stage_deadline_active_extensions_ms": dict(
+                    sorted(self._active_stage_extension_ms.items())
+                ),
+                "mandatory_stage_deadline_stage_extension_receipts": list(
+                    self._stage_extension_receipts[:16]
+                ),
                 "mandatory_stage_deadline_active_cap_enforced": True,
                 "mandatory_stage_deadline_consumed_ms": sum(
                     self._consumed_stage_reservations_ms.values()
@@ -1882,6 +2022,113 @@ class FusionEngine:
             if profile.profile_id == profile_id:
                 return profile
         return None
+
+    def _reserve_initial_stage_failover_deadline_headroom(
+        self,
+        route_plan: Mapping[str, Any],
+        deadline_budget: _DeadlineBudget,
+        call_budget: _CallBudget,
+    ) -> dict[str, Any]:
+        """Admit cross-model stage failover before optional work starts.
+
+        The route already admits at most one different logical model for each
+        mandatory control stage. That physical call is part of the stage's
+        failure contract, so its measured tail must be protected from expert
+        and repair work from the beginning of the request. The reservation is
+        dynamic by design: the initial Judge/Synthesizer call keeps its own
+        active cap, while the fallback gets a separate cap when it is acquired.
+        """
+
+        receipt: dict[str, Any] = {
+            "schema": "axio_fusion_api.initial_stage_failover_deadline_admission.v1",
+            "enabled": False,
+            "reserved": False,
+            "call_reserved": False,
+            "reservations_ms": {},
+            "call_reservations": {},
+            "roles": [],
+            "raw_profile_ids_persisted": False,
+            "raw_provider_names_persisted": False,
+            "raw_model_names_persisted": False,
+            "secrets_persisted": False,
+        }
+        budget = (
+            route_plan.get("budget")
+            if isinstance(route_plan.get("budget"), Mapping)
+            else {}
+        )
+        finalization_mode = str(
+            budget.get("fusion_finalization_mode")
+            or route_plan.get("fusion_finalization_mode")
+            or "direct"
+        )
+        contract = (
+            route_plan.get("judge_contract")
+            if isinstance(route_plan.get("judge_contract"), Mapping)
+            else {}
+        )
+        if finalization_mode != "provider_judge_synthesis" or contract.get("required") is not True:
+            return receipt
+
+        requested: dict[str, int] = {}
+        roles = route_plan.get("roles") if isinstance(route_plan.get("roles"), list) else []
+        for role_name in ("judge", "synthesizer"):
+            role = next(
+                (
+                    row
+                    for row in roles
+                    if isinstance(row, Mapping)
+                    and str(row.get("role") or "") == role_name
+                ),
+                None,
+            )
+            model = role.get("model") if isinstance(role, Mapping) and isinstance(role.get("model"), Mapping) else {}
+            routed_profile = _profile_from_safe_dict(model)
+            profile = self._registered_profile_for_id(routed_profile.profile_id) or routed_profile
+            fallback_profiles = self._cross_model_stage_fallback_profiles(
+                profile,
+                route_plan,
+                role_name=role_name,
+            )
+            headroom_ms = _stage_failover_deadline_reservation_ms(fallback_profiles)
+            role_receipt = {
+                "role": role_name,
+                "fallback_count": len(fallback_profiles),
+                "fallback_profile_hashes": [
+                    sha256_text(item.profile_id) for item in fallback_profiles
+                ][: _MAX_CROSS_MODEL_STAGE_FAILOVER_ATTEMPTS],
+                "headroom_ms": headroom_ms,
+            }
+            receipt["roles"].append(role_receipt)
+            if headroom_ms > 0:
+                requested[role_name] = headroom_ms
+
+        if not requested:
+            return receipt
+        receipt["enabled"] = True
+        call_reservations = {role_name: 1 for role_name in requested}
+        call_reserved = call_budget.reserve_mandatory_stage_reservations(
+            call_reservations,
+            reason="initial_cross_model_stage_failover_calls",
+        )
+        receipt["call_reserved"] = bool(call_reserved)
+        if not call_reserved:
+            return receipt
+        reserved = deadline_budget.reserve_stage_reservations(
+            requested,
+            reason="initial_cross_model_stage_failover_headroom",
+            idempotent=True,
+        )
+        receipt["reserved"] = bool(reserved)
+        if reserved:
+            receipt["reservations_ms"] = dict(sorted(requested.items()))
+            receipt["call_reservations"] = dict(sorted(call_reservations.items()))
+        else:
+            call_budget.release_dynamic_stage_reservations(
+                reason="initial_cross_model_stage_failover_deadline_blocked",
+                roles=tuple(call_reservations),
+            )
+        return receipt
 
     def _replica_attempt_profiles(
         self,
@@ -2126,6 +2373,13 @@ class FusionEngine:
             budget.get("fusion_finalization_mode")
             or route_plan.get("fusion_finalization_mode")
             or "direct"
+        )
+        route_plan["runtime_stage_failover_deadline_admission"] = (
+            self._reserve_initial_stage_failover_deadline_headroom(
+                route_plan,
+                deadline_budget,
+                call_budget,
+            )
         )
         local_consensus_mode = finalization_mode == "local_consensus"
         max_parallel = max(1, int(budget.get("max_parallel_experts") or 1))
@@ -3757,6 +4011,9 @@ class FusionEngine:
             ],
             "cross_model_failover_attempted": False,
             "cross_model_failover_used": False,
+            "cross_model_failover_deadline_headroom_reserved": False,
+            "cross_model_failover_deadline_headroom_ms": 0,
+            "cross_model_failover_headroom_released": False,
         }
         attempts: list[dict[str, Any]] = []
         provider_attempt_count = 0
@@ -3766,6 +4023,48 @@ class FusionEngine:
         ] + [
             ("cross_model", item) for item in fallback_profiles
         ]
+
+        def release_unused_failover_headroom() -> None:
+            # A successful initial stage no longer needs its already-admitted
+            # fallback slot. Releasing it before the next optional branch keeps
+            # the global call/deadline budgets useful without weakening the
+            # failover contract while the stage is still running.
+            released_call_count = (
+                call_budget.release_dynamic_stage_reservations(
+                    reason="stage_succeeded_without_cross_model_failover",
+                    roles=(role_name,),
+                )
+                if call_budget is not None
+                else 0
+            )
+            released_deadline_ms = (
+                deadline_budget.release_dynamic_stage_reservations(
+                    reason="stage_succeeded_without_cross_model_failover",
+                    roles=(role_name,),
+                )
+                if deadline_budget is not None
+                else 0
+            )
+            routing["cross_model_failover_headroom_released"] = bool(
+                released_call_count or released_deadline_ms
+            )
+
+        if deadline_budget is not None and fallback_profiles:
+            failover_headroom_ms = _stage_failover_deadline_reservation_ms(
+                fallback_profiles
+            )
+            if failover_headroom_ms > 0:
+                reserved = deadline_budget.reserve_stage_reservations(
+                    {role_name: failover_headroom_ms},
+                    reason="cross_model_stage_failover_headroom",
+                    idempotent=True,
+                )
+                routing["cross_model_failover_deadline_headroom_reserved"] = bool(
+                    reserved
+                )
+                routing["cross_model_failover_deadline_headroom_ms"] = (
+                    failover_headroom_ms if reserved else 0
+                )
         for replica_index, (attempt_scope, replica) in enumerate(attempt_plan, start=1):
             if cancellation_event is not None and cancellation_event.is_set():
                 raise PublicStreamInterruptedError(client_cancelled=True)
@@ -3788,6 +4087,20 @@ class FusionEngine:
             )
             if prompt_budget is not None:
                 prompt_budget.record(budget_receipt)
+            prompt_extension_ms = _stage_prompt_deadline_extension_ms(
+                attempt_prompt,
+                role_name=role_name,
+            )
+            if deadline_budget is not None and prompt_extension_ms > 0:
+                extended = deadline_budget.extend_active_stage_reservation(
+                    role=role_name,
+                    extension_ms=prompt_extension_ms,
+                    reason="large_mandatory_stage_prompt",
+                )
+                routing["stage_prompt_deadline_extension_requested_ms"] = (
+                    prompt_extension_ms
+                )
+                routing["stage_prompt_deadline_extension_applied"] = bool(extended)
             if (
                 attempt_scope == "cross_model"
                 and provider_attempt_count == 0
@@ -3906,6 +4219,7 @@ class FusionEngine:
                         )
                     )
                     routing["cross_model_failover_used"] = attempt_scope == "cross_model"
+                    release_unused_failover_headroom()
                     return (
                         completion if allow_tool_calls else str(output).strip(),
                         replica,
@@ -3939,6 +4253,7 @@ class FusionEngine:
                         )
                     )
                     routing["cross_model_failover_used"] = attempt_scope == "cross_model"
+                    release_unused_failover_headroom()
                     return completion, replica, {
                         **routing,
                         "stage_attempt_count": provider_attempt_count,
@@ -5201,6 +5516,11 @@ class FusionEngine:
                     ),
                     stream_observer=public_stream_observer,
                     cancellation_event=public_stream_cancellation,
+                    cross_model_fallback_profiles=self._cross_model_stage_fallback_profiles(
+                        profile,
+                        route_plan,
+                        role_name="synthesizer",
+                    ),
                 )
             )
             compression_receipt = {
@@ -9092,7 +9412,6 @@ def _judge_prompt(
     ]
     task_plan = _role_task_plan_prompt_fragment(route_plan, "judge")
     routing_context = _routing_context_prompt_fragment(route_plan, "judge")
-    scaffold = _context_scaffold_for_prompt(route_plan, "judge")
     role_contract = _role_execution_contract_prompt_fragment(route_plan, "judge")
     return (
         "Compare these Axio Fusion candidate answers for the original user task.\n"
@@ -9109,7 +9428,6 @@ def _judge_prompt(
         f"{routing_context}"
         f"{task_plan}"
         f"{role_contract}"
-        f"Judge context scaffold:\n{json.dumps(scaffold, ensure_ascii=False)}\n\n"
         f"Original task:\n{request.prompt}\n\n"
         f"Candidate packet:\n{json.dumps(candidate_packet, ensure_ascii=False)}\n\n"
         f"Local rubric precheck:\n{json.dumps(_safe_local_judge_for_prompt(local_judge), ensure_ascii=False)}"
@@ -9117,16 +9435,102 @@ def _judge_prompt(
 
 
 def _safe_local_judge_for_prompt(local_judge: Mapping[str, Any]) -> dict[str, Any]:
+    diagnostics = (
+        local_judge.get("candidate_diagnostics")
+        if isinstance(local_judge.get("candidate_diagnostics"), list)
+        else []
+    )
     return {
         "ranked_candidates": local_judge.get("ranked_candidates") if isinstance(local_judge.get("ranked_candidates"), list) else [],
         "missing_coverage": local_judge.get("missing_coverage") if isinstance(local_judge.get("missing_coverage"), list) else [],
         "contradiction_count": len(local_judge.get("contradictions", [])) if isinstance(local_judge.get("contradictions"), list) else 0,
         "unique_insights": local_judge.get("unique_insights") if isinstance(local_judge.get("unique_insights"), list) else [],
         "coverage_summary": local_judge.get("coverage_summary") if isinstance(local_judge.get("coverage_summary"), Mapping) else {},
-        "candidate_diagnostics": local_judge.get("candidate_diagnostics") if isinstance(local_judge.get("candidate_diagnostics"), list) else [],
+        # Candidate packets carry the authoritative bounded answer and DAG
+        # node receipts. The rubric only needs compact comparability signals;
+        # copying the full execution receipts here needlessly doubles the
+        # Judge context and increases provider latency.
+        "candidate_diagnostics": [
+            _candidate_diagnostic_summary_for_prompt(row)
+            for row in diagnostics[:12]
+            if isinstance(row, Mapping)
+        ],
         "confidence_calibration_summary": local_judge.get("confidence_calibration_summary") if isinstance(local_judge.get("confidence_calibration_summary"), Mapping) else {},
         "ready_for_synthesis": bool(local_judge.get("ready_for_synthesis")),
     }
+
+
+def _candidate_diagnostic_summary_for_prompt(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep local-rubric evidence useful without repeating candidate packets."""
+
+    task_execution = value.get("task_execution") if isinstance(value.get("task_execution"), Mapping) else {}
+    escalation = value.get("escalation_plan") if isinstance(value.get("escalation_plan"), Mapping) else {}
+    standardization = value.get("standardization") if isinstance(value.get("standardization"), Mapping) else {}
+    calibration = value.get("confidence_calibration") if isinstance(value.get("confidence_calibration"), Mapping) else {}
+    missing_fields = standardization.get("missing_required_fields")
+    return {
+        "candidate_id": str(value.get("candidate_id") or "")[:80],
+        "role": str(value.get("role") or "")[:80],
+        "answer_sha256": str(value.get("answer_sha256") or "")[:64],
+        "answer_char_count": _safe_int(value.get("answer_char_count"), default=0),
+        "local_score": _safe_float(value.get("local_score"), default=0.0),
+        "answer_claim_support_fraction": _safe_float(
+            value.get("answer_claim_support_fraction"), default=0.0
+        ),
+        "confidence": _safe_float(value.get("confidence"), default=0.0),
+        "confidence_calibration": {
+            "calibrated_confidence": _optional_float(calibration.get("calibrated_confidence")),
+            "calibration_delta": _optional_float(calibration.get("calibration_delta")),
+            "overconfidence_risk": bool(calibration.get("overconfidence_risk")),
+            "reason_codes": [
+                str(item)[:80]
+                for item in calibration.get("reason_codes", [])
+                if str(item)
+            ][:6] if isinstance(calibration.get("reason_codes"), list) else [],
+        },
+        "reasoning_step_count": _safe_int(value.get("reasoning_step_count"), default=0),
+        "evidence_count": _safe_int(value.get("evidence_count"), default=0),
+        "assumption_count": _safe_int(value.get("assumption_count"), default=0),
+        "uncertainty_count": _safe_int(value.get("uncertainty_count"), default=0),
+        "tool_success_count": _safe_int(value.get("tool_success_count"), default=0),
+        "dag": {
+            "assigned_node_count": _safe_int(task_execution.get("assigned_node_count"), default=0),
+            "verification_node_count": _safe_int(task_execution.get("verification_node_count"), default=0),
+            "dependency_count": _safe_int(task_execution.get("dependency_count"), default=0),
+            "checkpoint_count": _safe_int(task_execution.get("checkpoint_count"), default=0),
+        },
+        "escalation": {
+            "triggered": bool(escalation.get("triggered")),
+            "selected_subtask_count": _safe_int(escalation.get("selected_subtask_count"), default=0),
+            "requires_cross_provider_verifier": bool(escalation.get("requires_cross_provider_verifier")),
+        },
+        "standardization": {
+            "parsed": bool(standardization.get("parsed")),
+            "parse_mode": str(standardization.get("parse_mode") or "unknown")[:48],
+            "normalized_field_count": _safe_int(standardization.get("normalized_field_count"), default=0),
+            "missing_required_fields": [
+                str(item)[:80]
+                for item in missing_fields[:8]
+                if str(item)
+            ] if isinstance(missing_fields, list) else [],
+        },
+        "raw_candidate_text_persisted": False,
+    }
+
+
+def _safe_judge_result_for_synthesis(judge_result: Mapping[str, Any]) -> dict[str, Any]:
+    """Reuse the judge decision while removing duplicated execution receipts."""
+
+    result = dict(judge_result) if isinstance(judge_result, Mapping) else {}
+    diagnostics = result.get("candidate_diagnostics")
+    result["candidate_diagnostics"] = [
+        _candidate_diagnostic_summary_for_prompt(row)
+        for row in diagnostics[:12]
+        if isinstance(row, Mapping)
+    ] if isinstance(diagnostics, list) else []
+    result["raw_judge_output_persisted"] = False
+    result["raw_candidate_text_persisted"] = False
+    return result
 
 
 def _normalize_provider_judge_result(
@@ -10394,12 +10798,15 @@ def _synthesis_prompt(
     compression_receipt: Mapping[str, Any],
 ) -> str:
     candidate_packet = [
-        _candidate_prompt_packet(candidate, answer_char_limit=12000)
+        # Synthesis already receives the structured Judge record. A bounded
+        # head/tail excerpt preserves answer substance and hashes while
+        # preventing repeated long candidate outputs from consuming the stage
+        # deadline.
+        _candidate_prompt_packet(candidate, answer_char_limit=6000)
         for candidate in candidates
     ]
     task_plan = _role_task_plan_prompt_fragment(route_plan, "synthesizer")
     routing_context = _routing_context_prompt_fragment(route_plan, "synthesizer")
-    scaffold = _context_scaffold_for_prompt(route_plan, "synthesizer")
     role_contract = _role_execution_contract_prompt_fragment(route_plan, "synthesizer")
     return (
         "Synthesize one final answer for the original user task using the judge record.\n"
@@ -10422,11 +10829,10 @@ def _synthesis_prompt(
         f"{routing_context}"
         f"{task_plan}"
         f"{role_contract}"
-        f"Synthesizer context scaffold:\n{json.dumps(scaffold, ensure_ascii=False)}\n\n"
         f"Original task:\n{request.prompt}\n\n"
         f"Full candidate packet:\n{json.dumps(candidate_packet, ensure_ascii=False)}\n\n"
         f"Compressed candidate receipts:\n{json.dumps(compression_receipt, ensure_ascii=False)}\n\n"
-        f"Judge record:\n{json.dumps(judge_result, ensure_ascii=False)}"
+        f"Judge record:\n{json.dumps(_safe_judge_result_for_synthesis(judge_result), ensure_ascii=False)}"
     )
 
 
@@ -10443,8 +10849,8 @@ def _synthesizer_system(base_system: str = "") -> str:
 def _candidate_prompt_packet(candidate: CandidateResult, *, answer_char_limit: int) -> dict[str, Any]:
     answer_excerpt, truncated = _text_excerpt_for_provider(candidate.answer, max_chars=max(80, int(answer_char_limit)))
     reasoning = [
-        _text_excerpt_for_provider(item, max_chars=600)[0]
-        for item in list(candidate.reasoning_summary)[:8]
+        _text_excerpt_for_provider(item, max_chars=420)[0]
+        for item in list(candidate.reasoning_summary)[:6]
         if str(item).strip()
     ]
     return {
@@ -10466,15 +10872,132 @@ def _candidate_prompt_packet(candidate: CandidateResult, *, answer_char_limit: i
         "reasoning_summary": reasoning,
         "reasoning_step_count": len(candidate.reasoning_summary),
         "reasoning_summary_sha256": sha256_text(stable_json(list(candidate.reasoning_summary))),
-        "task_execution": _safe_candidate_task_execution_for_prompt(candidate.task_execution),
-        "escalation_plan": _safe_targeted_escalation_plan_for_prompt(candidate.escalation_plan),
+        # The Judge and Synthesizer receive role/DAG metadata separately. The
+        # candidate packet therefore carries only the node identities and
+        # verification counts needed to audit coverage, avoiding a repeated
+        # copy of every node's dependency and capability declaration.
+        "task_execution": _safe_candidate_task_execution_control_prompt(candidate.task_execution),
+        "escalation_plan": _safe_targeted_escalation_control_prompt(candidate.escalation_plan),
         "confidence": round(candidate.confidence, 4),
         "evidence_count": len(candidate.evidence),
-        "assumptions": list(candidate.assumptions)[:8],
-        "uncertainties": list(candidate.uncertainties)[:8],
-        "standardization": _safe_candidate_standardization_for_prompt(candidate.standardization),
+        "assumptions": [
+            _text_excerpt_for_provider(item, max_chars=240)[0]
+            for item in list(candidate.assumptions)[:4]
+            if str(item).strip()
+        ],
+        "uncertainties": [
+            _text_excerpt_for_provider(item, max_chars=240)[0]
+            for item in list(candidate.uncertainties)[:4]
+            if str(item).strip()
+        ],
+        "standardization": _safe_candidate_standardization_control_prompt(
+            candidate.standardization
+        ),
         "raw_reasoning_summary_persisted": False,
         "raw_candidate_text_persisted": False,
+    }
+
+
+def _safe_candidate_task_execution_control_prompt(
+    value: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Serialize only coverage-relevant DAG facts for control-stage prompts."""
+
+    base = _safe_candidate_task_execution_for_prompt(value)
+    return {
+        "schema": base.get("schema") or "axio_fusion_api.candidate_task_execution.v1",
+        "role": base.get("role") or "",
+        "assigned_node_count": _safe_int(base.get("assigned_node_count"), default=0),
+        "verification_node_count": _safe_int(base.get("verification_node_count"), default=0),
+        "dependency_count": _safe_int(base.get("dependency_count"), default=0),
+        "checkpoint_count": _safe_int(base.get("checkpoint_count"), default=0),
+        "node_receipts": [
+            {
+                "id": str(row.get("id") or "")[:120],
+                "assigned_role": str(row.get("assigned_role") or "")[:80],
+                "verification_required": bool(row.get("verification_required")),
+            }
+            for row in base.get("node_receipts", [])
+            if isinstance(row, Mapping)
+        ][:24],
+        "checkpoint_receipts": [
+            {
+                "id": str(row.get("id") or "")[:120],
+                "after_node": str(row.get("after_node") or "")[:120],
+            }
+            for row in base.get("checkpoint_receipts", [])
+            if isinstance(row, Mapping)
+        ][:8],
+        "hermes_cognitive_budget": base.get("hermes_cognitive_budget") if isinstance(base.get("hermes_cognitive_budget"), Mapping) else {},
+        "hermes_reference_fanout_cadence": str(base.get("hermes_reference_fanout_cadence") or "")[:80],
+        "raw_prompt_persisted": False,
+        "raw_candidate_text_persisted": False,
+    }
+
+
+def _safe_targeted_escalation_control_prompt(
+    value: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Keep escalation obligations while dropping repeated focus prose."""
+
+    base = _safe_targeted_escalation_plan_for_prompt(value)
+    return {
+        "schema": base.get("schema") or "axio_fusion_api.targeted_escalation_plan.v1",
+        "enabled": bool(base.get("enabled")),
+        "triggered": bool(base.get("triggered")),
+        "selected_subtask_count": _safe_int(base.get("selected_subtask_count"), default=0),
+        "quality_gap_triggered": bool(base.get("quality_gap_triggered")),
+        "requires_independent_answer_claim_verification": bool(
+            base.get("requires_independent_answer_claim_verification")
+        ),
+        "requires_cross_provider_verifier": bool(base.get("requires_cross_provider_verifier")),
+        "requires_new_profile_verifier": bool(base.get("requires_new_profile_verifier")),
+        "requires_new_canonical_model_verifier": bool(
+            base.get("requires_new_canonical_model_verifier")
+        ),
+        "subtasks": [
+            {
+                "id": str(row.get("id") or "")[:120],
+                "kind": str(row.get("kind") or "")[:80],
+                "priority": _safe_int(row.get("priority"), default=0),
+                "focus_sha256": str(row.get("focus_sha256") or "")[:64],
+                "focused_dag_node_ids": [
+                    str(item)[:120]
+                    for item in row.get("focused_dag_node_ids", [])
+                    if str(item)
+                ][:12] if isinstance(row.get("focused_dag_node_ids"), list) else [],
+            }
+            for row in base.get("subtasks", [])
+            if isinstance(row, Mapping)
+        ][:8],
+        "raw_prompt_persisted": False,
+        "raw_candidate_text_persisted": False,
+    }
+
+
+def _safe_candidate_standardization_control_prompt(
+    value: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Expose normalization health as counts, not a repeated field receipt."""
+
+    base = _safe_candidate_standardization_for_prompt(value)
+    missing = base.get("missing_required_fields")
+    return {
+        "schema": base.get("schema") or "axio_fusion_api.candidate_standardization.v1",
+        "parsed": bool(base.get("parsed")),
+        "parse_mode": str(base.get("parse_mode") or "unknown")[:48],
+        "normalized_field_count": _safe_int(base.get("normalized_field_count"), default=0),
+        "reasoning_step_count": _safe_int(base.get("reasoning_step_count"), default=0),
+        "evidence_count": _safe_int(base.get("evidence_count"), default=0),
+        "assumption_count": _safe_int(base.get("assumption_count"), default=0),
+        "uncertainty_count": _safe_int(base.get("uncertainty_count"), default=0),
+        "missing_required_fields": [
+            str(item)[:80]
+            for item in missing[:8]
+            if str(item)
+        ] if isinstance(missing, list) else [],
+        "raw_candidate_text_persisted": False,
+        "raw_reasoning_summary_persisted": False,
     }
 
 
@@ -11620,6 +12143,23 @@ def _timeout_for_request(
     return deadline_budget.timeout_seconds(request, role=role, kind=kind)
 
 
+def _stage_prompt_deadline_extension_ms(prompt: str, *, role_name: str) -> int:
+    """Estimate extra processing allowance for a large mandatory-stage prompt."""
+
+    if str(role_name or "") not in {"judge", "synthesizer"}:
+        return 0
+    excess = max(0, len(str(prompt or "")) - _STAGE_PROMPT_CONTEXT_BASELINE_CHARS)
+    if excess <= 0:
+        return 0
+    steps = (
+        excess + _STAGE_PROMPT_CONTEXT_STEP_CHARS - 1
+    ) // _STAGE_PROMPT_CONTEXT_STEP_CHARS
+    return min(
+        _STAGE_PROMPT_CONTEXT_MAX_EXTENSION_MS,
+        steps * _STAGE_PROMPT_CONTEXT_STEP_EXTENSION_MS,
+    )
+
+
 def _timeout_for_role(
     request: FusionRequest,
     deadline_budget: _DeadlineBudget | None,
@@ -11632,9 +12172,10 @@ def _timeout_for_role(
 
     A direct ``axio-fast`` route is intentionally serial.  Giving the primary
     request the entire deadline makes the advertised fallback unreachable after
-    a timeout.  Reserve at most half of the remaining window from the observed
-    latency of the quickest alternate candidate; non-Fast and single-call
-    routes retain the ordinary request/deadline timeout unchanged.
+    a timeout, so that route keeps its dedicated fallback-headroom policy.
+    Provider-Judge Fusion candidate roles instead use a screened p95 cap so one
+    optional expert tail cannot consume the mandatory control-stage window.
+    Direct non-Fusion routes retain the ordinary request/deadline timeout.
     """
 
     ordinary_timeout = _timeout_for_request(
@@ -11647,6 +12188,10 @@ def _timeout_for_role(
         "schema": "axio_fusion_api.provider_timeout_policy.v1",
         "role": str(role_name or "")[:80],
         "timeout_ms": round(float(ordinary_timeout) * 1000, 3),
+        "fusion_candidate_timeout_applied": False,
+        "fusion_candidate_timeout_basis_ms": None,
+        "fusion_candidate_timeout_cap_ms": None,
+        "fusion_candidate_timeout_basis": "ordinary_deadline",
         "fast_cascade_reservation_applied": False,
         "fast_cascade_headroom_available": None,
         "fast_cascade_projected_latency_ms": None,
@@ -11657,15 +12202,58 @@ def _timeout_for_role(
     }
     if deadline_budget is None or not isinstance(route_plan, Mapping):
         return ordinary_timeout, receipt
-    if str(route_plan.get("strategy") or "") != "fast_direct_cascade":
+    strategy = str(route_plan.get("strategy") or "")
+    budget = route_plan.get("budget") if isinstance(route_plan.get("budget"), Mapping) else {}
+    finalization_mode = str(
+        budget.get("fusion_finalization_mode")
+        or route_plan.get("fusion_finalization_mode")
+        or "direct"
+    )
+    if strategy != "fast_direct_cascade" and finalization_mode == "provider_judge_synthesis":
+        observed_latency_ms = _safe_int(
+            profile.p95_latency_ms or profile.p50_latency_ms,
+            default=0,
+        )
+        if observed_latency_ms > 0:
+            cap_ms = max(
+                _FUSION_CANDIDATE_TIMEOUT_MIN_MS,
+                min(
+                    _FUSION_CANDIDATE_TIMEOUT_MAX_MS,
+                    (
+                        observed_latency_ms
+                        * _FUSION_CANDIDATE_TIMEOUT_MULTIPLIER_NUMERATOR
+                        + _FUSION_CANDIDATE_TIMEOUT_MULTIPLIER_DENOMINATOR
+                        - 1
+                    )
+                    // _FUSION_CANDIDATE_TIMEOUT_MULTIPLIER_DENOMINATOR
+                    + _FUSION_CANDIDATE_TIMEOUT_MARGIN_MS,
+                ),
+            )
+            bounded_timeout = min(ordinary_timeout, cap_ms / 1000.0)
+            receipt.update(
+                {
+                    "timeout_ms": round(float(bounded_timeout) * 1000, 3),
+                    "fusion_candidate_timeout_applied": bounded_timeout < ordinary_timeout,
+                    "fusion_candidate_timeout_basis_ms": observed_latency_ms,
+                    "fusion_candidate_timeout_cap_ms": cap_ms,
+                    "fusion_candidate_timeout_basis": (
+                        "screened_p95_plus_margin"
+                        if profile.p95_latency_ms
+                        else "screened_p50_plus_margin"
+                    ),
+                }
+            )
+            return bounded_timeout, receipt
+        receipt["fusion_candidate_timeout_basis"] = "ordinary_deadline_unknown_latency"
         return ordinary_timeout, receipt
+
     if str(role_name or "") != "primary_solver":
         return ordinary_timeout, receipt
-    budget = route_plan.get("budget") if isinstance(route_plan.get("budget"), Mapping) else {}
     if int(budget.get("max_total_model_calls") or 1) <= 1:
         return ordinary_timeout, receipt
     if int(budget.get("fallback_call_allowance") or 0) <= 0:
         return ordinary_timeout, receipt
+
     provider_policy = (
         route_plan.get("provider_routing_policy")
         if isinstance(route_plan.get("provider_routing_policy"), Mapping)
