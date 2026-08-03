@@ -49,6 +49,13 @@ freeze is ready. The user's tier mapping remains the intended comparison
 policy (`axio-pro`/rank 1, `axio-terra`/rank 2, `axio-fast`/rank 3), but it is
 not evidence that can replace the required pool-wide ranking.
 
+The engineering gate is now independently ready for the benchmark phase: the
+current Python 3.11 regression run passed 939 tests, the four public protocol
+and provider-input dry checks are bound, and the remote-only Fusion runbook is
+ready. This does not override the provider-baseline gate; the separate target
+campaign remains prohibited until the complete-pool ranking conversion and
+baseline freeze pass.
+
 The `prefusion-probe-export` command now turns a ready screening artifact into
 the standard provider probe contract offline. This removes the last manual
 projection step in the current evidence chain and is reusable for future
