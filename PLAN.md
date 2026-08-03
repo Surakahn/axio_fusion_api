@@ -4,6 +4,11 @@
 
 Build `axio_fusion_api` as a standalone, ASciFS-decoupled Fusion API service that exposes `axio-fast`, `axio-terra`, and `axio-pro` through Chat Completions, Responses, Anthropic Messages, and Gemini-compatible surfaces.
 
+## Canonical Convergence Path
+
+The current implementation path is frozen to the staged control-plane gates
+in [docs/operations/convergence_execution_path_r20.md](docs/operations/convergence_execution_path_r20.md): finish the immutable r20 pre-Fusion screening, convert the complete pool into an externally evidenced rank-1/rank-2/rank-3 baseline freeze, close the official/audited harness import gate, then run the independent 9-category/21-suite campaign and claim audit. Until those gates are terminal, do not add new Fusion algorithms or tune prompts against benchmark material. A failed gate is preserved as evidence and repaired in a new cohort.
+
 ## Non-Negotiable Constraints
 
 - Do not import or depend on ASciFS runtime modules.

@@ -20,6 +20,12 @@
 - [x] Generate a fresh r20 non-target screening plan from the same bound
   registry and probe catalog: 11 canonical groups, 2 independent source
   families, 22 units, 2,420 fixed calls, and `max_workers=1`.
+- [x] Assemble the mechanical-disk dataset manifest against the real
+  standardized cohort and generate the six-suite official/audited harness pin
+  manifest; paths, evaluator files, dataset snapshots, and prompt/decoding
+  bindings are hash-only in the pin artifact.
+- [x] Record the single canonical convergence path and terminal command in
+  `docs/operations/convergence_execution_path_r20.md`.
 - [ ] Complete all 22 r20 screening units; retain every timeout or transport
   failure in the denominator and do not reuse an older cohort checkpoint.
 - [ ] Complete and freeze the pre-registered external ranking for the complete
