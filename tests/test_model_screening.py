@@ -703,6 +703,28 @@ def test_research_prompt_requires_fact_extraction_before_axis_and_role_mapping()
     assert "Parameter count, GPU requirements, price" in prompt
 
 
+def test_research_prompt_repairs_broad_axis_coverage_conservatively():
+    profile = _profile("provider-a", "alpha", "alpha")
+    groups = _groups([profile])
+    prompt = model_screening._build_research_prompt(
+        groups,
+        {
+            "evidence": [
+                {
+                    "source_slot": "source_official",
+                    "evidence_hash": sha256_text("source"),
+                    "excerpt": "public model evidence",
+                }
+            ]
+        },
+        repair_reason="prefusion_broad_capability_axis_coverage_insufficient",
+    )
+
+    assert "fewer than three nonzero capability axes" in prompt
+    assert "overall to 0.69 or lower" in prompt
+    assert "Do not invent a third axis" in prompt
+
+
 def test_research_prompt_scopes_candidate_specific_source_evidence():
     profiles = [
         _profile("provider-a", "alpha", "alpha"),
@@ -2311,6 +2333,67 @@ def test_research_transport_failure_switches_to_next_agent_profile():
     assert attempts[0]["agent_profile_sha256"] == sha256_text(primary.profile_id)
     assert attempts[0]["fallback_activated"] is True
     assert attempts[1]["agent_profile_sha256"] == sha256_text(fallback.profile_id)
+
+
+def test_research_transport_fallback_is_isolated_per_batch():
+    primary = _profile("provider-a", "primary-researcher", "primary-researcher")
+    fallback = _profile("provider-b", "fallback-researcher", "fallback-researcher")
+    groups = _groups(
+        [
+            _profile("provider-c", "candidate-1", "candidate-1"),
+            _profile("provider-d", "candidate-2", "candidate-2"),
+        ]
+    )
+
+    class PerBatchFallbackClient(_BatchResearchClient):
+        def complete_turn(self, profile, request, *, prompt, system, timeout):
+            del request, system, timeout
+            self.calls.append({"profile_id": profile.profile_id, "prompt": prompt})
+            if profile.profile_id == primary.profile_id:
+                raise provider_module.ProviderExecutionError(
+                    "primary unavailable for this batch",
+                    error_code="provider_request_timeout",
+                )
+            marker = "AUTHORITATIVE_CANDIDATE_INVENTORY\n"
+            inventory = prompt.split(marker, 1)[1].split(
+                "\n\nUNTRUSTED_SOURCE_DATA", 1
+            )[0]
+            candidate_ids = [
+                str(row["candidate_id"]) for row in json.loads(inventory)
+            ]
+            return ProviderCompletion(json.dumps(_research_output(candidate_ids)))
+
+    client = PerBatchFallbackClient()
+    _ranking, receipt = model_screening._run_research_agent_batches(
+        primary,
+        research_profiles=(primary, fallback),
+        groups=groups,
+        source_pack={
+            "receipts": [
+                {
+                    "source_slot": "source_official",
+                    "status": "inline_source_ready",
+                    "evidence_hash": sha256_text("source"),
+                }
+            ],
+            "evidence": [],
+        },
+        timeout=10.0,
+        client=client,
+        focus_manifest=model_screening.load_prefusion_focus_manifest(),
+        batch_size=1,
+        max_workers=1,
+        merge_strategy=model_screening._RESEARCH_MERGE_STRATEGY,
+    )
+
+    assert receipt["status"] == "validated"
+    assert receipt["fallback_switch_count"] == 2
+    assert [call["profile_id"] for call in client.calls] == [
+        primary.profile_id,
+        fallback.profile_id,
+        primary.profile_id,
+        fallback.profile_id,
+    ]
 
 
 def test_research_transport_budget_walks_the_complete_agent_profile_chain():

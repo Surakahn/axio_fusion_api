@@ -5468,23 +5468,12 @@ def _run_research_agent_batches(
         if isinstance(item, ModelProfile)
     ) or (profile,)
     agent_state_lock = threading.Lock()
-    active_agent_index = 0
     fallback_switch_count = 0
 
-    def active_agent_profile() -> ModelProfile:
+    def record_fallback_switch() -> None:
+        nonlocal fallback_switch_count
         with agent_state_lock:
-            return agent_profiles[active_agent_index]
-
-    def advance_agent_profile(failed_profile: ModelProfile) -> bool:
-        nonlocal active_agent_index, fallback_switch_count
-        with agent_state_lock:
-            if active_agent_index >= len(agent_profiles) - 1:
-                return False
-            if agent_profiles[active_agent_index].profile_id != failed_profile.profile_id:
-                return False
-            active_agent_index += 1
             fallback_switch_count += 1
-            return True
 
     bounded_batch_size = _bounded_research_setting(
         batch_size,
@@ -5509,6 +5498,24 @@ def _run_research_agent_batches(
     batch_results: list[dict[str, Any]] = []
 
     def execute(batch_index: int, batch_groups: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+        # Provider instability is batch-local. A timeout in one research shard
+        # must not silently downgrade every later shard to a weaker or
+        # protocol-different fallback profile.
+        batch_agent_index = 0
+
+        def active_agent_profile() -> ModelProfile:
+            return agent_profiles[batch_agent_index]
+
+        def advance_agent_profile(failed_profile: ModelProfile) -> bool:
+            nonlocal batch_agent_index
+            if batch_agent_index >= len(agent_profiles) - 1:
+                return False
+            if agent_profiles[batch_agent_index].profile_id != failed_profile.profile_id:
+                return False
+            batch_agent_index += 1
+            record_fallback_switch()
+            return True
+
         candidate_ids = [str(row.get("candidate_id") or "") for row in batch_groups]
         source_slots, source_evidence = _successful_source_scope(
             batch_groups,
@@ -6287,6 +6294,20 @@ def _build_research_prompt(
             "array in the authoritative inventory, or a source slot listed in "
             "shared_source_evidence. Do not invent, normalize, translate, or "
             "copy a source slot from another candidate.\n\n"
+        )
+    if repair_reason in {
+        "prefusion_broad_capability_axis_coverage_insufficient",
+        "prefusion_capability_axis_coverage_missing",
+    }:
+        repair_instruction += (
+            "Capability coverage repair rule: if the supplied evidence supports "
+            "fewer than three nonzero capability axes for a candidate, set that "
+            "candidate's capability_summary.overall to 0.69 or lower and keep "
+            "unsupported axes at 0.00. Do not invent a third axis merely to "
+            "preserve a high overall score. Lower confidence as well, and keep "
+            "the candidate restricted to narrow roles when the evidence is "
+            "narrow. The numeric threshold is a validation boundary, not a "
+            "request to manufacture evidence.\n\n"
         )
     if repair_reason.startswith("prefusion_research_reasoning_"):
         repair_instruction += (
