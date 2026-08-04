@@ -28,6 +28,9 @@ from typing import Any, Sequence
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CREDENTIAL_FILE = Path("/home/he/VeilGuard/fusionapi能用的模型接口.txt")
 DEFAULT_INTERVAL_SECONDS = 300.0
+SCREENING_TERMINAL_STATUSES = frozenset(
+    {"completed", "partial", "blocked", "failed"}
+)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -214,7 +217,7 @@ def _wait_for_exit(pid: int, expected_fragment: str, interval: float) -> None:
 def _wait_for_terminal_state(path: Path, interval: float) -> dict[str, Any]:
     while True:
         state = _read_json(path)
-        if state.get("status") not in {None, "running", "partial"}:
+        if state.get("status") in SCREENING_TERMINAL_STATUSES:
             return state
         time.sleep(interval)
 
@@ -226,7 +229,7 @@ def _ensure_r20_terminal(args: argparse.Namespace, interval: float) -> dict[str,
     max_recoveries = max(0, int(args.max_r20_recoveries))
     while True:
         state = _read_json(args.r20_state)
-        if state.get("status") in {"completed", "blocked", "failed"}:
+        if state.get("status") in SCREENING_TERMINAL_STATUSES:
             return state
         if recoveries >= max_recoveries:
             raise RuntimeError("r20_recovery_budget_exhausted")
@@ -237,7 +240,7 @@ def _ensure_r20_terminal(args: argparse.Namespace, interval: float) -> dict[str,
         log_path = args.r20_ranking_output.parent / "convergence_supervisor.private.log"
         _run_cli(_r20_screening_arguments(args), log_path=log_path)
         state = _read_json(args.r20_state)
-        if state.get("status") in {"completed", "blocked", "failed"}:
+        if state.get("status") in SCREENING_TERMINAL_STATUSES:
             return state
         time.sleep(interval)
 
@@ -290,7 +293,7 @@ def _successor_run_finished(args: argparse.Namespace, _return_code: int) -> bool
     """
 
     state = _read_json(args.r21_state)
-    terminal = state.get("status") in {"completed", "blocked", "failed"}
+    terminal = state.get("status") in SCREENING_TERMINAL_STATUSES
     return terminal
 
 
@@ -336,7 +339,7 @@ def main() -> int:
 
         while True:
             r21_state = _read_json(args.r21_state)
-            if r21_state.get("status") in {"completed", "blocked", "failed"}:
+            if r21_state.get("status") in SCREENING_TERMINAL_STATUSES:
                 break
             time.sleep(interval)
         _emit("r21_terminal_state", status=r21_state.get("status"))

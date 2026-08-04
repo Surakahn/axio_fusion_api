@@ -69,6 +69,22 @@ def test_successor_blocked_terminal_state_is_ready_for_conversion(tmp_path):
     assert supervisor._successor_run_finished(args, 2) is True
 
 
+def test_partial_screening_states_are_terminal_quality_gate_results(tmp_path):
+    r20_state = tmp_path / "r20-state.json"
+    r20_state.write_text(json.dumps({"status": "partial"}), encoding="utf-8")
+    args = SimpleNamespace(
+        r20_state=r20_state,
+        max_r20_recoveries=0,
+        r20_command_fragment="r20",
+    )
+    assert supervisor._ensure_r20_terminal(args, 0.01)["status"] == "partial"
+
+    r21_state = tmp_path / "r21-state.json"
+    r21_state.write_text(json.dumps({"status": "partial"}), encoding="utf-8")
+    successor_args = type("Args", (), {"r21_state": r21_state})()
+    assert supervisor._successor_run_finished(successor_args, 2) is True
+
+
 def test_successor_missing_state_and_nonzero_return_is_not_finished(tmp_path):
     state = tmp_path / "r21-state.json"
     args = type("Args", (), {"r21_state": state})()
