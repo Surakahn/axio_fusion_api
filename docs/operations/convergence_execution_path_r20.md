@@ -52,7 +52,7 @@ The following order is the only path to a formal quality claim:
 
 ## Current State (2026-08-04)
 
-- Engineering readiness is complete: Python 3.11 regression `939 passed`, the
+- Engineering readiness is complete: Python 3.11 regression `941 passed`, the
   four provider-input adapters pass dry checks, and all 12 Axio/public-surface
   cells pass the network-free protocol self-test.
 - The active r20 screening process is running in its isolated private root.
