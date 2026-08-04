@@ -1,295 +1,208 @@
 # Axio Fusion API Product Boundary
 
-Axio Fusion API is a standalone commercial model facade.  ASciFS can consume it,
-but the service is not an ASciFS-internal smoke tool and does not require the
-paper metadata database, graph database, Studio UI, or research workflow
-artifacts to run.
+Axio Fusion API is a standalone, remote-only model composition service. It
+turns a changing set of provider endpoints into one stable public model family:
+`axio-fast`, `axio-terra`, and `axio-pro`.
 
-## Product Shape
+The service does not train weights, run a local model, or require ASciFS. ASciFS
+or any other application may consume Axio over HTTP, but Axio is developed,
+configured, tested, and operated from this repository as an independent
+component.
 
-- Product id: `axio-fusion-api`
-- Public model family: `Axio`
-- Public model tiers: `axio-fast`, `axio-terra`, `axio-pro`
-- Public protocols:
-  - OpenAI legacy Completions: `POST /v1/completions`
-  - OpenAI Chat Completions: `POST /v1/chat/completions`
-  - OpenAI Responses: `POST /v1/responses`
-  - OpenAI Responses compact alias: `POST /v1/responses/compact`
-  - Anthropic Messages: `POST /v1/messages`
-  - Anthropic token count: `POST /v1/messages/count_tokens`
-  - Gemini generateContent: `POST /v1beta/models/{model}:generateContent`
-  - Gemini generateContent: `POST /v1/models/{model}:generateContent`
-  - Gemini streamGenerateContent: `POST /v1beta/models/{model}:streamGenerateContent`
-  - Axio prompt-free route plan: `POST /v1/axio/route-plan`
-  - Axio prompt-free feedback: `POST /v1/feedback`
-- Runtime control endpoints:
-  - `GET /v1/models`
-  - `GET /v1/models/{model}`
-  - `GET /v1/health`
-  - `GET /v1/axio/production-readiness`
-  - `GET /v1/smoke`
+## Product Contract
 
-## Standalone Boundary
+Axio accepts provider model profiles through a configuration-driven registry.
+Each profile may use one of four upstream formats:
 
-The product may share provider adapters, redaction helpers, and the model-fusion
-routing core from this repository while it is developed in-tree.  Its runtime
-contract is independent:
+- OpenAI Chat Completions
+- OpenAI Responses
+- Anthropic Messages
+- Google Gemini GenerateContent
 
-- No ASciFS research output is required.
-- No paper database is required.
-- No graph/vector database is required.
-- No Studio UI is required.
-- No benchmark examples or labels are inserted into prompts.
-- No new model weights are trained.
-- Prompt/source text and secrets are not persisted by audit logs or readiness
-artifacts.
-- It can be moved into another project and fed a new provider model inventory
-  plus capability evidence; the public facade still emits `axio-fast`,
-  `axio-terra`, and `axio-pro`.
+Physical replicas that expose the same canonical model identity are one logical
+model. Replicas are used for load balancing and failover; they are never counted
+as independent Fusion votes.
 
-## Capability Discovery Workflow
+The public model family is deliberately small:
 
-Before `axio-terra`/`axio-pro` are exposed as serious model products, Fusion API runs a
-portable pre-fusion workflow:
+- `axio-fast`: the smallest bounded route that meets the task and latency
+  budget.
+- `axio-terra`: selective independent solving, verification, or critique when
+  a second view is likely to add information.
+- `axio-pro`: a bounded expert panel, Judge, targeted repair, and acting
+  Synthesizer for difficult or high-risk work.
 
-1. Discover a provider/model inventory from explicit environment configuration
-   or an opt-in provider `/models` call.
-2. Normalize all supplied model endpoints into a provider/model inventory.
-3. Attach public model cards, official benchmark claims, pricing notes, and
-   operator observations when available.
-4. Probe endpoints only for availability, output shape, latency, and minimal
-   sanity when requested.
-5. Build a capability graph over language, science, math, code, logic,
-   agentic/tool-use, cost, latency, and reliability axes.
-6. Select missing or non-comparable axes for benchmark execution from the
-   mechanical-disk cache.
-7. Measure branch complementarity with per-case agreement and co-failure
-   summaries before promoting a multi-model panel.
-8. Synthesize `axio-terra`/`axio-pro` from the resulting capability graph.
+The public gateway exposes all four streaming protocol surfaces:
 
-The command is:
+| Surface | Endpoint |
+| --- | --- |
+| Chat Completions | `POST /v1/chat/completions` |
+| Responses | `POST /v1/responses` |
+| Anthropic Messages | `POST /v1/messages` |
+| Gemini GenerateContent | `POST /v1beta/models/{model}:generateContent` or `POST /v1/models/{model}:generateContent` |
 
-```bash
-axio-fusion-api bootstrap \
-  --provider cpa-plus \
-  --provider nvidia \
-  --provider ollama \
-  --cache-root /mnt/storage/ASciFS/axio_benchmarks \
-  --output-dir outputallresult
+The same normalized request contract drives each surface. The adapters only
+change wire representation, event framing, authentication headers, and the
+protocol-specific reasoning/tool fields. The Fusion route is not reselected
+merely because a caller used a different public protocol.
+
+The image lane is separate from text Fusion. Profiles marked as image models
+may serve image generation and editing through the dedicated Images routes;
+image artifacts are not passed into text candidate, Judge, or Synthesizer
+stages as if they were language-model answers.
+
+## Composition Runtime
+
+The runtime is a bounded orchestration graph:
+
+```text
+public streaming request
+        -> protocol normalization and admission
+        -> task analysis, tier policy, deadline and call budget
+        -> canonical-model routing and replica failover
+        -> role-scoped references and specialist work
+        -> Judge / verifier when admitted
+        -> acting Synthesizer when required
+        -> protocol-specific incremental stream
 ```
 
-The equivalent expanded commands are:
+Role prompts and context assembly are explicit configuration artifacts. A
+candidate receives only the context needed for its role; provider errors,
+internal identifiers, prompts, secrets, and raw outputs do not appear in public
+receipts. The finite Harness building blocks can be recomposed by reviewed
+configuration, while the runtime code that enforces isolation, deadlines,
+streaming, and safety cannot rewrite itself.
+
+The implementation borrows principles from Fugu, OpenRouter-style Fusion, and
+Hermes/MoA systems: complementary roles, bounded fan-out, evidence-aware
+selection, structured adjudication, and a single acting answer owner. It does
+not assume that more requests imply better intelligence. Complementarity,
+co-failure, cost, reliability, and latency are measured before a route is
+promoted.
+
+## Provider Onboarding
+
+Use a non-secret provider manifest. Base URLs, API keys, and optional model
+lists are referenced by environment-variable names; values are resolved only
+in process memory. The example manifests are:
+
+- `config/provider_configs.example.json` for arbitrary providers and all four
+  formats.
+- `config/current_channels.example.json` for the current NVIDIA Chat
+  Completions and TokenAPIs Responses channel shapes.
+- `config/research_agent.example.json` for the pre-Fusion research-ranking
+  agent.
+
+The recommended sequence is:
+
+1. Discover the configured inventory.
+2. Research and rank formal language models using public, non-target evidence.
+3. Probe strict streaming behavior with multiple samples.
+4. Exclude profiles whose observed stream cannot satisfy the 90-second limit.
+5. Bind the resulting evidence to a private runtime registry.
+6. Activate the registry only after provider and operational admission gates.
+
+Use the standalone CLI from the repository root:
 
 ```bash
-axio-fusion-api provider-inventory \
-  --provider cpa-plus \
-  --provider nvidia \
-  --provider ollama \
-  --output-dir outputallresult
-
-axio-fusion-api capability-discovery \
-  --inventory outputallresult/fusion_api_product/provider_model_inventory.json \
-  --public-evidence public_model_evidence.json \
-  --cache-root /mnt/storage/ASciFS/axio_benchmarks \
-  --output-dir outputallresult
+PYTHONPATH=src python3.11 -m axio_fusion_api.cli \
+  --provider-config-file config/current_channels.example.json \
+  pre-fusion-screen --live \
+  --focus-manifest config/nvidia_focus_models.json \
+  --source-manifest config/public_model_sources.example.json \
+  --research-agent-config config/research_agent.example.json \
+  --output private/prefusion.screened.private.json \
+  --registry-output private/fusion-runtime-registry.private.json
 ```
 
-This workflow is independent from ASciFS research artifacts.  It does not need
-the paper database, graph database, Studio UI, or Harness.
-
-## Commands
+For production serving, use a registry produced by the pre-Fusion handoff and
+require live admission:
 
 ```bash
-axio-fusion-api product-manifest --output-dir outputallresult
-axio-fusion-api bootstrap \
-  --provider cpa-plus \
-  --provider nvidia \
-  --provider ollama \
-  --cache-root /mnt/storage/ASciFS/axio_benchmarks \
-  --output-dir outputallresult
-axio-fusion-api provider-inventory \
-  --provider cpa-plus \
-  --provider nvidia \
-  --provider ollama \
-  --output-dir outputallresult
-axio-fusion-api capability-discovery \
-  --inventory outputallresult/fusion_api_product/provider_model_inventory.json \
-  --public-evidence public_model_evidence.json \
-  --cache-root /mnt/storage/ASciFS/axio_benchmarks \
-  --output-dir outputallresult
-axio-fusion-api openapi --output-dir outputallresult
-axio-fusion-api readiness --output-dir outputallresult
-axio-fusion-api benchmark-run-matrix \
-  --cache-root /mnt/storage/ASciFS/axio_benchmarks \
-  --output-dir outputallresult
-axio-fusion-api benchmark-download \
-  --cache-root /mnt/storage/ASciFS/axio_benchmarks \
-  --output-dir outputallresult
-axio-fusion-api benchmark-live-readiness \
-  --cache-root /mnt/storage/ASciFS/axio_benchmarks \
-  --output-dir outputallresult
-axio-fusion-api benchmark-dataset-receipt \
-  --suite gpqa_diamond_science_reasoning \
-  --dataset /mnt/storage/ASciFS/axio_benchmarks/datasets/gpqa_diamond_science_reasoning/gpqa.jsonl \
-  --cache-root /mnt/storage/ASciFS/axio_benchmarks \
-  --output-dir outputallresult
-axio-fusion-api benchmark-runbook \
-  --suite gpqa_diamond_science_reasoning \
-  --dataset /mnt/storage/ASciFS/axio_benchmarks/datasets/gpqa_diamond_science_reasoning/gpqa.jsonl \
-  --cache-root /mnt/storage/ASciFS/axio_benchmarks \
-  --output-dir outputallresult
-AXIO_FUSION_BENCHMARK_ENABLE_LIVE=1 axio-fusion-api benchmark-run \
-  --suite gpqa_diamond_science_reasoning \
-  --candidate-id axio-terra \
-  --dataset /mnt/storage/ASciFS/axio_benchmarks/datasets/gpqa_diamond_science_reasoning/gpqa.jsonl \
-  --cache-root /mnt/storage/ASciFS/axio_benchmarks \
-  --live
-AXIO_FUSION_BENCHMARK_ENABLE_LIVE=1 axio-fusion-api benchmark-batch-run \
-  --suite gpqa_diamond_science_reasoning \
-  --dataset /mnt/storage/ASciFS/axio_benchmarks/datasets/gpqa_diamond_science_reasoning/gpqa.jsonl \
-  --cache-root /mnt/storage/ASciFS/axio_benchmarks \
-  --reuse-existing \
-  --live
-axio-fusion-api serve --host 0.0.0.0 --port 8787 --production
+PYTHONPATH=src python3.11 -m axio_fusion_api.cli \
+  --registry private/fusion-runtime-registry.private.json \
+  serve --host 127.0.0.1 --port 8789 --live
 ```
 
-The main ASciFS CLI still exposes compatibility commands such as
-`axio serve-fusion-api`, but the commercial product boundary should use the
-standalone `axio-fusion-api` command.
+The default network policy is `auto` with proxy
+`http://127.0.0.1:10808`: a listening local proxy is used, otherwise direct
+connection is used. `on` requires the configured proxy and `off` forces a
+direct connection. Provider streaming calls have a 90-second admission
+ceiling; a profile that exceeds it is not eligible for the Fusion serving
+list.
 
-## Production Environment
+## Runtime Safety
 
-- `AXIO_FUSION_MODEL_REGISTRY_PATH`: optional JSON model registry.
-- `AXIO_FUSION_API_MODE`: `production`, `live`, or `dry-run`.
-- `AXIO_FUSION_API_KEYS`: comma-separated bearer or `x-api-key` tokens for clients.
-- `AXIO_FUSION_API_RATE_LIMIT_RPM`: per-principal request limit.
-- `AXIO_FUSION_API_MAX_CONCURRENT_REQUESTS`: server-side concurrency cap.
-- `AXIO_FUSION_API_MAX_BODY_BYTES`: request body size limit.
-- `AXIO_FUSION_API_AUDIT_LOG_PATH`: prompt-free JSONL audit log path.
-- `AXIO_CPA_PLUS_BASE_URL` and `AXIO_CPA_PLUS_API_KEY`: CPA Plus Responses API.
-- `AXIO_NVIDIA_API_KEYS`: NVIDIA/OpenAI-compatible provider keys.
-- `AXIO_FUSION_BENCHMARK_ENABLE_LIVE`: extra live benchmark safety gate.
+The following are product invariants:
 
-API keys and provider secrets must stay in environment/configuration systems and
-must not be committed.
+- no local weight inference or training;
+- no import from ASciFS runtime packages;
+- no API key, raw prompt, benchmark label, raw provider output, or raw image
+  content in repository evidence artifacts;
+- provider replicas do not inflate logical model vote counts;
+- call budgets and shared deadlines protect mandatory Judge/Synthesizer stages;
+- public protocol errors are normalized and internal provider details are
+  redacted;
+- benchmark evaluation is an external client of the HTTP gateway, not an
+  input to production routing or prompt tuning.
 
-`provider-inventory` follows the same rule. Dry-run mode reads only explicit
-model-list environment variables such as `AXIO_NVIDIA_MODELS`,
-`AXIO_CPA_PLUS_MODELS`, and `AXIO_OLLAMA_MODELS`. Live mode is opt-in and may
-call configured `/models` endpoints, but its artifact stores only model names,
-provider family, interface mode, key counts, and non-secret base URL hashes.
-Raw API keys, raw local gateway URLs, and raw provider responses are not
-persisted.
+## Independent Evaluation Boundary
 
-`bootstrap` additionally writes a prompt-free benchmark run matrix by default.
-This is still only a control-plane artifact: it reserves per-suite/per-candidate
-paths under the benchmark cache and records the scorecard contract, but it does
-not download benchmark data or call provider models. Use
-`--no-benchmark-run-matrix` when a deployment wants inventory/capability
-artifacts only.
+Benchmark execution is intentionally separate from the Fusion runtime. The
+evaluator loads the Axio base URL, client key, and one of the four public
+protocols just like any other client. It does not inject labels into prompts,
+does not alter route policy, and does not feed scores back into the live
+service.
 
-## Benchmark Gate
+The current locked matrix contains 9 categories and 21 suites:
 
-`axio-terra` and `axio-pro` benchmark claims are gated by reproducible artifacts, not
-by static registry scores.  The run matrix reserves per-suite, per-candidate
-`case_results.jsonl` paths under the benchmark cache root for `axio-terra`,
-`axio-pro`, and each selected single-model CPA Plus/NVIDIA baseline.  The
-scorecard may claim:
+- science knowledge: GPQA Diamond, MMMU text science;
+- multilingual: Global-MMLU Lite, FLORES translation;
+- code: LiveCodeBench, HumanEval;
+- mathematics: MATH-500, recent AIME;
+- logic: BBH, ARC-Challenge;
+- agentic tool calling: BFCL, tau-bench;
+- daily work: IFEval, MT-Bench work;
+- hallucination/factuality: TruthfulQA, HaluEval;
+- vertical domains: MedQA-USMLE, FinanceBench, LegalBench, BizBench, and
+  PolicyBench.
 
-- `axio-terra` only after imported official per-case results beat the second
-  best available single-model baseline.
-- `axio-pro` only after imported official per-case results beat the best
-  available single-model baseline.
+The asset root is `/mnt/storage/axio_fusion_benchmarks`, outside the source
+tree. The evaluation contract requires fixed case hashes, identical decoding
+and prompts for paired candidates, official or audited harness imports for
+code/tool/pairwise suites, paired case-level statistics, Holm correction,
+practical effect sizes, contamination checks, four-surface parity, and p50/p95
+latency no more than three times the corresponding single-model baseline.
 
-Benchmark questions, labels, raw prompts, provider secrets, and generated large
-case outputs stay outside git.  Only manifests, aggregate metrics, and
-anti-cheating receipts are suitable for repository artifacts.
+GPQA remains explicitly gated when authorized access is unavailable. A
+replacement is reported by its real identity and never relabeled as GPQA.
+Likewise, downloading a harness repository is not treated as a scored harness
+run: the pinned six-suite official/audited import gate must be satisfied before
+those suites enter a claim.
 
-The required benchmark coverage uses two representative suites per area:
+No superiority claim is valid until the complete provider candidate pool has
+been screened, rank 1/2/3 baselines have been externally evidenced and frozen,
+all permitted suite gates have passed, and the independent paired campaign
+supports the claim.
 
-- Math: `math_500_competition_math`, `aime_recent_math_reasoning`
-- Science knowledge: `gpqa_diamond_science_reasoning`,
-  `mmmu_science_multimodal_optional`
-- Code: `livecodebench_code_reasoning`, `humaneval_code_generation`
-- Logic reasoning: `bbh_logic_reasoning`, `arc_challenge_reasoning`
-- Agentic/tool-use: `bfcl_tool_calling`, `tau_bench_agentic_workflow`
+## Operational Evidence
 
-Benchmark datasets, external runners, and generated outputs live under the
-mechanical-disk benchmark cache such as
-`/mnt/storage/ASciFS/axio_benchmarks`.  Repository artifacts only contain
-manifests, hashes, aggregate metrics, and path receipts.
+Safe evidence is written below `private/` or the mechanical-disk benchmark
+root. It contains hashes, counts, status, reason codes, and audit receipts;
+private runtime files may contain process-local credentials and raw provider
+responses but are ignored by Git and must never be published.
 
-`axio-pro` must not assume that “more models” automatically means better output.
-The benchmark scorecard must also track per-case agreement, branch diversity,
-and co-failure rates.  If the candidate branches tend to fail on the same cases,
-the router should prefer the strongest single model plus a verifier instead of
-paying for a panel that cannot add information.
+The primary operating documents are:
 
-The current scorecard consumes prompt-free per-case result rows keyed by
-`case_id_hash`.  It reports aggregate accuracy/cost/latency plus co-failure
-rate, partial-disagreement rate, candidate-pair disagreement, and a
-`panel_promotion_ready` decision.  Missing case overlap, high co-failure, or no
-branch disagreement blocks Axio panel promotion even when aggregate rows exist.
+- `PLAN.md` for the frozen convergence path;
+- `docs/operations/convergence_execution_path_r20.md` for the current gate
+  order;
+- `docs/operations/prefusion_convergence_supervisor.md` for low-frequency
+  screening continuation;
+- `docs/pre_fusion_model_screening.md` for provider research and admission;
+- `docs/axio_fusion_benchmark_methodology_21_suites.md` for the independent
+  benchmark protocol.
 
-## Fusion References
-
-Axio borrows implementation principles, not vendor code, from:
-
-- SakanaAI Fugu: OpenAI-compatible facade over dynamic multi-model and
-  multi-agent coordination.
-- OpenRouter Fusion: panel-style multiple model calls, judge comparison, and
-  final synthesis for hard tasks.
-- Operator-provided Fusion analysis:
-  `https://blog.csdn.net/weixin_45888077/article/details/161985171`, used as
-  product-design guidance around cost, latency, and quality tradeoffs.
-- Multi-agent co-failure evaluation:
-  `https://arxiv.org/abs/2602.00370`, used as a guardrail that panel fusion
-  must prove error complementarity, not merely call more models.
-
-The resulting Axio design rules are:
-
-- Public callers see a small stable model surface: `axio-fast`, `axio-terra`,
-  and `axio-pro`. Provider names and branch composition remain internal control
-  plane state.
-- Easy requests use a cheap/fast route first. Hard requests may fan out to a
-  bounded panel, but only when the capability graph predicts complementary
-  strengths.
-- Panel synthesis is judge-mediated. The judge input is structured branch
-  metadata and answers, never benchmark labels or repository-stored raw prompts.
-- Recursive fusion is opt-in and bounded. The commercial default avoids nested
-  Fusion calls that can amplify latency, cost, and correlated failures.
-- Benchmark evidence is promoted through receipts, runbooks, per-case result
-  files, aggregate scorecards, and co-failure checks. Static marketing claims or
-  registry priors are not enough to claim `axio-terra`/`axio-pro` superiority.
-
-The first live runner is intentionally narrow: it supports GPQA/MMLU-Pro style
-multiple-choice JSONL/JSON/CSV slices, defaults to 20 cases, executes serially,
-and refuses provider calls unless both `--live` and
-`AXIO_FUSION_BENCHMARK_ENABLE_LIVE=1` are set.
-
-Use `benchmark-batch-run` to run the same slice across `axio-terra`, `axio-pro`, and
-the configured CPA Plus / NVIDIA provider baselines from the run matrix. It
-writes per-candidate JSONL under the cache root, merges them into
-`merged_case_results.jsonl`, and emits a scorecard only from the measured
-per-case outputs.
-
-Use `benchmark-live-readiness` before a real live run.  It defaults to a static
-environment readiness check and records only provider/model names, base URL
-hashes, API-key counts, blockers, and optional probe hashes.  It never writes
-actual API keys, raw probe prompts, or provider response text.  Add
-`--reuse-existing` to live benchmark runs to skip candidates whose cache-root
-`case_results.jsonl` already covers the requested case hashes; add `--rerun`
-when a measured result must be replaced deliberately.
-
-Use `benchmark-dataset-receipt` before any live benchmark execution.  The
-receipt records dataset path, cache-root placement, file size, file hash,
-supported format, usable case count, labeled/unlabeled counts, and blockers. It
-does not write benchmark questions, options, labels, raw prompts, or secrets
-into repository artifacts.
-
-Use `benchmark-runbook` as the commercial operator handoff. It combines the
-dataset receipt, run matrix, and live readiness into one status report and emits
-the next safe commands for download/materialization, dataset receipt refresh,
-dry-run batch, readiness check, and gated live batch. If any blocker remains, the
-runbook must not be interpreted as evidence that `axio-terra` or `axio-pro` beat
-their baselines; only the live measured scorecard can make that claim.
+The repository's engineering tests are the first gate. They prove contracts,
+not model superiority. Live provider evidence and the independent benchmark
+campaign are required for any quality claim.

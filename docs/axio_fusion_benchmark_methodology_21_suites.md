@@ -20,8 +20,13 @@ The mechanical-disk asset manifest is:
 - `/mnt/storage/axio_fusion_benchmarks/manifests/benchmark_download_manifest_v3_21_suites.json`
 - `/mnt/storage/axio_fusion_benchmarks/manifests/benchmark_sha256sums_v3_21_suites.txt`
 
-As of the current manifest, 19 suites are downloaded and 2 suites are blocked by Hugging Face gated access:
-`gpqa_diamond` and `flores_translation_instruction`. They must not be replaced with unofficial mirrors.
+The current materialization receipt has 14 suites ready for direct scoring. Six
+suites (`livecodebench`, `humaneval`, `bfcl`, `tau_bench`, `ifeval`, and
+`mt_bench_work`) are downloaded but remain blocked until their official or
+audited harness runs are imported. `gpqa_diamond` remains blocked by gated
+access. FLORES is currently materialized and ready. A blocked suite must never
+be replaced with an unofficial mirror or silently removed from the declared
+21-suite matrix.
 
 ## Frozen Evaluation Policy
 
