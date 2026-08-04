@@ -39,6 +39,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--source-manifest", required=True, type=Path)
     parser.add_argument("--r20-private-root", required=True, type=Path)
     parser.add_argument("--r20-private-probe-file", required=True, type=Path)
+    parser.add_argument("--r20-output", required=True, type=Path)
     parser.add_argument("--r20-ranking-output", required=True, type=Path)
     parser.add_argument("--r21-plan", required=True, type=Path)
     parser.add_argument("--r21-private-root", required=True, type=Path)
@@ -52,6 +53,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--interval-seconds", type=float, default=DEFAULT_INTERVAL_SECONDS
     )
+    parser.add_argument("--max-r20-recoveries", type=int, default=1)
     parser.add_argument(
         "--r20-command-fragment",
         default="baseline_screening_plan.r20.safe.json",
@@ -182,6 +184,18 @@ def _screening_arguments(
     ]
 
 
+def _r20_screening_arguments(args: argparse.Namespace) -> list[str]:
+    return _screening_arguments(
+        registry=args.r20_registry,
+        plan=args.r20_plan,
+        source_manifest=args.source_manifest,
+        private_probe_file=args.r20_private_probe_file,
+        private_root=args.r20_private_root,
+        state=args.r20_state,
+        output=args.r20_output,
+    )
+
+
 def _wait_for_exit(pid: int, expected_fragment: str, interval: float) -> None:
     first_command = _proc_cmdline(pid)
     if not first_command or expected_fragment not in first_command:
@@ -201,6 +215,29 @@ def _wait_for_terminal_state(path: Path, interval: float) -> dict[str, Any]:
     while True:
         state = _read_json(path)
         if state.get("status") not in {None, "running", "partial"}:
+            return state
+        time.sleep(interval)
+
+
+def _ensure_r20_terminal(args: argparse.Namespace, interval: float) -> dict[str, Any]:
+    """Resume the same frozen r20 campaign after an unexpected exit."""
+
+    recoveries = 0
+    max_recoveries = max(0, int(args.max_r20_recoveries))
+    while True:
+        state = _read_json(args.r20_state)
+        if state.get("status") in {"completed", "blocked", "failed"}:
+            return state
+        if recoveries >= max_recoveries:
+            raise RuntimeError("r20_recovery_budget_exhausted")
+        if _existing_live_process(args.r20_command_fragment):
+            raise RuntimeError("r20_recovery_duplicate_process")
+        recoveries += 1
+        _emit("r20_resume_starting", attempt=recoveries)
+        log_path = args.r20_ranking_output.parent / "convergence_supervisor.private.log"
+        _run_cli(_r20_screening_arguments(args), log_path=log_path)
+        state = _read_json(args.r20_state)
+        if state.get("status") in {"completed", "blocked", "failed"}:
             return state
         time.sleep(interval)
 
@@ -270,7 +307,7 @@ def main() -> int:
 
         _load_credentials(args.credentials_file)
         _wait_for_exit(args.r20_pid, args.r20_command_fragment, interval)
-        r20_state = _wait_for_terminal_state(args.r20_state, interval)
+        r20_state = _ensure_r20_terminal(args, interval)
         _emit("r20_terminal_state", status=r20_state.get("status"))
 
         r20_log = args.r20_ranking_output.parent / "convergence_supervisor.private.log"

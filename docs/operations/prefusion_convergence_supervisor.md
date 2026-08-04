@@ -32,6 +32,7 @@ PYTHONPATH=src nohup setsid python3.11 \
   --source-manifest /mnt/storage/axio_fusion_benchmarks/non_target_ranking_campaigns/full_pool_2026-07-20/source_manifest.private.json \
   --r20-private-root private/runs/2026-08-02-prefusion-cohort-r20/baseline_screening.private \
   --r20-private-probe-file private/runs/2026-08-02-prefusion-cohort-r20/provider_probe.exported.private.json \
+  --r20-output private/runs/2026-08-02-prefusion-cohort-r20/baseline_screening.safe.json \
   --r20-ranking-output private/runs/2026-08-02-prefusion-cohort-r20/external_provider_ranking.r20.screened.private.json \
   --r21-plan private/runs/2026-08-04-prefusion-cohort-r21/baseline_screening_plan.r21.failfast.safe.json \
   --r21-private-root private/runs/2026-08-04-prefusion-cohort-r21/baseline_screening.private \
@@ -39,6 +40,7 @@ PYTHONPATH=src nohup setsid python3.11 \
   --r21-output private/runs/2026-08-04-prefusion-cohort-r21/baseline_screening.safe.json \
   --r21-ranking-output private/runs/2026-08-04-prefusion-cohort-r21/external_provider_ranking.r21.screened.private.json \
   --lock-file private/runs/prefusion-convergence-supervisor.lock \
+  --max-r20-recoveries 1 \
   --interval-seconds 300 \
   >>private/runs/prefusion-convergence-supervisor.console.log 2>&1 &
 echo $! > private/runs/prefusion-convergence-supervisor.pid
@@ -51,6 +53,11 @@ exit code `2` for a valid but blocked conversion; the supervisor intentionally
 reads the generated safe manifest and uses its
 `screening_conversion_ready` field instead of treating that return code as a
 process error.
+
+If the bound r20 process exits while its state is still non-terminal, the
+supervisor uses the same plan, state, private root, and checkpoint once to
+resume the campaign. It never adds `--retry-failed`; after the configured
+recovery budget is exhausted it fails closed for operator review.
 
 When the conversion is ready, the supervisor stops at the baseline-freeze
 gate. It does not select the top three models automatically. The next action

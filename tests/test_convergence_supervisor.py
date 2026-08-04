@@ -1,6 +1,6 @@
 import json
-import os
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 
@@ -80,3 +80,55 @@ def test_successor_zero_return_without_terminal_state_is_not_finished(tmp_path):
     state.write_text(json.dumps({"status": "running"}), encoding="utf-8")
     args = type("Args", (), {"r21_state": state})()
     assert supervisor._successor_run_finished(args, 0) is False
+
+
+def test_r20_recovery_reuses_frozen_arguments_after_process_exit(monkeypatch, tmp_path):
+    state_path = tmp_path / "r20-state.json"
+    state_path.write_text(json.dumps({"status": "running"}), encoding="utf-8")
+    args = SimpleNamespace(
+        r20_state=state_path,
+        r20_command_fragment="baseline_screening_plan.r20.safe.json",
+        max_r20_recoveries=1,
+        r20_registry=tmp_path / "registry.json",
+        r20_plan=tmp_path / "r20-plan.json",
+        source_manifest=tmp_path / "source.json",
+        r20_private_probe_file=tmp_path / "probe.json",
+        r20_private_root=tmp_path / "private",
+        r20_output=tmp_path / "r20.safe.json",
+        r20_ranking_output=tmp_path / "ranking.json",
+    )
+    commands = iter([[], []])
+    monkeypatch.setattr(
+        supervisor,
+        "_existing_live_process",
+        lambda _fragment: next(commands),
+    )
+    captured = {}
+
+    def fake_run(arguments, *, log_path):
+        captured["arguments"] = arguments
+        state_path.write_text(json.dumps({"status": "blocked"}), encoding="utf-8")
+        return 2
+
+    monkeypatch.setattr(supervisor, "_run_cli", fake_run)
+    result = supervisor._ensure_r20_terminal(args, 0.01)
+    assert result["status"] == "blocked"
+    assert "baseline-screening-run" in captured["arguments"]
+    assert str(args.r20_plan) in captured["arguments"]
+    assert "--retry-failed" not in captured["arguments"]
+
+
+def test_r20_recovery_budget_fails_closed(tmp_path):
+    state_path = tmp_path / "r20-state.json"
+    state_path.write_text(json.dumps({"status": "running"}), encoding="utf-8")
+    args = SimpleNamespace(
+        r20_state=state_path,
+        max_r20_recoveries=0,
+        r20_command_fragment="r20",
+    )
+    try:
+        supervisor._ensure_r20_terminal(args, 0.01)
+    except RuntimeError as exc:
+        assert str(exc) == "r20_recovery_budget_exhausted"
+    else:
+        raise AssertionError("recovery budget must fail closed")
