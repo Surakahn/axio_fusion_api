@@ -76,6 +76,10 @@ The following order is the only path to a formal quality claim:
   This is only a pre-registered successor artifact: it does not supersede r20,
   and it must not be started until r20 has reached a terminal state and its
   complete evidence has passed through ranking conversion.
+- The r21 plan has passed its zero-network execution preflight. The preflight
+  matches the plan digest, schedule digest, and task-sequence digest; it made
+  no provider or target-suite calls and persisted no raw provider output or
+  secret. The live r21 run remains closed until the r20 terminal conversion.
 
 ## Terminal Action
 
