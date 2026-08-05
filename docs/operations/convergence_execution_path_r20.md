@@ -23,10 +23,11 @@ logical model and are used for load balancing and failover only.
 
 The following order is the only path to a formal quality claim:
 
-1. **Pre-Fusion screening:** complete the immutable r20 plan for all 11
-   admitted logical models, both independent non-target source families, and
-   all 22 units. The plan fixes serial execution (`max_workers=1`), request
-   budget, scorer, source snapshot, and failure denominator.
+1. **Pre-Fusion screening:** complete the active immutable full-pool plan for
+   all admitted logical models, both independent non-target source families,
+   and every registered source-model unit. The plan fixes serial execution
+   (`max_workers=1`), request budget, scorer, source snapshot, and failure
+   denominator.
 2. **Ranking conversion:** after the process reaches a terminal state, run
    `baseline-screening-to-ranking` once against the exact plan, state, source
    manifest, and private probe binding. Every failure stays in the denominator.
@@ -64,10 +65,10 @@ The following order is the only path to a formal quality claim:
   or missing case IDs before plan execution. This changes the adapter digest,
   so the next screening plan must be regenerated from a new source-manifest
   binding.
-- The next cohort must use the same full-pool registry and source families
-  only after a zero-network preflight authenticates the new plan, schedule,
-  task order, and adapter digest. It remains the only route to provider
-  baseline ranking and freeze.
+- The active r25 cohort uses the same full-pool registry and source families
+  after a zero-network preflight authenticated its plan, schedule, task order,
+  and repaired adapter digest. It remains the only route to provider baseline
+  ranking and freeze.
 - Ranking conversion is fail-closed for an interrupted campaign with no
   complete cross-source candidate: it emits a template-only blocker receipt
   rather than raising or deriving a partial rank.
@@ -77,19 +78,19 @@ The following order is the only path to a formal quality claim:
 
 ## Terminal Action
 
-When the screening process exits, inspect the state and run the following
-command with no retry or overwrite flag:
+When the active screening process exits, inspect its state and run the
+following command with no retry or overwrite flag:
 
 ```bash
-PYTHONPATH=src python3.11 -m axio_fusion_api.cli \
-  --registry private/runs/2026-08-02-prefusion-cohort-r20/fusion-runtime-registry.exported-bound.private.json \
+PYTHONPATH=src .venv/bin/python -m axio_fusion_api.cli \
+  --registry private/runs/2026-08-05-prefusion-cohort-r22-repair6/runtime_registry.from_probe.private.json \
   baseline-screening-to-ranking \
-  --plan private/runs/2026-08-02-prefusion-cohort-r20/baseline_screening_plan.r20.safe.json \
-  --campaign-state private/runs/2026-08-02-prefusion-cohort-r20/baseline_screening_state.private.json \
-  --source-manifest /mnt/storage/axio_fusion_benchmarks/non_target_ranking_campaigns/full_pool_2026-07-20/source_manifest.private.json \
-  --private-root private/runs/2026-08-02-prefusion-cohort-r20/baseline_screening.private \
-  --private-probe-file private/runs/2026-08-02-prefusion-cohort-r20/provider_probe.exported.private.json \
-  --output private/runs/2026-08-02-prefusion-cohort-r20/external_provider_ranking.r20.screened.private.json
+  --plan private/runs/2026-08-05-prefusion-cohort-r25-full-pool-failfast/baseline_screening_plan.safe.json \
+  --campaign-state private/runs/2026-08-05-prefusion-cohort-r25-full-pool-failfast/baseline_screening_state.live.private.json \
+  --source-manifest private/runs/2026-08-05-prefusion-cohort-r25-full-pool-failfast/source_manifest.private.json \
+  --private-root private/runs/2026-08-05-prefusion-cohort-r25-full-pool-failfast/baseline_screening.private \
+  --private-probe-file private/runs/2026-08-05-provider-enrollment-r22/provider_probe.private.json \
+  --output private/runs/2026-08-05-prefusion-cohort-r25-full-pool-failfast/external_provider_ranking.r25.screened.private.json
 ```
 
 `screening_conversion_ready=false` is a valid terminal blocker, not a partial

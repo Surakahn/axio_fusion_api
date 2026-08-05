@@ -7,7 +7,7 @@ Build `axio_fusion_api` as a standalone, ASciFS-decoupled Fusion API service tha
 ## Canonical Convergence Path
 
 The current implementation path is frozen to the staged control-plane gates
-in [docs/operations/convergence_execution_path_r20.md](docs/operations/convergence_execution_path_r20.md): finish the immutable r20 pre-Fusion screening, convert the complete pool into an externally evidenced rank-1/rank-2/rank-3 baseline freeze, close the official/audited harness import gate, then run the independent 9-category/21-suite campaign and claim audit. Until those gates are terminal, do not add new Fusion algorithms or tune prompts against benchmark material. A failed gate is preserved as evidence and repaired in a new cohort.
+in [docs/operations/convergence_execution_path_r20.md](docs/operations/convergence_execution_path_r20.md): finish the active immutable full-pool pre-Fusion screening cohort, convert the complete pool into an externally evidenced rank-1/rank-2/rank-3 baseline freeze, close the official/audited harness import gate, then run the independent 9-category/21-suite campaign and claim audit. Until those gates are terminal, do not add new Fusion algorithms or tune prompts against benchmark material. A failed gate is preserved as evidence and repaired in a new cohort.
 
 ## Non-Negotiable Constraints
 
@@ -58,11 +58,14 @@ The engineering gate remains independently ready: the Python 3.11 regression
 passes 983 tests, including the new identity, duplicate-source, and
 fail-closed ranking conversion tests. Ranking conversion now returns a safe
 template when an interrupted campaign has no complete cross-source evidence,
-instead of raising while aggregating an empty list. The
-next gate is a fresh full-pool fail-fast screening cohort, followed by ranking
-conversion, provider baseline freeze, official harness import validation, and
-only then the separate 9-category/21-suite target campaign. No provider
-baseline or Axio superiority claim is currently trusted.
+instead of raising while aggregating an empty list. The active gate is the
+fresh full-pool fail-fast `r25` screening cohort. Its zero-network preflight
+passed with 22 logical models, 44 source-model units, serial execution, and
+plan digest
+`ad5311a433c13995f9c9de34ec6b50813068e2d861cc2b9a421a0b239b78e740`.
+Ranking conversion, provider baseline freeze, official harness import
+validation, and the separate 9-category/21-suite target campaign remain
+closed. No provider baseline or Axio superiority claim is currently trusted.
 
 The `prefusion-probe-export` command now turns a ready screening artifact into
 the standard provider probe contract offline. This removes the last manual
