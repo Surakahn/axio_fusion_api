@@ -25,6 +25,7 @@ from .image_api import (
     ImageRouter,
     image_request_timeout,
     image_route_kind,
+    image_router_summary,
     parse_edit_payload,
     parse_generation_payload,
     render_image_event,
@@ -39,7 +40,7 @@ from .providers import (
     ensure_strict_streaming_client,
     profile_credential_readiness,
 )
-from .registry import load_registry, registry_readiness
+from .registry import load_image_registry, load_registry, registry_readiness
 from .runtime import ResponseContinuation, runtime_state, tenant_key_from_headers
 from .runtime_activation import AtomicFusionRuntime
 from .schemas import (
@@ -88,6 +89,7 @@ def handle_request(
     headers: Mapping[str, str] | None = None,
     body: bytes | str | None = None,
     engine: FusionEngine | None = None,
+    image_profiles: Sequence[Any] | None = None,
     live: bool = False,
     record_trace: bool = True,
     record_runtime: bool = True,
@@ -133,8 +135,18 @@ def handle_request(
     active_engine = engine or FusionEngine(
         load_registry(require_prefusion=bool(live))
     )
+    selected_image_profiles = (
+        getattr(active_engine, "profiles", ())
+        if image_profiles is None
+        else image_profiles
+    )
     if method.upper() == "GET" and route in {"/health", "/v1/health"}:
-        return respond(_json_response(200, _health(active_engine)))
+        return respond(
+            _json_response(
+                200,
+                _health(active_engine, image_profiles=selected_image_profiles),
+            )
+        )
     if method.upper() == "GET" and route in {"/v1/models", "/models"}:
         return respond(_json_response(200, _models(active_engine)))
     if method.upper() == "GET" and route in {"/v1/axio/runtime", "/runtime"}:
@@ -152,7 +164,7 @@ def handle_request(
                 operation=image_operation,
                 headers=headers_lc,
                 body=body,
-                profiles=active_engine.profiles,
+                profiles=selected_image_profiles,
             )
         )
     try:
@@ -348,6 +360,7 @@ def _prepare_incremental_image_stream_request(
     headers: Mapping[str, str] | None,
     body: bytes | str | None,
     engine: FusionEngine,
+    image_profiles: Sequence[Any] | None,
     live: bool,
     record_runtime: bool,
 ) -> tuple[_PreparedIncrementalImageStream | None, tuple[int, dict[str, str], bytes] | None]:
@@ -401,7 +414,9 @@ def _prepare_incremental_image_stream_request(
             operation=operation,
             payload=payload,
             files=files,
-            router=ImageRouter(engine.profiles),
+            router=ImageRouter(
+                engine.profiles if image_profiles is None else image_profiles
+            ),
             tenant_key=tenant_key,
         ),
         None,
@@ -723,6 +738,7 @@ def create_http_server(
     *,
     live: bool = False,
     engine: FusionEngine | None = None,
+    image_profiles: Sequence[Any] | None = None,
     record_trace: bool = True,
     record_runtime: bool = True,
 ) -> ThreadingHTTPServer:
@@ -772,6 +788,11 @@ def create_http_server(
                     headers=dict(self.headers),
                     body=body,
                     engine=request_engine,
+                    image_profiles=(
+                        request_engine.profiles
+                        if image_profiles is None
+                        else image_profiles
+                    ),
                     live=live,
                     record_runtime=record_runtime,
                 )
@@ -814,6 +835,11 @@ def create_http_server(
                 headers=dict(self.headers),
                 body=body,
                 engine=request_engine,
+                image_profiles=(
+                    request_engine.profiles
+                    if image_profiles is None
+                    else image_profiles
+                ),
                 live=live,
                 record_trace=record_trace,
                 record_runtime=record_runtime,
@@ -1009,6 +1035,9 @@ def create_http_server(
     server.daemon_threads = True
     server.runtime_engine_handle = runtime_handle
     server.axio_engine = active_engine
+    server.axio_image_profiles = tuple(
+        active_engine.profiles if image_profiles is None else image_profiles
+    )
 
     def swap_engine(
         candidate: FusionEngine,
@@ -1247,6 +1276,7 @@ def create_runtime_http_server(
     environment: Mapping[str, Any] | None = None,
     secret_resolver: Any | None = None,
     client: HTTPProviderClient | None = None,
+    image_registry: str | Path | None = None,
     record_trace: bool = True,
     record_runtime: bool = True,
     require_prefusion: bool = False,
@@ -1385,11 +1415,16 @@ def create_runtime_http_server(
         else:
             active_client = ensure_strict_streaming_client(client)
         engine = FusionEngine(profiles, client=active_client, **engine_kwargs)
+    image_registry_path = str(
+        image_registry or os.getenv("AXIO_FUSION_IMAGE_REGISTRY_PATH", "")
+    ).strip()
+    image_profiles = load_image_registry(image_registry_path) if image_registry_path else []
     server = create_http_server(
         host=host,
         port=port,
         live=live,
         engine=engine,
+        image_profiles=image_profiles,
         record_trace=record_trace,
         record_runtime=record_runtime,
     )
@@ -1575,11 +1610,14 @@ def serve(host: str = "127.0.0.1", port: int = 8789, *, live: bool = False) -> N
     profiles = load_registry(require_prefusion=True)
     if not profiles:
         raise ValueError("production pre-Fusion registry contains no enabled profiles")
+    image_registry_path = os.getenv("AXIO_FUSION_IMAGE_REGISTRY_PATH", "").strip()
+    image_profiles = load_image_registry(image_registry_path) if image_registry_path else []
     server = create_http_server(
         host=host,
         port=port,
         live=live,
         engine=FusionEngine(profiles, client=HTTPProviderClient(require_streaming=True)),
+        image_profiles=image_profiles,
     )
     try:
         server.serve_forever()
@@ -4119,7 +4157,11 @@ def _public_model_policy(model: str) -> dict[str, Any]:
     }
 
 
-def _health(engine: FusionEngine) -> dict[str, Any]:
+def _health(
+    engine: FusionEngine,
+    *,
+    image_profiles: Sequence[Any] = (),
+) -> dict[str, Any]:
     readiness = _public_registry_readiness(engine.profiles)
     return {
         "schema": "axio_fusion_api.health.v1",
@@ -4129,6 +4171,7 @@ def _health(engine: FusionEngine) -> dict[str, Any]:
         "public_models": list(PUBLIC_MODELS),
         "supported_api_formats": ["chat/completions", "responses", "anthropic", "gemini"],
         "registry_readiness": readiness,
+        "image_registry": image_router_summary(ImageRouter(image_profiles)),
         "network": provider_proxy_runtime_summary(),
         "runtime": runtime_state().snapshot(),
         "auth_required": bool(_server_keys()),

@@ -90,6 +90,18 @@
             "transport": "responses_reasoning",
             "supported_efforts": ["low", "medium", "high", "xhigh", "max"]
           }
+        },
+        {
+          "model": "gpt-image-2",
+          "model_kind": "image",
+          "image_capabilities": {
+            "status": "candidate",
+            "transport": "images_api",
+            "operations": ["generation", "editing"],
+            "streaming": true,
+            "max_input_images": 1
+          },
+          "image_probe_status": "not_run"
         }
       ],
       "traffic_control": {

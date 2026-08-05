@@ -311,6 +311,48 @@ def load_registry(
     return _dedupe_profiles(profiles)
 
 
+def load_image_registry(
+    path: str | Path | None = None,
+    *,
+    include_disabled: bool = False,
+) -> list[ModelProfile]:
+    """Load a separately promoted image-capability registry.
+
+    Text pre-Fusion registries intentionally do not carry image admission
+    state. An image registry is therefore opt-in and must prove that the
+    image probe binding is ready before any profile can reach ``ImageRouter``.
+    Mixed text/image files are rejected instead of silently filtered.
+    """
+
+    selected = str(
+        path or os.getenv("AXIO_FUSION_IMAGE_REGISTRY_PATH", "")
+    ).strip()
+    if not selected:
+        return []
+    payload = _load_registry_payload(selected)
+    if payload.get("image_capability_registry_ready") is not True:
+        raise ValueError("image registry is not promoted")
+    binding = payload.get("image_probe_binding")
+    if not isinstance(binding, Mapping) or str(binding.get("status") or "") != "ready":
+        raise ValueError("image registry probe binding is not ready")
+    rows = payload.get("models") if isinstance(payload.get("models"), list) else []
+    profiles = [normalize_profile(row) for row in rows if isinstance(row, Mapping)]
+    if not profiles:
+        raise ValueError("image registry contains no profiles")
+    if any(profile.text_model_eligible for profile in profiles):
+        raise ValueError("image registry contains text profiles")
+    if not include_disabled:
+        profiles = [profile for profile in profiles if profile.enabled]
+    if not profiles:
+        raise ValueError("image registry contains no enabled profiles")
+    if not any(
+        profile.image_generation_eligible or profile.image_editing_eligible
+        for profile in profiles
+    ):
+        raise ValueError("image registry contains no verified image operations")
+    return _dedupe_profiles(profiles)
+
+
 def registry_report(profiles: Sequence[ModelProfile]) -> dict[str, Any]:
     return {
         "schema": "axio_fusion_api.registry_report.v1",

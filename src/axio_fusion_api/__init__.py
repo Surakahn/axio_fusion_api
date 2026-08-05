@@ -58,6 +58,7 @@ from .benchmark_replacements import (
 from .registry import (
     build_default_registry,
     build_probe_bound_registry,
+    load_image_registry,
     load_registry,
     validate_prefusion_registry_handoff,
 )
@@ -82,6 +83,7 @@ __all__ = [
     "ModelProfile",
     "build_default_registry",
     "build_probe_bound_registry",
+    "load_image_registry",
     "build_runtime_profiles",
     "create_runtime_http_server",
     "build_route_plan",

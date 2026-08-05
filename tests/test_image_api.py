@@ -28,6 +28,7 @@ from axio_fusion_api.image_probe import (
     redact_image_probe_artifact,
 )
 from axio_fusion_api.orchestrator import FusionEngine
+from axio_fusion_api.registry import load_image_registry
 from axio_fusion_api.schemas import ModelProfile
 
 
@@ -128,6 +129,100 @@ def test_image_capability_requires_verified_capability_and_probe():
     assert _image_profile(capability_status="candidate").image_generation_eligible is False
     assert _image_profile(probe_status="not_run").image_generation_eligible is False
     assert _image_profile(probe_status="failed").image_generation_eligible is False
+
+
+def test_load_image_registry_requires_promoted_image_only_binding(tmp_path):
+    profile = _image_profile()
+    registry_path = tmp_path / "image-registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema": "axio_fusion_api.registry.v1",
+                "models": [profile.safe_dict()],
+                "image_capability_registry_ready": True,
+                "image_probe_binding": {"status": "ready"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = load_image_registry(registry_path)
+
+    assert [item.profile_id for item in loaded] == [profile.profile_id]
+    assert loaded[0].image_generation_eligible is True
+
+
+def test_load_image_registry_rejects_unpromoted_or_mixed_profiles(tmp_path):
+    image = _image_profile()
+    text = ModelProfile(provider="text-provider", model="text-model")
+
+    unpromoted = tmp_path / "unpromoted.json"
+    unpromoted.write_text(
+        json.dumps(
+            {
+                "schema": "axio_fusion_api.registry.v1",
+                "models": [image.safe_dict()],
+                "image_capability_registry_ready": False,
+                "image_probe_binding": {"status": "blocked"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="not promoted"):
+        load_image_registry(unpromoted)
+
+    mixed = tmp_path / "mixed.json"
+    mixed.write_text(
+        json.dumps(
+            {
+                "schema": "axio_fusion_api.registry.v1",
+                "models": [image.safe_dict(), text.safe_dict()],
+                "image_capability_registry_ready": True,
+                "image_probe_binding": {"status": "ready"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="text profiles"):
+        load_image_registry(mixed)
+
+
+def test_explicit_image_profiles_are_isolated_from_text_engine():
+    profile = _image_profile()
+    fake = _FakeImageClient()
+
+    status, _headers, body = server.handle_request(
+        method="POST",
+        path="/v1/images/generations",
+        headers={"Content-Type": "application/json"},
+        body=json.dumps({"model": "axio-fast", "prompt": "a red kite"}),
+        engine=FusionEngine([profile]),
+        image_profiles=[],
+        record_runtime=False,
+        record_trace=False,
+    )
+
+    assert status == 503
+    assert json.loads(body)["error"]["code"] == "image_capability_unavailable"
+    assert fake.generate_calls == []
+
+
+def test_health_reports_image_registry_separately_from_text_registry():
+    text = ModelProfile(provider="text-provider", model="text-model")
+    status, _headers, body = server.handle_request(
+        method="GET",
+        path="/v1/health",
+        engine=FusionEngine([text]),
+        image_profiles=[_image_profile()],
+        record_runtime=False,
+        record_trace=False,
+    )
+
+    payload = json.loads(body)
+    assert status == 200
+    assert payload["image_registry"]["generation_profile_count"] == 1
+    assert payload["image_registry"]["editing_profile_count"] == 1
+    assert payload["image_registry"]["text_fusion_isolated"] is True
 
 
 def test_generation_parser_allowlists_fields_and_parses_boolean():

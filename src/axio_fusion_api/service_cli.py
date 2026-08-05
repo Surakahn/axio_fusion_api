@@ -45,6 +45,14 @@ def build_parser() -> argparse.ArgumentParser:
     serve_cmd.add_argument("--host", default="127.0.0.1")
     serve_cmd.add_argument("--port", type=int, default=8789)
     serve_cmd.add_argument("--live", action="store_true")
+    serve_cmd.add_argument(
+        "--image-registry",
+        default=None,
+        help=(
+            "Optional private registry promoted by image-probe-bind; it is "
+            "loaded separately from the text pre-Fusion registry."
+        ),
+    )
     serve_cmd.add_argument("--discover", action="store_true")
     serve_cmd.add_argument("--enroll", action="store_true")
     serve_cmd.add_argument(
@@ -183,6 +191,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
     if not dynamic_manifest_mode:
         if args.registry:
             os.environ["AXIO_FUSION_REGISTRY_PATH"] = str(args.registry)
+        if args.image_registry:
+            os.environ["AXIO_FUSION_IMAGE_REGISTRY_PATH"] = str(args.image_registry)
         print(f"Serving standalone Axio Fusion API on http://{args.host}:{args.port}", file=sys.stderr)
         try:
             serve(host=args.host, port=args.port, live=bool(args.live))
@@ -211,6 +221,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         enrollment_reasoning_probe_max_models=args.enrollment_reasoning_probe_max_models,
         enrollment_reasoning_probe_max_models_per_provider=args.enrollment_reasoning_probe_max_models_per_provider,
         enrollment_min_available_models=args.enrollment_min_available_models,
+        image_registry=args.image_registry,
         enrollment_calibrate_tools=not bool(args.no_tool_calibration),
         enrollment_calibrate_reasoning=not bool(args.no_reasoning_calibration),
         require_prefusion=bool(args.enroll and not args.diagnostic_only),

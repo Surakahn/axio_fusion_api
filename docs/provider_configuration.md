@@ -105,6 +105,26 @@ promotion and leaves the source registry unchanged. Image probe prompts and
 source image bytes are never used for benchmark calibration or Fusion prompt
 tuning.
 
+The promoted image registry is a separate serving input. Set
+`AXIO_FUSION_IMAGE_REGISTRY_PATH` or pass `--image-registry` to the service;
+do not append its rows to the text pre-Fusion registry. The loader requires
+`image_capability_registry_ready: true`, a `ready` image probe binding, an
+image-only profile set, and at least one verified operation. Without this
+input, production `serve` exposes the text Axio models but returns a bounded
+image-capability-unavailable response for image routes. The health response
+reports the image lane separately from `registry_readiness`.
+
+```bash
+axio-fusion-api-service \
+  --registry <PRIVATE_TEXT_PREFUSION_REGISTRY.json> serve --live \
+  --image-registry <PRIVATE_IMAGE_VERIFIED_REGISTRY.json>
+```
+
+This separation also means a text registry refresh cannot accidentally replace
+or downgrade the verified image capability. Image profile routing still uses
+the same provider credential pool, proxy policy, failover rules, and 90-second
+deadline, but it never enters text Fusion deliberation.
+
 ## Reasoning Strength Transport
 
 `FusionRequest.reasoning_effort` is Axio's protocol-neutral logical control.
