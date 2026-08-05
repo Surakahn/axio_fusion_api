@@ -175,6 +175,45 @@ for diagnostics and cannot be loaded as a serving registry. This gate is
 independent from both the production short-probe admission and the later
 21-suite evaluator. It does not make a capability or superiority claim.
 
+## Transport-Only Successor Admission
+
+When a complete screening campaign is terminal but one or more canonical
+models exceed the transport-failure gate, the campaign must not be converted
+to a ranking and its successful scores must not be mixed into a new campaign.
+The control plane can instead create a new hash-only successor receipt from
+the old campaign's transport evidence:
+
+```bash
+PYTHONPATH=src python3 -m axio_fusion_api.cli \
+  --registry <PRIVATE_REGISTRY.json> baseline-screening-transport-admission \
+  --plan <PRIVATE_PLAN.safe.json> \
+  --campaign-state <PRIVATE_CAMPAIGN_STATE.private.json> \
+  --min-canonical-models 3 \
+  --output <PRIVATE_WORK_DIR>/transport_admission.private.json
+```
+
+This receipt is an availability gate, not a quality or ranking signal. A
+canonical model is eligible only when every pre-registered source unit is
+terminal, has no fail-fast denominator gap, and remains at or below the
+fixed 2% transport-failure ceiling. Labels, answers, scores, and provider
+output content are rejected from the selection contract. The new campaign
+must be registered from the receipt and starts all cases from zero:
+
+```bash
+PYTHONPATH=src python3 -m axio_fusion_api.cli \
+  --registry <PRIVATE_REGISTRY.json> baseline-screening-plan \
+  --source-manifest <PRIVATE_SOURCE_MANIFEST.json> \
+  --private-probe-file <PRIVATE_PROVIDER_PROBE.json> \
+  --transport-availability-file <PRIVATE_WORK_DIR>/transport_admission.private.json \
+  --min-cases-per-source 70 --max-workers 1 \
+  --output <PRIVATE_WORK_DIR>/successor_screening_plan.safe.json
+```
+
+The receipt is bound into the plan, campaign resume state, and ranking
+conversion. A changed registry, source manifest, candidate hash set, or
+transport receipt therefore fails closed and requires a fresh successor
+registration.
+
 The independent non-target baseline-screening control plane applies the same
 fail-closed discipline before it spends provider budget: pinned official
 scorer imports are checked while the screening plan is created, and the

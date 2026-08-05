@@ -22,6 +22,8 @@ from .benchmark_replacements import (
     build_mmlu_pro_stem_replacement,
 )
 from .baseline_screening import (
+    DEFAULT_MAX_TRANSPORT_FAILURE_RATE,
+    build_transport_availability_admission,
     build_external_ranking_manifest_from_screening,
     build_non_target_screening_plan,
     run_non_target_screening_campaign,
@@ -728,6 +730,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Private long-request admission receipt; formal baseline screening uses only its eligible profiles.",
     )
+    screening_plan.add_argument(
+        "--transport-availability-file",
+        default=None,
+        help="Hash-only transport gate receipt used to create a successor candidate pool.",
+    )
     screening_plan.add_argument("--output", required=True)
     screening_plan.set_defaults(func=cmd_baseline_screening_plan)
 
@@ -755,6 +762,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="The same private long-request admission receipt used to build the plan.",
     )
+    screening_run.add_argument(
+        "--transport-availability-file",
+        default=None,
+        help="The same transport-only successor receipt used to build the plan.",
+    )
     screening_run.add_argument("--output", default=None)
     screening_run.set_defaults(func=cmd_baseline_screening_run)
 
@@ -773,8 +785,28 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="The same private long-request admission receipt used to build the plan.",
     )
+    screening_ranking.add_argument(
+        "--transport-availability-file",
+        default=None,
+        help="The same transport-only successor receipt used to build the plan.",
+    )
     screening_ranking.add_argument("--output", required=True)
     screening_ranking.set_defaults(func=cmd_baseline_screening_to_ranking)
+
+    screening_transport_admission = sub.add_parser(
+        "baseline-screening-transport-admission",
+        help="Build a successor candidate receipt from transport failures only.",
+    )
+    screening_transport_admission.add_argument("--plan", required=True)
+    screening_transport_admission.add_argument("--campaign-state", required=True)
+    screening_transport_admission.add_argument(
+        "--max-transport-failure-rate",
+        type=float,
+        default=DEFAULT_MAX_TRANSPORT_FAILURE_RATE,
+    )
+    screening_transport_admission.add_argument("--min-canonical-models", type=int, default=3)
+    screening_transport_admission.add_argument("--output", required=True)
+    screening_transport_admission.set_defaults(func=cmd_baseline_screening_transport_admission)
 
     baseline_freeze = sub.add_parser("benchmark-provider-baseline-freeze")
     baseline_freeze.add_argument("--max-provider-baselines", type=int, default=3)
@@ -2320,6 +2352,7 @@ def cmd_baseline_screening_plan(args: argparse.Namespace) -> int:
         max_workers=args.max_workers,
         fail_fast_transport_failure_gate=bool(args.fail_fast_transport_failure_gate),
         operational_admission_path=args.operational_admission_file,
+        transport_availability_path=args.transport_availability_file,
     )
     _emit_json(payload, output=args.output)
     return 0 if payload.get("ready") is True else 2
@@ -2339,6 +2372,7 @@ def cmd_baseline_screening_run(args: argparse.Namespace) -> int:
         retry_failed=bool(args.retry_failed),
         overwrite=False,
         operational_admission_path=args.operational_admission_file,
+        transport_availability_path=args.transport_availability_file,
     )
     _emit_json(payload, output=args.output)
     if payload.get("status") in {"completed", "preflight_ready"}:
@@ -2362,9 +2396,22 @@ def cmd_baseline_screening_to_ranking(args: argparse.Namespace) -> int:
         private_probe_files=args.private_probe_file,
         private_root=args.private_root,
         operational_admission_path=args.operational_admission_file,
+        transport_availability_path=args.transport_availability_file,
     )
     _emit_json(payload, output=args.output)
     return 0 if payload.get("screening_conversion_ready") is True else 2
+
+
+def cmd_baseline_screening_transport_admission(args: argparse.Namespace) -> int:
+    payload = build_transport_availability_admission(
+        plan_path=args.plan,
+        campaign_state_path=args.campaign_state,
+        registry_path=_baseline_screening_registry(args),
+        max_transport_failure_rate=args.max_transport_failure_rate,
+        min_canonical_models=args.min_canonical_models,
+    )
+    _emit_json(payload, output=args.output)
+    return 0 if payload.get("status") == "ready" else 2
 
 
 def cmd_provider_probe_evidence_audit(args: argparse.Namespace) -> int:

@@ -11,6 +11,7 @@ if str(STANDALONE_SRC) not in sys.path:
     sys.path.insert(0, str(STANDALONE_SRC))
 
 from axio_fusion_api.baseline_screening import (
+    SCREENING_TRANSPORT_ADMISSION_SCHEMA,
     SCREENING_CAMPAIGN_SCHEMA,
     SCREENING_PLAN_SCHEMA,
     ScreeningCase,
@@ -26,6 +27,7 @@ from axio_fusion_api.baseline_screening import (
     _screening_unit_path,
     build_external_ranking_manifest_from_screening,
     build_non_target_screening_plan,
+    build_transport_availability_admission,
     build_provider_identity_attestation_receipt,
     run_non_target_screening_campaign,
 )
@@ -876,6 +878,133 @@ def test_fail_fast_transport_gate_preserves_complete_failure_denominator(tmp_pat
     assert len(resumed_client.calls) == 3
     assert resumed["transport_failure_count"] == 4
     assert resumed["fail_fast_unattempted_case_count"] == 1
+
+
+def _transport_admission_fixture(tmp_path: Path):
+    registry_path, probe_path, manifest_path = _screening_fixture(tmp_path)
+    registry_payload = json.loads(registry_path.read_text(encoding="utf-8"))
+    fourth = {
+        **_registry_rows()[3],
+        "provider": f"{PRIVATE_PROVIDER_MARKER}_FOUR",
+        "model": f"{PRIVATE_MODEL_MARKER}_FOUR",
+        "canonical_model_id": f"{PRIVATE_MODEL_MARKER}_FOUR",
+    }
+    registry_payload["models"].append(fourth)
+    _write_json(registry_path, registry_payload)
+    probe_payload = json.loads(probe_path.read_text(encoding="utf-8"))
+    probe_payload["provider_reports"].append(
+        {
+            "provider": fourth["provider"],
+            "status": "ok",
+            "base_url_sha256": sha256_text(f"https://{fourth['provider']}.invalid/v1"),
+            "model_count": 1,
+            "model_ids": [fourth["model"]],
+        }
+    )
+    _write_json(probe_path, probe_payload)
+    plan = build_non_target_screening_plan(
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        min_cases_per_source=4,
+        max_workers=1,
+    )
+    assert plan["ready"] is True, plan["blockers"]
+    plan_path = _write_json(tmp_path / "transport-source-plan.safe.json", plan)
+    failed_canonical = plan["candidate_groups"][0]["canonical_identity_sha256"]
+    units = []
+    for task in plan["tasks"]:
+        failed = task["canonical_identity_sha256"] == failed_canonical
+        units.append(
+            {
+                "task_id": task["task_id"],
+                "source_id_sha256": task["source_id_sha256"],
+                "canonical_identity_sha256": task["canonical_identity_sha256"],
+                "status": "failed" if failed else "completed",
+                "transport_failure_count": 2 if failed else 0,
+                "transport_failure_rate": 0.5 if failed else 0.0,
+                "fail_fast_unattempted_case_count": 0,
+                "reason_codes": [],
+                "private_unit_content_sha256": sha256_text(task["task_id"]),
+            }
+        )
+    state = {
+        "schema": SCREENING_CAMPAIGN_SCHEMA,
+        "mode": "live",
+        "status": "partial",
+        "plan_file_content_sha256": _file_sha256(plan_path),
+        "plan_digest_sha256": plan["plan_digest_sha256"],
+        "registry_file_sha256": _file_sha256(registry_path),
+        "source_manifest_content_sha256": plan["source_manifest_content_sha256"],
+        "network_calls_performed": True,
+        "target_suite_calls_performed": False,
+        "benchmark_outputs_used_for_training": False,
+        "benchmark_outputs_used_for_prompt_tuning": False,
+        "units": units,
+        "elapsed_ms": 1.0,
+    }
+    _rehash_campaign_state(state)
+    state_path = _write_json(tmp_path / "transport-source-campaign.private.json", state)
+    return registry_path, probe_path, manifest_path, plan_path, state_path, plan, failed_canonical
+
+
+def test_transport_availability_admission_filters_only_failed_transport_candidates(tmp_path):
+    registry_path, probe_path, manifest_path, plan_path, state_path, plan, failed_canonical = _transport_admission_fixture(tmp_path)
+
+    receipt = build_transport_availability_admission(
+        plan_path=plan_path,
+        campaign_state_path=state_path,
+        registry_path=registry_path,
+        min_canonical_models=3,
+    )
+
+    assert receipt["schema"] == SCREENING_TRANSPORT_ADMISSION_SCHEMA
+    assert receipt["status"] == "ready", receipt["blockers"]
+    assert receipt["eligible_canonical_model_count"] == 3
+    assert failed_canonical not in receipt["eligible_canonical_identity_sha256s"]
+    assert receipt["quality_fields_used_for_selection"] == []
+    assert receipt["no_cheat_contract"]["uses_benchmark_scores"] is False
+
+    receipt_path = _write_json(tmp_path / "transport-admission.private.json", receipt)
+    successor = build_non_target_screening_plan(
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        min_cases_per_source=4,
+        max_workers=1,
+        transport_availability_path=receipt_path,
+    )
+
+    assert successor["ready"] is True, successor["blockers"]
+    assert successor["transport_availability"]["status"] == "ready"
+    assert successor["canonical_model_group_count"] == 3
+    assert successor["replica_profile_count"] == 4
+
+
+def test_transport_availability_admission_rejects_quality_selection_or_campaign_tamper(tmp_path):
+    registry_path, probe_path, manifest_path, plan_path, state_path, _, _ = _transport_admission_fixture(tmp_path)
+    receipt = build_transport_availability_admission(
+        plan_path=plan_path,
+        campaign_state_path=state_path,
+        registry_path=registry_path,
+        min_canonical_models=3,
+    )
+    receipt["quality_fields_used_for_selection"] = ["mean_score"]
+    tampered_receipt_path = _write_json(
+        tmp_path / "transport-admission-tampered.private.json", receipt
+    )
+    # The receipt builder itself remains the trust boundary; a tampered
+    # receipt cannot be bound into a successor plan.
+    successor = build_non_target_screening_plan(
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        min_cases_per_source=4,
+        max_workers=1,
+        transport_availability_path=tampered_receipt_path,
+    )
+    assert successor["ready"] is False
+    assert "screening_transport_admission_quality_selection_present" in successor["blockers"]
 
 
 def test_identity_attestation_requires_exact_catalog_alias(tmp_path):

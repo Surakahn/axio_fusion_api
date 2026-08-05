@@ -35,6 +35,12 @@ def _parse_args() -> argparse.Namespace:
         help="Private long-request receipt bound to the screening plan.",
     )
     parser.add_argument(
+        "--transport-availability-file",
+        type=Path,
+        default=None,
+        help="Hash-only transport successor receipt bound to the screening plan.",
+    )
+    parser.add_argument(
         "--credentials-file",
         type=Path,
         default=DEFAULT_CREDENTIAL_FILE,
@@ -108,6 +114,13 @@ def _run_chunk(args: argparse.Namespace, chunk: int) -> tuple[int, dict[str, Any
             [
                 "--operational-admission-file",
                 str(args.operational_admission_file),
+            ]
+        )
+    if args.transport_availability_file is not None:
+        sys.argv.extend(
+            [
+                "--transport-availability-file",
+                str(args.transport_availability_file),
             ]
         )
     sys.argv.extend(["--output", str(receipt)])

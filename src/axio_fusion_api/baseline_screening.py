@@ -58,6 +58,9 @@ SCREENING_UNIT_SAFE_SCHEMA = "axio_fusion_api.non_target_screening_unit_safe.v1"
 SCREENING_IDENTITY_ATTESTATION_SCHEMA = (
     "axio_fusion_api.provider_identity_attestation_receipt.v1"
 )
+SCREENING_TRANSPORT_ADMISSION_SCHEMA = (
+    "axio_fusion_api.non_target_screening_transport_admission.v1"
+)
 
 SUPPORTED_SCREENING_ADAPTERS = frozenset(
     {"jsonl_multiple_choice", "mmlu_pro", "livebench_official"}
@@ -187,6 +190,7 @@ def build_non_target_screening_plan(
     max_workers: int = DEFAULT_SCREENING_MAX_WORKERS,
     fail_fast_transport_failure_gate: bool = False,
     operational_admission_path: str | Path | None = None,
+    transport_availability_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Pre-register a complete-pool, non-target provider screening matrix.
 
@@ -217,6 +221,13 @@ def build_non_target_screening_plan(
         blockers.append("screening_registry_content_digest_missing")
     if source_manifest.get("schema") != SCREENING_SOURCE_MANIFEST_SCHEMA:
         blockers.append("screening_source_manifest_schema_invalid")
+    profiles, transport_availability = _apply_transport_availability_filter(
+        profiles,
+        transport_availability_path=transport_availability_path,
+        registry_content_sha256=registry_sha256,
+        source_manifest_content_sha256=source_manifest_sha256,
+        blockers=blockers,
+    )
 
     pre_registration = (
         source_manifest.get("pre_registration")
@@ -343,6 +354,7 @@ def build_non_target_screening_plan(
         "registry_file_sha256": registry_sha256,
         "source_manifest_content_sha256": source_manifest_sha256,
         "operational_admission": operational_admission,
+        "transport_availability": transport_availability,
         "pre_registered_before_target_campaign": (
             pre_registration.get("declared_before_target_campaign") is True
         ),
@@ -877,6 +889,311 @@ def _load_private_json(
     return dict(value), sha256_text(raw)
 
 
+def build_transport_availability_admission(
+    *,
+    plan_path: str | Path,
+    campaign_state_path: str | Path,
+    registry_path: str | Path,
+    max_transport_failure_rate: float = DEFAULT_MAX_TRANSPORT_FAILURE_RATE,
+    min_canonical_models: int = len(EXTERNAL_PROVIDER_RANKING_REQUIRED_RANKS),
+) -> dict[str, Any]:
+    """Build a hash-only successor-candidate receipt from transport evidence.
+
+    This is deliberately narrower than quality ranking and independent from
+    the long-request operational admission gate. It may remove a model only
+    when every pre-registered source unit is terminal, successful at the
+    transport gate, and free of fail-fast denominator gaps. Scores, labels,
+    and answer content are never read for the eligibility decision.
+    """
+
+    blockers: list[str] = []
+    plan, plan_content_sha256 = _load_private_json(
+        Path(plan_path),
+        reason_prefix="transport_admission_plan",
+        blockers=blockers,
+    )
+    state, state_content_sha256 = _load_private_json(
+        Path(campaign_state_path),
+        reason_prefix="transport_admission_campaign",
+        blockers=blockers,
+    )
+    registry_file = Path(registry_path)
+    registry_content_sha256 = _file_sha256(registry_file)
+    if not registry_content_sha256:
+        blockers.append("transport_admission_registry_file_missing")
+
+    try:
+        threshold = float(max_transport_failure_rate)
+    except (TypeError, ValueError):
+        threshold = -1.0
+    if (
+        not math.isfinite(threshold)
+        or threshold < 0.0
+        or threshold > DEFAULT_MAX_TRANSPORT_FAILURE_RATE
+    ):
+        blockers.append("transport_admission_failure_rate_threshold_invalid")
+        threshold = DEFAULT_MAX_TRANSPORT_FAILURE_RATE
+    minimum_models = max(1, int(min_canonical_models or 1))
+
+    if plan.get("schema") != SCREENING_PLAN_SCHEMA:
+        blockers.append("transport_admission_plan_schema_invalid")
+    if plan.get("ready") is not True:
+        blockers.append("transport_admission_plan_not_ready")
+    if state.get("schema") != SCREENING_CAMPAIGN_SCHEMA:
+        blockers.append("transport_admission_campaign_schema_invalid")
+    if state.get("status") not in {"completed", "partial"}:
+        blockers.append("transport_admission_campaign_not_terminal")
+    if state.get("network_calls_performed") is not True:
+        blockers.append("transport_admission_campaign_not_live")
+    if state.get("target_suite_calls_performed") is not False:
+        blockers.append("transport_admission_target_suite_calls_present")
+    if state.get("benchmark_outputs_used_for_training") is not False:
+        blockers.append("transport_admission_training_output_present")
+    if state.get("benchmark_outputs_used_for_prompt_tuning") is not False:
+        blockers.append("transport_admission_prompt_tuning_output_present")
+    if plan.get("registry_file_sha256") != registry_content_sha256:
+        blockers.append("transport_admission_registry_binding_mismatch")
+    if state.get("registry_file_sha256") != registry_content_sha256:
+        blockers.append("transport_admission_campaign_registry_binding_mismatch")
+    if state.get("plan_file_content_sha256") != plan_content_sha256:
+        blockers.append("transport_admission_campaign_plan_file_binding_mismatch")
+    declared_plan_digest = str(plan.get("plan_digest_sha256") or "")
+    if state.get("plan_digest_sha256") != declared_plan_digest:
+        blockers.append("transport_admission_plan_digest_mismatch")
+    if declared_plan_digest != sha256_text(
+        stable_json(_screening_plan_digest_input(plan))
+    ):
+        blockers.append("transport_admission_plan_content_digest_mismatch")
+    declared_campaign_digest = str(state.get("campaign_digest_sha256") or "")
+    computed_campaign_digest = sha256_text(
+        stable_json(
+            {
+                key: value
+                for key, value in state.items()
+                if key not in {"campaign_digest_sha256", "elapsed_ms"}
+            }
+        )
+    )
+    if not declared_campaign_digest or declared_campaign_digest != computed_campaign_digest:
+        blockers.append("transport_admission_campaign_content_digest_mismatch")
+    if state.get("source_manifest_content_sha256") != plan.get(
+        "source_manifest_content_sha256"
+    ):
+        blockers.append("transport_admission_source_binding_mismatch")
+    no_cheat = plan.get("no_cheat_contract")
+    if not isinstance(no_cheat, Mapping):
+        blockers.append("transport_admission_no_cheat_contract_missing")
+    else:
+        for key in (
+            "target_suite_prompts_used",
+            "target_suite_labels_used",
+            "target_suite_results_used",
+            "benchmark_outputs_used_for_router_training",
+            "benchmark_outputs_used_for_prompt_tuning",
+        ):
+            if no_cheat.get(key) is not False:
+                blockers.append(f"transport_admission_{key}_present")
+
+    task_rows = [
+        row for row in plan.get("tasks", []) if isinstance(row, Mapping)
+    ] if isinstance(plan.get("tasks"), list) else []
+    source_rows = [
+        row for row in plan.get("sources", []) if isinstance(row, Mapping)
+    ] if isinstance(plan.get("sources"), list) else []
+    candidate_rows = [
+        row
+        for row in plan.get("candidate_groups", [])
+        if isinstance(row, Mapping)
+    ] if isinstance(plan.get("candidate_groups"), list) else []
+    units = [
+        row for row in state.get("units", []) if isinstance(row, Mapping)
+    ] if isinstance(state.get("units"), list) else []
+    expected_task_ids = {
+        str(row.get("task_id") or "") for row in task_rows if str(row.get("task_id") or "")
+    }
+    unit_by_task: dict[str, Mapping[str, Any]] = {}
+    duplicate_task_ids: set[str] = set()
+    for row in units:
+        task_id = str(row.get("task_id") or "")
+        if not task_id:
+            blockers.append("transport_admission_unit_task_id_missing")
+            continue
+        if task_id in unit_by_task:
+            duplicate_task_ids.add(task_id)
+            continue
+        unit_by_task[task_id] = row
+        if str(row.get("status") or "") not in {"completed", "failed", "blocked"}:
+            blockers.append("transport_admission_unit_not_terminal")
+    if duplicate_task_ids:
+        blockers.append("transport_admission_unit_task_id_duplicate")
+    if expected_task_ids != set(unit_by_task):
+        blockers.append("transport_admission_unit_set_incomplete")
+
+    source_by_hash = {
+        str(row.get("source_id_sha256") or ""): row
+        for row in source_rows
+        if str(row.get("source_id_sha256") or "")
+    }
+    source_family_count = len(
+        {
+            str(row.get("source_family_sha256") or "")
+            for row in source_rows
+            if str(row.get("source_family_sha256") or "")
+        }
+    )
+    if source_family_count < EXTERNAL_PROVIDER_RANKING_MIN_INDEPENDENT_SOURCES:
+        blockers.append("transport_admission_independent_source_count_below_minimum")
+
+    unit_evidence: list[dict[str, Any]] = []
+    transport_pass_by_task: dict[str, bool] = {}
+    for task in task_rows:
+        task_id = str(task.get("task_id") or "")
+        unit = unit_by_task.get(task_id)
+        if unit is None:
+            transport_pass_by_task[task_id] = False
+            continue
+        raw_rate = unit.get("transport_failure_rate")
+        try:
+            rate = float(raw_rate)
+        except (TypeError, ValueError):
+            rate = math.nan
+        failure_count = unit.get("transport_failure_count")
+        try:
+            failure_count_int = int(failure_count or 0)
+        except (TypeError, ValueError):
+            failure_count_int = -1
+        unattempted = unit.get("fail_fast_unattempted_case_count")
+        try:
+            unattempted_int = int(unattempted or 0)
+        except (TypeError, ValueError):
+            unattempted_int = -1
+        valid_rate = math.isfinite(rate) and 0.0 <= rate <= 1.0
+        valid_counts = failure_count_int >= 0 and unattempted_int >= 0
+        passed = (
+            str(unit.get("status") or "") == "completed"
+            and valid_rate
+            and valid_counts
+            and unattempted_int == 0
+            and rate <= threshold
+        )
+        identity_matches = (
+            str(unit.get("canonical_identity_sha256") or "")
+            == str(task.get("canonical_identity_sha256") or "")
+            and str(unit.get("source_id_sha256") or "")
+            == str(task.get("source_id_sha256") or "")
+        )
+        if not identity_matches:
+            blockers.append("transport_admission_unit_identity_mismatch")
+        passed = passed and identity_matches
+        transport_pass_by_task[task_id] = passed
+        unit_evidence.append(
+            {
+                "task_id_sha256": task_id,
+                "source_id_sha256": str(task.get("source_id_sha256") or ""),
+                "canonical_identity_sha256": str(
+                    task.get("canonical_identity_sha256") or ""
+                ),
+                "status": str(unit.get("status") or ""),
+                "transport_failure_count": failure_count_int,
+                "transport_failure_rate": rate if valid_rate else None,
+                "fail_fast_unattempted_case_count": unattempted_int,
+                "transport_gate_passed": passed,
+            }
+        )
+
+    eligible_canonical: list[str] = []
+    for candidate in candidate_rows:
+        canonical_hash = str(candidate.get("canonical_identity_sha256") or "")
+        candidate_tasks = [
+            task
+            for task in task_rows
+            if str(task.get("canonical_identity_sha256") or "") == canonical_hash
+        ]
+        source_ids = {
+            str(task.get("source_id_sha256") or "")
+            for task in candidate_tasks
+            if str(task.get("source_id_sha256") or "")
+        }
+        candidate_ready = (
+            bool(canonical_hash)
+            and len(source_ids) == len(source_by_hash)
+            and len(candidate_tasks) == len(source_by_hash)
+            and all(transport_pass_by_task.get(str(task.get("task_id") or "")) is True for task in candidate_tasks)
+        )
+        if candidate_ready:
+            eligible_canonical.append(canonical_hash)
+
+    eligible_canonical = sorted(set(eligible_canonical))
+    if len(eligible_canonical) < minimum_models:
+        blockers.append("transport_admission_fewer_than_minimum_models")
+    eligible_groups = {
+        str(row.get("canonical_identity_sha256") or ""): row
+        for row in candidate_rows
+        if str(row.get("canonical_identity_sha256") or "") in eligible_canonical
+    }
+    eligible_profile_hashes = sorted(
+        {
+            str(profile_hash)
+            for row in eligible_groups.values()
+            for profile_hash in row.get("replica_profile_id_sha256s", [])
+            if str(profile_hash)
+        }
+    )
+    del source_by_hash
+    payload: dict[str, Any] = {
+        "schema": SCREENING_TRANSPORT_ADMISSION_SCHEMA,
+        "standalone_product": True,
+        "decoupled_from_asci_fs": True,
+        "status": "ready" if not blockers else "blocked",
+        "source_plan_file_sha256": plan_content_sha256,
+        "source_campaign_state_file_sha256": state_content_sha256,
+        "plan_digest_sha256": declared_plan_digest,
+        "campaign_digest_sha256": str(state.get("campaign_digest_sha256") or ""),
+        "registry_file_sha256": registry_content_sha256,
+        "source_manifest_content_sha256": str(
+            plan.get("source_manifest_content_sha256") or ""
+        ),
+        "campaign_status": str(state.get("status") or ""),
+        "candidate_canonical_model_count": len(candidate_rows),
+        "eligible_canonical_model_count": len(eligible_canonical),
+        "minimum_canonical_model_count": minimum_models,
+        "source_count": len(source_rows),
+        "source_family_count": source_family_count,
+        "terminal_unit_count": len(unit_by_task),
+        "planned_unit_count": len(expected_task_ids),
+        "max_transport_failure_rate": threshold,
+        "eligible_canonical_identity_sha256s": eligible_canonical,
+        "eligible_profile_id_sha256s": eligible_profile_hashes,
+        "unit_transport_evidence": sorted(
+            unit_evidence, key=lambda row: str(row.get("task_id_sha256") or "")
+        ),
+        "selection_basis": "transport_failure_rate_only",
+        "quality_fields_used_for_selection": [],
+        "quality_fields_ignored": [
+            "mean_score",
+            "source_scores",
+            "labels",
+            "provider_outputs",
+        ],
+        "no_cheat_contract": {
+            "uses_benchmark_labels": False,
+            "uses_benchmark_answers": False,
+            "uses_benchmark_scores": False,
+            "uses_provider_output_content": False,
+            "uses_transport_failure_evidence_only": True,
+            "future_campaign_must_start_from_new_plan": True,
+        },
+        "raw_provider_names_persisted": False,
+        "raw_provider_model_ids_persisted": False,
+        "raw_provider_outputs_persisted": False,
+        "raw_prompts_persisted": False,
+        "raw_labels_persisted": False,
+        "secrets_persisted": False,
+        "blockers": sorted(set(blockers)),
+    }
+    return payload
+
+
 def _apply_operational_admission_filter(
     profiles: Sequence[ModelProfile],
     *,
@@ -936,6 +1253,105 @@ def _apply_operational_admission_filter(
     }
 
 
+def _apply_transport_availability_filter(
+    profiles: Sequence[ModelProfile],
+    *,
+    transport_availability_path: str | Path | None,
+    registry_content_sha256: str,
+    source_manifest_content_sha256: str,
+    blockers: list[str],
+) -> tuple[list[ModelProfile], dict[str, Any]]:
+    """Bind a new screening plan to transport-only successor evidence."""
+
+    if transport_availability_path is None or not str(transport_availability_path).strip():
+        return list(profiles), {
+            "required": False,
+            "status": "not_required",
+            "content_sha256": "",
+            "eligible_canonical_identity_sha256s": [],
+            "eligible_profile_id_sha256s": [],
+            "candidate_profile_count": len(profiles),
+            "filtered_profile_count": len(profiles),
+            "selection_basis": "none",
+            "raw_provider_names_persisted": False,
+            "raw_provider_model_ids_persisted": False,
+            "raw_provider_outputs_persisted": False,
+            "secrets_persisted": False,
+        }
+
+    payload, content_sha256 = _load_private_json(
+        Path(transport_availability_path),
+        reason_prefix="screening_transport_admission",
+        blockers=blockers,
+    )
+    reason_codes: list[str] = []
+    filter_blockers: list[str] = []
+    if payload.get("schema") != SCREENING_TRANSPORT_ADMISSION_SCHEMA:
+        reason_codes.append("screening_transport_admission_schema_invalid")
+    if payload.get("status") != "ready":
+        reason_codes.append("screening_transport_admission_not_ready")
+    if payload.get("registry_file_sha256") != registry_content_sha256:
+        reason_codes.append("screening_transport_admission_registry_binding_mismatch")
+    if payload.get("source_manifest_content_sha256") != source_manifest_content_sha256:
+        reason_codes.append("screening_transport_admission_source_binding_mismatch")
+    if payload.get("selection_basis") != "transport_failure_rate_only":
+        reason_codes.append("screening_transport_admission_selection_basis_invalid")
+    if payload.get("quality_fields_used_for_selection") != []:
+        reason_codes.append("screening_transport_admission_quality_selection_present")
+    transport_no_cheat = payload.get("no_cheat_contract")
+    if not isinstance(transport_no_cheat, Mapping):
+        reason_codes.append("screening_transport_admission_no_cheat_contract_invalid")
+    elif transport_no_cheat.get("uses_benchmark_scores") is not False:
+        reason_codes.append("screening_transport_admission_scores_present")
+    eligible_canonical = {
+        str(value).lower()
+        for value in payload.get("eligible_canonical_identity_sha256s", [])
+        if str(value)
+    }
+    eligible_profile_hashes = {
+        str(value).lower()
+        for value in payload.get("eligible_profile_id_sha256s", [])
+        if str(value)
+    }
+    if not eligible_canonical:
+        reason_codes.append("screening_transport_admission_candidate_set_missing")
+    if not eligible_profile_hashes:
+        reason_codes.append("screening_transport_admission_profile_set_missing")
+    filter_blockers.extend(reason_codes)
+
+    filtered = [
+        profile
+        for profile in profiles
+        if profile.canonical_identity_sha256.lower() in eligible_canonical
+        and sha256_text(profile.profile_id).lower() in eligible_profile_hashes
+    ]
+    if len(filtered) != len(eligible_profile_hashes):
+        filter_blockers.append("screening_transport_admission_profile_set_not_in_registry")
+    if {
+        profile.canonical_identity_sha256.lower() for profile in filtered
+    } != eligible_canonical:
+        filter_blockers.append("screening_transport_admission_canonical_set_not_in_registry")
+    if not filtered:
+        filter_blockers.append("screening_transport_admission_left_no_baseline_profiles")
+    if payload.get("eligible_profile_id_sha256s") != sorted(eligible_profile_hashes):
+        filter_blockers.append("screening_transport_admission_profile_hash_set_invalid")
+    if payload.get("eligible_canonical_identity_sha256s") != sorted(eligible_canonical):
+        filter_blockers.append("screening_transport_admission_canonical_hash_set_invalid")
+    blockers.extend(filter_blockers)
+    return filtered if not filter_blockers else [], {
+        "required": True,
+        "status": "ready" if not filter_blockers and filtered else "blocked",
+        "content_sha256": content_sha256,
+        "eligible_canonical_identity_sha256s": sorted(eligible_canonical),
+        "eligible_profile_id_sha256s": sorted(eligible_profile_hashes),
+        "candidate_profile_count": len(profiles),
+        "filtered_profile_count": len(filtered) if not filter_blockers else 0,
+        "selection_basis": "transport_failure_rate_only",
+        "raw_provider_names_persisted": False,
+        "raw_provider_model_ids_persisted": False,
+        "raw_provider_outputs_persisted": False,
+        "secrets_persisted": False,
+    }
 def _canonical_live_groups(profiles: Sequence[ModelProfile]) -> list[dict[str, Any]]:
     """Project the evaluation subsystem's canonical replica groups.
 
@@ -2399,6 +2815,7 @@ def run_non_target_screening_campaign(
     retry_failed: bool = False,
     overwrite: bool = False,
     operational_admission_path: str | Path | None = None,
+    transport_availability_path: str | Path | None = None,
     client: HTTPProviderClient | None = None,
 ) -> dict[str, Any]:
     """Execute or resume a pre-registered complete-pool screening campaign."""
@@ -2453,6 +2870,7 @@ def run_non_target_screening_campaign(
             and plan["fail_fast_policy"].get("enabled") is True
         ),
         operational_admission_path=operational_admission_path,
+        transport_availability_path=transport_availability_path,
     )
     plan_digest = str(plan.get("plan_digest_sha256") or "")
     if not _looks_like_sha256(plan_digest):
@@ -2473,6 +2891,13 @@ def run_non_target_screening_campaign(
     profiles, operational_admission = _apply_operational_admission_filter(
         profiles,
         operational_admission_path=operational_admission_path,
+        blockers=blockers,
+    )
+    profiles, transport_availability = _apply_transport_availability_filter(
+        profiles,
+        transport_availability_path=transport_availability_path,
+        registry_content_sha256=_file_sha256(registry_file),
+        source_manifest_content_sha256=source_manifest_sha256,
         blockers=blockers,
     )
     profile_by_hash = {sha256_text(item.profile_id): item for item in profiles}
@@ -2594,6 +3019,7 @@ def run_non_target_screening_campaign(
         "registry_file_sha256": _file_sha256(registry_file),
         "source_manifest_content_sha256": source_manifest_sha256,
         "operational_admission": operational_admission,
+        "transport_availability": transport_availability,
         "private_root_sha256": sha256_text(str(output_root)),
         "planned_task_count": int(plan.get("task_count") or 0),
         "selected_task_count": len(task_rows),
@@ -2849,6 +3275,7 @@ def build_external_ranking_manifest_from_screening(
     private_probe_files: Sequence[str | Path],
     private_root: str | Path,
     operational_admission_path: str | Path | None = None,
+    transport_availability_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Convert a complete screening campaign into the strict ranking v3 input."""
 
@@ -2872,6 +3299,13 @@ def build_external_ranking_manifest_from_screening(
     profiles, operational_admission = _apply_operational_admission_filter(
         profiles,
         operational_admission_path=operational_admission_path,
+        blockers=blockers,
+    )
+    profiles, transport_availability = _apply_transport_availability_filter(
+        profiles,
+        transport_availability_path=transport_availability_path,
+        registry_content_sha256=_file_sha256(Path(registry_path)),
+        source_manifest_content_sha256=source_manifest_sha256,
         blockers=blockers,
     )
     template = build_external_provider_ranking_template(
@@ -2919,6 +3353,10 @@ def build_external_ranking_manifest_from_screening(
         plan.get("operational_admission")
     ):
         blockers.append("screening_ranking_operational_admission_binding_mismatch")
+    if stable_json(state.get("transport_availability")) != stable_json(
+        plan.get("transport_availability")
+    ):
+        blockers.append("screening_ranking_transport_availability_binding_mismatch")
     declared_plan_digest = str(plan.get("plan_digest_sha256") or "")
     computed_plan_digest = sha256_text(
         stable_json(_screening_plan_digest_input(plan))
@@ -2942,6 +3380,7 @@ def build_external_ranking_manifest_from_screening(
             and plan["fail_fast_policy"].get("enabled") is True
         ),
         operational_admission_path=operational_admission_path,
+        transport_availability_path=transport_availability_path,
     )
     if current_plan.get("ready") is not True:
         blockers.extend(
@@ -4828,6 +5267,7 @@ def _screening_resume_state_errors(
         "plan_digest_sha256",
         "registry_file_sha256",
         "source_manifest_content_sha256",
+        "transport_availability",
         "execution_schedule_digest_sha256",
         "execution_task_sequence_sha256",
         "live_credential_readiness_digest_sha256",
