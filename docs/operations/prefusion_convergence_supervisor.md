@@ -1,67 +1,86 @@
 # Pre-Fusion Convergence Supervisor
 
 The production Fusion runtime and the benchmark evaluator remain separate.
-This utility only closes the current provider-screening handoff:
+This document describes the operator handoff for the active full-pool screening
+cohort. It is intentionally fail-closed:
 
 ```text
-r20 live screening
-  -> one ranking conversion
-  -> r21 fail-fast successor only when conversion is not ready
-  -> one r21 ranking conversion
+r25 live screening
+  -> one ranking conversion after terminal state
+  -> transport-only successor admission if conversion is blocked
+  -> a newly generated immutable cohort, if enough canonical models remain
   -> operator baseline-freeze and official-harness gates
 ```
 
-It does not change a frozen plan, retry a completed case, alter prompts, tune
-router weights, or start target benchmark traffic. It reads the operator
-credential file into the child process environment and never writes credential
-values, provider outputs, or raw prompts to a repository artifact. Runtime logs
-and state belong below `private/`.
+The supervisor never changes a frozen plan, retries a completed case, alters
+prompts, tunes router weights, or starts target benchmark traffic. It never
+selects a top-three baseline from a partial pool. Runtime logs and state belong
+below `private/`; public receipts contain hashes, counts, and reason codes only.
 
-## Current cohort
+## Active cohort
 
-Start it only once, using the PID of the already running r20 process:
+The current cohort is
+`private/runs/2026-08-05-prefusion-cohort-r25-full-pool-failfast/`.
+It has an existing live process and watcher:
+
+- screening PID: `screening.pid`
+- screening state: `baseline_screening_state.live.private.json`
+- watcher log: `ranking-watcher.private.log`
+- ranking output: `external_provider_ranking.r25.screened.private.json`
+
+Do not start another supervisor, run a manual provider request, or launch a
+successor while this PID is alive. The watcher performs exactly one ranking
+conversion after the process reaches a terminal state. A valid but blocked
+conversion is expected to return a non-zero command status; the authoritative
+decision is its `screening_conversion_ready` field, not the shell exit code.
+
+## Terminal handoff
+
+After the live PID exits, verify the state and read the ranking receipt before
+any downstream action:
 
 ```bash
 cd /home/he/axio_fusion_api
-PYTHONPATH=src nohup setsid python3.11 \
-  scripts/continue_prefusion_convergence.py \
-  --r20-pid 3460559 \
-  --r20-state private/runs/2026-08-02-prefusion-cohort-r20/baseline_screening_state.private.json \
-  --r20-plan private/runs/2026-08-02-prefusion-cohort-r20/baseline_screening_plan.r20.safe.json \
-  --r20-registry private/runs/2026-08-02-prefusion-cohort-r20/fusion-runtime-registry.exported-bound.private.json \
-  --source-manifest /mnt/storage/axio_fusion_benchmarks/non_target_ranking_campaigns/full_pool_2026-07-20/source_manifest.private.json \
-  --r20-private-root private/runs/2026-08-02-prefusion-cohort-r20/baseline_screening.private \
-  --r20-private-probe-file private/runs/2026-08-02-prefusion-cohort-r20/provider_probe.exported.private.json \
-  --r20-output private/runs/2026-08-02-prefusion-cohort-r20/baseline_screening.safe.json \
-  --r20-ranking-output private/runs/2026-08-02-prefusion-cohort-r20/external_provider_ranking.r20.screened.private.json \
-  --r21-plan private/runs/2026-08-04-prefusion-cohort-r21/baseline_screening_plan.r21.failfast.safe.json \
-  --r21-private-root private/runs/2026-08-04-prefusion-cohort-r21/baseline_screening.private \
-  --r21-state private/runs/2026-08-04-prefusion-cohort-r21/baseline_screening_state.private.json \
-  --r21-output private/runs/2026-08-04-prefusion-cohort-r21/baseline_screening.safe.json \
-  --r21-ranking-output private/runs/2026-08-04-prefusion-cohort-r21/external_provider_ranking.r21.screened.private.json \
-  --lock-file private/runs/prefusion-convergence-supervisor.lock \
-  --max-r20-recoveries 1 \
-  --interval-seconds 300 \
-  >>private/runs/prefusion-convergence-supervisor.console.log 2>&1 &
-echo $! > private/runs/prefusion-convergence-supervisor.pid
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+path = Path(
+    "private/runs/2026-08-05-prefusion-cohort-r25-full-pool-failfast/"
+    "baseline_screening_state.live.private.json"
+)
+state = json.loads(path.read_text(encoding="utf-8"))
+print(state.get("status"), state.get("ready_for_ranking"))
+PY
 ```
 
-The script validates that the supplied PID still contains the r20 plan
-fragment. A changed or reused PID aborts without starting a successor. The
-lock prevents duplicate supervisors. `baseline-screening-to-ranking` returns
-exit code `2` for a valid but blocked conversion; the supervisor intentionally
-reads the generated safe manifest and uses its
-`screening_conversion_ready` field instead of treating that return code as a
-process error.
+The ranking conversion must be bound to the exact r25 plan, source manifest,
+registry, private probe, and private unit root. The canonical command is kept
+in [convergence_execution_path_r20.md](convergence_execution_path_r20.md)
+and must not be run while the PID is still alive.
 
-If the bound r20 process exits while its state is still non-terminal, the
-supervisor uses the same plan, state, private root, and checkpoint once to
-resume the campaign. It never adds `--retry-failed`; after the configured
-recovery budget is exhausted it fails closed for operator review.
+If `screening_conversion_ready=true`, stop at the baseline-freeze gate. The
+operator must still validate the externally evidenced rank mapping, provider
+probe audit, identity attestations, and official/audited harness imports.
+No benchmark request is authorized merely because ranking conversion passed.
 
-When the conversion is ready, the supervisor stops at the baseline-freeze
-gate. It does not select the top three models automatically. The next action
-is the documented provider-freeze validation followed by the official harness
-gate. If conversion is not ready, r21 is started with its immutable,
-pre-registered serial fail-fast plan; cancelled cases remain in the complete
-failure denominator.
+If `screening_conversion_ready=false`, preserve the complete r25 evidence and
+run the transport-only admission command once, after terminal state:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m axio_fusion_api.cli \
+  --registry <r25-bound-registry> \
+  baseline-screening-transport-admission \
+  --plan private/runs/2026-08-05-prefusion-cohort-r25-full-pool-failfast/baseline_screening_plan.safe.json \
+  --campaign-state private/runs/2026-08-05-prefusion-cohort-r25-full-pool-failfast/baseline_screening_state.live.private.json \
+  --max-transport-failure-rate 0.02 \
+  --min-canonical-models 3 \
+  --output <transport-admission-receipt>
+```
+
+This command may use only transport terminal evidence. It must not read scores,
+answers, labels, or benchmark outputs to select eligible profiles. A ready
+receipt is only an input to a newly generated plan; it does not resume r25 and
+does not establish provider ranking. If fewer than three canonical models
+remain, the provider configuration or live availability must be repaired and a
+fresh full-pool plan generated before ranking can reopen.
