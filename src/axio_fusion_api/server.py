@@ -1097,9 +1097,13 @@ def _attach_runtime_refresh(
         enrollment_reasoning_probe_timeout: float | None = None,
         enrollment_reasoning_probe_max_models: int | None = None,
         enrollment_reasoning_probe_max_models_per_provider: int | None = None,
+        enrollment_vision_probe_timeout: float | None = None,
+        enrollment_vision_probe_max_models: int | None = None,
+        enrollment_vision_probe_max_models_per_provider: int | None = None,
         enrollment_min_available_models: int = 1,
         enrollment_calibrate_tools: bool = True,
         enrollment_calibrate_reasoning: bool = True,
+        enrollment_calibrate_vision: bool = True,
         environment: Mapping[str, Any] | None = None,
         secret_resolver: Any | None = None,
         client: HTTPProviderClient | None = None,
@@ -1179,9 +1183,13 @@ def _attach_runtime_refresh(
                 reasoning_probe_timeout=enrollment_reasoning_probe_timeout,
                 reasoning_probe_max_models=enrollment_reasoning_probe_max_models,
                 reasoning_probe_max_models_per_provider=enrollment_reasoning_probe_max_models_per_provider,
+                vision_probe_timeout=enrollment_vision_probe_timeout,
+                vision_probe_max_models=enrollment_vision_probe_max_models,
+                vision_probe_max_models_per_provider=enrollment_vision_probe_max_models_per_provider,
                 min_available_models=enrollment_min_available_models,
                 calibrate_tools=enrollment_calibrate_tools,
                 calibrate_reasoning=enrollment_calibrate_reasoning,
+                calibrate_vision=enrollment_calibrate_vision,
                 live=live,
                 client=effective_client,
                 engine_kwargs=options,
@@ -1270,9 +1278,13 @@ def create_runtime_http_server(
     enrollment_reasoning_probe_timeout: float | None = None,
     enrollment_reasoning_probe_max_models: int | None = None,
     enrollment_reasoning_probe_max_models_per_provider: int | None = None,
+    enrollment_vision_probe_timeout: float | None = None,
+    enrollment_vision_probe_max_models: int | None = None,
+    enrollment_vision_probe_max_models_per_provider: int | None = None,
     enrollment_min_available_models: int = 1,
     enrollment_calibrate_tools: bool = True,
     enrollment_calibrate_reasoning: bool = True,
+    enrollment_calibrate_vision: bool = True,
     environment: Mapping[str, Any] | None = None,
     secret_resolver: Any | None = None,
     client: HTTPProviderClient | None = None,
@@ -1362,9 +1374,13 @@ def create_runtime_http_server(
             reasoning_probe_timeout=enrollment_reasoning_probe_timeout,
             reasoning_probe_max_models=enrollment_reasoning_probe_max_models,
             reasoning_probe_max_models_per_provider=enrollment_reasoning_probe_max_models_per_provider,
+            vision_probe_timeout=enrollment_vision_probe_timeout,
+            vision_probe_max_models=enrollment_vision_probe_max_models,
+            vision_probe_max_models_per_provider=enrollment_vision_probe_max_models_per_provider,
             min_available_models=enrollment_min_available_models,
             calibrate_tools=enrollment_calibrate_tools,
             calibrate_reasoning=enrollment_calibrate_reasoning,
+            calibrate_vision=enrollment_calibrate_vision,
             live=live,
             client=client,
             engine_kwargs=engine_kwargs,
@@ -1583,6 +1599,28 @@ def _safe_runtime_refresh_enrollment_receipt(value: Mapping[str, Any]) -> dict[s
         "reasoning_probe_verified_count": _safe_nonnegative_int(value.get("reasoning_probe_verified_count")),
         "reasoning_probe_rejected_count": _safe_nonnegative_int(value.get("reasoning_probe_rejected_count")),
         "reasoning_probe_indeterminate_count": _safe_nonnegative_int(value.get("reasoning_probe_indeterminate_count")),
+        "vision_probe_enabled": value.get("vision_probe_enabled") is True,
+        "vision_probe_timeout_seconds": _safe_nonnegative_int(
+            value.get("vision_probe_timeout_seconds")
+        ) if value.get("vision_probe_timeout_seconds") is not None else None,
+        "vision_probe_selected_model_count": _safe_nonnegative_int(
+            value.get("vision_probe_selected_model_count")
+        ),
+        "vision_probe_passed_count": _safe_nonnegative_int(
+            value.get("vision_probe_passed_count")
+        ),
+        "vision_probe_failed_count": _safe_nonnegative_int(
+            value.get("vision_probe_failed_count")
+        ),
+        "vision_probe_unsupported_count": _safe_nonnegative_int(
+            value.get("vision_probe_unsupported_count")
+        ),
+        "vision_probe_indeterminate_count": _safe_nonnegative_int(
+            value.get("vision_probe_indeterminate_count")
+        ),
+        "vision_probe_latency_ineligible_count": _safe_nonnegative_int(
+            value.get("vision_probe_latency_ineligible_count")
+        ),
         "elapsed_ms": _safe_nonnegative_int(value.get("elapsed_ms")),
         "profile_set_sha256": str(value.get("profile_set_sha256") or "")[:128],
     }

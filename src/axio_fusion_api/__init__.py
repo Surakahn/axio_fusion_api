@@ -20,6 +20,13 @@ from .image_probe import (
     redact_image_probe_artifact,
     redact_image_probe_artifact_file,
 )
+from .vision_probe import (
+    build_vision_probe_bound_registry,
+    probe_provider_vision_support,
+    redact_vision_probe_artifact,
+    redact_vision_probe_artifact_file,
+    vision_input_probe_binding,
+)
 from .channel_config import (
     ChannelConfigError,
     build_runtime_profiles,
@@ -126,4 +133,9 @@ __all__ = [
     "probe_image_capabilities",
     "redact_image_probe_artifact",
     "redact_image_probe_artifact_file",
+    "build_vision_probe_bound_registry",
+    "probe_provider_vision_support",
+    "redact_vision_probe_artifact",
+    "redact_vision_probe_artifact_file",
+    "vision_input_probe_binding",
 ]

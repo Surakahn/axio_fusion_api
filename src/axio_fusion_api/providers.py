@@ -7537,6 +7537,9 @@ def _probe_profile_metadata(profile: ModelProfile) -> dict[str, Any]:
         "tool_probe_status": profile.tool_probe_status,
         "tool_calling_eligible": profile.tool_calling_eligible,
         "supports_vision": profile.supports_vision,
+        "vision_input_eligible": profile.vision_input_eligible,
+        "vision_probe_status": profile.vision_probe_status,
+        "vision_capability_source": profile.vision_capability_source,
         "model_kind": profile.model_kind,
         "image_capabilities": dict(profile.image_capabilities),
         "image_probe_status": profile.image_probe_status,
@@ -7620,6 +7623,8 @@ def _redact_probe_row(row: Mapping[str, Any]) -> dict[str, Any]:
         "tool_capability_source": str(row.get("tool_capability_source") or ""),
         "tool_probe_status": str(row.get("tool_probe_status") or "not_run"),
         "supports_vision": bool(row.get("supports_vision")),
+        "vision_probe_status": str(row.get("vision_probe_status") or "not_run"),
+        "vision_capability_source": str(row.get("vision_capability_source") or ""),
         "model_kind": str(row.get("model_kind") or "text")[:32],
         "image_capabilities": (
             dict(row.get("image_capabilities"))

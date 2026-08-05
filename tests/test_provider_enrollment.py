@@ -7,6 +7,7 @@ import pytest
 
 from axio_fusion_api import model_screening
 from axio_fusion_api.cli import main as fusion_cli_main
+from axio_fusion_api.service_cli import main as service_cli_main
 from axio_fusion_api.provider_enrollment import enroll_provider_channels, enroll_runtime_channels
 from axio_fusion_api.evaluation import build_fusion_code_test_receipt
 from axio_fusion_api.registry import (
@@ -15,6 +16,7 @@ from axio_fusion_api.registry import (
     provider_configuration_source_summary,
 )
 from axio_fusion_api.schemas import CAPABILITY_AXES, sha256_text
+from axio_fusion_api.vision_probe import vision_input_probe_binding
 
 
 def test_production_registry_loading_rejects_legacy_probe_registry(tmp_path):
@@ -621,6 +623,12 @@ def test_cli_enrollment_forwards_independent_tool_probe_budget(tmp_path, monkeyp
             "5",
             "--reasoning-probe-max-models-per-provider",
             "2",
+            "--vision-probe-timeout",
+            "13",
+            "--vision-probe-max-models",
+            "4",
+            "--vision-probe-max-models-per-provider",
+            "1",
             "--output-dir",
             str(tmp_path / "enrollment"),
         ]
@@ -633,6 +641,253 @@ def test_cli_enrollment_forwards_independent_tool_probe_budget(tmp_path, monkeyp
     assert observed["reasoning_probe_timeout"] == 11.0
     assert observed["reasoning_probe_max_models"] == 5
     assert observed["reasoning_probe_max_models_per_provider"] == 2
+    assert observed["calibrate_vision"] is True
+    assert observed["vision_probe_timeout"] == 13.0
+    assert observed["vision_probe_max_models"] == 4
+    assert observed["vision_probe_max_models_per_provider"] == 1
+
+
+def test_service_cli_enrollment_forwards_vision_probe_budget(tmp_path, monkeypatch, capsys):
+    config_path = tmp_path / "service_channels.json"
+    config_path.write_text(json.dumps({"providers": []}), encoding="utf-8")
+    observed = {}
+
+    def fake_enroll_provider_channels(**kwargs):
+        observed.update(kwargs)
+        return {"status": "blocked", "reason_codes": ["test_only"]}
+
+    monkeypatch.setattr(
+        "axio_fusion_api.service_cli.enroll_provider_channels",
+        fake_enroll_provider_channels,
+    )
+
+    assert service_cli_main(
+        [
+            "--provider-config-file",
+            str(config_path),
+            "enroll-providers",
+            "--live",
+            "--vision-probe-timeout",
+            "13",
+            "--vision-probe-max-models",
+            "4",
+            "--vision-probe-max-models-per-provider",
+            "1",
+            "--output-dir",
+            str(tmp_path / "enrollment"),
+        ]
+    ) == 2
+    capsys.readouterr()
+
+    assert observed["calibrate_vision"] is True
+    assert observed["vision_probe_timeout"] == 13.0
+    assert observed["vision_probe_max_models"] == 4
+    assert observed["vision_probe_max_models_per_provider"] == 1
+
+
+def test_file_enrollment_calibrates_vision_without_changing_quality_scores(
+    tmp_path,
+    monkeypatch,
+):
+    config_path = tmp_path / "vision_channels.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "providers": [
+                    {
+                        "provider": "fixture-vision",
+                        "api_format": "responses",
+                        "base_url_env": "FIXTURE_VISION_BASE_URL",
+                        "api_key_env": "FIXTURE_VISION_API_KEY",
+                        "models": [{"model": "fixture-vision-model", "supports_vision": True}],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FIXTURE_VISION_BASE_URL", "https://vision.fixture/v1")
+    monkeypatch.setenv("FIXTURE_VISION_API_KEY", "vision-fixture-secret")
+    capability_prior = {
+        "science_knowledge": 0.8,
+        "logic": 0.82,
+        "structured_output": 0.85,
+        "critique": 0.84,
+        "daily_work": 0.81,
+    }
+
+    def fake_text_probe(**_kwargs):
+        return {
+            "schema": "axio_fusion_api.exposed_provider_model_probe.v1",
+            "mode": "live",
+            "network_calls_performed": True,
+            "discovered_model_count": 1,
+            "candidate_model_count": 1,
+            "probe_report": {
+                "mode": "live",
+                "available_count": 1,
+                "probes": [
+                    {
+                        "provider": "fixture-vision",
+                        "model": "fixture-vision-model",
+                        "api_format": "responses",
+                        "base_url_env": "FIXTURE_VISION_BASE_URL",
+                        "api_key_env": "FIXTURE_VISION_API_KEY",
+                        "supports_vision": True,
+                        "status": "available",
+                        "probe_mode": "live",
+                        "latency_ms": 14,
+                        "output_sha256": "a" * 64,
+                        "capabilities": capability_prior,
+                    }
+                ],
+            },
+        }
+
+    def fake_vision_probe(profiles, **kwargs):
+        assert kwargs["live"] is True
+        assert len(profiles) == 1
+        profile = profiles[0]
+        return {
+            "schema": "axio_fusion_api.vision_input_probe.v1",
+            "probe_kind": "vision_input",
+            "mode": "live",
+            "network_calls_performed": True,
+            "model_count": 1,
+            "passed_count": 1,
+            "failed_count": 0,
+            "unsupported_count": 0,
+            "indeterminate_count": 0,
+            "latency_ineligible_count": 0,
+            "probes": [
+                {
+                    "profile_id": profile.profile_id,
+                    "probe_kind": "vision_input",
+                    "status": "passed",
+                    "live_probe_evidence": True,
+                    "marker_valid": True,
+                    "endpoint_binding": vision_input_probe_binding(profile),
+                    "stream_requested": True,
+                    "strict_streaming_requested": True,
+                    "stream_observed": True,
+                    "stream_fallback_used": False,
+                    "stream_protocol": "sse",
+                    "stream_frame_count": 2,
+                    "latency_ms": 12,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        "axio_fusion_api.provider_enrollment.probe_exposed_provider_models",
+        fake_text_probe,
+    )
+    monkeypatch.setattr(
+        "axio_fusion_api.provider_enrollment.probe_provider_vision_support",
+        fake_vision_probe,
+    )
+
+    result = enroll_provider_channels(
+        config_path=config_path,
+        output_dir=tmp_path / "enrollment",
+        live=True,
+        calibrate_tools=False,
+        calibrate_reasoning=False,
+        redact_provider_identifiers=True,
+    )
+
+    candidate = load_registry(
+        tmp_path / "enrollment" / "runtime_registry.candidate.private.json"
+    )[0]
+    calibrated = load_registry(
+        tmp_path / "enrollment" / "runtime_registry.calibrated.private.json"
+    )[0]
+    serialized = json.dumps(result, ensure_ascii=False)
+    assert result["status"] == "ready"
+    assert result["stages"]["vision_input_probe"]["counts"]["passed_count"] == 1
+    assert calibrated.vision_probe_status == "passed"
+    assert calibrated.vision_capability_source == "operational_probe"
+    assert calibrated.vision_input_eligible is True
+    assert calibrated.capabilities == candidate.capabilities
+    assert "fixture-vision" not in serialized
+    assert "vision-fixture-secret" not in serialized
+
+
+def test_runtime_enrollment_keeps_text_profile_when_vision_probe_is_indeterminate(
+    monkeypatch,
+):
+    profile = normalize_profile(
+        {
+            "provider": "runtime-vision",
+            "model": "runtime-vision-model",
+            "api_format": "responses",
+            "base_url_env": "RUNTIME_VISION_BASE_URL",
+            "api_key_env": "RUNTIME_VISION_API_KEY",
+            "supports_vision": True,
+            "capabilities": {axis: 0.8 for axis in CAPABILITY_AXES},
+        }
+    )
+    monkeypatch.setenv("RUNTIME_VISION_BASE_URL", "https://runtime-vision.fixture/v1")
+    monkeypatch.setattr(
+        "axio_fusion_api.provider_enrollment.discover_runtime_profiles",
+        lambda *args, **_kwargs: {
+            "status": "ready",
+            "profiles": [profile],
+            "provider_count": 1,
+            "successful_provider_count": 1,
+            "failed_provider_count": 0,
+            "skipped_provider_count": 0,
+            "empty_success_provider_count": 0,
+            "report_status_counts": {"ok": 1},
+            "warning_codes": [],
+        },
+    )
+    monkeypatch.setattr(
+        "axio_fusion_api.provider_enrollment.probe_provider_models",
+        lambda profiles, **_kwargs: {
+            "probes": [
+                {
+                    "profile_id": item.profile_id,
+                    "status": "available",
+                    "latency_ms": 10,
+                }
+                for item in profiles
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        "axio_fusion_api.provider_enrollment.probe_provider_vision_support",
+        lambda profiles, **_kwargs: {
+            "model_count": len(profiles),
+            "indeterminate_count": len(profiles),
+            "probes": [
+                {
+                    "profile_id": item.profile_id,
+                    "probe_kind": "vision_input",
+                    "status": "indeterminate",
+                    "live_probe_evidence": True,
+                    "endpoint_binding": vision_input_probe_binding(item),
+                }
+                for item in profiles
+            ],
+        },
+    )
+
+    result = enroll_runtime_channels(
+        {"providers": []},
+        live=True,
+        diagnostic_only=True,
+        calibrate_tools=False,
+        calibrate_reasoning=False,
+    )
+
+    enrolled = result["profiles"][0]
+    assert result["status"] == "ready"
+    assert enrolled.health == "available"
+    assert enrolled.vision_probe_status == "indeterminate"
+    assert enrolled.vision_capability_source == "operational_probe"
+    assert enrolled.vision_input_eligible is False
+    assert result["receipt"]["vision_probe_indeterminate_count"] == 1
 
 
 def test_provider_level_manifest_without_models_blocks_stale_default_registry(

@@ -7237,7 +7237,7 @@ def _apply_privacy_filter(
             )
             continue
         if request.has_non_text_input:
-            if request.has_visual_input and profile.supports_vision is not True:
+            if request.has_visual_input and profile.vision_input_eligible is not True:
                 blocked_counts["vision_capability_required"] = (
                     blocked_counts.get("vision_capability_required", 0) + 1
                 )

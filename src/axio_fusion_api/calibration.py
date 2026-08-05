@@ -15,6 +15,11 @@ from .registry import (
     validate_prefusion_registry_handoff,
 )
 from .latency_policy import PROVIDER_MAX_RESPONSE_LATENCY_MS
+from .vision_probe import (
+    vision_input_probe_binding_matches,
+    vision_input_probe_status,
+    vision_input_probe_row_passed,
+)
 from .schemas import (
     CAPABILITY_AXES,
     ModelProfile,
@@ -92,6 +97,7 @@ def build_registry_calibration(
     _apply_probe_signals(signals, probe_rows)
     _apply_tool_probe_signals(signals, probe_rows)
     _apply_reasoning_probe_signals(signals, probe_rows)
+    _apply_vision_probe_signals(signals, probe_rows)
     _apply_benchmark_signals(signals, benchmark_rows)
     _apply_feedback_signals(signals, feedback_rows, hash_to_profile)
     _apply_trace_signals(signals, trace_rows, hash_to_profile)
@@ -134,6 +140,9 @@ def build_registry_calibration(
             ),
             "reasoning_probe_row_count": sum(
                 1 for row in probe_rows if _is_reasoning_probe_row(row)
+            ),
+            "vision_probe_row_count": sum(
+                1 for row in probe_rows if _is_vision_probe_row(row)
             ),
             "benchmark_row_count": len(benchmark_rows),
             "feedback_row_count": len(feedback_rows),
@@ -209,6 +218,7 @@ def _empty_signal(profile: ModelProfile) -> dict[str, Any]:
         "tool_probe_total": 0,
         "tool_call_supported_count": 0,
         "reasoning_probe_rows": [],
+        "vision_probe_rows": [],
         "current_reasoning_transport": (
             dict(profile.reasoning_transport)
             if isinstance(profile.reasoning_transport, Mapping)
@@ -224,7 +234,11 @@ def _empty_signal(profile: ModelProfile) -> dict[str, Any]:
 
 def _apply_probe_signals(signals: dict[str, dict[str, Any]], rows: Sequence[Mapping[str, Any]]) -> None:
     for row in rows:
-        if _is_tool_probe_row(row) or _is_reasoning_probe_row(row):
+        if (
+            _is_tool_probe_row(row)
+            or _is_reasoning_probe_row(row)
+            or _is_vision_probe_row(row)
+        ):
             continue
         profile_id = str(row.get("profile_id") or "")
         if profile_id not in signals:
@@ -268,6 +282,19 @@ def _apply_reasoning_probe_signals(
         if profile_id not in signals:
             continue
         signals[profile_id]["reasoning_probe_rows"].append(dict(row))
+
+
+def _apply_vision_probe_signals(
+    signals: dict[str, dict[str, Any]],
+    rows: Sequence[Mapping[str, Any]],
+) -> None:
+    for row in rows:
+        if not _is_vision_probe_row(row):
+            continue
+        profile_id = str(row.get("profile_id") or "")
+        if profile_id not in signals:
+            continue
+        signals[profile_id]["vision_probe_rows"].append(dict(row))
 
 
 def _apply_benchmark_signals(signals: dict[str, dict[str, Any]], rows: Sequence[Mapping[str, Any]]) -> None:
@@ -408,6 +435,10 @@ def _signal_to_patch(
         signal.get("current_reasoning_transport"),
         signal.get("reasoning_probe_rows"),
     )
+    vision_input_patch = _vision_input_patch(
+        profile,
+        signal.get("vision_probe_rows"),
+    )
     return {
         "profile_id": signal["profile_id"],
         "provider": signal["provider"],
@@ -427,6 +458,7 @@ def _signal_to_patch(
         "tool_probe_status_patch": tool_probe_status_patch,
         "tool_support_rate": tool_support_rate,
         "reasoning_transport_patch": reasoning_transport_patch,
+        "vision_input_patch": vision_input_patch,
         "signal_counts": {
             "probe_total": probe_total,
             "benchmark_category_count": len(benchmark_scores),
@@ -440,10 +472,47 @@ def _signal_to_patch(
                 if isinstance(signal.get("reasoning_probe_rows"), Sequence)
                 else []
             ),
+            "vision_probe_total": len(
+                signal.get("vision_probe_rows", [])
+                if isinstance(signal.get("vision_probe_rows"), Sequence)
+                else []
+            ),
         },
         "raw_prompt_persisted": False,
         "raw_provider_output_persisted": False,
         "secrets_persisted": False,
+    }
+
+
+def _vision_input_patch(
+    profile: ModelProfile | None,
+    rows: Any,
+) -> dict[str, Any] | None:
+    """Promote only exact visual-input evidence for the current endpoint."""
+
+    if profile is None or profile.supports_vision is not True:
+        return None
+    probe_rows = [
+        row
+        for row in rows
+        if isinstance(row, Mapping)
+        and _is_vision_probe_row(row)
+        and row.get("live_probe_evidence") is True
+        and vision_input_probe_binding_matches(profile, row)
+    ] if isinstance(rows, Sequence) else []
+    status = vision_input_probe_status(profile, probe_rows)
+    if status is None:
+        return None
+    passed_count = sum(
+        1 for row in probe_rows if vision_input_probe_row_passed(profile, row)
+    )
+    return {
+        "supports_vision": True,
+        "vision_probe_status": status,
+        "vision_capability_source": "operational_probe",
+        "vision_probe_sample_count": len(probe_rows),
+        "vision_probe_passed_sample_count": passed_count,
+        "vision_probe_endpoint_binding_verified": True,
     }
 
 
@@ -759,6 +828,21 @@ def _updated_registry_payload(
                 row[row_key] = patch[patch_key]
         if isinstance(patch.get("reasoning_transport_patch"), Mapping):
             row["reasoning_transport"] = dict(patch["reasoning_transport_patch"])
+        if isinstance(patch.get("vision_input_patch"), Mapping):
+            vision_patch = patch["vision_input_patch"]
+            row["supports_vision"] = vision_patch.get(
+                "supports_vision", row.get("supports_vision", False)
+            ) is True
+            row["vision_probe_status"] = str(
+                vision_patch.get("vision_probe_status")
+                or row.get("vision_probe_status")
+                or "not_run"
+            )
+            row["vision_capability_source"] = str(
+                vision_patch.get("vision_capability_source")
+                or row.get("vision_capability_source")
+                or ""
+            )
         row["source"] = "calibrated_registry"
         row["calibration"] = {
             "profile_id_sha256": sha256_text(profile.profile_id),
@@ -774,6 +858,34 @@ def _updated_registry_payload(
             ),
             "reasoning_transport_updated_from_operational_probe": isinstance(
                 patch.get("reasoning_transport_patch"), Mapping
+            ),
+            "vision_probe_status": (
+                str(patch.get("vision_input_patch", {}).get("vision_probe_status") or "")
+                if isinstance(patch.get("vision_input_patch"), Mapping)
+                else ""
+            ),
+            "vision_capability_source": (
+                str(
+                    patch.get("vision_input_patch", {}).get(
+                        "vision_capability_source"
+                    )
+                    or ""
+                )
+                if isinstance(patch.get("vision_input_patch"), Mapping)
+                else ""
+            ),
+            "vision_probe_sample_count": (
+                int(
+                    patch.get("vision_input_patch", {}).get(
+                        "vision_probe_sample_count"
+                    )
+                    or 0
+                )
+                if isinstance(patch.get("vision_input_patch"), Mapping)
+                else 0
+            ),
+            "vision_probe_updated_from_operational_probe": isinstance(
+                patch.get("vision_input_patch"), Mapping
             ),
             "raw_prompt_persisted": False,
             "raw_provider_output_persisted": False,
@@ -820,6 +932,11 @@ def _updated_registry_payload(
         ),
         "reasoning_probe_row_count": sum(
             int(patch.get("signal_counts", {}).get("reasoning_probe_total") or 0)
+            for patch in patches
+            if isinstance(patch.get("signal_counts"), Mapping)
+        ),
+        "vision_probe_row_count": sum(
+            int(patch.get("signal_counts", {}).get("vision_probe_total") or 0)
             for patch in patches
             if isinstance(patch.get("signal_counts"), Mapping)
         ),
@@ -888,6 +1005,15 @@ def _is_reasoning_probe_row(row: Mapping[str, Any]) -> bool:
         .strip()
         .lower()
         == "reasoning_transport"
+    )
+
+
+def _is_vision_probe_row(row: Mapping[str, Any]) -> bool:
+    return (
+        str(row.get("probe_kind") or row.get("probe_type") or "")
+        .strip()
+        .lower()
+        == "vision_input"
     )
 
 

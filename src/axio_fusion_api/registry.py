@@ -874,6 +874,8 @@ def _profile_from_probe_row(row: Mapping[str, Any], *, status: str) -> ModelProf
         else (0 if status == "available" else 1),
         "supports_tools": row.get("supports_tools", False),
         "supports_vision": row.get("supports_vision", False),
+        "vision_probe_status": row.get("vision_probe_status", "not_run"),
+        "vision_capability_source": row.get("vision_capability_source", ""),
         "model_kind": row.get("model_kind", row.get("modelKind", "text")),
         "image_capabilities": (
             dict(row.get("image_capabilities"))
@@ -1050,6 +1052,9 @@ def _portfolio_model_receipt(profile: ModelProfile) -> dict[str, Any]:
         "tool_probe_status": profile.tool_probe_status,
         "tool_calling_eligible": profile.tool_calling_eligible,
         "supports_vision": profile.supports_vision,
+        "vision_input_eligible": profile.vision_input_eligible,
+        "vision_probe_status": profile.vision_probe_status,
+        "vision_capability_source": profile.vision_capability_source,
         "live_probe_evidence": _profile_has_live_evidence(profile),
         "capability_summary": {
             axis: round(profile.capability(axis), 4)
@@ -1742,6 +1747,16 @@ def normalize_profile(raw: Mapping[str, Any]) -> ModelProfile:
             or "not_run"
         ),
         supports_vision=_coerce_bool(raw.get("supports_vision", raw.get("vision", False))),
+        vision_probe_status=str(
+            raw.get("vision_probe_status")
+            or raw.get("visionProbeStatus")
+            or "not_run"
+        ),
+        vision_capability_source=str(
+            raw.get("vision_capability_source")
+            or raw.get("visionCapabilitySource")
+            or ""
+        ),
         model_kind=str(
             raw.get("model_kind")
             or raw.get("modelKind")

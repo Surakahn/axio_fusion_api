@@ -277,6 +277,43 @@ def test_vision_admission_rejects_profile_without_vision_capability():
     assert plan["privacy_policy"]["blocked_counts"]["vision_capability_required"] == 1
 
 
+@pytest.mark.parametrize("probe_status", ["failed", "unsupported", "indeterminate"])
+def test_vision_admission_rejects_profile_without_a_passing_endpoint_probe(probe_status):
+    request = _image_request()
+    profile = _profile("chat")
+    profile = normalize_profile(
+        {
+            **profile.safe_dict(),
+            "vision_probe_status": probe_status,
+            "vision_capability_source": "operational_probe",
+        }
+    )
+
+    plan = build_route_plan(request, [profile])
+
+    assert plan["selected_models"] == []
+    assert plan["privacy_policy"]["blocked_counts"]["vision_capability_required"] == 1
+
+
+def test_indeterminate_vision_probe_does_not_remove_text_route_eligibility():
+    profile = normalize_profile(
+        {
+            **_profile("chat").safe_dict(),
+            "vision_probe_status": "indeterminate",
+            "vision_capability_source": "operational_probe",
+        }
+    )
+
+    image_plan = build_route_plan(_image_request(), [profile])
+    text_plan = build_route_plan(
+        FusionRequest(model="axio-pro", prompt="Summarize the meeting notes."),
+        [profile],
+    )
+
+    assert image_plan["selected_models"] == []
+    assert text_plan["selected_models"]
+
+
 @pytest.mark.parametrize("response_path", ["/v1/chat/completions", "/v1/axio/route-plan"])
 def test_invalid_content_contract_is_a_public_400(response_path):
     payload = {

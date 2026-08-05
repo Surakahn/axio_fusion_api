@@ -125,6 +125,36 @@ or downgrade the verified image capability. Image profile routing still uses
 the same provider credential pool, proxy policy, failover rules, and 90-second
 deadline, but it never enters text Fusion deliberation.
 
+## Visual Input Capability
+
+`supports_vision` is a candidate prior for text or multimodal profiles. It is
+not accepted as endpoint proof. Run the independent visual-input probe after a
+provider registry is discovered:
+
+```bash
+axio-fusion-api-standalone \
+  --registry <PRIVATE_TEXT_REGISTRY.json> vision-probe --live \
+  --output <PRIVATE_WORK_DIR>/vision_probe.private.json
+
+axio-fusion-api-standalone vision-probe-bind \
+  --registry-file <PRIVATE_TEXT_REGISTRY.json> \
+  --probe-file <PRIVATE_WORK_DIR>/vision_probe.private.json \
+  --output-registry <PRIVATE_TEXT_REGISTRY_WITH_VISION.json> \
+  --output <SAFE_WORK_DIR>/vision_probe_binding.safe.json
+```
+
+The probe uses one in-memory blue PNG and the protocol-local input shape:
+Chat `image_url`, Responses `input_image`, Anthropic base64 image content, or
+Gemini `inlineData`. It requires the exact visual marker and real SSE/NDJSON
+framing under the 90-second ceiling. A profile is promoted only when the full
+candidate set, endpoint binding, protocol, image hash, marker hash, and probe
+status match. `failed` or `unsupported` endpoint evidence overrides the static
+vision prior in routing; transient failures remain `indeterminate` for later
+re-probing. Raw image bytes, prompt, output, endpoint, and credentials are
+never persisted. The promoted vision fields remain on the text/multimodal
+registry and those models continue to participate in text Fusion; only image
+generation/editing profiles use the separate image registry.
+
 ## Reasoning Strength Transport
 
 `FusionRequest.reasoning_effort` is Axio's protocol-neutral logical control.

@@ -998,12 +998,20 @@ def test_runtime_refresh_forwards_multi_sample_prefusion_setting(monkeypatch):
             {"providers": []},
             expected_generation=0,
             prefusion_stream_probe_samples=4,
+            enrollment_vision_probe_timeout=13,
+            enrollment_vision_probe_max_models=4,
+            enrollment_vision_probe_max_models_per_provider=1,
+            enrollment_calibrate_vision=False,
         )
     finally:
         gateway.server_close()
 
     assert refresh["status"] == "ready"
     assert observed["prefusion_stream_probe_samples"] == 4
+    assert observed["vision_probe_timeout"] == 13
+    assert observed["vision_probe_max_models"] == 4
+    assert observed["vision_probe_max_models_per_provider"] == 1
+    assert observed["calibrate_vision"] is False
 
 
 def test_runtime_http_server_cannot_bypass_required_prefusion_with_static_profiles():

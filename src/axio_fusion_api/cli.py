@@ -87,6 +87,11 @@ from .image_probe import (
     probe_image_capabilities,
     redact_image_probe_artifact_file,
 )
+from .vision_probe import (
+    build_vision_probe_bound_registry,
+    probe_provider_vision_support,
+    redact_vision_probe_artifact_file,
+)
 from .available_model_generation import (
     AvailableModelGenerationError,
     generate_available_model_set,
@@ -222,9 +227,17 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
     )
+    serve_cmd.add_argument("--enrollment-vision-probe-timeout", type=float, default=None)
+    serve_cmd.add_argument("--enrollment-vision-probe-max-models", type=int, default=None)
+    serve_cmd.add_argument(
+        "--enrollment-vision-probe-max-models-per-provider",
+        type=int,
+        default=None,
+    )
     serve_cmd.add_argument("--enrollment-min-available-models", type=int, default=1)
     serve_cmd.add_argument("--no-tool-calibration", action="store_true")
     serve_cmd.add_argument("--no-reasoning-calibration", action="store_true")
+    serve_cmd.add_argument("--no-vision-calibration", action="store_true")
     serve_cmd.add_argument(
         "--prefusion-focus-manifest",
         default=None,
@@ -458,6 +471,43 @@ def build_parser() -> argparse.ArgumentParser:
     image_probe_bind.add_argument("--output", default=None)
     image_probe_bind.set_defaults(func=cmd_image_probe_bind)
 
+    vision_probe = sub.add_parser(
+        "vision-probe",
+        help="Endpoint-bound strict-stream probe for declared text-model visual input.",
+    )
+    vision_probe.add_argument("--timeout", type=float, default=90.0)
+    vision_probe.add_argument("--live", action="store_true")
+    vision_probe.add_argument(
+        "--profile-hash",
+        action="append",
+        default=None,
+        help="Probe only exact SHA-256 visual-input profile identifiers.",
+    )
+    vision_probe.add_argument("--max-models", type=int, default=None)
+    vision_probe.add_argument("--max-models-per-provider", type=int, default=None)
+    vision_probe.add_argument("--max-workers", type=int, default=4)
+    vision_probe.add_argument("--redact-provider-identifiers", action="store_true")
+    vision_probe.add_argument("--output", default=None)
+    vision_probe.set_defaults(func=cmd_vision_probe)
+
+    redact_vision_probe = sub.add_parser(
+        "redact-vision-probe",
+        help="Create an offline hash-only receipt from a visual-input probe artifact.",
+    )
+    redact_vision_probe.add_argument("--probe-file", required=True)
+    redact_vision_probe.add_argument("--output", required=True)
+    redact_vision_probe.set_defaults(func=cmd_redact_vision_probe)
+
+    vision_probe_bind = sub.add_parser(
+        "vision-probe-bind",
+        help="Promote a complete endpoint-bound visual-input probe cohort into a registry.",
+    )
+    vision_probe_bind.add_argument("--registry-file", required=True)
+    vision_probe_bind.add_argument("--probe-file", required=True)
+    vision_probe_bind.add_argument("--output-registry", required=True)
+    vision_probe_bind.add_argument("--output", default=None)
+    vision_probe_bind.set_defaults(func=cmd_vision_probe_bind)
+
     operational_admission = sub.add_parser(
         "operational-admission",
         help=(
@@ -505,11 +555,15 @@ def build_parser() -> argparse.ArgumentParser:
     enrollment.add_argument("--reasoning-probe-timeout", type=float, default=None)
     enrollment.add_argument("--reasoning-probe-max-models", type=int, default=None)
     enrollment.add_argument("--reasoning-probe-max-models-per-provider", type=int, default=None)
+    enrollment.add_argument("--vision-probe-timeout", type=float, default=None)
+    enrollment.add_argument("--vision-probe-max-models", type=int, default=None)
+    enrollment.add_argument("--vision-probe-max-models-per-provider", type=int, default=None)
     enrollment.add_argument("--max-workers", type=int, default=4)
     enrollment.add_argument("--min-available-models", type=int, default=1)
     enrollment.add_argument("--include-unavailable", action="store_true")
     enrollment.add_argument("--no-tool-calibration", action="store_true")
     enrollment.add_argument("--no-reasoning-calibration", action="store_true")
+    enrollment.add_argument("--no-vision-calibration", action="store_true")
     enrollment.add_argument("--redact-provider-identifiers", action="store_true")
     enrollment.add_argument("--live", action="store_true")
     enrollment.add_argument("--output-dir", required=True)
@@ -1694,9 +1748,13 @@ def cmd_serve(args: argparse.Namespace) -> int:
         enrollment_reasoning_probe_timeout=args.enrollment_reasoning_probe_timeout,
         enrollment_reasoning_probe_max_models=args.enrollment_reasoning_probe_max_models,
         enrollment_reasoning_probe_max_models_per_provider=args.enrollment_reasoning_probe_max_models_per_provider,
+        enrollment_vision_probe_timeout=args.enrollment_vision_probe_timeout,
+        enrollment_vision_probe_max_models=args.enrollment_vision_probe_max_models,
+        enrollment_vision_probe_max_models_per_provider=args.enrollment_vision_probe_max_models_per_provider,
         enrollment_min_available_models=args.enrollment_min_available_models,
         enrollment_calibrate_tools=not bool(args.no_tool_calibration),
         enrollment_calibrate_reasoning=not bool(args.no_reasoning_calibration),
+        enrollment_calibrate_vision=not bool(args.no_vision_calibration),
         require_prefusion=bool(args.enroll and not args.diagnostic_only),
         focus_manifest=args.prefusion_focus_manifest,
         source_manifest=args.prefusion_source_manifest,
@@ -2032,6 +2090,40 @@ def cmd_image_probe_bind(args: argparse.Namespace) -> int:
     return 0 if payload.get("status") in {"ready", "not_applicable"} else 2
 
 
+def cmd_vision_probe(args: argparse.Namespace) -> int:
+    profiles = load_registry(args.registry, include_disabled=True)
+    live = bool(args.live or os.getenv("AXIO_FUSION_PROBE_LIVE") == "1")
+    _emit_json(
+        probe_provider_vision_support(
+            profiles,
+            timeout=args.timeout,
+            live=live,
+            max_workers=args.max_workers,
+            profile_hashes=args.profile_hash,
+            max_models=args.max_models,
+            max_models_per_provider=args.max_models_per_provider,
+            redact_provider_identifiers=bool(args.redact_provider_identifiers),
+        ),
+        output=args.output,
+    )
+    return 0
+
+
+def cmd_redact_vision_probe(args: argparse.Namespace) -> int:
+    _emit_json(redact_vision_probe_artifact_file(args.probe_file), output=args.output)
+    return 0
+
+
+def cmd_vision_probe_bind(args: argparse.Namespace) -> int:
+    payload = build_vision_probe_bound_registry(
+        registry_path=args.registry_file,
+        probe_path=args.probe_file,
+    )
+    _write_json_atomic(args.output_registry, payload["registry"])
+    _emit_json(payload["receipt"], output=args.output)
+    return 0 if payload.get("status") in {"ready", "not_applicable"} else 2
+
+
 def cmd_operational_admission(args: argparse.Namespace) -> int:
     profiles = load_registry(args.registry)
     live = bool(args.live or os.getenv("AXIO_FUSION_PROBE_LIVE") == "1")
@@ -2076,6 +2168,10 @@ def cmd_enroll_providers(args: argparse.Namespace) -> int:
         reasoning_probe_timeout=args.reasoning_probe_timeout,
         reasoning_probe_max_models=args.reasoning_probe_max_models,
         reasoning_probe_max_models_per_provider=args.reasoning_probe_max_models_per_provider,
+        calibrate_vision=not bool(args.no_vision_calibration),
+        vision_probe_timeout=args.vision_probe_timeout,
+        vision_probe_max_models=args.vision_probe_max_models,
+        vision_probe_max_models_per_provider=args.vision_probe_max_models_per_provider,
         redact_provider_identifiers=bool(args.redact_provider_identifiers),
     )
     _emit_json(payload)

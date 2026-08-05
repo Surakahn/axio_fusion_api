@@ -40,6 +40,7 @@ from .providers import (
     probe_provider_tool_support,
     reasoning_transport_probe_binding,
 )
+from .vision_probe import probe_provider_vision_support, vision_input_probe_status
 from .registry import (
     build_registry_from_probe_artifacts,
     load_registry,
@@ -78,6 +79,10 @@ def enroll_runtime_channels(
     reasoning_probe_timeout: float | None = None,
     reasoning_probe_max_models: int | None = None,
     reasoning_probe_max_models_per_provider: int | None = None,
+    calibrate_vision: bool = True,
+    vision_probe_timeout: float | None = None,
+    vision_probe_max_models: int | None = None,
+    vision_probe_max_models_per_provider: int | None = None,
     live: bool = True,
     client: HTTPProviderClient | None = None,
     engine_kwargs: Mapping[str, Any] | None = None,
@@ -130,6 +135,15 @@ def enroll_runtime_channels(
             PROVIDER_MAX_RESPONSE_SECONDS,
             float(reasoning_probe_timeout)
             if reasoning_probe_timeout is not None
+            else min(bounded_timeout, 20.0),
+        ),
+    )
+    bounded_vision_timeout = max(
+        1.0,
+        min(
+            PROVIDER_MAX_RESPONSE_SECONDS,
+            float(vision_probe_timeout)
+            if vision_probe_timeout is not None
             else min(bounded_timeout, 20.0),
         ),
     )
@@ -374,6 +388,28 @@ def enroll_runtime_channels(
             ],
         )
         reasoning_probe_source = "runtime_diagnostic"
+    vision_probe: dict[str, Any] = {}
+    if calibrate_vision:
+        available_profiles = [
+            profile for profile in calibrated_profiles if profile.health == "available"
+        ]
+        vision_probe = probe_provider_vision_support(
+            available_profiles,
+            timeout=bounded_vision_timeout,
+            client=active_client,
+            live=True,
+            max_workers=bounded_workers,
+            max_models=vision_probe_max_models,
+            max_models_per_provider=vision_probe_max_models_per_provider,
+        )
+        calibrated_profiles = _apply_runtime_vision_probe(
+            calibrated_profiles,
+            [
+                row
+                for row in vision_probe.get("probes", [])
+                if isinstance(row, Mapping)
+            ],
+        )
     serving_profiles = [
         profile for profile in calibrated_profiles if profile.health == "available"
     ]
@@ -475,6 +511,26 @@ def enroll_runtime_channels(
         "reasoning_probe_verified_count": int(reasoning_probe.get("verified_count") or 0),
         "reasoning_probe_rejected_count": int(reasoning_probe.get("rejected_count") or 0),
         "reasoning_probe_indeterminate_count": int(reasoning_probe.get("indeterminate_count") or 0),
+        "vision_probe_enabled": bool(calibrate_vision),
+        "vision_probe_timeout_seconds": bounded_vision_timeout if calibrate_vision else None,
+        "vision_probe_max_models": (
+            max(0, int(vision_probe_max_models))
+            if vision_probe_max_models is not None
+            else None
+        ),
+        "vision_probe_max_models_per_provider": (
+            max(0, int(vision_probe_max_models_per_provider))
+            if vision_probe_max_models_per_provider is not None
+            else None
+        ),
+        "vision_probe_selected_model_count": int(vision_probe.get("model_count") or 0),
+        "vision_probe_passed_count": int(vision_probe.get("passed_count") or 0),
+        "vision_probe_failed_count": int(vision_probe.get("failed_count") or 0),
+        "vision_probe_unsupported_count": int(vision_probe.get("unsupported_count") or 0),
+        "vision_probe_indeterminate_count": int(vision_probe.get("indeterminate_count") or 0),
+        "vision_probe_latency_ineligible_count": int(
+            vision_probe.get("latency_ineligible_count") or 0
+        ),
         "runtime_channel_summary": runtime_channel_summary(serving_profiles),
         "profile_set_sha256": sha256_text(
             stable_json(sorted(sha256_text(profile.profile_id) for profile in serving_profiles))
@@ -844,6 +900,29 @@ def _apply_runtime_tool_probe(
     return updated
 
 
+def _apply_runtime_vision_probe(
+    profiles: Sequence[ModelProfile],
+    rows: Sequence[Mapping[str, Any]],
+) -> list[ModelProfile]:
+    """Apply endpoint-bound visual evidence without touching quality scores."""
+
+    updated: list[ModelProfile] = []
+    for profile in profiles:
+        status = vision_input_probe_status(profile, rows)
+        if status is None:
+            updated.append(profile)
+            continue
+        updated.append(
+            replace(
+                profile,
+                supports_vision=True,
+                vision_probe_status=status,
+                vision_capability_source="operational_probe",
+            )
+        )
+    return updated
+
+
 def _apply_runtime_reasoning_probe(
     profiles: Sequence[ModelProfile],
     rows: Sequence[Mapping[str, Any]],
@@ -1140,6 +1219,10 @@ def enroll_provider_channels(
     reasoning_probe_timeout: float | None = None,
     reasoning_probe_max_models: int | None = None,
     reasoning_probe_max_models_per_provider: int | None = None,
+    calibrate_vision: bool = True,
+    vision_probe_timeout: float | None = None,
+    vision_probe_max_models: int | None = None,
+    vision_probe_max_models_per_provider: int | None = None,
     redact_provider_identifiers: bool = False,
 ) -> dict[str, Any]:
     """Discover, probe, and operationally calibrate configured channels.
@@ -1169,6 +1252,8 @@ def enroll_provider_channels(
     redacted_tool_probe_path = output_root / "provider_tool_probe.safe.json"
     reasoning_probe_path = output_root / "provider_reasoning_probe.private.json"
     redacted_reasoning_probe_path = output_root / "provider_reasoning_probe.safe.json"
+    vision_probe_path = output_root / "vision_probe.private.json"
+    redacted_vision_probe_path = output_root / "vision_probe.safe.json"
     calibration_path = output_root / "registry_calibration.private.json"
     calibrated_registry_path = output_root / "runtime_registry.calibrated.private.json"
     receipt_path = output_root / "enrollment_receipt.safe.json"
@@ -1352,13 +1437,75 @@ def enroll_provider_channels(
                 "reason_codes": list(reason_codes),
             }
 
-        calibration_enabled = bool(calibrate_tools or calibrate_reasoning)
+        vision_probe_payload: dict[str, Any] = {}
+        if not reason_codes and calibrate_vision:
+            profiles = load_registry(registry_path)
+            bounded_vision_timeout = max(
+                1.0,
+                min(
+                    PROVIDER_MAX_RESPONSE_SECONDS,
+                    float(vision_probe_timeout)
+                    if vision_probe_timeout is not None
+                    else min(
+                        max(1.0, min(PROVIDER_MAX_RESPONSE_SECONDS, float(timeout))),
+                        20.0,
+                    ),
+                ),
+            )
+            vision_probe_payload = probe_provider_vision_support(
+                profiles,
+                timeout=bounded_vision_timeout,
+                live=True,
+                max_workers=max(1, min(32, int(max_workers or 1))),
+                max_models=vision_probe_max_models,
+                max_models_per_provider=vision_probe_max_models_per_provider,
+                redact_provider_identifiers=False,
+            )
+            _write_json(vision_probe_path, vision_probe_payload)
+            stage_receipts["vision_input_probe"] = _stage_receipt(
+                status=(
+                    "ready"
+                    if vision_probe_payload.get("network_calls_performed") is True
+                    or int(vision_probe_payload.get("model_count") or 0) == 0
+                    else "failed"
+                ),
+                path=vision_probe_path,
+                payload=vision_probe_payload,
+                count_fields=(
+                    "model_count",
+                    "passed_count",
+                    "failed_count",
+                    "unsupported_count",
+                    "indeterminate_count",
+                    "latency_ineligible_count",
+                ),
+                extra_counts={"timeout_seconds": bounded_vision_timeout},
+            )
+            if redact_provider_identifiers:
+                _write_json(
+                    redacted_vision_probe_path,
+                    _redacted_vision_probe_copy(vision_probe_payload),
+                )
+        elif not calibrate_vision:
+            stage_receipts["vision_input_probe"] = {
+                "status": "skipped",
+                "reason_codes": ["vision_calibration_disabled"],
+            }
+        else:
+            stage_receipts["vision_input_probe"] = {
+                "status": "blocked",
+                "reason_codes": list(reason_codes),
+            }
+
+        calibration_enabled = bool(calibrate_tools or calibrate_reasoning or calibrate_vision)
         if not reason_codes and calibration_enabled:
             calibration_probe_paths: list[Path] = [probe_path]
             if calibrate_tools:
                 calibration_probe_paths.append(tool_probe_path)
             if calibrate_reasoning:
                 calibration_probe_paths.append(reasoning_probe_path)
+            if calibrate_vision:
+                calibration_probe_paths.append(vision_probe_path)
             calibration_payload = build_registry_calibration(
                 registry_path=registry_path,
                 probe_paths=calibration_probe_paths,
@@ -1410,6 +1557,8 @@ def enroll_provider_channels(
                 "tool_probe_safe_path_sha256": _path_receipt(redacted_tool_probe_path),
                 "reasoning_probe_private_path_sha256": _path_receipt(reasoning_probe_path),
                 "reasoning_probe_safe_path_sha256": _path_receipt(redacted_reasoning_probe_path),
+                "vision_probe_private_path_sha256": _path_receipt(vision_probe_path),
+                "vision_probe_safe_path_sha256": _path_receipt(redacted_vision_probe_path),
                 "calibration_path_sha256": _path_receipt(calibration_path),
                 "calibrated_registry_path_sha256": _path_receipt(calibrated_registry_path),
                 "serving_registry_path_sha256": _path_receipt(candidate_registry) if status == "ready" else "",
@@ -1534,3 +1683,9 @@ def _redacted_reasoning_probe_copy(payload: Mapping[str, Any]) -> dict[str, Any]
     from .providers import redact_provider_reasoning_probe_artifact
 
     return redact_provider_reasoning_probe_artifact(payload)
+
+
+def _redacted_vision_probe_copy(payload: Mapping[str, Any]) -> dict[str, Any]:
+    from .vision_probe import redact_vision_probe_artifact
+
+    return redact_vision_probe_artifact(payload)

@@ -48,6 +48,7 @@ CAPABILITY_AXES = (
 )
 
 TOOL_CAPABILITY_STATES = ("proven", "unproven", "failed")
+VISION_PROBE_STATUSES = ("not_run", "passed", "failed", "indeterminate", "unsupported")
 
 # Image models live in the same provider registry as text models, but their
 # admission contract is deliberately separate.  A profile must explicitly
@@ -821,6 +822,10 @@ class ModelProfile:
     tool_capability_source: str = ""
     tool_probe_status: str = "not_run"
     supports_vision: bool = False
+    # ``supports_vision`` is the provider/model prior.  These fields record
+    # endpoint-bound input evidence without changing the prior in place.
+    vision_probe_status: str = "not_run"
+    vision_capability_source: str = ""
     # Text and image modalities share credentials but never share a Fusion
     # candidate pool. Image eligibility is an explicit, separately probed
     # capability rather than a model-name heuristic.
@@ -920,6 +925,14 @@ class ModelProfile:
             "tool_probe_status",
             str(self.tool_probe_status or "not_run").strip().lower() or "not_run",
         )
+        vision_status = str(self.vision_probe_status or "not_run").strip().casefold()
+        if vision_status not in VISION_PROBE_STATUSES:
+            vision_status = "not_run"
+        vision_source = str(self.vision_capability_source or "").strip().casefold()
+        if not vision_source:
+            vision_source = "external_attestation" if self.supports_vision else "none"
+        object.__setattr__(self, "vision_probe_status", vision_status)
+        object.__setattr__(self, "vision_capability_source", vision_source)
         endpoint = str(self.models_endpoint or "/models").strip()
         if endpoint.lower() in {"none", "disabled", "off"}:
             endpoint = ""
@@ -1074,6 +1087,8 @@ class ModelProfile:
             "tool_capability_source": self.tool_capability_source,
             "tool_probe_status": self.tool_probe_status,
             "supports_vision": self.supports_vision,
+            "vision_probe_status": self.vision_probe_status,
+            "vision_capability_source": self.vision_capability_source,
             "model_kind": self.model_kind,
             "image_capabilities": dict(self.image_capabilities),
             "image_probe_status": self.image_probe_status,
@@ -1148,6 +1163,22 @@ class ModelProfile:
         """Whether routing may spend a native-tool turn on this profile."""
 
         return bool(self.supports_tools and self.tool_capability == "proven")
+
+    @property
+    def vision_input_eligible(self) -> bool:
+        """Whether visual input may use this profile's declared capability.
+
+        A failed or explicitly unsupported endpoint probe overrides the static
+        model prior. ``not_run`` remains a compatibility state for legacy
+        diagnostic registries; production pre-Fusion handoff should promote
+        the profile through ``vision-probe-bind`` first.
+        """
+
+        if not self.supports_vision:
+            return False
+        if self.vision_capability_source == "operational_probe":
+            return self.vision_probe_status == "passed"
+        return self.vision_probe_status not in {"failed", "unsupported"}
 
     @property
     def text_model_eligible(self) -> bool:
