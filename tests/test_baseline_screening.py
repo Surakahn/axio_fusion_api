@@ -15,6 +15,8 @@ from axio_fusion_api.baseline_screening import (
     SCREENING_CAMPAIGN_SCHEMA,
     SCREENING_PLAN_SCHEMA,
     ScreeningCase,
+    _load_mmlu_pro_cases,
+    _load_source_cases,
     _canonical_live_groups,
     _run_screening_case,
     _run_screening_unit,
@@ -53,6 +55,74 @@ PRIVATE_SOURCE_MARKER = "PRIVATE_SCREENING_SOURCE_MUST_NOT_LEAK"
 PRIVATE_PROVIDER_MARKER = "PRIVATE_SCREENING_PROVIDER_MUST_NOT_LEAK"
 PRIVATE_MODEL_MARKER = "PRIVATE_SCREENING_MODEL_MUST_NOT_LEAK"
 PRIVATE_OUTPUT_MARKER = "PRIVATE_SCREENING_OUTPUT_MUST_NOT_LEAK"
+
+
+def test_mmlu_pro_case_identity_namespaces_repeated_question_ids(monkeypatch):
+    test_rows = [
+        {
+            "category": "biology",
+            "question_id": 1,
+            "question": "Which item belongs to biology?",
+            "options": ["cell", "orbit"],
+            "answer": "A",
+        },
+        {
+            "category": "physics",
+            "question_id": 1,
+            "question": "Which item belongs to physics?",
+            "options": ["orbit", "cell"],
+            "answer": "A",
+        },
+    ]
+
+    def read_parquet(path):
+        return test_rows if path.name == "test.parquet" else []
+
+    monkeypatch.setattr(
+        "axio_fusion_api.baseline_screening._read_parquet",
+        read_parquet,
+    )
+    source = {
+        "dataset_path": "test.parquet",
+        "validation_path": "validation.parquet",
+        "prompt_protocol": {"shots": 0},
+    }
+
+    first = _load_mmlu_pro_cases(source)
+    second = _load_mmlu_pro_cases(source)
+
+    assert len(first) == 2
+    assert len({case.case_id for case in first}) == 2
+    assert first == second
+    assert all(case.case_id.startswith("mmlu-pro:") for case in first)
+    assert all(len(case.case_id.rsplit(":", 1)[-1]) == 64 for case in first)
+
+
+def test_source_loader_rejects_duplicate_case_identity(tmp_path):
+    path = tmp_path / "duplicate.jsonl"
+    path.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "id": "duplicate",
+                    "question": f"Question {index}",
+                    "options": ["A", "B"],
+                    "answer": "A",
+                }
+            )
+            for index in range(2)
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="screening_source_case_identity_duplicate"):
+        _load_source_cases(
+            {
+                "adapter": "jsonl_multiple_choice",
+                "dataset_path": str(path),
+            }
+        )
 
 
 def test_official_scorer_dependency_failure_blocks_before_provider_calls(monkeypatch):

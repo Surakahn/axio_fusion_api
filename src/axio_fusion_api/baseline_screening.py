@@ -1649,12 +1649,39 @@ def _source_file_receipts(
 def _load_source_cases(source: Mapping[str, Any]) -> list[ScreeningCase]:
     adapter = str(source.get("adapter") or "")
     if adapter == "jsonl_multiple_choice":
-        return _load_jsonl_multiple_choice_cases(Path(str(source.get("dataset_path") or "")))
-    if adapter == "mmlu_pro":
-        return _load_mmlu_pro_cases(source)
-    if adapter == "livebench_official":
-        return _load_livebench_cases(source)
-    raise ValueError("unsupported screening source adapter")
+        cases = _load_jsonl_multiple_choice_cases(
+            Path(str(source.get("dataset_path") or ""))
+        )
+    elif adapter == "mmlu_pro":
+        cases = _load_mmlu_pro_cases(source)
+    elif adapter == "livebench_official":
+        cases = _load_livebench_cases(source)
+    else:
+        raise ValueError("unsupported screening source adapter")
+    return _require_unique_screening_case_ids(cases, adapter=adapter)
+
+
+def _require_unique_screening_case_ids(
+    cases: Sequence[ScreeningCase],
+    *,
+    adapter: str,
+) -> list[ScreeningCase]:
+    """Reject an ambiguous source before it can enter a frozen campaign.
+
+    Case identity is used for deterministic sampling, retries, checkpoints,
+    paired scoring, and private-artifact verification.  A duplicate is thus a
+    source-contract failure, not a condition that can be repaired after live
+    provider calls have begun.
+    """
+
+    observed = [str(case.case_id or "") for case in cases]
+    if not observed or any(not case_id for case_id in observed):
+        raise ValueError("screening_source_case_identity_missing")
+    if len(observed) != len(set(observed)):
+        raise ValueError(
+            f"screening_source_case_identity_duplicate:{str(adapter or 'unknown')}"
+        )
+    return list(cases)
 
 
 def _load_jsonl_multiple_choice_cases(path: Path) -> list[ScreeningCase]:
@@ -1716,9 +1743,22 @@ def _load_mmlu_pro_cases(source: Mapping[str, Any]) -> list[ScreeningCase]:
             for example in examples_by_category.get(category, [])[:shots]
         )
         prompt = prefix + demonstrations + _format_mmlu_example(row, include_answer=False)
+        # MMLU-Pro question_id values repeat across categories.  Keep the raw
+        # row details out of the case identifier while binding the identity to
+        # the category and full prompt item, so retries and paired scoring can
+        # never merge unrelated questions that happen to share an ordinal.
+        # The answer is deliberately excluded: case selection must remain
+        # label-blind, including when a disjointness audit swaps labels.
+        case_identity = {
+            "schema": "axio_fusion_api.mmlu_pro_case_identity.v1",
+            "category": category,
+            "question_id": str(row.get("question_id") or ""),
+            "question": question,
+            "options": options,
+        }
         cases.append(
             ScreeningCase(
-                case_id=f"mmlu-pro:{row.get('question_id', index)}",
+                case_id=f"mmlu-pro:{sha256_text(stable_json(case_identity))}",
                 prompt=prompt,
                 reference=str(row.get("answer") or "").strip().upper(),
                 stratum=category,
@@ -2453,6 +2493,7 @@ def _screening_case_contract_receipt(
 
 def _screening_adapter_implementation_sha256(adapter: str) -> str:
     common = [
+        _require_unique_screening_case_ids,
         _select_screening_cases,
         _safe_decoding_receipt,
         _screening_failure_from_exception,

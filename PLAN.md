@@ -36,30 +36,30 @@ in [docs/operations/convergence_execution_path_r20.md](docs/operations/convergen
 12. Keep a top-level completion audit after evidence-pack/final-audit generation, mapping every product, provider, API-surface, benchmark, statistical, latency, contamination, and final-claim requirement to concrete hash-only evidence or a precise blocker.
 13. Treat system development readiness and LLM benchmark validation as separate phases: engineering readiness is proven by standalone code-test receipts, dry protocol/adapter self-tests, runtime construction, and operator runbook templates; model superiority is proven only later by the separate 9-category 21-suite live benchmark campaign.
 
-## Current Execution Checkpoint (2026-08-03)
+## Current Execution Checkpoint (2026-08-05)
 
-The current `r20` pre-Fusion cohort is the active serving input for this
-workspace. Its ready screening report contains 18 physical candidates; 11
-logical models passed the three-sample strict-stream admission and the hard
-90-second ceiling. The private registry, probe projection, redacted probe,
-redacted registry evidence, and provider-probe evidence audit are bound to the
-same cohort and pass their integrity checks.
+The current serving registry remains the fresh, full-pool, strict-stream
+registry from the private r22 provider enrollment. Its 22 logical models are
+the fixed candidate pool for the next baseline cohort. The r24 fail-fast
+screening attempt was intentionally interrupted after a private checkpoint
+showed a source-contract defect: MMLU-Pro question numbers were not globally
+unique. Its 16 completed/partial units and checkpoint remain diagnostic-only;
+they cannot be converted into ranking evidence and no target benchmark call
+was made from them.
 
-The next gate is deliberately narrow: complete the private, pre-registered
-non-target external ranking for all 11 admitted logical models, including two
-independent common source families and identity attestations. The newly
-generated ranking input is still `template_only`; the baseline freeze is
-therefore correctly blocked. No target benchmark request may start until that
-freeze is ready. The user's tier mapping remains the intended comparison
-policy (`axio-pro`/rank 1, `axio-terra`/rank 2, `axio-fast`/rank 3), but it is
-not evidence that can replace the required pool-wide ranking.
+The adapter defect is repaired without changing Fusion prompts, routing, or
+model policy. MMLU-Pro case identities now bind category, source question
+identity, question content, and options, while excluding the reference answer
+to preserve label-blind selection. All screening adapters now fail closed on a
+missing or duplicate case identity. The adapter digest therefore changes and
+forces a new source-manifest binding and immutable plan.
 
-The engineering gate is now independently ready for the benchmark phase: the
-current Python 3.11 regression run passed 939 tests, the four public protocol
-and provider-input dry checks are bound, and the remote-only Fusion runbook is
-ready. This does not override the provider-baseline gate; the separate target
-campaign remains prohibited until the complete-pool ranking conversion and
-baseline freeze pass.
+The engineering gate remains independently ready: the Python 3.11 regression
+passes 982 tests, including the new identity and duplicate-source tests. The
+next gate is a fresh full-pool fail-fast screening cohort, followed by ranking
+conversion, provider baseline freeze, official harness import validation, and
+only then the separate 9-category/21-suite target campaign. No provider
+baseline or Axio superiority claim is currently trusted.
 
 The `prefusion-probe-export` command now turns a ready screening artifact into
 the standard provider probe contract offline. This removes the last manual

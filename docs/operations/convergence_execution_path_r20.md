@@ -50,36 +50,27 @@ The following order is the only path to a formal quality claim:
    baseline. If any gate fails, publish a diagnostic result and a bounded
    shadow-only improvement proposal; do not claim superiority.
 
-## Current State (2026-08-04)
+## Current State (2026-08-05)
 
-- Engineering readiness is complete: Python 3.11 regression `950 passed`, the
-  four provider-input adapters pass dry checks, and all 12 Axio/public-surface
-  cells pass the network-free protocol self-test.
-- The active r20 screening process is running in its isolated private root.
-  Its PID and state file are operator-owned runtime state; do not start a
-  second copy or mutate its plan/concurrency.
-- The assembled dataset manifest is
-  `/mnt/storage/axio_fusion_benchmarks/manifests/dataset_manifest.assembled.r20.json`.
-- The official/audited harness pin manifest is
-  `/mnt/storage/axio_fusion_benchmarks/manifests/harness_pin_manifest.assembled.r20.safe.json`.
-- These manifests improve provenance readiness only. They do not authorize a
-  target benchmark request while provider baseline screening is incomplete.
-- A future screening cohort may explicitly register the serial fail-fast
-  transport gate. Once the first failure count makes the pre-registered rate
-  impossible to pass, pending requests are cancelled and represented as
-  transport failures in the complete denominator. The current r20 plan does
-  not enable this policy and its digest remains unchanged.
-- A successor r21 plan has now been prepared offline at
-  `private/runs/2026-08-04-prefusion-cohort-r21/baseline_screening_plan.r21.failfast.safe.json`.
-  It is ready, serial, and fail-fast-enabled with digest
-  `34a1dc759271f3372204db96a41f929c185c60603670b3ed64f90586f23bf80f`.
-  This is only a pre-registered successor artifact: it does not supersede r20,
-  and it must not be started until r20 has reached a terminal state and its
-  complete evidence has passed through ranking conversion.
-- The r21 plan has passed its zero-network execution preflight. The preflight
-  matches the plan digest, schedule digest, and task-sequence digest; it made
-  no provider or target-suite calls and persisted no raw provider output or
-  secret. The live r21 run remains closed until the r20 terminal conversion.
+- Engineering readiness is complete: the Python 3.11 regression passes `982`
+  tests, the four provider-input adapters pass dry checks, and all 12
+  Axio/public-surface cells pass the network-free protocol self-test.
+- The r24 full-pool fail-fast attempt was stopped after a private checkpoint
+  exposed duplicate MMLU-Pro case identities. Its private artifacts are
+  preserved as interrupted diagnostic evidence only; no unit answer or score
+  may be reused for ranking.
+- The MMLU-Pro adapter now binds category, source question identity, question
+  content, and options, excludes labels from identity, and rejects duplicate
+  or missing case IDs before plan execution. This changes the adapter digest,
+  so the next screening plan must be regenerated from a new source-manifest
+  binding.
+- The next cohort must use the same full-pool registry and source families
+  only after a zero-network preflight authenticates the new plan, schedule,
+  task order, and adapter digest. It remains the only route to provider
+  baseline ranking and freeze.
+- The assembled 21-suite dataset and official harness manifests remain
+  provenance inputs only. They do not authorize target benchmark requests
+  while provider baseline screening is incomplete.
 
 ## Terminal Action
 
