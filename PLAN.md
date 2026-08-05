@@ -55,7 +55,10 @@ missing or duplicate case identity. The adapter digest therefore changes and
 forces a new source-manifest binding and immutable plan.
 
 The engineering gate remains independently ready: the Python 3.11 regression
-passes 982 tests, including the new identity and duplicate-source tests. The
+passes 983 tests, including the new identity, duplicate-source, and
+fail-closed ranking conversion tests. Ranking conversion now returns a safe
+template when an interrupted campaign has no complete cross-source evidence,
+instead of raising while aggregating an empty list. The
 next gate is a fresh full-pool fail-fast screening cohort, followed by ranking
 conversion, provider baseline freeze, official harness import validation, and
 only then the separate 9-category/21-suite target campaign. No provider

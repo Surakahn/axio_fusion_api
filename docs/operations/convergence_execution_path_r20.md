@@ -52,7 +52,7 @@ The following order is the only path to a formal quality claim:
 
 ## Current State (2026-08-05)
 
-- Engineering readiness is complete: the Python 3.11 regression passes `982`
+- Engineering readiness is complete: the Python 3.11 regression passes `983`
   tests, the four provider-input adapters pass dry checks, and all 12
   Axio/public-surface cells pass the network-free protocol self-test.
 - The r24 full-pool fail-fast attempt was stopped after a private checkpoint
@@ -68,6 +68,9 @@ The following order is the only path to a formal quality claim:
   only after a zero-network preflight authenticates the new plan, schedule,
   task order, and adapter digest. It remains the only route to provider
   baseline ranking and freeze.
+- Ranking conversion is fail-closed for an interrupted campaign with no
+  complete cross-source candidate: it emits a template-only blocker receipt
+  rather than raising or deriving a partial rank.
 - The assembled 21-suite dataset and official harness manifests remain
   provenance inputs only. They do not authorize target benchmark requests
   while provider baseline screening is incomplete.

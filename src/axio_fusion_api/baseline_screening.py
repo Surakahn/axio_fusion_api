@@ -3590,6 +3590,12 @@ def build_external_ranking_manifest_from_screening(
             (int(evidence["reported_rank"]) - 1) / max(1, candidate_count - 1)
             for evidence in evidence_rows
         ]
+        if not normalized:
+            # A partial or interrupted campaign can have no candidate with
+            # complete cross-source evidence. Preserve the blocker and return
+            # the safe template below instead of dividing an empty list.
+            blockers.append("screening_ranking_candidate_evidence_empty")
+            continue
         overall_rows.append(
             {
                 "candidate_hash": candidate_hash,

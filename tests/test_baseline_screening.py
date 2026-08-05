@@ -3079,6 +3079,57 @@ def test_completed_campaign_converts_to_existing_strict_ranking_contract(tmp_pat
     assert receipt["common_independent_source_family_count"] == 2
 
 
+def test_ranking_conversion_fails_closed_for_empty_partial_evidence(tmp_path):
+    registry_path, probe_path, manifest_path = _screening_fixture(tmp_path)
+    plan = build_non_target_screening_plan(
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        min_cases_per_source=4,
+        max_workers=1,
+    )
+    plan_path = _write_json(tmp_path / "screening_plan.safe.json", plan)
+    state_path = tmp_path / "campaign_state.private.json"
+    campaign = run_non_target_screening_campaign(
+        plan_path=plan_path,
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        private_root=tmp_path / "private_units",
+        state_path=state_path,
+        live=False,
+    )
+    assert campaign["status"] == "preflight_ready"
+    empty_manifest_path = _write_json(
+        tmp_path / "empty_source_manifest.private.json",
+        {
+            "schema": "axio_fusion_api.non_target_screening_source_manifest.v1",
+            "pre_registration": {
+                "declared_before_target_campaign": True,
+                "registered_on": "2026-07-20",
+                "selection_seed": "fixture-seed",
+                "target_benchmark_results_used": False,
+                "target_suite_results_used": False,
+            },
+            "sources": [],
+        },
+    )
+
+    ranking = build_external_ranking_manifest_from_screening(
+        plan_path=plan_path,
+        campaign_state_path=state_path,
+        registry_path=registry_path,
+        source_manifest_path=empty_manifest_path,
+        private_probe_files=[probe_path],
+        private_root=tmp_path / "private_units",
+    )
+
+    assert ranking["screening_conversion_ready"] is False
+    assert ranking["template_only"] is True
+    assert "screening_ranking_campaign_not_complete" in ranking["blockers"]
+    assert "screening_ranking_candidate_evidence_empty" in ranking["blockers"]
+
+
 def test_ranking_rescores_private_output_after_attacker_rehashes_artifacts(tmp_path):
     registry_path, probe_path, manifest_path = _screening_fixture(tmp_path)
     plan = build_non_target_screening_plan(
