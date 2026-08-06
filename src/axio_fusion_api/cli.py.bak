@@ -565,17 +565,6 @@ def build_parser() -> argparse.ArgumentParser:
     enrollment.add_argument("--no-reasoning-calibration", action="store_true")
     enrollment.add_argument("--no-vision-calibration", action="store_true")
     enrollment.add_argument("--redact-provider-identifiers", action="store_true")
-    enrollment.add_argument(
-        "--focus-manifest",
-        default=None,
-        help="Non-secret focus manifest; required model refs are preserved through all probe limits.",
-    )
-    enrollment.add_argument(
-        "--restrict-to-required-models",
-        action="store_true",
-        default=False,
-        help="Restrict the enrollment probe to only the models declared in the focus manifest.",
-    )
     enrollment.add_argument("--live", action="store_true")
     enrollment.add_argument("--output-dir", required=True)
     enrollment.set_defaults(func=cmd_enroll_providers)
@@ -2184,8 +2173,6 @@ def cmd_enroll_providers(args: argparse.Namespace) -> int:
         vision_probe_max_models=args.vision_probe_max_models,
         vision_probe_max_models_per_provider=args.vision_probe_max_models_per_provider,
         redact_provider_identifiers=bool(args.redact_provider_identifiers),
-        focus_manifest=args.focus_manifest,
-        restrict_to_required_models=bool(args.restrict_to_required_models),
     )
     _emit_json(payload)
     return 0 if payload.get("status") == "ready" else 2

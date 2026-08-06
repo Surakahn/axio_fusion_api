@@ -16,7 +16,10 @@ import time
 from typing import Any, Mapping, Sequence
 
 from .calibration import build_registry_calibration
-from .channel_config import discover_runtime_profiles, runtime_channel_summary
+from .channel_config import (
+    discover_runtime_profiles,
+    runtime_channel_summary,
+)
 from .latency_policy import (
     PROVIDER_MAX_RESPONSE_LATENCY_MS,
     PROVIDER_MAX_RESPONSE_SECONDS,
@@ -27,6 +30,7 @@ from .latency_policy import (
 from .model_screening import (
     apply_prefusion_handoff_metadata,
     build_prefusion_fusion_handoff,
+    load_prefusion_focus_manifest,
     run_prefusion_model_screening,
 )
 from .orchestrator import FusionEngine
@@ -1224,6 +1228,8 @@ def enroll_provider_channels(
     vision_probe_max_models: int | None = None,
     vision_probe_max_models_per_provider: int | None = None,
     redact_provider_identifiers: bool = False,
+    focus_manifest: Mapping[str, Any] | str | Path | None = None,
+    restrict_to_required_models: bool = False,
 ) -> dict[str, Any]:
     """Discover, probe, and operationally calibrate configured channels.
 
@@ -1268,6 +1274,30 @@ def enroll_provider_channels(
         if not live:
             reason_codes.append("live_flag_required_for_channel_enrollment")
 
+        required_model_refs: list[Mapping[str, Any]] | None = None
+        focus_scope_digest = sha256_text("")
+        if focus_manifest is not None:
+            try:
+                focus = load_prefusion_focus_manifest(focus_manifest)
+                candidates = focus.get("candidates", [])
+                if isinstance(candidates, list) and candidates:
+                    required_model_refs = [
+                        {
+                            "provider": str(row.get("provider") or "").strip(),
+                            "model": str(row.get("model") or "").strip(),
+                            "canonical_model_id": str(row.get("canonical_model_id") or "").strip(),
+                            "api_format": str(row.get("api_format") or "").strip(),
+                        }
+                        for row in candidates
+                        if isinstance(row, Mapping)
+                        and str(row.get("provider") or "").strip()
+                        and str(row.get("model") or "").strip()
+                    ]
+                    focus_scope_digest = sha256_text(stable_json(required_model_refs))
+            except Exception:
+                required_model_refs = None
+                focus_scope_digest = sha256_text("focus_manifest_load_failed")
+
         if not reason_codes:
             bounded_timeout = max(1.0, min(300.0, float(timeout)))
             bounded_workers = max(1, min(32, int(max_workers or 1)))
@@ -1277,6 +1307,8 @@ def enroll_provider_channels(
                 live=True,
                 max_models=max_models,
                 max_models_per_provider=max_models_per_provider,
+                required_model_refs=required_model_refs,
+                restrict_to_required_models=bool(restrict_to_required_models),
                 max_workers=bounded_workers,
                 redact_provider_identifiers=False,
             )
@@ -1582,6 +1614,17 @@ def enroll_provider_channels(
                 "raw_provider_outputs_persisted": False,
                 "secrets_persisted": False,
                 "private_intermediate_artifacts_are_operator_only": True,
+            },
+            "focus_scope": {
+                "focus_manifest_supplied": focus_manifest is not None,
+                "focus_manifest_loaded": required_model_refs is not None
+                or focus_manifest is None,
+                "focus_candidate_count": len(required_model_refs) if required_model_refs is not None else 0,
+                "focus_candidate_set_sha256": focus_scope_digest,
+                "restrict_to_required_models": bool(restrict_to_required_models),
+                "raw_provider_names_persisted": False,
+                "raw_provider_model_ids_persisted": False,
+                "secrets_persisted": False,
             },
         }
         _write_json(receipt_path, result)

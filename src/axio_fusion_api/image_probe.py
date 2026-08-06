@@ -68,6 +68,7 @@ def probe_image_capabilities(
         profile_hashes=profile_hashes,
         max_models=max_models,
         max_models_per_provider=max_models_per_provider,
+        required_profile_hashes=None,
     )
     bounded_timeout = max(1.0, min(90.0, float(timeout)))
     probe_client = client or ImageProviderClient()

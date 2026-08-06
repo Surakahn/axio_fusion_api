@@ -1206,6 +1206,7 @@ def probe_provider_reasoning_support(
         profile_hashes=profile_hashes,
         max_models=max_models,
         max_models_per_provider=max_models_per_provider,
+        required_profile_hashes=None,
     )
     bounded_timeout = max(
         1.0,
@@ -2098,6 +2099,7 @@ def probe_provider_models(
     require_streaming: bool = False,
     max_workers: int = 4,
     profile_hashes: Sequence[str] | None = None,
+    required_profile_hashes: Sequence[str] | None = None,
     max_models: int | None = None,
     max_models_per_provider: int | None = None,
     samples_per_profile: int = 1,
@@ -2119,6 +2121,7 @@ def probe_provider_models(
     selected_profiles, selection_policy = _select_probe_profiles(
         profiles,
         profile_hashes=profile_hashes,
+        required_profile_hashes=required_profile_hashes,
         max_models=max_models,
         max_models_per_provider=max_models_per_provider,
     )
@@ -3363,6 +3366,7 @@ def probe_provider_tool_support(
         profile_hashes=profile_hashes,
         max_models=max_models,
         max_models_per_provider=max_models_per_provider,
+        required_profile_hashes=None,
     )
     # Tool calibration is a capability check, not the pre-Fusion serving
     # admission gate. Keep the historical JSON compatibility path for custom
@@ -3676,6 +3680,8 @@ def probe_exposed_provider_models(
     max_models: int | None = None,
     max_models_per_provider: int | None = None,
     profile_hashes: Sequence[str] | None = None,
+    required_model_refs: Sequence[Mapping[str, Any]] | None = None,
+    restrict_to_required_models: bool = False,
     max_workers: int = 4,
     client: HTTPProviderClient | None = None,
     redact_provider_identifiers: bool = False,
@@ -3713,6 +3719,18 @@ def probe_exposed_provider_models(
         if str(profile.provider).strip().lower().replace("_", "-") not in discovery_provider_slugs
     ]
     profiles_to_probe = _dedupe_probe_profiles([*discovered_profiles, *static_profiles])
+    required_profile_hashes, model_scope = _required_model_scope(
+        profiles_to_probe,
+        required_model_refs,
+        restrict_to_required_models=bool(restrict_to_required_models),
+    )
+    if model_scope["restricted_to_required_models"]:
+        required_hash_set = set(required_profile_hashes)
+        profiles_to_probe = [
+            profile
+            for profile in profiles_to_probe
+            if sha256_text(profile.profile_id) in required_hash_set
+        ]
     probe_report = probe_provider_models(
         profiles_to_probe,
         timeout=timeout,
@@ -3720,6 +3738,7 @@ def probe_exposed_provider_models(
         live=live,
         max_workers=max_workers,
         profile_hashes=profile_hashes,
+        required_profile_hashes=required_profile_hashes,
         max_models=max_models,
         max_models_per_provider=max_models_per_provider,
     )
@@ -3739,6 +3758,7 @@ def probe_exposed_provider_models(
         "candidate_model_count_before_selection": len(profiles_to_probe),
         "candidate_model_count": int(probe_report.get("model_count") or 0),
         "probe_report": probe_report,
+        "model_scope": model_scope,
         "policy": {
             "short_prompt_sha256": hashlib.sha256("Return exactly AXIO_PROBE_OK.".encode("utf-8")).hexdigest(),
             "timeout_seconds": timeout,
@@ -4527,12 +4547,17 @@ def _select_probe_profiles(
     profiles: Sequence[ModelProfile],
     *,
     profile_hashes: Sequence[str] | None,
+    required_profile_hashes: Sequence[str] | None,
     max_models: int | None,
     max_models_per_provider: int | None,
 ) -> tuple[list[ModelProfile], dict[str, Any]]:
     candidates = _dedupe_probe_profiles(profiles)
     requested_hashes, invalid_hash_count = _normalized_profile_hashes(profile_hashes)
+    required_hashes, invalid_required_hash_count = _normalized_profile_hashes(
+        required_profile_hashes
+    )
     requested_hash_set = set(requested_hashes)
+    required_hash_set = set(required_hashes)
     if requested_hashes:
         hash_filtered = [
             profile
@@ -4542,24 +4567,32 @@ def _select_probe_profiles(
     else:
         hash_filtered = list(candidates)
 
+    candidate_hashes = sorted({sha256_text(profile.profile_id) for profile in candidates})
+    candidate_hash_set = set(candidate_hashes)
+    matched_required_hashes = sorted(candidate_hash_set.intersection(required_hash_set))
+    unmatched_required_hashes = sorted(required_hash_set.difference(candidate_hash_set))
+    required_after_hash_filter = required_hash_set.intersection(
+        {sha256_text(profile.profile_id) for profile in hash_filtered}
+    )
+
     per_provider_limit = None
     if max_models_per_provider is not None:
         per_provider_limit = max(0, int(max_models_per_provider))
-        provider_counts: dict[str, int] = {}
-        provider_limited: list[ModelProfile] = []
-        for profile in hash_filtered:
-            provider_key = str(profile.provider or "").strip().lower().replace("_", "-")
-            count = provider_counts.get(provider_key, 0)
-            if count >= per_provider_limit:
-                continue
-            provider_counts[provider_key] = count + 1
-            provider_limited.append(profile)
+        provider_limited = _provider_limit_preserving_required(
+            hash_filtered,
+            per_provider_limit,
+            required_hashes=required_after_hash_filter,
+        )
     else:
         provider_limited = list(hash_filtered)
 
     global_limit = None if max_models is None else max(0, int(max_models))
     selected = (
-        _provider_fair_profile_limit(provider_limited, global_limit)
+        _global_limit_preserving_required(
+            provider_limited,
+            global_limit,
+            required_hashes=required_after_hash_filter,
+        )
         if global_limit is not None
         else provider_limited
     )
@@ -4575,6 +4608,15 @@ def _select_probe_profiles(
         "profile_hash_filter_enabled": bool(requested_hashes),
         "requested_profile_hash_count": len(requested_hashes),
         "invalid_profile_hash_count": invalid_hash_count,
+        "required_profile_hash_filter_enabled": bool(required_hashes),
+        "required_profile_hash_count": len(required_hashes),
+        "invalid_required_profile_hash_count": invalid_required_hash_count,
+        "matched_required_profile_hashes": matched_required_hashes,
+        "unmatched_required_profile_hashes": unmatched_required_hashes,
+        "required_profile_set_sha256": sha256_text(stable_json(required_hashes)),
+        "required_profiles_preserved": set(matched_required_hashes).issubset(
+            {sha256_text(profile.profile_id) for profile in selected}
+        ),
         "matched_profile_hash_count": len(matched_hashes),
         "unmatched_profile_hash_count": len(unmatched_hashes),
         "matched_profile_hashes": matched_hashes,
@@ -4591,11 +4633,186 @@ def _select_probe_profiles(
         ),
         "max_models": global_limit,
         "max_models_per_provider": per_provider_limit,
-        "global_limit_policy": "provider_fair_round_robin" if global_limit is not None else "unbounded",
+        "global_limit_policy": (
+            "provider_fair_round_robin_preserving_required"
+            if global_limit is not None and required_hashes
+            else "provider_fair_round_robin"
+            if global_limit is not None
+            else "unbounded"
+        ),
+        "global_limit_overridden_for_required_profiles": bool(
+            global_limit is not None
+            and len(required_after_hash_filter) > global_limit
+        ),
+        "per_provider_limit_overridden_for_required_profiles": bool(
+            per_provider_limit is not None
+            and any(
+                sum(
+                    1
+                    for profile in hash_filtered
+                    if str(profile.provider or "").strip().lower().replace("_", "-")
+                    == provider
+                    and sha256_text(profile.profile_id) in required_after_hash_filter
+                )
+                > per_provider_limit
+                for provider in {
+                    str(profile.provider or "").strip().lower().replace("_", "-")
+                    for profile in hash_filtered
+                }
+            )
+        ),
         "raw_provider_names_persisted": False,
         "raw_provider_model_ids_persisted": False,
         "secrets_persisted": False,
     }
+
+
+def _required_model_scope(
+    profiles: Sequence[ModelProfile],
+    model_refs: Sequence[Mapping[str, Any]] | None,
+    *,
+    restrict_to_required_models: bool,
+) -> tuple[list[str], dict[str, Any]]:
+    """Resolve an explicit model scope to exact physical profile hashes.
+
+    A scope is an operational allowlist, not a quality or rank signal. Matching
+    requires provider and model identity; optional canonical/api-format fields
+    further narrow the match. This keeps same-named models at different
+    providers as distinct transport profiles while making the selected set
+    reproducible and auditable without retaining raw identifiers in receipts.
+    """
+
+    normalized_refs: list[dict[str, str]] = []
+    seen_refs: set[str] = set()
+    for raw in model_refs or ():
+        if not isinstance(raw, Mapping):
+            continue
+        provider = str(raw.get("provider") or "").strip().casefold().replace("_", "-")
+        model = str(raw.get("model") or raw.get("model_id") or "").strip()
+        if not provider or not model:
+            continue
+        ref = {
+            "provider": provider,
+            "model": model,
+            "canonical_model_id": str(raw.get("canonical_model_id") or "").strip(),
+            "api_format": str(raw.get("api_format") or "").strip().casefold(),
+        }
+        ref_key = stable_json(ref)
+        if ref_key in seen_refs:
+            continue
+        seen_refs.add(ref_key)
+        normalized_refs.append(ref)
+
+    def ref_hash(ref: Mapping[str, str]) -> str:
+        return sha256_text(stable_json(dict(ref)))
+
+    matched_ref_hashes: list[str] = []
+    unmatched_ref_hashes: list[str] = []
+    required_profile_hashes: set[str] = set()
+    for ref in normalized_refs:
+        matches = []
+        for profile in profiles:
+            provider = str(profile.provider or "").strip().casefold().replace("_", "-")
+            if provider != ref["provider"] or str(profile.model or "").strip() != ref["model"]:
+                continue
+            if ref["canonical_model_id"] and str(
+                profile.canonical_model_id or profile.model or ""
+            ).strip() != ref["canonical_model_id"]:
+                continue
+            if ref["api_format"] and str(profile.api_format or "").strip().casefold() != ref["api_format"]:
+                continue
+            matches.append(profile)
+        if matches:
+            matched_ref_hashes.append(ref_hash(ref))
+            required_profile_hashes.update(
+                sha256_text(profile.profile_id) for profile in matches
+            )
+        else:
+            unmatched_ref_hashes.append(ref_hash(ref))
+
+    candidate_hashes = sorted(sha256_text(profile.profile_id) for profile in profiles)
+    required_hashes = sorted(required_profile_hashes)
+    return required_hashes, {
+        "schema": "axio_fusion_api.provider_model_scope.v1",
+        "restricted_to_required_models": bool(restrict_to_required_models and normalized_refs),
+        "declared_model_ref_count": len(normalized_refs),
+        "matched_model_ref_count": len(matched_ref_hashes),
+        "missing_model_ref_count": len(unmatched_ref_hashes),
+        "declared_model_ref_hashes": sorted(ref_hash(ref) for ref in normalized_refs),
+        "matched_model_ref_hashes": sorted(matched_ref_hashes),
+        "missing_model_ref_hashes": sorted(unmatched_ref_hashes),
+        "required_profile_hashes": required_hashes,
+        "required_profile_set_sha256": sha256_text(stable_json(required_hashes)),
+        "candidate_profile_set_sha256": sha256_text(stable_json(candidate_hashes)),
+        "intersection_complete": len(required_hashes) > 0
+        and set(required_hashes).issubset(set(candidate_hashes)),
+        "raw_provider_names_persisted": False,
+        "raw_provider_model_ids_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _provider_limit_preserving_required(
+    profiles: Sequence[ModelProfile],
+    limit: int,
+    *,
+    required_hashes: set[str],
+) -> list[ModelProfile]:
+    """Apply a per-provider cap without dropping an explicit required profile."""
+
+    if limit <= 0:
+        return [
+            profile
+            for profile in profiles
+            if sha256_text(profile.profile_id) in required_hashes
+        ]
+    provider_order: list[str] = []
+    grouped: dict[str, list[ModelProfile]] = {}
+    for profile in profiles:
+        provider = str(profile.provider or "").strip().lower().replace("_", "-")
+        if provider not in grouped:
+            provider_order.append(provider)
+            grouped[provider] = []
+        grouped[provider].append(profile)
+    selected: list[ModelProfile] = []
+    for provider in provider_order:
+        rows = grouped[provider]
+        required = [
+            profile
+            for profile in rows
+            if sha256_text(profile.profile_id) in required_hashes
+        ]
+        optional = [
+            profile
+            for profile in rows
+            if sha256_text(profile.profile_id) not in required_hashes
+        ]
+        selected.extend(required)
+        selected.extend(optional[: max(0, limit - len(required))])
+    return selected
+
+
+def _global_limit_preserving_required(
+    profiles: Sequence[ModelProfile],
+    limit: int,
+    *,
+    required_hashes: set[str],
+) -> list[ModelProfile]:
+    """Apply the global fair cap after retaining every required profile."""
+
+    required = [
+        profile
+        for profile in profiles
+        if sha256_text(profile.profile_id) in required_hashes
+    ]
+    optional = [
+        profile
+        for profile in profiles
+        if sha256_text(profile.profile_id) not in required_hashes
+    ]
+    if len(required) >= limit:
+        return required
+    return [*required, *_provider_fair_profile_limit(optional, limit - len(required))]
 
 
 def _normalized_profile_hashes(values: Sequence[str] | None) -> tuple[list[str], int]:
