@@ -17,6 +17,12 @@ id_ed25519
 id_ed25519.*
 credentials.json
 credentials*.json
+# One-off local provider diagnostics may contain process-injected or manually
+# supplied credentials. Keep them available to the operator but never stage
+# them into the public repository.
+/scripts/check_creds.py
+/scripts/check_tokenapis*.py
+/scripts/prepare_registry.py
 *.private.json
 *.private.jsonl
 *.secret.json
