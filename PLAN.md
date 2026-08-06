@@ -58,14 +58,20 @@ The engineering gate remains independently ready: the Python 3.11 regression
 passes 983 tests, including the new identity, duplicate-source, and
 fail-closed ranking conversion tests. Ranking conversion now returns a safe
 template when an interrupted campaign has no complete cross-source evidence,
-instead of raising while aggregating an empty list. The active gate is the
-fresh full-pool fail-fast `r25` screening cohort. Its zero-network preflight
-passed with 22 logical models, 44 source-model units, serial execution, and
-plan digest
-`ad5311a433c13995f9c9de34ec6b50813068e2d861cc2b9a421a0b239b78e740`.
-Ranking conversion, provider baseline freeze, official harness import
-validation, and the separate 9-category/21-suite target campaign remain
-closed. No provider baseline or Axio superiority claim is currently trusted.
+instead of raising while aggregating an empty list. The former r25 full-pool
+attempt reached a terminal partial result and its transport-only successor
+admission retained no eligible canonical model; it remains diagnostic only.
+
+The active gate is the fresh r26 configured-provider full-pool cohort from
+the 2026-08-06 enrollment. Its zero-network preflight authenticated five
+canonical model groups, two independent source families, ten source-model
+tasks, serial execution, and plan digest
+`81c20ba9d20ede6f062e5f0d26043ac17fddb9935d8b146f9b48f153b241219c`.
+The r26 plan binds the existing source-manifest content digest and must not be
+rewritten while the run is live. Ranking conversion, provider baseline freeze,
+official harness import validation, and the separate 9-category/21-suite
+target campaign remain closed. No provider baseline or Axio superiority claim
+is currently trusted.
 
 The `prefusion-probe-export` command now turns a ready screening artifact into
 the standard provider probe contract offline. This removes the last manual

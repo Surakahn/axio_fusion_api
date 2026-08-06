@@ -1,4 +1,4 @@
-# R20 Convergence Execution Path
+# Convergence Execution Path (Active r26)
 
 This document is the canonical execution path for the current Axio Fusion
 milestone. It is intentionally short and operational. New provider channels,
@@ -51,7 +51,7 @@ The following order is the only path to a formal quality claim:
    baseline. If any gate fails, publish a diagnostic result and a bounded
    shadow-only improvement proposal; do not claim superiority.
 
-## Current State (2026-08-05)
+## Current State (2026-08-06)
 
 - Engineering readiness is complete: the Python 3.11 regression passes `983`
   tests, the four provider-input adapters pass dry checks, and all 12
@@ -65,10 +65,17 @@ The following order is the only path to a formal quality claim:
   or missing case IDs before plan execution. This changes the adapter digest,
   so the next screening plan must be regenerated from a new source-manifest
   binding.
-- The active r25 cohort uses the same full-pool registry and source families
-  after a zero-network preflight authenticated its plan, schedule, task order,
-  and repaired adapter digest. It remains the only route to provider baseline
-  ranking and freeze.
+- The r25 cohort reached a terminal partial result and its transport-only
+  admission receipt retained zero eligible canonical models. It is preserved
+  as diagnostic evidence and cannot supply a provider baseline, a survivor
+  subset, or any r26 input.
+- The active r26 cohort is a fresh provider enrollment with its complete
+  five-canonical-model pool, two independent non-target source families, ten
+  serial tasks, a pre-registered 2% transport-failure gate, and plan digest
+  `81c20ba9d20ede6f062e5f0d26043ac17fddb9935d8b146f9b48f153b241219c`.
+  Its source manifest is intentionally the exact digest-bound r25 artifact;
+  no source, prompt, scorer, case, or decoding substitution is permitted.
+  It remains the only route to provider baseline ranking and freeze.
 - Ranking conversion is fail-closed for an interrupted campaign with no
   complete cross-source candidate: it emits a template-only blocker receipt
   rather than raising or deriving a partial rank.
@@ -83,18 +90,18 @@ following command with no retry or overwrite flag:
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m axio_fusion_api.cli \
-  --registry private/runs/2026-08-05-prefusion-cohort-r22-repair6/runtime_registry.from_probe.private.json \
+  --registry private/runs/2026-08-06-provider-enrollment/runtime_registry.candidate.private.json \
   baseline-screening-to-ranking \
-  --plan private/runs/2026-08-05-prefusion-cohort-r25-full-pool-failfast/baseline_screening_plan.safe.json \
-  --campaign-state private/runs/2026-08-05-prefusion-cohort-r25-full-pool-failfast/baseline_screening_state.live.private.json \
+  --plan private/runs/2026-08-06-prefusion-cohort-r26/baseline_screening_plan.safe.json \
+  --campaign-state private/runs/2026-08-06-prefusion-cohort-r26/baseline_screening_state.live.private.json \
   --source-manifest private/runs/2026-08-05-prefusion-cohort-r25-full-pool-failfast/source_manifest.private.json \
-  --private-root private/runs/2026-08-05-prefusion-cohort-r25-full-pool-failfast/baseline_screening.private \
-  --private-probe-file private/runs/2026-08-05-provider-enrollment-r22/provider_probe.private.json \
-  --output private/runs/2026-08-05-prefusion-cohort-r25-full-pool-failfast/external_provider_ranking.r25.screened.private.json
+  --private-root private/runs/2026-08-06-prefusion-cohort-r26/baseline_screening.private \
+  --private-probe-file private/runs/2026-08-06-provider-enrollment/provider_probe.private.json \
+  --output private/runs/2026-08-06-prefusion-cohort-r26/external_provider_ranking.r26.screened.private.json
 ```
 
 `screening_conversion_ready=false` is a valid terminal blocker, not a partial
-baseline. In that case preserve the complete evidence, repair the provider
+baseline. In that case preserve the complete r26 evidence, repair the provider
 availability or screening contract in a new cohort, and keep the benchmark
 campaign closed. `screening_conversion_ready=true` permits baseline-freeze
 validation, but still does not bypass the official harness-import gate.

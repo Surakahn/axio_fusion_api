@@ -1,5 +1,24 @@
 # Axio Fusion API Checklist
 
+## Current Execution Gate (2026-08-06, r26)
+
+- [x] Preserve r25 as terminal diagnostic evidence: its ranking conversion was
+  template-only and transport-only successor admission retained zero eligible
+  canonical models; no r25 answer, score, failure, or checkpoint is reusable.
+- [x] Enroll the current configured provider pool and freeze the r26 plan:
+  five canonical model groups, two independent non-target source families,
+  ten serial tasks, fixed task order, 90-second per-request ceiling, and a 2%
+  transport-failure gate.
+- [ ] Complete every r26 task with all timeout and transport outcomes retained
+  in the pre-registered denominator; do not launch side-channel provider
+  traffic, retry completed cases, or mutate the plan.
+- [ ] Run exactly one r26 screening-to-ranking conversion after terminal state;
+  accept only a complete, evidence-derived ranking and never a partial
+  survivor subset.
+- [ ] Freeze the derived rank-1/rank-2/rank-3 provider baselines, activate and
+  live-verify all Axio tiers across four public streaming API formats, then
+  execute the independent 9-category/21-suite campaign.
+
 ## Current Execution Gate (2026-08-03, r20)
 
 - [x] Validate the active r20 pre-Fusion report: 18 physical candidates and 11
