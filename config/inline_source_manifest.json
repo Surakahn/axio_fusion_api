@@ -1,0 +1,26 @@
+{
+  "schema": "axio_fusion_api.prefusion_source_manifest.v1",
+  "sources": [
+    {
+      "source_slot": "model_capability_ranking",
+      "url": "",
+      "title": "Model capability ranking from public benchmarks and community consensus",
+      "content": "Based on public benchmarks (MMLU, HumanEval, MATH, GPQA, etc.) and community consensus as of 2026-08, the relative capability ranking of the candidate models is as follows:\n\n=== Tier 1: Frontier Models ===\n1. gpt-5.6-sol - The strongest model in the pool. Top-tier reasoning, coding, math, and general knowledge. Supports max reasoning effort. Best for complex tasks requiring deep reasoning and synthesis.\n2. gpt-5.6-terra - Very strong model, slightly below sol. Excellent reasoning, coding, and math. Supports max reasoning effort. Good for complex tasks and as a judge/synthesizer.\n3. gpt-5.6-luna - Strong model with good balance of speed and capability. Supports max reasoning effort. Good for most tasks including reasoning and coding.\n\n=== Tier 2: Strong Models ===\n4. gpt-5.5 - Solid performer across most benchmarks. Supports up to xhigh reasoning effort. Good for general tasks and as a reference model.\n5. deepseek-ai/deepseek-v4-pro - DeepSeek's latest pro model. Strong on coding and math. Good latency characteristics.\n6. mistralai/mistral-large-3-675b-instruct-2512 - Mistral's large model. Strong on multilingual tasks and general reasoning.\n7. deepseek-ai/deepseek-v4-flash - DeepSeek's fast model. Good for low-latency tasks and simple verification.\n8. openai/gpt-oss-120b - OpenAI's open-source 120B model. Good general capabilities. Supports reasoning effort.\n\n=== Tier 3: Capable Models ===\n9. nvidia/nemotron-3-super-120b-a12b - NVIDIA's 120B MoE model. Good for general tasks.\n10. minimaxai/minimax-m3 - MiniMax's latest model. Competitive on Chinese language tasks.\n11. minimaxai/minimax-m2.7 - MiniMax's previous generation. Decent general capabilities.\n12. stepfun-ai/step-3.7-flash - StepFun's fast model. Good for simple tasks.\n13. stepfun-ai/step-3.5-flash - StepFun's previous fast model.\n14. z-ai/glm-5.2 - Zhipu AI's GLM model. Strong on Chinese language tasks.\n15. openai/gpt-oss-20b - OpenAI's smaller open-source model. Good for lightweight tasks.\n\n=== Tier 4: Lightweight/Specialized Models ===\n16. nvidia/nemotron-3-nano-omni-30b-a3b-reasoning - NVIDIA's nano reasoning model.\n17. nvidia/nemotron-3-nano-30b-a3b - NVIDIA's nano model.\n18. nvidia/llama-3.1-nemotron-nano-8b-v1 - Lightweight NVIDIA model.\n19. nvidia/llama-3.1-nemotron-nano-vl-8b-v1 - Lightweight vision-language model.\n20. nvidia/nemotron-mini-4b-instruct - Very small model for simple tasks.\n\n=== Reasoning Capability Notes ===\ngpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna: support low/medium/high/xhigh/max reasoning effort via responses_reasoning transport\ngpt-5.5, gpt-5.2: support low/medium/high/xhigh reasoning effort via responses_reasoning transport\nopenai/gpt-oss-120b, openai/gpt-oss-20b: support low/medium/high reasoning effort via chat_reasoning_effort transport\nMost other models: limited or no explicit reasoning effort support\n\n=== Role Recommendations ===\n- primary_solver: gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna\n- independent_solver: gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-5.5, deepseek-v4-pro\n- critic: gpt-5.6-terra, gpt-5.6-luna, gpt-5.5\n- judge: gpt-5.6-sol, gpt-5.6-terra\n- synthesizer: gpt-5.6-sol, gpt-5.6-terra\n- domain_specialist: gpt-5.6-luna, minimax-m3, glm-5.2\n- structured_extraction: gpt-5.5, deepseek-v4-flash, gpt-oss-120b\n- short_verification: deepseek-v4-flash, gpt-oss-20b, nemotron-mini-4b\n- simple_classification: deepseek-v4-flash, gpt-oss-20b, nemotron-mini-4b\n- single_tool_argument_validation: gpt-5.5, deepseek-v4-flash",
+      "models": [
+        "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.2",
+        "deepseek-ai/deepseek-v4-pro", "deepseek-ai/deepseek-v4-flash",
+        "openai/gpt-oss-120b", "openai/gpt-oss-20b",
+        "nvidia/nemotron-3-super-120b-a12b",
+        "mistralai/mistral-large-3-675b-instruct-2512",
+        "minimaxai/minimax-m3", "minimaxai/minimax-m2.7",
+        "stepfun-ai/step-3.7-flash", "stepfun-ai/step-3.5-flash",
+        "z-ai/glm-5.2",
+        "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+        "nvidia/nemotron-3-nano-30b-a3b",
+        "nvidia/llama-3.1-nemotron-nano-8b-v1",
+        "nvidia/llama-3.1-nemotron-nano-vl-8b-v1",
+        "nvidia/nemotron-mini-4b-instruct"
+      ]
+    }
+  ]
+}
