@@ -1,0 +1,594 @@
+{
+  "schema": "axio_fusion_api.benchmark_evaluation.v1",
+  "timestamp": "2026-08-07T01:22:56",
+  "models": [
+    "axio-fast",
+    "axio-terra",
+    "axio-pro"
+  ],
+  "total_benchmarks": 20,
+  "max_samples_per_benchmark": 20,
+  "total_time_seconds": 5.23,
+  "results": [
+    {
+      "name": "mmmu_text_science.jsonl",
+      "type": "multichoice",
+      "samples": 20,
+      "summary": {
+        "axio-fast": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-terra": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-pro": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        }
+      },
+      "label": "Science-MMMU-Pro"
+    },
+    {
+      "name": "global_mmlu_lite.jsonl",
+      "type": "multichoice",
+      "samples": 20,
+      "summary": {
+        "axio-fast": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-terra": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-pro": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        }
+      },
+      "label": "Multilingual-GlobalMMLU"
+    },
+    {
+      "name": "flores_translation_instruction.jsonl",
+      "type": "translation",
+      "samples": 20,
+      "summary": {
+        "axio-fast": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-terra": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-pro": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        }
+      },
+      "label": "Multilingual-FLORES"
+    },
+    {
+      "name": "humaneval.jsonl",
+      "type": "code",
+      "samples": 20,
+      "summary": {
+        "axio-fast": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-terra": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-pro": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        }
+      },
+      "label": "Code-HumanEval"
+    },
+    {
+      "name": "livecodebench_mini.jsonl",
+      "type": "code",
+      "samples": 10,
+      "summary": {
+        "axio-fast": {
+          "total_samples": 10,
+          "successful": 0,
+          "errors": 10,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-terra": {
+          "total_samples": 10,
+          "successful": 0,
+          "errors": 10,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-pro": {
+          "total_samples": 10,
+          "successful": 0,
+          "errors": 10,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        }
+      },
+      "label": "Code-LiveCodeBench"
+    },
+    {
+      "name": "math_500.jsonl",
+      "type": "math",
+      "samples": 20,
+      "summary": {
+        "axio-fast": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-terra": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-pro": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        }
+      },
+      "label": "Math-MATH500"
+    },
+    {
+      "name": "aime_recent.jsonl",
+      "type": "math",
+      "samples": 20,
+      "summary": {
+        "axio-fast": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-terra": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-pro": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        }
+      },
+      "label": "Math-AIME"
+    },
+    {
+      "name": "bbh.jsonl",
+      "type": "qa",
+      "samples": 20,
+      "summary": {
+        "axio-fast": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-terra": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-pro": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        }
+      },
+      "label": "Logic-BBH"
+    },
+    {
+      "name": "arc_challenge.jsonl",
+      "type": "multichoice",
+      "samples": 20,
+      "summary": {
+        "axio-fast": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-terra": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-pro": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        }
+      },
+      "label": "Logic-ARC"
+    },
+    {
+      "name": "bfcl_mini.jsonl",
+      "type": "tool",
+      "samples": 8,
+      "summary": {
+        "axio-fast": {
+          "total_samples": 8,
+          "successful": 0,
+          "errors": 8,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-terra": {
+          "total_samples": 8,
+          "successful": 0,
+          "errors": 8,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-pro": {
+          "total_samples": 8,
+          "successful": 0,
+          "errors": 8,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        }
+      },
+      "label": "Agentic-BFCL"
+    },
+    {
+      "name": "tau_bench_mini.jsonl",
+      "type": "tool",
+      "samples": 5,
+      "summary": {
+        "axio-fast": {
+          "total_samples": 5,
+          "successful": 0,
+          "errors": 5,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-terra": {
+          "total_samples": 5,
+          "successful": 0,
+          "errors": 5,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-pro": {
+          "total_samples": 5,
+          "successful": 0,
+          "errors": 5,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        }
+      },
+      "label": "Agentic-TauBench"
+    },
+    {
+      "name": "ifeval.jsonl",
+      "type": "qa",
+      "samples": 20,
+      "summary": {
+        "axio-fast": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-terra": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-pro": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        }
+      },
+      "label": "DailyWork-IFEval"
+    },
+    {
+      "name": "mt_bench_questions.jsonl",
+      "type": "qa",
+      "samples": 20,
+      "summary": {
+        "axio-fast": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-terra": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-pro": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        }
+      },
+      "label": "DailyWork-MTBench"
+    },
+    {
+      "name": "truthfulqa.jsonl",
+      "type": "qa",
+      "samples": 20,
+      "summary": {
+        "axio-fast": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-terra": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-pro": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        }
+      },
+      "label": "Hallucination-TruthfulQA"
+    },
+    {
+      "name": "halueval.jsonl",
+      "type": "qa",
+      "samples": 20,
+      "summary": {
+        "axio-fast": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-terra": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-pro": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        }
+      },
+      "label": "Hallucination-HaluEval"
+    },
+    {
+      "name": "medqa_usmle.jsonl",
+      "type": "multichoice",
+      "samples": 20,
+      "summary": {
+        "axio-fast": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-terra": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-pro": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        }
+      },
+      "label": "Vertical-MedQA"
+    },
+    {
+      "name": "finqa.jsonl",
+      "type": "qa",
+      "samples": 20,
+      "summary": {
+        "axio-fast": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-terra": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-pro": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        }
+      },
+      "label": "Vertical-FinQA"
+    },
+    {
+      "name": "legalbench.jsonl",
+      "type": "qa",
+      "samples": 20,
+      "summary": {
+        "axio-fast": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-terra": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-pro": {
+          "total_samples": 20,
+          "successful": 0,
+          "errors": 20,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        }
+      },
+      "label": "Vertical-LegalBench"
+    },
+    {
+      "name": "consultqa_mini.jsonl",
+      "type": "qa",
+      "samples": 5,
+      "summary": {
+        "axio-fast": {
+          "total_samples": 5,
+          "successful": 0,
+          "errors": 5,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-terra": {
+          "total_samples": 5,
+          "successful": 0,
+          "errors": 5,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-pro": {
+          "total_samples": 5,
+          "successful": 0,
+          "errors": 5,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        }
+      },
+      "label": "Vertical-ConsultQA"
+    },
+    {
+      "name": "policyqa_mini.jsonl",
+      "type": "qa",
+      "samples": 5,
+      "summary": {
+        "axio-fast": {
+          "total_samples": 5,
+          "successful": 0,
+          "errors": 5,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-terra": {
+          "total_samples": 5,
+          "successful": 0,
+          "errors": 5,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        },
+        "axio-pro": {
+          "total_samples": 5,
+          "successful": 0,
+          "errors": 5,
+          "avg_latency_seconds": 0.0,
+          "success_rate": 0.0
+        }
+      },
+      "label": "Vertical-PolicyQA"
+    }
+  ]
+}
