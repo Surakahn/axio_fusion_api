@@ -29,7 +29,7 @@ FAST_DIRECT_BASE_SCORE_WEIGHT = 0.35
 FAST_DIRECT_LATENCY_WEIGHT = 0.50
 FAST_DIRECT_RELIABILITY_WEIGHT = 0.15
 FAST_DIRECT_CASCADE_SAFETY_MARGIN_MS = 150
-FAST_DIRECT_DEFAULT_DEADLINE_MS = 2500
+FAST_DIRECT_DEFAULT_DEADLINE_MS = 12000
 FAST_DIRECT_DEADLINE_MULTIPLIER = 2.5
 FAST_DIRECT_DEADLINE_MARGIN_MS = 500
 FAST_DIRECT_MAX_DEADLINE_MS = 60_000
@@ -689,10 +689,10 @@ def _budget_for_request(
         max_models = 2 if fast_light_verify else 1
         max_depth = 0
         max_cost = 0.0015 if fast_light_verify else 0.001
-        max_latency = 3500 if fast_light_verify else 2500
+        max_latency = 15000 if fast_light_verify else 12000
     elif model == "axio-pro":
         max_models = 6 if complexity >= 0.72 else 4
-        max_depth, max_cost, max_latency = 2, 0.02, 25000
+        max_depth, max_cost, max_latency = 2, 0.02, 60000
     else:
         max_models = 3 if complexity >= 0.42 else 2
         # Terra's initial Fusion plan may already consume nearly 3x a fast
@@ -2385,7 +2385,7 @@ def _fast_direct_candidate_order(
     if not primary_allowed:
         return []
     scored = primary_allowed
-    max_latency_ms = max(1, int(budget.get("max_latency_ms") or 2500))
+    max_latency_ms = max(1, int(budget.get("max_latency_ms") or FAST_DIRECT_DEFAULT_DEADLINE_MS))
     feasible = [
         row
         for row in scored
@@ -3030,7 +3030,7 @@ def _model_selection_policy(
         max_provider_target = 3 if request.public_model == "axio-pro" or quality_target >= 0.90 else 2
         target_provider_count = min(provider_count, max_models, max_provider_target)
     fast_direct_cascade = request.public_model == "axio-fast" and not fast_light_verify
-    fast_deadline_ms = max(1, int(budget.get("max_latency_ms") or 2500))
+    fast_deadline_ms = max(1, int(budget.get("max_latency_ms") or FAST_DIRECT_DEFAULT_DEADLINE_MS))
     fast_feasible_profiles = [
         profile
         for profile, _ in scored
@@ -7696,7 +7696,7 @@ def _provider_routing_policy(
         request.public_model == "axio-fast"
         and not _fast_light_verify_enabled(request, analysis, budget)
     )
-    fast_deadline_ms = max(1, int(budget.get("max_latency_ms") or 2500))
+    fast_deadline_ms = max(1, int(budget.get("max_latency_ms") or FAST_DIRECT_DEFAULT_DEADLINE_MS))
     fallback_scored = [
         (
             profile,

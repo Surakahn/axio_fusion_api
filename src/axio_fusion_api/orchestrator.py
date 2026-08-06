@@ -13594,7 +13594,7 @@ def _timeout_for_role(
         )
         headroom_available = projected_latency_ms <= max(
             1,
-            int(budget.get("max_latency_ms") or 2500),
+            int(budget.get("max_latency_ms") or 12000),
         )
         receipt.update(
             {

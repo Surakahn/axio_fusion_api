@@ -1,0 +1,5 @@
+{"task_id": "consult/1", "question": "A B2B SaaS company with $5M ARR wants to expand into the APAC market. Develop a go-to-market strategy covering market selection, pricing adaptation, and partnership strategy.", "domain": "market_entry"}
+{"task_id": "consult/2", "question": "A mid-size manufacturing company wants to undergo digital transformation. Design a 3-year roadmap covering technology, talent, and process changes.", "domain": "digital_transformation"}
+{"task_id": "consult/3", "question": "Analyze the risks and synergies in a merger between a traditional bank and a fintech startup. Provide integration recommendations.", "domain": "mergers_acquisitions"}
+{"task_id": "consult/4", "question": "A startup has developed a new AI-powered API product. Recommend a pricing strategy (freemium, usage-based, tiered) with justification.", "domain": "pricing_strategy"}
+{"task_id": "consult/5", "question": "How can a global retailer build supply chain resilience against geopolitical disruptions? Provide a framework with specific actions.", "domain": "supply_chain"}

@@ -45,6 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve_cmd.add_argument("--host", default="127.0.0.1")
     serve_cmd.add_argument("--port", type=int, default=8789)
     serve_cmd.add_argument("--live", action="store_true")
+    serve_cmd.add_argument("--no-prefusion", action="store_true", help="Skip pre-Fusion screening validation; use existing calibrated registry directly.")
     serve_cmd.add_argument(
         "--image-registry",
         default=None,
@@ -203,7 +204,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
             os.environ["AXIO_FUSION_IMAGE_REGISTRY_PATH"] = str(args.image_registry)
         print(f"Serving standalone Axio Fusion API on http://{args.host}:{args.port}", file=sys.stderr)
         try:
-            serve(host=args.host, port=args.port, live=bool(args.live))
+            serve(host=args.host, port=args.port, live=bool(args.live), require_prefusion=not bool(getattr(args, "no_prefusion", False)))
         except KeyboardInterrupt:
             return 0
         return 0
