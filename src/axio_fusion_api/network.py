@@ -438,6 +438,18 @@ def provider_proxy_runtime_summary() -> dict[str, Any]:
     }
 
 
+class _UserAgentHandler(urllib.request.BaseHandler):
+    """Inject a plain User-Agent header so Cloudflare-protected upstreams
+    (TokenAPIs and similar) do not return 403/1010 blocks."""
+
+    def http_request(self, req):
+        req.add_header("User-Agent", "AxioFusionAPI/1.0")
+        return req
+
+    https_request = http_request
+
+
+
 def build_network_opener(*handlers: Any):
     """Build an opener whose proxy behavior is fully determined by policy."""
 
@@ -457,6 +469,7 @@ def build_network_opener(*handlers: Any):
         proxy_handler = urllib.request.ProxyHandler({})
     return urllib.request.build_opener(
         proxy_handler,
+        _UserAgentHandler(),
         _DeadlineHTTPHandler(),
         _DeadlineHTTPSHandler(),
         *tuple(handlers),
