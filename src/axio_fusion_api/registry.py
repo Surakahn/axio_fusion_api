@@ -52,9 +52,18 @@ _AUXILIARY_MODEL_PATTERNS: tuple[str, ...] = (
 _AUXILIARY_MODEL_SUBSTRINGS: tuple[str, ...] = (
     "gpt-image-",
 )
+# Models that are stale / not present in the current configured channels.
+# These are removed from the serving registry to prevent 400 errors.
+_STALE_MODEL_IDS: frozenset[str] = frozenset({
+    "gpt-5.6",  # CPA only has gpt-5.6-luna/terra/sol, not bare gpt-5.6
+    "gpt-5.4-2026-03-05",  # Versioned snapshot, not in current CPA
+    "gpt-5.4-mini",  # Not in current CPA channel
+})
 
 
 def _is_auxiliary_model(model: str) -> bool:
+    if model in _STALE_MODEL_IDS:
+        return True
     model_lower = model.lower()
     for pattern in _AUXILIARY_MODEL_PATTERNS:
         if pattern in model_lower:
