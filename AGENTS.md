@@ -258,3 +258,42 @@ L1: 语法 → L2: 导入 → L3a: 单元测试 → L3b: Dry-run → L3c: 连通
 ---
 
 *最后更新：2026-08-08 — 随项目演进持续更新*
+
+---
+
+## 九、当前里程碑状态 (2026-08-08)
+
+### 已完成
+- [x] Fusion API核心系统实现（router, orchestrator, registry, server）
+- [x] axio-fast/terra/pro 三模型全部正常响应
+- [x] Panel phase预算bug修复（dynamic failover挤占expert预算）
+- [x] axio-fast路由权重修复（BASE_SCORE 0.35→0.55, LATENCY 0.50→0.30）
+- [x] Responses API格式验证通过
+- [x] Chat/Completions格式完整支持
+- [x] 2个provider渠道接入（NVIDIA chat + CPA responses）
+- [x] 29个模型profiles加载
+- [x] 辅助模型过滤（codex-auto-review, gpt-image-*）
+- [x] 网络代理配置（auto模式，10808端口）
+- [x] 延迟预算guard（5.0x multiplier）
+- [x] 快速评测：axio-pro/terra/fast在科学/数学/逻辑题上正确
+- [x] Git管理，已推送至 github.com:Surakahn/axio_fusion_api
+
+### 待完成
+- [ ] Anthropic和Gemini API格式的完整验证
+- [ ] 综合benchmark评测（9大类20+基准）vs 单模型基线
+- [ ] axio-pro输出过于冗长的问题（包含完整JSON reasoning结构）
+- [ ] NVIDIA渠道模型实际能力校准（许多模型的能力分为注入prior，非实测）
+- [ ] 推理强度参数(reasoning_effort)的透传支持
+- [ ] 图片生成/编辑模块（独立于fusion系统）
+- [ ] 自适应渠道接入时的prompt recalibration机制
+
+### 已知限制
+1. axio-pro输出包含完整内部推理结构（JSON格式），需在compat层做后处理
+2. NVIDIA渠道许多模型p95延迟=20001ms（超时标记），实际可用模型有限
+3. CPA渠道通过代理访问，额外延迟~1-2秒（SSL握手）
+4. Python 3.8不兼容部分测试（需3.11+）
+5. 评测脚本直接HTTP调用较脆弱，建议改用FusionEngine直接调用
+
+---
+
+*最后更新：2026-08-08 01:40 CST*
