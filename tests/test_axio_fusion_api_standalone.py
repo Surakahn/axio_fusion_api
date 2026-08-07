@@ -1019,7 +1019,7 @@ def test_standalone_latency_multiplier_guard_blocks_known_over_3x_fusion():
     assert "fusion_latency_exceeds_3x_single_model_guard" in admission["blocked_reasons"]
     assert "pro_tier_independent_verification_policy" in admission["force_reasons"]
     assert admission["latency_multiplier_guard"]["blocked"] is True
-    assert admission["latency_multiplier_guard"]["target_max_vs_single_model"] == 3.0
+    assert admission["latency_multiplier_guard"]["target_max_vs_single_model"] == 5.0
     assert admission["latency_multiplier_vs_single_model"] > 3.0
     assert route_plan["strategy"] == "pro_direct_with_verifier_gap"
 
@@ -3728,8 +3728,8 @@ def test_standalone_live_execution_prompts_receive_role_scoped_task_dag_without_
     assert "bounded_deliberative_branch_and_verify" in primary_prompt
     assert "latency_multiplier_guard" in primary_prompt
     assert (
-        '"target_max_vs_single_model": 3.0' in primary_prompt
-        or '"target_max_vs_single_model":3.0' in primary_prompt
+        '"target_max_vs_single_model": 5.0' in primary_prompt
+        or '"target_max_vs_single_model":5.0' in primary_prompt
     )
     assert "answer_policy" in primary_prompt
     assert '"quality_target": 0.95' in primary_prompt or '"quality_target":0.95' in primary_prompt
@@ -3759,7 +3759,7 @@ def test_standalone_live_execution_prompts_receive_role_scoped_task_dag_without_
     assert response.route_plan["deliberative_search_policy"]["enabled"] is True
     assert response.route_plan["deliberative_search_policy"]["anti_cheating_contract"]["no_training_on_eval_cases"] is True
     assert response.route_plan["runtime_guards"]["deliberative_search_policy_enabled"] is True
-    assert response.route_plan["runtime_guards"]["latency_multiplier_guard"]["target_max_vs_single_model"] == 3.0
+    assert response.route_plan["runtime_guards"]["latency_multiplier_guard"]["target_max_vs_single_model"] == 5.0
     assert "safe_routing_context" in response.route_plan["orchestration_scaffold"]["context_assembly"]["judge_context"]
     assert "deliberative_search_contract" in response.route_plan["orchestration_scaffold"]["context_assembly"]["judge_context"]
     assert response.route_plan["orchestration_scaffold"]["deliberative_search_policy"]["branch_count"] >= 3
