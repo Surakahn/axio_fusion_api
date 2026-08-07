@@ -40,6 +40,31 @@ FUSION_PORTFOLIO_CATEGORY_THRESHOLD = 0.65
 FUSION_PORTFOLIO_STRONG_MODEL_THRESHOLD = 0.66
 FUSION_PORTFOLIO_ROLE_THRESHOLD = 0.65
 
+# ── Auxiliary model exclusions ────────────────────────────────────────────
+# Models that are internal tool agents, not general-purpose LLMs suitable
+# for fusion. They are excluded from the serving registry and never routed
+# as fusion experts, judges, or synthesizers.
+_AUXILIARY_MODEL_PATTERNS: tuple[str, ...] = (
+    "codex-auto-review",
+    "gpt-image-1",
+    "gpt-image-2",
+)
+_AUXILIARY_MODEL_SUBSTRINGS: tuple[str, ...] = (
+    "gpt-image-",
+)
+
+
+def _is_auxiliary_model(model: str) -> bool:
+    model_lower = model.lower()
+    for pattern in _AUXILIARY_MODEL_PATTERNS:
+        if pattern in model_lower:
+            return True
+    for substr in _AUXILIARY_MODEL_SUBSTRINGS:
+        if substr in model_lower:
+            return True
+    return False
+
+
 # Keep this control-plane enum local to the registry validator. Importing the
 # screening module here would create a cycle, and a loadable registry must be
 # able to verify its own handoff without trusting the report process.
@@ -308,6 +333,8 @@ def load_registry(
     profiles = [normalize_profile(row) for row in rows if isinstance(row, Mapping)]
     if not include_disabled:
         profiles = [profile for profile in profiles if profile.enabled]
+    # Exclude auxiliary/tool-only models that are not general-purpose LLMs
+    profiles = [p for p in profiles if not _is_auxiliary_model(p.model)]
     return _dedupe_profiles(profiles)
 
 

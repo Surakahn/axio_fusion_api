@@ -54,6 +54,7 @@ def handle_signal(signum, frame):
 
 signal.signal(signal.SIGTERM, handle_signal)
 signal.signal(signal.SIGINT, handle_signal)
+signal.signal(signal.SIGHUP, handle_signal)
 
 print('Axio Fusion API server running on http://127.0.0.1:18900', file=sys.stderr, flush=True)
 try:

@@ -5607,13 +5607,19 @@ def _role_assignments(
         # even when its known p50/cost exceeds the caller's hard budget.  The
         # admission layer then records the concrete blocker and prevents
         # activation; this is different from bypassing an explicit role deny.
+        # Judge selection must prefer the strongest available profile,
+        # even when that profile is already assigned to an expert role.
+        # An unassigned-weak profile (e.g. nemotron when gpt-5.6 models
+        # are all busy) produces worse synthesis than reusing the best model.
+        # Operational-evidence cascade preserves weaker unassigned profiles
+        # only when no stronger reuse candidate passes the stage gate.
         judge = _best_judge(
-            eligible_judge_operational_unassigned_profiles
-            or eligible_judge_operational_stage_profiles
+            eligible_judge_all_profiles
             or eligible_judge_operational_reuse_profiles
+            or eligible_judge_operational_unassigned_profiles
+            or eligible_judge_operational_stage_profiles
             or eligible_judge_profiles
             or eligible_stage_judge_profiles
-            or eligible_judge_all_profiles
             or role_capable_judge_profiles
         )
         remaining_unassigned_profiles = [
@@ -5674,13 +5680,15 @@ def _role_assignments(
                 stage_budget,
             )
         ]
+        # Same principle as Judge: prefer strongest model even if reused,
+        # rather than an unassigned weak model that degrades synthesis quality.
         synthesizer = _best_synthesizer(
-            eligible_synthesizer_operational_unassigned_profiles
-            or eligible_synthesizer_operational_stage_profiles
+            eligible_synthesizer_all_profiles
             or eligible_synthesizer_operational_reuse_profiles
+            or eligible_synthesizer_operational_unassigned_profiles
+            or eligible_synthesizer_operational_stage_profiles
             or eligible_synthesizer_profiles
             or eligible_stage_synthesizer_profiles
-            or eligible_synthesizer_all_profiles
             or role_capable_synthesizer_profiles,
             analysis,
         )
@@ -6269,6 +6277,48 @@ def _latency_optimize_stage_profiles(
                     )
                 ):
                     continue
+            # ── Quality gate ─────────────────────────────────────────
+            # Do not replace a strong judge/synthesizer with a
+            # significantly weaker model even when latency improves.
+            # Require replacement to have >= 97% of original judge
+            # quality and >= 92% of original synthesizer quality.
+            candidate_judge_quality = (
+                candidate_judge.capability("critique")
+                + candidate_judge.capability("structured_output")
+            )
+            original_judge_quality = (
+                judge.capability("critique")
+                + judge.capability("structured_output")
+            )
+            if (
+                original_judge_quality > 0.0
+                and candidate_judge_quality < original_judge_quality * 0.97
+            ):
+                continue
+            candidate_synth_quality = (
+                candidate_synthesizer.capability("structured_output") * 0.36
+                + candidate_synthesizer.capability("critique") * 0.18
+                + candidate_synthesizer.capability("long_context") * 0.12
+                + _domain_average(
+                    candidate_synthesizer,
+                    _analysis_capability_axes(analysis),
+                ) * 0.24
+            )
+            original_synth_quality = (
+                synthesizer.capability("structured_output") * 0.36
+                + synthesizer.capability("critique") * 0.18
+                + synthesizer.capability("long_context") * 0.12
+                + _domain_average(
+                    synthesizer,
+                    _analysis_capability_axes(analysis),
+                ) * 0.24
+            )
+            if (
+                original_synth_quality > 0.0
+                and candidate_synth_quality < original_synth_quality * 0.92
+            ):
+                continue
+
             stage_pairs.append(
                 (
                     candidate_judge,
@@ -6280,6 +6330,7 @@ def _latency_optimize_stage_profiles(
     if not stage_pairs:
         base_receipt["reason"] = "no_faster_stage_pair_meets_latency_guard"
         return judge, synthesizer, base_receipt
+
     faster_judge, faster_synthesizer, optimized_total, optimized_p95_total = min(
         stage_pairs,
         key=lambda row: (
