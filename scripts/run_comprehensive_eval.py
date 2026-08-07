@@ -11,7 +11,7 @@ from typing import Any
 AXIO_URL = "http://127.0.0.1:18900"
 BENCHMARK_DIR = "data/benchmarks"
 RESULTS_DIR = "data/evaluation_results/comprehensive"
-MAX_SAMPLES_PER_BENCH = 20  # Per model, per benchmark
+MAX_SAMPLES_PER_BENCH = 5  # Per model, per benchmark
 TIMEOUT = 90
 
 # Single-model baselines: call directly via CPA provider
@@ -70,6 +70,7 @@ def call_cpa_baseline(model: str, messages: list, reasoning_effort: str = "max",
                 headers={
                     "Content-Type": "application/json",
                     "Authorization": f"Bearer {CPA_KEY}",
+                    "User-Agent": "AxioFusionStandalone/0.1",
                 },
             )
             resp = opener.open(req, timeout=TIMEOUT)
