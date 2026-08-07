@@ -4005,6 +4005,12 @@ def _run_screening_case(
                 system=system_prompt,
                 api_format=profile.api_format,
                 task_type="non_target_provider_baseline_screening",
+                reasoning_effort=effective_decoding.get("reasoning_effort") or None,
+                reasoning_budget_tokens=(
+                    int(effective_decoding["reasoning_budget_tokens"])
+                    if effective_decoding.get("reasoning_budget_tokens")
+                    else None
+                ),
                 temperature=_optional_float(effective_decoding.get("temperature")),
                 top_p=_optional_float(effective_decoding.get("top_p")),
                 max_output_tokens=int(
