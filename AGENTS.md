@@ -170,3 +170,91 @@ Git commit + push
 ---
 
 *最后更新：2026-08-07 — 随项目演进持续更新*
+
+---
+
+## 七、测试执行规范 (Test Execution Discipline) — 2026-08-08 更新
+
+### 7.1 递进门禁不可跳过
+每次修改核心代码后，必须按顺序通过所有层级。任何一层失败即停止，修复后重新开始。
+
+```
+L1: 语法 → L2: 导入 → L3a: 单元测试 → L3b: Dry-run → L3c: 连通性 → L4: Review → Commit
+```
+
+### 7.2 L3 功能测试实施细则
+
+#### L3a: 单元/集成测试
+- 目标：路由逻辑、注册表加载、模型筛选、能力分计算、延迟预算
+- 工具：pytest（`tests/` 目录下的专用测试）
+- 最低要求：router.py、registry.py、orchestrator.py 的核心路径必须覆盖
+- 执行命令：`python3 -m pytest tests/ -x -q --tb=short`
+
+#### L3b: Dry-run Route Plan 验证
+- 目标：验证三个 Axio 模型的 route plan 生成正确
+- 检查项：
+  - strategy 匹配（fast → direct/fast_light, terra → terra_panel, pro → pro_panel_judge_escalation）
+  - Judge/Synthesizer 选择为最高能力分模型
+  - 辅助模型被正确排除
+  - 延迟预算在合理范围内（不超过 3x baseline p95）
+- 执行命令：通过 `/route-plan` API 端点验证
+
+#### L3c: Provider 连通性探测
+- 目标：验证 provider 可正常响应流式请求
+- 约束：30秒超时，必须走系统代理（如有配置）
+- 检查项：HTTP 200、非空响应、stream 帧验证
+- 失败处理：标记为 unavailable，不影响其他 provider
+
+### 7.3 L4 语义与生产级质量标准（详细）
+
+除原有 10 条标准外，新增以下检查：
+
+11. **超时预算的合理性**：所有 `_DeadlineBudget` 超时计算必须考虑：
+    - Proxy/SSL 握手时间（最少 2-3 秒）
+    - Provider 实际 p95 延迟
+    - Mandatory stage reservations（judge/synthesizer）
+    - Panel phase 最低窗口（5000ms）
+12. **Phase 生命周期完整性**：每个 phase（如 `fusion_panel`）必须：
+    - 在 `configure_phase` 成功后才允许 acquire
+    - `timeout_seconds` 调用必须传递正确的 `phase` 参数
+    - 动态 reservation 不能挤占核心 phase 预算
+13. **错误传播透明性**：provider 调用失败时，trace 必须包含：
+    - 错误代码（error_code）
+    - HTTP 状态码（如适用）
+    - 延迟预算状态（skipped/released）
+    - 不得泄露 API key 或原始 provider URL
+14. **并发安全性**：`_DeadlineBudget` 的所有公共方法必须在 `self._lock` 下操作共享状态
+15. **资源释放**：stage 完成后必须调用 `release_pending_stage_reservations` 归还预算
+
+### 7.4 修复验证模板
+
+发现 Bug 后的修复流程：
+1. **复现**：编写最小复现脚本（dry-run 或 live）
+2. **根因分析**：添加 debug 日志定位精确故障点
+3. **修复**：最小化代码变更
+4. **验证**：
+   - Dry-run 验证（L3b）
+   - Live 验证（L3c，如涉及 provider 调用）
+   - 回归验证（确保 axio-fast/terra/pro 全部通过）
+5. **记录**：将根因和修复方案写入 commit message
+
+---
+
+## 八、已知问题与修复记录
+
+### 2026-08-08: axio-pro panel phase 配置失败
+
+**症状**：axio-pro 所有 candidate 被 `DeadlineExceeded` 跳过，`timeout_seconds` 返回 ~127ms
+
+**根因**：`_reserve_initial_stage_failover_deadline_headroom` 添加的 dynamic failover reservations 使 `pending_stage_reservation_ms()` 膨胀，导致 `_configure_fusion_panel_phase` 计算出 `panel_phase_budget < 5000ms`（最低窗口），panel phase 未配置，experts 在 acquire 时 protected 未被清零，可用时间仅 127ms。
+
+**修复**（commit: 待提交）：
+1. 新增 `_DeadlineBudget.initial_stage_reservation_ms()` 方法，仅统计 initial mandatory reservations
+2. `_configure_fusion_panel_phase` 改用 `initial_stage_reservation_ms()` 计算 control window
+3. Dynamic failover headroom 不再挤占 expert panel phase 预算
+
+**验证**：axio-pro live 请求 5.8 秒返回正确结果
+
+---
+
+*最后更新：2026-08-08 — 随项目演进持续更新*

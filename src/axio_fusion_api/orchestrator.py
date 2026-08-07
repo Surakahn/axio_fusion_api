@@ -748,7 +748,7 @@ def _configure_fusion_panel_phase(
         return receipt
 
     outer_ms = max(1, int(deadline_budget.max_latency_ms))
-    measured_control_ms = deadline_budget.pending_stage_reservation_ms()
+    measured_control_ms = deadline_budget.initial_stage_reservation_ms()
     fractional_control_ms = (
         outer_ms * _FUSION_CONTROL_WINDOW_FRACTION_NUMERATOR
         + _FUSION_CONTROL_WINDOW_FRACTION_DENOMINATOR
@@ -828,10 +828,10 @@ def _runtime_fusion_latency_budget(
     if baseline <= 0.0:
         baseline = _safe_float(direct_candidate.get("estimated_latency_ms"), default=0.0)
     try:
-        target_multiplier = float(guard.get("target_max_vs_single_model") or 3.0)
+        target_multiplier = float(guard.get("target_max_vs_single_model") or 5.0)
     except (TypeError, ValueError):
-        target_multiplier = 3.0
-    target_multiplier = max(1.0, min(3.0, target_multiplier))
+        target_multiplier = 5.0
+    target_multiplier = max(1.0, min(8.0, target_multiplier))
     receipt.update(
         {
             "enabled": True,
@@ -842,9 +842,10 @@ def _runtime_fusion_latency_budget(
     )
     if baseline <= 0.0:
         return requested, receipt
-    # Keep a small transport floor so an unusually optimistic probe does not
-    # create a sub-second Fusion deadline that cannot carry one real stream.
-    ceiling = max(3_000, int(baseline * target_multiplier))
+    # Keep a transport floor high enough that a proxy-based provider
+    # with SSL overhead can complete its handshake before timeout.
+    # 6_000 ms provides headroom for proxy tunnel + SSL + first token.
+    ceiling = max(6_000, int(baseline * target_multiplier))
     effective = min(requested, ceiling)
     receipt.update(
         {
@@ -1640,6 +1641,15 @@ class _DeadlineBudget:
 
     def phase_expired(self, name: str) -> bool:
         return self.phase_remaining_seconds(name) <= 0.0
+
+    def initial_stage_reservation_ms(self) -> int:
+        """Return the current protected headroom from initial mandatory reservations only.
+
+        Dynamic (failover) reservations are excluded so that optional fallback
+        capacity cannot crowd out the expert panel phase or other core stages.
+        """
+        with self._lock:
+            return max(0, int(sum(self._initial_stage_reservations_ms.values())))
 
     def pending_stage_reservation_ms(self) -> int:
         """Return the current protected control-stage headroom."""
