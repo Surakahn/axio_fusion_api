@@ -79,6 +79,12 @@ REASONING_EFFORT_LEVELS = (
 _REASONING_EFFORT_ORDER = {
     effort: index for index, effort in enumerate(REASONING_EFFORT_LEVELS)
 }
+# Axio exposes five practical public levels, while providers may omit one
+# intermediate level.  An explicit model-local xhigh -> max map is the only
+# allowed upward compatibility map: it preserves the caller's intended upper
+# tier when the exact endpoint has verified native max but has no native
+# xhigh.  All other upward rewrites remain invalid.
+_EXPLICIT_REASONING_ESCALATION_MAPS = frozenset({("xhigh", "max")})
 MAX_OUTPUT_TOKEN_PARAMETERS = (
     "max_tokens",
     "max_completion_tokens",
@@ -195,20 +201,11 @@ def normalize_screening_reasoning_capability(
     )
     native_efforts.sort(key=lambda item: _REASONING_EFFORT_ORDER[item])
     native_set = set(native_efforts)
-    raw_map = raw.get("effort_map", raw.get("effortMap", {}))
-    effort_map: dict[str, str] = {}
-    if isinstance(raw_map, Mapping):
-        for source, target in raw_map.items():
-            requested = normalize_reasoning_effort(source)
-            effective = normalize_reasoning_effort(target)
-            if (
-                requested
-                and effective
-                and effective in native_set
-                and _REASONING_EFFORT_ORDER[effective]
-                <= _REASONING_EFFORT_ORDER[requested]
-            ):
-                effort_map[requested] = effective
+    effort_map = _normalize_reasoning_effort_map(
+        raw.get("effort_map", raw.get("effortMap", {})),
+        supported_efforts=native_set,
+        scope="model",
+    )
     supported_budgets = _reasoning_budget_values(
         raw.get(
             "supported_budget_tokens",
@@ -253,6 +250,10 @@ def normalize_screening_reasoning_capability(
         "transport": transport,
         "api_format": format_name,
         "api_format_compatible": api_format_compatible,
+        # Research output is already candidate-local. The corresponding
+        # serving declaration still requires the exact endpoint probe before
+        # an effort map can affect a provider request.
+        "scope": "model",
         "native_efforts": native_efforts,
         "effort_map": dict(sorted(effort_map.items())),
         "supported_budget_tokens": supported_budgets,
@@ -328,6 +329,60 @@ def _reasoning_effort_values(value: Any) -> list[str]:
     return normalized
 
 
+def _reasoning_effort_mapping_direction(
+    requested: Any,
+    effective: Any,
+) -> str:
+    """Classify one closed logical-to-native effort mapping."""
+
+    source = normalize_reasoning_effort(requested)
+    target = normalize_reasoning_effort(effective)
+    if not source or not target:
+        return ""
+    if source == target:
+        return "native"
+    if _REASONING_EFFORT_ORDER[target] < _REASONING_EFFORT_ORDER[source]:
+        return "downgrade"
+    if (source, target) in _EXPLICIT_REASONING_ESCALATION_MAPS:
+        return "explicit_xhigh_to_max"
+    return ""
+
+
+def _normalize_reasoning_effort_map(
+    value: Any,
+    *,
+    supported_efforts: set[str],
+    scope: str,
+) -> dict[str, str]:
+    """Keep only deterministic, model-scoped compatible effort maps.
+
+    Downward maps make an unavailable logical level explicit.  The sole
+    upward map is xhigh -> max and is accepted only for a model-scoped
+    declaration whose target is an actually declared native effort.  This is
+    deliberately narrower than a generic proxy rewrite policy.
+    """
+
+    if not isinstance(value, Mapping):
+        return {}
+    normalized: dict[str, str] = {}
+    for source, target in value.items():
+        requested = normalize_reasoning_effort(source)
+        effective = normalize_reasoning_effort(target)
+        direction = _reasoning_effort_mapping_direction(requested, effective)
+        if (
+            requested
+            and effective
+            and effective in supported_efforts
+            and direction
+            and (
+                direction != "explicit_xhigh_to_max"
+                or scope == "model"
+            )
+        ):
+            normalized[requested] = effective
+    return dict(sorted(normalized.items()))
+
+
 def _reasoning_budget_values(value: Any) -> list[int]:
     if isinstance(value, str):
         raw_values = value.replace(";", ",").split(",")
@@ -379,26 +434,20 @@ def _normalize_reasoning_transport(
     transport = str(raw.get("transport") or "").strip().casefold()
     if transport not in _REASONING_TRANSPORT_FORMATS:
         transport = ""
+    scope = (
+        "model"
+        if str(raw.get("scope") or "").strip().casefold() == "model"
+        else ""
+    )
     supported_efforts = _reasoning_effort_values(
         raw.get("supported_efforts", raw.get("supportedEfforts", ()))
     )
     supported_set = set(supported_efforts)
-    raw_map = raw.get("effort_map", raw.get("effortMap", {}))
-    effort_map: dict[str, str] = {}
-    if isinstance(raw_map, Mapping):
-        for source, target in raw_map.items():
-            requested = normalize_reasoning_effort(source)
-            effective = normalize_reasoning_effort(target)
-            # A transport map is only a declared downgrade.  It cannot turn a
-            # caller's upper bound into a more expensive reasoning request.
-            if (
-                requested
-                and effective
-                and effective in supported_set
-                and _REASONING_EFFORT_ORDER[effective]
-                <= _REASONING_EFFORT_ORDER[requested]
-            ):
-                effort_map[requested] = effective
+    effort_map = _normalize_reasoning_effort_map(
+        raw.get("effort_map", raw.get("effortMap", {})),
+        supported_efforts=supported_set,
+        scope=scope,
+    )
     supported_budgets = _reasoning_budget_values(
         raw.get(
             "supported_budget_tokens",
@@ -434,7 +483,7 @@ def _normalize_reasoning_transport(
     # the sole scope that may survive research uncertainty and reach the
     # endpoint-bound reasoning probe; keeping the marker optional preserves
     # the existing provider-level configuration shape.
-    if str(raw.get("scope") or "").strip().casefold() == "model":
+    if scope == "model":
         normalized["scope"] = "model"
     return normalized
 
@@ -992,45 +1041,93 @@ class ModelProfile:
             min(1.0, float(self.screening_capability_axes.get(axis, 0.0) or 0.0)),
         )
 
-    def resolve_reasoning_transport(self, requested_effort: Any) -> tuple[str, str]:
-        """Resolve one verified wire transport and its effective effort.
+    def resolve_reasoning_transport_details(
+        self,
+        requested_effort: Any,
+    ) -> dict[str, Any]:
+        """Resolve one verified wire transport with an auditable map receipt.
 
         Unknown, candidate, unsupported, malformed, and protocol-mismatched
-        declarations always fail closed.  An unsupported caller level may be
-        sent only when the profile explicitly declares a non-escalating map.
+        declarations fail closed.  A configured downward map is permitted
+        when its native target was verified.  The only upward compatibility
+        map is an explicit model-scoped ``xhigh -> max`` declaration, whose
+        native ``max`` target must likewise have passed the endpoint probe.
         """
 
         requested = normalize_reasoning_effort(requested_effort)
+        result = {
+            "requested_effort": requested,
+            "effective_effort": "",
+            "transport": "",
+            "transport_verified": False,
+            "mapping_applied": False,
+            "mapping_direction": "unavailable",
+            "mapping_scope": "",
+        }
         if not requested:
-            return "", ""
+            return result
         config = self.reasoning_transport
         if not isinstance(config, Mapping) or config.get("status") != "verified":
-            return "", ""
+            return result
         transport = str(config.get("transport") or "")
         if transport in {"anthropic_thinking", "gemini_thinking_config"}:
-            return "", ""
+            return result
         expected_format = _REASONING_TRANSPORT_FORMATS.get(transport, "")
         if (
             not expected_format
             or expected_format != _reasoning_transport_api_format(self.api_format)
             or config.get("api_format_compatible") is not True
         ):
-            return "", ""
+            return result
         supported = set(_reasoning_effort_values(config.get("supported_efforts")))
         if requested in supported:
-            return transport, requested
+            return {
+                **result,
+                "effective_effort": requested,
+                "transport": transport,
+                "transport_verified": True,
+                "mapping_direction": "native",
+            }
         effort_map = config.get("effort_map")
         mapped = normalize_reasoning_effort(
             effort_map.get(requested) if isinstance(effort_map, Mapping) else ""
         )
+        direction = _reasoning_effort_mapping_direction(requested, mapped)
+        model_scoped_escalation = bool(
+            direction == "explicit_xhigh_to_max"
+            and str(config.get("scope") or "").strip().casefold() == "model"
+        )
         if (
             mapped
             and mapped in supported
-            and _REASONING_EFFORT_ORDER[mapped]
-            <= _REASONING_EFFORT_ORDER[requested]
+            and (
+                direction == "downgrade"
+                or model_scoped_escalation
+            )
         ):
-            return transport, mapped
-        return "", ""
+            return {
+                **result,
+                "effective_effort": mapped,
+                "transport": transport,
+                "transport_verified": True,
+                "mapping_applied": True,
+                "mapping_direction": direction,
+                "mapping_scope": (
+                    "model"
+                    if model_scoped_escalation
+                    else str(config.get("scope") or "").strip().casefold()
+                ),
+            }
+        return result
+
+    def resolve_reasoning_transport(self, requested_effort: Any) -> tuple[str, str]:
+        """Return the verified provider field and effective logical effort."""
+
+        resolved = self.resolve_reasoning_transport_details(requested_effort)
+        return (
+            str(resolved.get("transport") or ""),
+            str(resolved.get("effective_effort") or ""),
+        )
 
     def resolve_reasoning_budget(
         self,

@@ -32,6 +32,14 @@ from .tool_contract import (
 )
 
 
+class CompatibilityError(ValueError):
+    """A public protocol request has incompatible closed-control fields."""
+
+    def __init__(self, code: str, message: str | None = None) -> None:
+        self.code = str(code or "invalid_protocol_parameter")[:120]
+        super().__init__((message or self.code)[:240])
+
+
 def canonicalize_payload(payload: Mapping[str, Any], *, api_format: str = "chat/completions") -> FusionRequest:
     normalized = normalize_api_format(api_format)
     model = str(payload.get("model") or _model_from_gemini_payload(payload) or "axio-terra")
@@ -125,8 +133,9 @@ def _reasoning_effort_from_payload(
     Chat Completions carries ``reasoning_effort`` at the top level while
     Responses carries ``reasoning.effort``.  Accepting the other spelling as a
     fallback makes the public gateway tolerant of clients that share one
-    request builder, but the native field always wins and no raw vendor object
-    is preserved in the internal request.
+    request builder. A duplicated field is accepted only when both normalized
+    values agree; a conflict is a visible 4xx rather than a silent native-field
+    preference. No raw vendor object is preserved in the internal request.
     """
 
     nested = payload.get("reasoning")
@@ -136,6 +145,11 @@ def _reasoning_effort_from_payload(
         else ""
     )
     top_level_effort = normalize_reasoning_effort(payload.get("reasoning_effort"))
+    if top_level_effort and nested_effort and top_level_effort != nested_effort:
+        raise CompatibilityError(
+            "conflicting_reasoning_effort",
+            "reasoning_effort conflicts with reasoning.effort",
+        )
     if api_format == "responses":
         return nested_effort or top_level_effort
     if api_format in {"chat", "chat/completions"}:
@@ -163,11 +177,21 @@ def _reasoning_budget_from_payload(
         if isinstance(thinking, Mapping):
             thinking_type = str(thinking.get("type") or "").strip().casefold()
             if thinking_type == "disabled":
+                if generic is not None:
+                    raise CompatibilityError(
+                        "conflicting_reasoning_budget",
+                        "reasoning_budget_tokens conflicts with disabled thinking",
+                    )
                 return None
             native = normalize_reasoning_budget_tokens(
                 thinking.get("budget_tokens", thinking.get("budgetTokens"))
             )
             if native is not None:
+                if generic is not None and generic != native:
+                    raise CompatibilityError(
+                        "conflicting_reasoning_budget",
+                        "reasoning_budget_tokens conflicts with thinking.budget_tokens",
+                    )
                 return native
     if api_format == "gemini":
         config = _generation_config(payload)
@@ -182,6 +206,11 @@ def _reasoning_budget_from_payload(
                 )
             )
             if native is not None:
+                if generic is not None and generic != native:
+                    raise CompatibilityError(
+                        "conflicting_reasoning_budget",
+                        "reasoning_budget_tokens conflicts with thinkingConfig.thinkingBudget",
+                    )
                 return native
     return generic
 

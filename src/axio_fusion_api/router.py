@@ -847,7 +847,7 @@ def _budget_with_direct_profile_deadline(
         updated["direct_profile_deadline_adaptation"] = receipt
         return updated
     configured = max(
-        FAST_DIRECT_DEFAULT_DEADLINE_MS,
+        1,
         int(budget.get("max_latency_ms") or FAST_DIRECT_DEFAULT_DEADLINE_MS),
     )
     if request.public_model == "axio-fast":

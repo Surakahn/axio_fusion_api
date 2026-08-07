@@ -12,6 +12,7 @@ from typing import Any, Mapping, Sequence
 from urllib.parse import unquote, urlparse
 
 from .compat import (
+    CompatibilityError,
     IncrementalStreamRenderer,
     canonicalize_payload,
     normalize_api_format,
@@ -178,7 +179,7 @@ def handle_request(
                 payload.get("request") if isinstance(payload.get("request"), Mapping) else payload,
                 api_format=api_format,
             )
-        except ContentContractError as exc:
+        except (ContentContractError, CompatibilityError) as exc:
             return respond(
                 _json_response(
                     400,
@@ -223,7 +224,7 @@ def handle_request(
         payload = _inherit_responses_continuation_defaults(payload, continuation)
     try:
         request = canonicalize_payload(payload, api_format=endpoint)
-    except ContentContractError as exc:
+    except (ContentContractError, CompatibilityError) as exc:
         return respond(
             _json_response(
                 400,
@@ -526,7 +527,7 @@ def _prepare_incremental_stream_request(
         payload = _inherit_responses_continuation_defaults(payload, continuation)
     try:
         request = canonicalize_payload(payload, api_format=endpoint)
-    except ContentContractError as exc:
+    except (ContentContractError, CompatibilityError) as exc:
         return None, respond(
             _json_response(
                 400,

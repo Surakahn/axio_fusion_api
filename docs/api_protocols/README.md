@@ -47,7 +47,7 @@ The four public protocol surfaces are:
 
 ## Source Policy
 
-The source list below was checked on 2026-08-01 through the configured HTTP
+The source list below was checked through 2026-08-07 via the configured HTTP
 proxy. Vendor behavior can change, so every live provider enrollment still
 requires a streaming probe and an endpoint-bound capability receipt. A web
 page or README is a design input, never runtime proof.

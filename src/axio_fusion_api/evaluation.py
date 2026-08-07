@@ -26967,7 +26967,9 @@ def _provider_benchmark_reasoning_receipt(
     task_format: str = "",
 ) -> dict[str, Any]:
     requested = normalize_reasoning_effort(requested_effort)
-    transport, effective = profile.resolve_reasoning_transport(requested)
+    resolution = profile.resolve_reasoning_transport_details(requested)
+    transport = str(resolution.get("transport") or "")
+    effective = str(resolution.get("effective_effort") or "")
     config = profile.reasoning_transport if isinstance(profile.reasoning_transport, Mapping) else {}
     transport_verified = bool(
         requested
@@ -26985,6 +26987,13 @@ def _provider_benchmark_reasoning_receipt(
         "requested_reasoning_effort": requested,
         "effective_reasoning_effort": effective,
         "reasoning_transport": transport,
+        "reasoning_mapping_applied": resolution.get("mapping_applied") is True,
+        "reasoning_mapping_direction": str(
+            resolution.get("mapping_direction") or "unavailable"
+        )[:80],
+        "reasoning_mapping_scope": str(
+            resolution.get("mapping_scope") or ""
+        )[:32],
         "transport_verified": transport_verified,
         "native_reasoning_effort_verified": native_verified,
         "verification_scope": "calibrated_provider_profile",
@@ -27020,6 +27029,9 @@ def _public_benchmark_reasoning_receipt(
         "requested_reasoning_effort": requested,
         "effective_reasoning_effort": requested,
         "reasoning_transport": transport,
+        "reasoning_mapping_applied": False,
+        "reasoning_mapping_direction": "public_logical_request",
+        "reasoning_mapping_scope": "",
         "transport_verified": bool(requested and transport),
         # The public Axio boundary verifies the logical request shape.  The
         # actual provider-native max status is audited separately per provider
@@ -27046,6 +27058,9 @@ def _benchmark_reasoning_receipt_not_executed(
         "requested_reasoning_effort": BENCHMARK_TARGET_REASONING_EFFORT,
         "effective_reasoning_effort": "",
         "reasoning_transport": "",
+        "reasoning_mapping_applied": False,
+        "reasoning_mapping_direction": "not_executed",
+        "reasoning_mapping_scope": "",
         "transport_verified": False,
         "native_reasoning_effort_verified": False,
         "verification_scope": "not_executed",
@@ -27080,6 +27095,15 @@ def _normalize_benchmark_reasoning_receipt(
         source.get("effective_reasoning_effort")
     )
     normalized["reasoning_transport"] = str(source.get("reasoning_transport") or "")[:80]
+    normalized["reasoning_mapping_applied"] = source.get(
+        "reasoning_mapping_applied"
+    ) is True
+    normalized["reasoning_mapping_direction"] = str(
+        source.get("reasoning_mapping_direction") or "unavailable"
+    )[:80]
+    normalized["reasoning_mapping_scope"] = str(
+        source.get("reasoning_mapping_scope") or ""
+    )[:32]
     native = source.get("native_reasoning_effort_verified")
     normalized["native_reasoning_effort_verified"] = native if isinstance(native, bool) else None
     normalized["transport_verified"] = source.get("transport_verified") is True

@@ -13,7 +13,7 @@ Axio.
 | OpenAI Responses streaming | <https://developers.openai.com/api/reference/resources/responses/streaming-events/> | 2026-08-01 | Current streaming events |
 | OpenAI migration | <https://developers.openai.com/api/docs/guides/migrate-to-responses> | 2026-08-01 | Current guide |
 | OpenAI tools | <https://developers.openai.com/api/docs/guides/tools> | 2026-08-01 | Current guide |
-| OpenAI reasoning | <https://developers.openai.com/api/docs/guides/reasoning> | 2026-08-01 | Current guide |
+| OpenAI reasoning | <https://developers.openai.com/api/docs/guides/reasoning> | 2026-08-07 | Current guide; model-dependent effort levels and Responses nested field |
 | OpenAI images | <https://developers.openai.com/api/docs/guides/image-generation/> | 2026-08-01 | Current guide |
 | OpenAI images reference | <https://developers.openai.com/api/reference/resources/images/methods/generate/> | 2026-08-01 | Current generate method |
 | OpenAI image edits reference | <https://developers.openai.com/api/reference/resources/images/methods/edit/> | 2026-08-01 | Current edit method |
@@ -25,6 +25,7 @@ Axio.
 | CC Switch | <https://github.com/farion1231/cc-switch> | 2026-08-01 | `ebbf141fc71547a99f669df1be8e345130d1d890` |
 | New API | <https://github.com/QuantumNous/new-api> | 2026-08-01 | `cfaba1dd6754d4238e1360247c198a64a313e96c` |
 | CLIProxyAPI | <https://github.com/router-for-me/CLIProxyAPI> | 2026-08-01 | `bc71c77f5cc42f3fbe1bf040cf14d4f166894835` |
+| Sub2API | <https://github.com/Wei-Shaw/sub2api> | 2026-08-07 | `93367b6db43315abe4f9fd9b09cbfc971b1f5ad0`; reasoning map policy review |
 | Client2API | <https://github.com/Hongtruongbvn/client2api> | 2026-08-01 | default branch `main`; small client translation proxy |
 
 ## Local Companion Documents

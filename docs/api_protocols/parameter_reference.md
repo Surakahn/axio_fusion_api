@@ -51,7 +51,7 @@ scheme is recorded as a safe enum and the secret is never persisted.
 | `temperature`, `top_p`, `stop` | supported | canonical sampling fields | forwarded only in the closed native shape |
 | `tools`, `tool_choice` | supported common function subset | canonical tools | native tool capability must be proven |
 | `response_format` | supported JSON/text subset | canonical structured output | mapped to the target's native wrapper |
-| `reasoning_effort` | model-specific | canonical logical effort | sent only as verified top-level `reasoning_effort` |
+| `reasoning_effort` | model-specific | canonical logical effort | sent only as verified top-level `reasoning_effort`; a conflicting nested `reasoning.effort` alias is a 4xx |
 | `frequency_penalty`, `presence_penalty`, `logit_bias`, `logprobs`, `n`, audio, prediction, vendor extensions | not in closed contract | none | reject or omit by route policy; never pass through |
 
 The modern OpenAI schema distinguishes `max_completion_tokens` from the older
@@ -80,7 +80,7 @@ Chat-only sentinel.
 | `max_output_tokens`, `temperature`, `top_p` | supported | canonical fields | native Responses names |
 | `text.format` | supported JSON/text subset | structured output | never replaced with Chat `response_format` |
 | function `tools`, `tool_choice`, `parallel_tool_calls` | supported common function subset | canonical tools | tool capability must be proven |
-| `reasoning.effort` | model-specific | canonical logical effort | nested field only for verified Responses transport |
+| `reasoning.effort` | model-specific | canonical logical effort | nested field only for verified Responses transport; a conflicting top-level `reasoning_effort` alias is a 4xx |
 | `previous_response_id` | supported by Axio control plane | continuation history | process-local, tenant-scoped, non-durable by default |
 | `store`, `metadata` | bounded public behavior | continuation/receipt controls | Axio does not claim upstream storage semantics |
 | built-in tools, computer use, hosted MCP, background mode, encrypted reasoning items | outside closed contract | none | require a dedicated adapter and probe |
@@ -188,6 +188,13 @@ by turn/index; it does not treat one JSON object as a semantic completion.
 The conversion is deliberately not a universal superset. An unsupported file,
 tool mode, server-side tool, reasoning shape, or modality is rejected before
 provider dispatch when flattening it would change the user's meaning.
+
+OpenAI-compatible clients sometimes emit both `reasoning_effort` and
+`reasoning.effort` while moving between Chat Completions and Responses. Axio
+normalizes matching values once; mismatched values fail at the public boundary
+with `conflicting_reasoning_effort`. Anthropic and Gemini native thinking
+budgets follow the same no-silent-override rule when they conflict with the
+closed `reasoning_budget_tokens` alias.
 
 ## Error, Retry, And Timeout Rules
 

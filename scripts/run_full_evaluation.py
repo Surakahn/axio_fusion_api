@@ -1,22 +1,19 @@
 #!/usr/bin/env python3
-"""Axio Fusion API - Full Scientific Benchmark Evaluation."""
+"""Non-formal local diagnostic sampler; never use it for an Axio quality claim."""
 import json, os, sys, time, re, hashlib
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib import request as urllib_request
 
-os.environ.pop('http_proxy', None)
-os.environ.pop('https_proxy', None)
-os.environ.pop('HTTP_PROXY', None)
-os.environ.pop('HTTPS_PROXY', None)
+# Remove proxy for localhost access
+for k in ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY']:
+    os.environ.pop(k, None)
 
 AXIO_URL = "http://127.0.0.1:18900"
-TOKENAPIS_URL = "https://tokenapis.com/v1"
-TOKENAPIS_KEY = "sk-9023fc08bd8788b07e426144de48ac476b3de9e1e532f1fd67719b9b12e5e1ef"
+TOKENAPIS_URL = os.environ.get("AXIO_TOKENAPIS_BASE_URL", "https://tokenapis.com/v1").rstrip("/")
+TOKENAPIS_KEY = os.environ.get("AXIO_TOKENAPIS_API_KEY", "").strip()
 BENCHMARK_DIR = "data/benchmarks"
 RESULTS_DIR = "data/evaluation_results"
 MAX_SAMPLES = 15
-MAX_WORKERS = 3
 TIMEOUT = 90
 
 Path(RESULTS_DIR).mkdir(parents=True, exist_ok=True)
@@ -62,9 +59,11 @@ def call_axio(model, messages, max_tokens=256):
     return call_api(f"{AXIO_URL}/v1/chat/completions", payload, {"Content-Type": "application/json"})
 
 def call_provider(model, messages, max_tokens=256):
+    if not TOKENAPIS_KEY:
+        return None, "AXIO_TOKENAPIS_API_KEY is not configured"
     payload = {"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": 0.0, "stream": False}
-    return call_api(f"{TOKENAPIS_URL}/v1/chat/completions", payload,
-        {"Content-Type": "application/json", "Authorization": f"Bearer {TOKENAPIS_KEY}"})
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {TOKENAPIS_KEY}"}
+    return call_api(f"{TOKENAPIS_URL}/v1/chat/completions", payload, headers)
 
 def normalize_answer(text):
     if not text: return ""
@@ -156,96 +155,86 @@ def format_prompt(case, task_type):
         return str(case.get("question", case.get("prompt", "")))[:2000]
 
 def get_gold(case, task_type):
-    if task_type == "mcq":
-        return str(case.get("answer", case.get("label", case.get("target", "")))).strip().upper()
-    elif task_type == "math":
-        return str(case.get("answer", case.get("solution", "")))
-    elif task_type == "binary":
-        return str(case.get("answer", case.get("label", ""))).strip().upper()
+    if task_type == "mcq": return str(case.get("answer", case.get("label", ""))).strip().upper()
+    elif task_type == "math": return str(case.get("answer", case.get("solution", "")))
+    elif task_type == "binary": return str(case.get("answer", case.get("label", ""))).strip().upper()
     return str(case.get("answer", case.get("label", "")))
 
-def run_one_case(case, task_type, model_name, call_func, max_tokens):
-    prompt = format_prompt(case, task_type)
-    gold = get_gold(case, task_type)
-    messages = [{"role": "user", "content": prompt}]
+def run_model(model_name, call_func, is_axio):
+    bench_results = {}
+    total_score, total_cases, total_lat = 0, 0, 0
     t0 = time.time()
-    response, error = call_func(model_name, messages, max_tokens)
-    elapsed = time.time() - t0
-    if response and not error:
-        score = score_answer(response, gold, task_type)
-        return {"score": score, "latency": elapsed, "error": None}
-    return {"score": 0.0, "latency": elapsed, "error": error}
-
-def run_benchmark(filename, label, task_type, model_name, call_func, max_tokens=256):
-    cases = load_benchmark(filename)[:MAX_SAMPLES]
-    if not cases: return None
-    scores, latencies, errors = [], [], 0
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
-        futures = {ex.submit(run_one_case, c, task_type, model_name, call_func, max_tokens): i for i, c in enumerate(cases)}
-        for future in as_completed(futures):
-            result = future.result()
-            scores.append(result["score"])
-            latencies.append(result["latency"])
-            if result["error"]: errors += 1
-    acc = sum(scores) / max(len(scores), 1)
-    avg_lat = sum(latencies) / max(len(latencies), 1)
-    print(f"  [{label}] {sum(scores):.1f}/{len(scores)} ({acc:.1%}) avg={avg_lat:.1f}s err={errors}", flush=True)
-    return {"accuracy": round(acc, 4), "correct": sum(scores), "total": len(scores), "avg_latency_s": round(avg_lat, 2), "errors": errors}
+    for filename, label, task_type in BENCHMARKS:
+        cases = load_benchmark(filename)[:MAX_SAMPLES]
+        if not cases:
+            print(f"  [{label}] No cases, skip", flush=True)
+            continue
+        scores, latencies, errors = [], [], 0
+        for case in cases:
+            prompt = format_prompt(case, task_type)
+            gold = get_gold(case, task_type)
+            messages = [{"role": "user", "content": prompt}]
+            max_tok = 512 if task_type in ("code", "math") else 256
+            t1 = time.time()
+            response, error = call_func(model_name, messages, max_tok)
+            elapsed = time.time() - t1
+            if response and not error:
+                scores.append(score_answer(response, gold, task_type))
+                latencies.append(elapsed)
+            else:
+                scores.append(0.0)
+                latencies.append(elapsed)
+                errors += 1
+        acc = sum(scores) / max(len(scores), 1)
+        avg_lat = sum(latencies) / max(len(latencies), 1)
+        bench_results[label] = {"accuracy": round(acc, 4), "correct": sum(scores), "total": len(scores), "avg_latency_s": round(avg_lat, 2), "errors": errors}
+        total_score += sum(scores)
+        total_cases += len(scores)
+        total_lat += sum(latencies)
+        print(f"  [{label}] {sum(scores):.1f}/{len(scores)} ({acc:.1%}) avg={avg_lat:.1f}s err={errors}", flush=True)
+    overall = {"total_accuracy": round(total_score / max(total_cases, 1), 4), "total_correct": total_score, "total_cases": total_cases, "avg_latency_s": round(total_lat / max(total_cases, 1), 2), "wall_time_s": round(time.time() - t0, 1)}
+    return bench_results, overall
 
 def main():
+    if os.environ.get("AXIO_ALLOW_NONFORMAL_DIAGNOSTIC") != "1":
+        raise SystemExit(
+            "This sampler is diagnostic-only. Use the frozen official campaign "
+            "for benchmark evidence, or set AXIO_ALLOW_NONFORMAL_DIAGNOSTIC=1 "
+            "for a local, non-claim diagnostic run."
+        )
     print("=" * 70, flush=True)
-    print(f"Axio Fusion API - Full Evaluation | Time: {time.strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
-    print(f"Benchmarks: {len(BENCHMARKS)}, Samples: {MAX_SAMPLES}, Workers: {MAX_WORKERS}", flush=True)
+    print(
+        f"Axio Fusion API - NON-FORMAL DIAGNOSTIC | "
+        f"{time.strftime('%Y-%m-%d %H:%M:%S')}",
+        flush=True,
+    )
+    print(f"Benchmarks: {len(BENCHMARKS)}, Samples: {MAX_SAMPLES}", flush=True)
+    print("This output is not valid benchmark evidence or a quality claim.", flush=True)
     print("=" * 70, flush=True)
+    all_results = {
+        "schema": "axio_fusion_api.nonformal_diagnostic_sampler.v1",
+        "formal_evaluation": False,
+        "quality_claim_eligible": False,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "axio_models": {},
+        "baseline_models": {},
+        "comparisons": {},
+    }
     
-    all_results = {"schema": "axio_fusion_api.full_evaluation.v1", "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                    "axio_models": {}, "baseline_models": {}, "comparisons": {}}
-    
-    # Axio Models
-    print("\n=== EVALUATING AXIO MODELS ===", flush=True)
+    print("\n=== AXIO MODELS ===", flush=True)
     for model in AXIO_MODELS:
         print(f"\n--- {model} ---", flush=True)
-        t0 = time.time()
-        bench_results = {}
-        total_score, total_cases, total_lat = 0, 0, 0
-        for filename, label, task_type in BENCHMARKS:
-            max_tok = 512 if task_type in ("code", "math") else 256
-            result = run_benchmark(filename, label, task_type, model, call_axio, max_tok)
-            if result:
-                bench_results[label] = result
-                total_score += result["correct"]
-                total_cases += result["total"]
-                total_lat += result["avg_latency_s"] * result["total"]
-        overall = {"total_accuracy": round(total_score / max(total_cases, 1), 4),
-                   "total_correct": total_score, "total_cases": total_cases,
-                   "avg_latency_s": round(total_lat / max(total_cases, 1), 2),
-                   "wall_time_s": round(time.time() - t0, 1)}
+        bench_results, overall = run_model(model, call_axio, True)
         all_results["axio_models"][model] = {"benchmarks": bench_results, "overall": overall}
         print(f"  OVERALL: {overall['total_accuracy']:.1%} ({overall['total_correct']:.1f}/{overall['total_cases']}) avg={overall['avg_latency_s']:.1f}s wall={overall['wall_time_s']:.0f}s", flush=True)
     
-    # Baseline Models
-    print("\n=== EVALUATING BASELINE MODELS ===", flush=True)
+    print("\n=== BASELINE MODELS ===", flush=True)
     for model, tier in BASELINE_MODELS:
         print(f"\n--- {model} ({tier}) ---", flush=True)
-        t0 = time.time()
-        bench_results = {}
-        total_score, total_cases, total_lat = 0, 0, 0
-        for filename, label, task_type in BENCHMARKS:
-            max_tok = 512 if task_type in ("code", "math") else 256
-            result = run_benchmark(filename, label, task_type, model, call_provider, max_tok)
-            if result:
-                bench_results[label] = result
-                total_score += result["correct"]
-                total_cases += result["total"]
-                total_lat += result["avg_latency_s"] * result["total"]
-        overall = {"total_accuracy": round(total_score / max(total_cases, 1), 4),
-                   "total_correct": total_score, "total_cases": total_cases,
-                   "avg_latency_s": round(total_lat / max(total_cases, 1), 2),
-                   "wall_time_s": round(time.time() - t0, 1)}
+        bench_results, overall = run_model(model, call_provider, False)
         all_results["baseline_models"][model] = {"tier": tier, "benchmarks": bench_results, "overall": overall}
         print(f"  OVERALL: {overall['total_accuracy']:.1%} ({overall['total_correct']:.1f}/{overall['total_cases']}) avg={overall['avg_latency_s']:.1f}s wall={overall['wall_time_s']:.0f}s", flush=True)
     
-    # Comparisons
     print("\n=== COMPARISON ===", flush=True)
     for axio_m, base_m, tier_label in [("axio-pro","gpt-5.6-sol","Strongest"),("axio-terra","gpt-5.6-terra","Second"),("axio-fast","gpt-5.6-luna","Third")]:
         ao = all_results["axio_models"].get(axio_m, {}).get("overall", {})
@@ -253,18 +242,26 @@ def main():
         aa, ba = ao.get("total_accuracy",0), bo.get("total_accuracy",0)
         al, bl = ao.get("avg_latency_s",0), bo.get("avg_latency_s",0)
         delta, lr = aa - ba, al / max(bl, 0.001)
-        verdict = "BETTER" if delta > 0.01 else ("SIMILAR" if abs(delta) <= 0.01 else "WORSE")
         lat_ok = "OK" if lr <= 3.0 else "EXCEEDS 3x"
-        print(f"\n{tier_label}: {axio_m} vs {base_m}", flush=True)
-        print(f"  Axio: {aa:.1%} ({al:.1f}s) | Baseline: {ba:.1%} ({bl:.1f}s)", flush=True)
-        print(f"  Delta: {delta:+.1%} | Latency: {lr:.1f}x {lat_ok} | Verdict: {verdict}", flush=True)
-        all_results["comparisons"][f"{axio_m}_vs_{base_m}"] = {"axio_accuracy":aa,"baseline_accuracy":ba,"delta":round(delta,4),"axio_latency_s":al,"baseline_latency_s":bl,"latency_ratio":round(lr,2),"verdict":verdict,"latency_ok":lr<=3.0}
+        print(
+            f"{tier_label}: {axio_m} vs {base_m} | Axio: {aa:.1%} "
+            f"Base: {ba:.1%} | Delta: {delta:+.1%} Lat: {lr:.1f}x {lat_ok} "
+            "(diagnostic only)",
+            flush=True,
+        )
+        all_results["comparisons"][f"{axio_m}_vs_{base_m}"] = {
+            "axio_accuracy": aa,
+            "baseline_accuracy": ba,
+            "delta": round(delta, 4),
+            "axio_latency_s": al,
+            "baseline_latency_s": bl,
+            "latency_ratio": round(lr, 2),
+            "latency_ok": lr <= 3.0,
+            "quality_claim_eligible": False,
+        }
     
     output_path = os.path.join(RESULTS_DIR, f"full_evaluation_{time.strftime('%Y%m%d_%H%M%S')}.json")
-    with open(output_path, 'w') as f:
-        json.dump(all_results, f, ensure_ascii=False, indent=2)
-    print(f"\nResults saved to: {output_path}", flush=True)
-    return all_results
+    with open(output_path, 'w') as f: json.dump(all_results, f, ensure_ascii=False, indent=2)
+    print(f"\nSaved: {output_path}", flush=True)
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()

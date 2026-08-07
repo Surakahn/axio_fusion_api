@@ -38,9 +38,14 @@ The serving profile stores that prior as `screening_reasoning_capability` and
 stores the independent endpoint probe as `reasoning_transport`. Only the
 latter can be `verified`. A model that declares only `medium` does not acquire
 `low`, `high`, `xhigh`, or `max` by interpolation. An `effort_map` is accepted
-only when it is explicit, maps to a declared native level, and does not raise
-the caller's requested intensity. The research evidence must be visible to
-the same candidate; a source attached to another model cannot be reused.
+only when it is explicit and maps to a declared native level. Ordinary maps
+may only lower the caller's requested intensity. The one exception is the
+exact model-scoped `xhigh -> max` compatibility map: it is permitted only when
+the endpoint probe has verified native `max` for that same profile. This
+retains Axio's five-level public contract for a provider that exposes `low`,
+`medium`, `high`, and `max` but no native `xhigh`; it does not authorize
+arbitrary upward rewrites. The research evidence must be visible to the same
+candidate; a source attached to another model cannot be reused.
 
 An evidence gap is represented as `status: "unknown"`, with no transport,
 native effort, cost claim, or reasoning evidence forwarded. This is a bounded
@@ -77,7 +82,7 @@ enabled on a profile whose upstream API format is Chat Completions.
 
 The current NVIDIA candidate declaration therefore probes only that documented
 three-level subset. Once the exact model/channel passes the probe, its explicit
-non-escalating map may route Axio's logical `xhigh` and `max` roles to NVIDIA's
+downgrade map may route Axio's logical `xhigh` and `max` roles to NVIDIA's
 highest verified native value, `high`. It must never send `xhigh` or `max` to
 NVIDIA merely because Axio understands those logical values.
 
@@ -186,6 +191,10 @@ values.
 The private evidence records only endpoint hashes, profile/model bindings,
 timing, stream framing, status classes, and output hashes. It never persists a
 credential, endpoint value, raw prompt, visible output, or hidden reasoning.
+When a benchmark or operational receipt resolves an effort map, it records the
+requested logical effort, effective native effort, whether a map was applied,
+the map direction, and the model scope. A `max` claim remains native only when
+the request itself and effective endpoint value are both `max`.
 
 ## Axio Configuration Gate
 
@@ -194,21 +203,40 @@ The profile-level declaration is deliberately closed:
 ```json
 {
   "reasoning_transport": {
+    "scope": "model",
     "status": "verified",
     "transport": "chat_reasoning_effort",
-    "supported_efforts": ["low", "medium", "high"],
-    "effort_map": {"xhigh": "high"}
+    "supported_efforts": ["low", "medium", "high", "max"],
+    "effort_map": {"xhigh": "max"}
   }
 }
 ```
 
-- `transport` may only be `chat_reasoning_effort`, `responses_reasoning`, or
-  `responses_reasoning_effort`.
+- `transport` may only be `chat_reasoning_effort`, `responses_reasoning`,
+  `responses_reasoning_effort`, `anthropic_thinking`, or
+  `gemini_thinking_config`.
 - `status` must be `verified` before the adapter writes a wire field.
 - The declared transport must match the profile API format.
 - An unsupported requested level is omitted unless `effort_map` explicitly
-  maps it to a declared supported level of equal or lower intensity.
+  maps it to a declared supported level. The normal case is equal-or-lower
+  intensity. The sole upward case is model-scoped `xhigh -> max`, and its
+  `max` target must be in the profile's endpoint-verified supported set.
 - No configuration field can inject arbitrary upstream request-body keys.
+
+## Public Alias Conflict Rule
+
+Chat Completions normally carries top-level `reasoning_effort`; Responses
+normally carries `reasoning.effort`. Axio accepts either spelling as a
+compatibility alias at either public endpoint only when both supplied values
+normalize to the same logical effort. If both are present and differ, Axio
+returns `400 conflicting_reasoning_effort`; it does not silently privilege
+the native spelling. The same rule applies to the generic Axio
+`reasoning_budget_tokens` alias versus native Anthropic/Gemini thinking-token
+budgets when both are supplied.
+
+This makes a cross-protocol client bug observable before any provider request
+is started, and prevents a configuration or SDK migration from quietly
+changing the intended reasoning cost or latency.
 
 ## Verification And Failure Semantics
 

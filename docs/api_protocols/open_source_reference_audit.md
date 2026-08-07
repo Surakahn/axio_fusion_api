@@ -92,6 +92,29 @@ review anchors; upstream projects continue to change.
   cloaking, or any behavior that would make a provider response appear to be a
   different model without a measurement receipt.
 
+## Sub2API
+
+- Repository: <https://github.com/Wei-Shaw/sub2api>
+- HEAD reviewed: `93367b6db43315abe4f9fd9b09cbfc971b1f5ad0`
+- License shown by GitHub: LGPL-3.0
+- Relevant public surface: subscription-backed OpenAI, Claude, Gemini, and
+  compatible request gateways with model mappings, streaming bridges, and
+  OpenAI/Codex reasoning-effort controls.
+- Useful lesson: normalize an explicitly enumerated reasoning map once, then
+  apply a separate ceiling. This avoids chained rewrites and keeps omitted
+  values under the upstream default.
+- File anchors reviewed:
+  `backend/internal/domain/reasoning_effort.go`,
+  `backend/internal/service/openai_reasoning_effort_policy.go`, and
+  `backend/internal/pkg/apicompat/chatcompletions_anthropic_bridge_test.go`.
+- Axio adoption: `ModelProfile` now resolves a closed, one-step logical to
+  native mapping and emits a mapping receipt. Axio is stricter: an upward
+  mapping is limited to explicit model-scoped `xhigh -> max`, and its target
+  must be verified by a strict stream probe against the active endpoint.
+- Deliberately not adopted: group-wide arbitrary rewrites, cross-protocol
+  field mutation without a model capability record, and opaque account or
+  subscription behavior.
+
 ## Client2API
 
 - Repository: <https://github.com/Hongtruongbvn/client2api>

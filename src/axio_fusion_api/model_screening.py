@@ -6607,26 +6607,15 @@ def _normalize_research_api_format(value: Any) -> str:
 
 def _parse_strict_json_object(text: str) -> dict[str, Any]:
     value = str(text or "").strip()
-    candidates = [value]
-    # Some models wrap JSON in Markdown fences, possibly with text before/after.
-    # Try extracting every fenced block; the last valid JSON object is used.
-    fence_pattern = re.compile(r"```(?:json)?\s*([\s\S]*?)\s*```", flags=re.IGNORECASE)
-    fence_matches = fence_pattern.findall(value)
-    for match in fence_matches:
-        stripped = match.strip()
-        if stripped:
-            candidates.append(stripped)
-    # Also try the original fullmatch approach for backward compatibility
+    # Research output must be exactly one JSON object, optionally enclosed by
+    # one complete outer JSON fence. Parsing an embedded fenced block would
+    # permit prose or a second answer to bypass the fixed Agent contract.
     fenced = re.fullmatch(r"```(?:json)?\s*([\s\S]*?)\s*```", value, flags=re.IGNORECASE)
-    if fenced:
-        candidates.append(fenced.group(1).strip())
-    parsed: Any = None
-    for candidate in candidates:
-        try:
-            parsed = json.loads(candidate)
-            break
-        except json.JSONDecodeError:
-            continue
+    candidate = fenced.group(1).strip() if fenced else value
+    try:
+        parsed: Any = json.loads(candidate)
+    except json.JSONDecodeError as exc:
+        raise ModelScreeningError("prefusion_research_output_not_strict_json") from exc
     if parsed is None:
         raise ModelScreeningError("prefusion_research_output_not_strict_json")
     if not isinstance(parsed, dict):

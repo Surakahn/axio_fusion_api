@@ -28,3 +28,6 @@ credentials*.json
 *.secret.json
 *.secret.jsonl
 private/
+# Local diagnostic evaluation runs are not formal, hash-bound campaign
+# evidence and may contain provider-derived metadata.
+/data/evaluation_results/

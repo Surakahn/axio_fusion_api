@@ -1,16 +1,22 @@
-import os, sys, signal
+import os, sys, signal, threading
 
-os.environ['AXIO_FUSION_NETWORK_MODE'] = 'auto'
-os.environ['AXIO_FUSION_SYSTEM_PROXY'] = 'http://127.0.0.1:10808'
-os.environ['AXIO_FUSION_REGISTRY_PATH'] = os.path.join(
+os.environ.setdefault('AXIO_FUSION_NETWORK_MODE', 'auto')
+os.environ.setdefault('AXIO_FUSION_SYSTEM_PROXY', 'http://127.0.0.1:10808')
+os.environ.setdefault('AXIO_FUSION_REGISTRY_PATH', os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     'private/current_channel_enrollment_20260728_combined_r1/runtime_registry.calibrated.private.json'
-)
-# Provider channel credentials - resolved from env only, never persisted
-os.environ['AXIO_NVIDIA_BASE_URL'] = 'https://integrate.api.nvidia.com/v1'
-os.environ['AXIO_NVIDIA_API_KEYS'] = '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,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,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,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,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'
-os.environ['AXIO_TOKENAPIS_BASE_URL'] = 'https://tokenapis.com/v1'
-os.environ['AXIO_TOKENAPIS_API_KEY'] = 'sk-9023fc08bd8788b07e426144de48ac476b3de9e1e532f1fd67719b9b12e5e1ef'
+))
+os.environ.setdefault('AXIO_NVIDIA_BASE_URL', 'https://integrate.api.nvidia.com/v1')
+os.environ.setdefault('AXIO_TOKENAPIS_BASE_URL', 'https://tokenapis.com/v1')
+
+required_secrets = ('AXIO_NVIDIA_API_KEYS', 'AXIO_TOKENAPIS_API_KEY')
+missing_secrets = [name for name in required_secrets if not os.environ.get(name, '').strip()]
+if missing_secrets:
+    raise SystemExit(
+        'Missing provider credentials in the process environment: '
+        + ', '.join(missing_secrets)
+        + '. Source private/current_channels.env before starting the server.'
+    )
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'src'))
 
@@ -33,13 +39,24 @@ server = create_http_server(
     image_profiles=[],
 )
 
+shutdown_started = False
+
+
 def handle_signal(signum, frame):
-    print('Shutting down...', file=sys.stderr)
-    server.shutdown()
-    sys.exit(0)
+    global shutdown_started
+    if shutdown_started:
+        return
+    shutdown_started = True
+    print('Shutting down...', file=sys.stderr, flush=True)
+    # BaseServer.shutdown() waits for serve_forever() to exit and therefore
+    # must not run in the signal handler on the serving thread.
+    threading.Thread(target=server.shutdown, daemon=True).start()
 
 signal.signal(signal.SIGTERM, handle_signal)
 signal.signal(signal.SIGINT, handle_signal)
 
 print('Axio Fusion API server running on http://127.0.0.1:18900', file=sys.stderr, flush=True)
-server.serve_forever()
+try:
+    server.serve_forever()
+finally:
+    server.server_close()

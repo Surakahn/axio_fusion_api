@@ -2058,6 +2058,11 @@ def reasoning_transport_probe_binding(profile: ModelProfile) -> dict[str, Any]:
             and credential.get("base_url_sha256")
         ),
         "transport": str(config.get("transport") or "")[:80],
+        "scope": (
+            "model"
+            if str(config.get("scope") or "").strip().casefold() == "model"
+            else ""
+        ),
         "supported_efforts": supported_efforts,
         "effort_map": dict(sorted(effort_map.items())),
         "supported_budget_tokens": sorted(supported_budgets),
@@ -5196,6 +5201,11 @@ def _redact_reasoning_transport_binding(value: Mapping[str, Any]) -> dict[str, A
         "base_url_sha256": str(value.get("base_url_sha256") or "")[:128],
         "endpoint_binding_ready": value.get("endpoint_binding_ready") is True,
         "transport": str(value.get("transport") or "")[:80],
+        "scope": (
+            "model"
+            if str(value.get("scope") or "").strip().casefold() == "model"
+            else ""
+        ),
         "supported_efforts": efforts,
         "effort_map": dict(sorted(effort_map.items())),
         "supported_budget_tokens": sorted(set(budgets)),

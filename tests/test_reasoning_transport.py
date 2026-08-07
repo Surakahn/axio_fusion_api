@@ -13,7 +13,7 @@ if str(STANDALONE_SRC) not in sys.path:
     sys.path.insert(0, str(STANDALONE_SRC))
 
 from axio_fusion_api.channel_config import build_runtime_profiles
-from axio_fusion_api.compat import canonicalize_payload
+from axio_fusion_api.compat import CompatibilityError, canonicalize_payload
 from axio_fusion_api import providers as provider_module
 from axio_fusion_api.orchestrator import _provider_request_for_role
 from axio_fusion_api.providers import (
@@ -44,13 +44,13 @@ def _profile(
     )
 
 
-def test_public_payloads_normalize_native_reasoning_effort_before_fallbacks():
+def test_public_payloads_normalize_matching_reasoning_effort_aliases():
     chat = canonicalize_payload(
         {
             "model": "axio-fast",
             "messages": [{"role": "user", "content": "hello"}],
             "reasoning_effort": "HIGH",
-            "reasoning": {"effort": "low"},
+            "reasoning": {"effort": "high"},
         },
         api_format="chat/completions",
     )
@@ -58,7 +58,7 @@ def test_public_payloads_normalize_native_reasoning_effort_before_fallbacks():
         {
             "model": "axio-terra",
             "input": "hello",
-            "reasoning_effort": "low",
+            "reasoning_effort": "medium",
             "reasoning": {"effort": "medium"},
         },
         api_format="responses",
@@ -84,6 +84,19 @@ def test_public_payloads_normalize_native_reasoning_effort_before_fallbacks():
     assert responses.reasoning_effort == "medium"
     assert fallback.reasoning_effort == "minimal"
     assert invalid.reasoning_effort == ""
+
+
+def test_public_payloads_reject_conflicting_openai_reasoning_efforts():
+    with pytest.raises(CompatibilityError, match="conflicts"):
+        canonicalize_payload(
+            {
+                "model": "axio-fast",
+                "messages": [{"role": "user", "content": "hello"}],
+                "reasoning_effort": "high",
+                "reasoning": {"effort": "low"},
+            },
+            api_format="chat/completions",
+        )
 
 
 def test_public_payloads_normalize_anthropic_and_gemini_reasoning_budgets():
@@ -1014,6 +1027,91 @@ def test_reasoning_transport_does_not_invent_native_efforts_or_escalate_maps():
         "chat_reasoning_effort",
         "medium",
     )
+
+
+def test_reasoning_transport_allows_only_explicit_model_scoped_xhigh_to_max():
+    mapped = _profile(
+        api_format="responses",
+        reasoning_transport={
+            "scope": "model",
+            "status": "verified",
+            "transport": "responses_reasoning",
+            "supported_efforts": ["low", "medium", "high", "max"],
+            "effort_map": {"xhigh": "max"},
+        },
+    )
+    unscoped = _profile(
+        api_format="responses",
+        reasoning_transport={
+            "status": "verified",
+            "transport": "responses_reasoning",
+            "supported_efforts": ["low", "medium", "high", "max"],
+            "effort_map": {"xhigh": "max"},
+        },
+    )
+    invalid_upward = _profile(
+        api_format="responses",
+        reasoning_transport={
+            "scope": "model",
+            "status": "verified",
+            "transport": "responses_reasoning",
+            "supported_efforts": ["low", "medium", "high", "max"],
+            "effort_map": {"low": "medium"},
+        },
+    )
+
+    details = mapped.resolve_reasoning_transport_details("xhigh")
+    assert mapped.resolve_reasoning_transport("xhigh") == (
+        "responses_reasoning",
+        "max",
+    )
+    assert details["requested_effort"] == "xhigh"
+    assert details["effective_effort"] == "max"
+    assert details["mapping_applied"] is True
+    assert details["mapping_direction"] == "explicit_xhigh_to_max"
+    assert details["mapping_scope"] == "model"
+    assert unscoped.resolve_reasoning_transport("xhigh") == ("", "")
+    assert invalid_upward.reasoning_transport["effort_map"] == {}
+    assert invalid_upward.resolve_reasoning_transport("minimal") == ("", "")
+
+
+def test_explicit_model_scoped_xhigh_to_max_reaches_responses_wire(monkeypatch):
+    profile = _profile(
+        api_format="responses",
+        reasoning_transport={
+            "scope": "model",
+            "status": "verified",
+            "transport": "responses_reasoning",
+            "supported_efforts": ["low", "medium", "high", "max"],
+            "effort_map": {"xhigh": "max"},
+        },
+    )
+    captured: dict[str, object] = {}
+
+    def fake_post(_profile, _path, payload, *, timeout, **_kwargs):
+        del timeout
+        captured.update(payload)
+        return {"output_text": "ok"}
+
+    monkeypatch.setattr(provider_module, "_post_json", fake_post)
+    request = FusionRequest(
+        model="axio-terra",
+        prompt="hello",
+        reasoning_effort="xhigh",
+    )
+
+    completion = HTTPProviderClient().complete_turn(
+        profile,
+        request,
+        prompt=request.prompt,
+        system=request.system,
+    )
+
+    assert completion.text == "ok"
+    assert captured["reasoning"] == {"effort": "max"}
+    binding = reasoning_transport_probe_binding(profile)
+    assert binding["scope"] == "model"
+    assert binding["effort_map"] == {"xhigh": "max"}
 
 
 def test_reasoning_transport_for_wrong_protocol_is_not_sendable():

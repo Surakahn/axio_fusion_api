@@ -336,6 +336,45 @@ def test_invalid_content_contract_is_a_public_400(response_path):
     assert response["error"]["code"] == "unsupported_content_part"
 
 
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        (
+            "/v1/chat/completions",
+            {
+                "model": "axio-fast",
+                "messages": [{"role": "user", "content": "hello"}],
+                "reasoning_effort": "high",
+                "reasoning": {"effort": "low"},
+            },
+        ),
+        (
+            "/v1/responses",
+            {
+                "model": "axio-terra",
+                "input": "hello",
+                "reasoning_effort": "low",
+                "reasoning": {"effort": "medium"},
+            },
+        ),
+    ],
+)
+def test_conflicting_openai_reasoning_aliases_are_public_400(path, payload):
+    status, _headers, body = handle_request(
+        method="POST",
+        path=path,
+        headers={},
+        body=json.dumps(payload).encode("utf-8"),
+        engine=object(),
+        record_trace=False,
+        record_runtime=False,
+    )
+
+    response = json.loads(body)
+    assert status == 400
+    assert response["error"]["code"] == "conflicting_reasoning_effort"
+
+
 def test_invalid_content_contract_is_a_400_before_incremental_stream_headers():
     payload = {
         "model": "axio-fast",
