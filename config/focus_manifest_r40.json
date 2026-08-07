@@ -1,0 +1,25 @@
+{
+  "schema": "axio_fusion_api.prefusion_focus_manifest.v1",
+  "candidates": [
+    {"provider": "cpa_plus", "model": "gpt-5.6-sol", "canonical_model_id": "gpt-5.6-sol", "api_format": "responses", "priority": 1},
+    {"provider": "cpa_plus", "model": "gpt-5.6-terra", "canonical_model_id": "gpt-5.6-terra", "api_format": "responses", "priority": 2},
+    {"provider": "cpa_plus", "model": "gpt-5.6-luna", "canonical_model_id": "gpt-5.6-luna", "api_format": "responses", "priority": 3},
+    {"provider": "cpa_plus", "model": "gpt-5.5", "canonical_model_id": "gpt-5.5", "api_format": "responses", "priority": 4},
+    {"provider": "cpa_plus", "model": "gpt-5.4", "canonical_model_id": "gpt-5.4", "api_format": "responses", "priority": 5},
+    {"provider": "cpa_plus", "model": "claude-opus-4-6", "canonical_model_id": "claude-opus-4-6", "api_format": "responses", "priority": 6},
+    {"provider": "cpa_plus", "model": "claude-sonnet-4-6", "canonical_model_id": "claude-sonnet-4-6", "api_format": "responses", "priority": 7},
+    {"provider": "cpa_plus", "model": "deepseek-v4-flash", "canonical_model_id": "deepseek-v4-flash", "api_format": "responses", "priority": 8},
+    {"provider": "cpa_plus", "model": "glm-5.2", "canonical_model_id": "glm-5.2", "api_format": "responses", "priority": 9},
+    {"provider": "cpa_plus", "model": "kimi-k2.6", "canonical_model_id": "kimi-k2.6", "api_format": "responses", "priority": 10},
+    {"provider": "nvidia", "model": "openai/gpt-oss-120b", "canonical_model_id": "openai/gpt-oss-120b", "api_format": "chat", "priority": 11},
+    {"provider": "nvidia", "model": "nvidia/nemotron-3-super-120b-a12b", "canonical_model_id": "nemotron-3-super-120b", "api_format": "chat", "priority": 12},
+    {"provider": "nvidia", "model": "nvidia/llama-3.1-nemotron-ultra-253b-v1", "canonical_model_id": "nemotron-ultra-253b", "api_format": "chat", "priority": 13},
+    {"provider": "nvidia", "model": "z-ai/glm-5.2", "canonical_model_id": "z-ai/glm-5.2", "api_format": "chat", "priority": 14},
+    {"provider": "nvidia", "model": "minimaxai/minimax-m3", "canonical_model_id": "minimax-m3", "api_format": "chat", "priority": 15},
+    {"provider": "nvidia", "model": "moonshotai/kimi-k2.6", "canonical_model_id": "kimi-k2.6-nv", "api_format": "chat", "priority": 16},
+    {"provider": "nvidia", "model": "mistralai/mistral-large", "canonical_model_id": "mistral-large", "api_format": "chat", "priority": 17},
+    {"provider": "nvidia", "model": "stepfun-ai/step-3.7-flash", "canonical_model_id": "step-3.7-flash", "api_format": "chat", "priority": 18},
+    {"provider": "nvidia", "model": "nvidia/nemotron-3-nano-30b-a3b", "canonical_model_id": "nemotron-nano-30b", "api_format": "chat", "priority": 19},
+    {"provider": "nvidia", "model": "openai/gpt-oss-20b", "canonical_model_id": "openai/gpt-oss-20b", "api_format": "chat", "priority": 20}
+  ]
+}

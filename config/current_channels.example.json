@@ -6,28 +6,7 @@
       "base_url_env": "AXIO_NVIDIA_BASE_URL",
       "api_key_env": "AXIO_NVIDIA_API_KEYS",
       "models_env": "AXIO_NVIDIA_MODELS",
-      "models": [
-        {
-          "model": "openai/gpt-oss-120b",
-          "reasoning_transport": {
-            "scope": "model",
-            "status": "candidate",
-            "transport": "chat_reasoning_effort",
-            "supported_efforts": ["low", "medium", "high"],
-            "effort_map": {"xhigh": "high", "max": "high"}
-          }
-        },
-        {
-          "model": "openai/gpt-oss-20b",
-          "reasoning_transport": {
-            "scope": "model",
-            "status": "candidate",
-            "transport": "chat_reasoning_effort",
-            "supported_efforts": ["low", "medium", "high"],
-            "effort_map": {"xhigh": "high", "max": "high"}
-          }
-        }
-      ],
+      "models": [],
       "traffic_control": {
         "scope": "channel",
         "max_in_flight": 1,
@@ -40,70 +19,12 @@
       "reasoning_transport": {}
     },
     {
-      "provider": "tokenapis",
+      "provider": "cpa_plus",
       "api_format": "responses",
-      "base_url_env": "AXIO_TOKENAPIS_BASE_URL",
-      "api_key_env": "AXIO_TOKENAPIS_API_KEY",
-      "models_env": "AXIO_TOKENAPIS_MODELS",
-      "models": [
-        {
-          "model": "gpt-5.2",
-          "reasoning_transport": {
-            "scope": "model",
-            "status": "candidate",
-            "transport": "responses_reasoning",
-            "supported_efforts": ["low", "medium", "high", "xhigh"]
-          }
-        },
-        {
-          "model": "gpt-5.5",
-          "reasoning_transport": {
-            "scope": "model",
-            "status": "candidate",
-            "transport": "responses_reasoning",
-            "supported_efforts": ["low", "medium", "high", "xhigh"]
-          }
-        },
-        {
-          "model": "gpt-5.6-luna",
-          "reasoning_transport": {
-            "scope": "model",
-            "status": "candidate",
-            "transport": "responses_reasoning",
-            "supported_efforts": ["low", "medium", "high", "xhigh", "max"]
-          }
-        },
-        {
-          "model": "gpt-5.6-terra",
-          "reasoning_transport": {
-            "scope": "model",
-            "status": "candidate",
-            "transport": "responses_reasoning",
-            "supported_efforts": ["low", "medium", "high", "xhigh", "max"]
-          }
-        },
-        {
-          "model": "gpt-5.6-sol",
-          "reasoning_transport": {
-            "scope": "model",
-            "status": "candidate",
-            "transport": "responses_reasoning",
-            "supported_efforts": ["low", "medium", "high", "xhigh", "max"]
-          }
-        },
-        {
-          "model": "gpt-image-2",
-          "model_kind": "image",
-          "image_capabilities": {
-            "status": "candidate",
-            "transport": "images_api",
-            "operations": ["generation", "editing"],
-            "streaming": true,
-            "max_input_images": 1
-          },
-          "image_probe_status": "not_run"
-        }
-      ],
+      "base_url_env": "AXIO_CPA_PLUS_BASE_URL",
+      "api_key_env": "AXIO_CPA_PLUS_API_KEY",
+      "models_env": "AXIO_CPA_PLUS_MODELS",
+      "models": [],
       "traffic_control": {
         "scope": "profile",
         "max_in_flight": 0,
