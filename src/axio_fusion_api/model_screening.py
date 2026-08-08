@@ -8087,6 +8087,25 @@ def _redact_provider_identifiers(value: Any, *, key: str = "") -> Any:
             redacted["raw_provider_names_persisted"] = False
         return redacted
     if isinstance(value, list):
+        if key == "model_entries":
+            return [
+                {
+                    "model_id_sha256": sha256_text(
+                        str(item.get("id") or item.get("name") or "")
+                    ),
+                    "owned_by_sha256": sha256_text(
+                        str(item.get("owned_by") or item.get("owner") or "")
+                    ),
+                    "api_format": str(
+                        item.get("api_format")
+                        or item.get("protocol")
+                        or ""
+                    ),
+                }
+                for item in value
+                if isinstance(item, Mapping)
+                and str(item.get("id") or item.get("name") or "")
+            ]
         if key in {"providers", "model_ids", "allow_models"}:
             return [
                 f"sha256:{sha256_text(str(item))}"

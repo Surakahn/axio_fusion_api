@@ -22,6 +22,7 @@ from .compat import (
 )
 from .content_contract import ContentContractError
 from .image_api import (
+    ImagePromptTransformer,
     ImageRequestError,
     ImageRouter,
     image_request_timeout,
@@ -166,6 +167,7 @@ def handle_request(
                 headers=headers_lc,
                 body=body,
                 profiles=selected_image_profiles,
+                text_engine=active_engine,
             )
         )
     try:
@@ -415,8 +417,9 @@ def _prepare_incremental_image_stream_request(
             operation=operation,
             payload=payload,
             files=files,
-            router=ImageRouter(
-                engine.profiles if image_profiles is None else image_profiles
+            router=_build_image_router(
+                engine.profiles if image_profiles is None else image_profiles,
+                text_engine=engine,
             ),
             tenant_key=tenant_key,
         ),
@@ -4275,12 +4278,35 @@ def _endpoint_api_format(route: str) -> str:
     return ""
 
 
+def _build_image_router(
+    profiles: Sequence[Any],
+    *,
+    text_engine: FusionEngine | None,
+) -> ImageRouter:
+    """Construct the isolated image router with optional prompt composition."""
+
+    transformer = (
+        ImagePromptTransformer(text_engine)
+        if text_engine is not None
+        and any(
+            getattr(profile, "enabled", False)
+            and getattr(profile, "text_model_eligible", False)
+            for profile in getattr(text_engine, "profiles", ())
+        )
+        else None
+    )
+    if transformer is None:
+        return ImageRouter(profiles)
+    return ImageRouter(profiles, prompt_transformer=transformer)
+
+
 def _handle_image_request(
     *,
     operation: str,
     headers: Mapping[str, str],
     body: bytes | str | None,
     profiles: Sequence[Any],
+    text_engine: FusionEngine | None = None,
 ) -> tuple[int, dict[str, str], bytes]:
     """Dispatch the Images API outside the text Fusion protocol adapters.
 
@@ -4291,9 +4317,10 @@ def _handle_image_request(
     """
 
     try:
+        router = _build_image_router(profiles, text_engine=text_engine)
         if operation == "generations":
             payload = parse_generation_payload(body)
-            response, result, _profile = ImageRouter(profiles).generate(
+            response, result, _profile = router.generate(
                 payload,
                 timeout=image_request_timeout(),
             )
@@ -4302,7 +4329,7 @@ def _handle_image_request(
                 body,
                 headers.get("content-type", ""),
             )
-            response, result, _profile = ImageRouter(profiles).edit(
+            response, result, _profile = router.edit(
                 payload,
                 files,
                 timeout=image_request_timeout(),

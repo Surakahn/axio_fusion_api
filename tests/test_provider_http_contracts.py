@@ -1490,6 +1490,67 @@ def test_model_discovery_can_be_disabled_for_static_model_rows(monkeypatch):
     assert report["network_calls_performed"] is False
 
 
+def test_model_catalog_preserves_per_model_protocol_hints(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return json.dumps(
+                {
+                    "data": [
+                        {"id": "gpt-5.6-terra", "owned_by": "openai"},
+                        {"id": "claude-sonnet-5", "owned_by": "anthropic"},
+                    ]
+                }
+            ).encode()
+
+    def fake_urlopen(request, timeout=None):
+        captured["url"] = request.full_url
+        return FakeResponse()
+
+    _install_fake_opener(monkeypatch, fake_urlopen)
+    monkeypatch.setenv("FIXTURE_MULTI_FORMAT_BASE_URL", "https://multi.fixture/v1")
+    monkeypatch.setenv("FIXTURE_MULTI_FORMAT_KEY", "multi-secret")
+    seed = normalize_profile(
+        {
+            "provider": "cpa-plus",
+            "model": "seed",
+            "api_format": "responses",
+            "base_url_env": "FIXTURE_MULTI_FORMAT_BASE_URL",
+            "api_key_env": "FIXTURE_MULTI_FORMAT_KEY",
+        }
+    )
+
+    report = provider_module._safe_list_models(seed, timeout=1.0)
+
+    assert report["model_ids"] == ["gpt-5.6-terra", "claude-sonnet-5"]
+    assert report["model_entries"][1]["owned_by"] == "anthropic"
+    assert captured["url"] == "https://multi.fixture/v1/models"
+    assert "multi-secret" not in json.dumps(report, ensure_ascii=False)
+
+    gpt_row = provider_module._discovered_profile_row(
+        seed,
+        "gpt-5.6-terra",
+        {},
+        model_entry=report["model_entries"][0],
+    )
+    claude_row = provider_module._discovered_profile_row(
+        seed,
+        "claude-sonnet-5",
+        {},
+        model_entry=report["model_entries"][1],
+    )
+
+    assert gpt_row["api_format"] == "responses"
+    assert claude_row["api_format"] == "anthropic"
+
+
 def test_http_client_supports_explicit_no_auth_remote_gateway(monkeypatch):
     captured = {}
 

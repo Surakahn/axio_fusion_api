@@ -3708,9 +3708,14 @@ def probe_exposed_provider_models(
     discovered_profile_rows: list[dict[str, Any]] = []
     discovered_profiles: list[ModelProfile] = []
     for seed, report in zip(profile_seeds, provider_reports):
-        model_ids = report.get("model_ids") if isinstance(report.get("model_ids"), list) else []
-        for model_id in model_ids:
-            row = _discovered_profile_row(seed, str(model_id), discovery_priors)
+        model_entries = _model_entries_from_report(report)
+        for model_entry in model_entries:
+            row = _discovered_profile_row(
+                seed,
+                str(model_entry["id"]),
+                discovery_priors,
+                model_entry=model_entry,
+            )
             discovered_profile_rows.append(row)
             discovered_profiles.append(normalize_profile(row))
     static_profiles = provider_configured_profiles_from_env(selected)
@@ -3851,13 +3856,9 @@ def discover_provider_profiles(
 
     discovered_profiles: list[ModelProfile] = []
     for seed, report in zip(profile_seeds, provider_reports):
-        model_ids = (
-            report.get("model_ids")
-            if isinstance(report.get("model_ids"), list)
-            else []
-        )
-        for model_id in model_ids:
-            model_name = str(model_id or "").strip()
+        model_entries = _model_entries_from_report(report)
+        for model_entry in model_entries:
+            model_name = str(model_entry.get("id") or "").strip()
             if not model_name:
                 continue
             discovered_profiles.append(
@@ -3866,6 +3867,7 @@ def discover_provider_profiles(
                         seed,
                         model_name,
                         discovery_priors,
+                        model_entry=model_entry,
                     )
                 )
             )
@@ -4130,11 +4132,18 @@ def _discovered_profile_row(
     seed: ModelProfile,
     model_id: str,
     discovery_priors: Mapping[str, Mapping[str, Any]],
+    *,
+    model_entry: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     slug = seed.provider.strip().lower().replace("_", "-")
     prior = discovery_priors.get(slug, {})
     model_prior = _discovery_prior_for_model(prior, model_id)
-    api_format = _prior_value(model_prior, prior, "api_format", seed.api_format)
+    api_format = _prior_value(
+        model_prior,
+        prior,
+        "api_format",
+        _discovered_api_format(seed, model_entry=model_entry),
+    )
     row: dict[str, Any] = {
         "provider": seed.provider,
         "model": model_id,
@@ -7491,7 +7500,8 @@ def _safe_list_models(profile: ModelProfile, *, timeout: float) -> dict[str, Any
                     break
                 _sleep_before_retry(retry_attempt_index, deadline_at=deadline_at)
                 continue
-            ids = _model_ids_from_list_response(parsed)
+            model_entries = _model_entries_from_list_response(parsed)
+            ids = [str(item["id"]) for item in model_entries]
             _advance_provider_key_rotation(profile, canonical_key_index)
             return {
                 "provider": profile.provider,
@@ -7499,6 +7509,10 @@ def _safe_list_models(profile: ModelProfile, *, timeout: float) -> dict[str, Any
                 "network_calls_performed": True,
                 "model_count": len(ids),
                 "model_ids": ids,
+                # This is process-local discovery metadata.  It is consumed
+                # immediately to bind one upstream API format per model and
+                # is removed by every safe artifact projection.
+                "model_entries": model_entries,
                 "models_endpoint": endpoint,
                 "base_url_sha256": hashlib.sha256(base_url.encode("utf-8")).hexdigest(),
                 "key_attempt_count": key_attempt_index if key_required else 0,
@@ -7662,17 +7676,52 @@ def _provider_seed_profile(provider: str) -> ModelProfile:
 def _model_ids_from_list_response(parsed: Any) -> list[str]:
     """Extract model ids from common OpenAI, Gemini, and gateway variants."""
 
-    rows: list[str] = []
+    return [str(item["id"]) for item in _model_entries_from_list_response(parsed)]
+
+
+def _model_entries_from_list_response(parsed: Any) -> list[dict[str, str]]:
+    """Extract model ids and non-secret format hints from a catalog response.
+
+    OpenAI-compatible ``/models`` responses normally expose only ``id``.
+    Some multi-protocol gateways additionally expose ``owned_by`` or an
+    explicit protocol field.  Keeping that metadata until profile creation
+    lets one endpoint safely serve Responses, Chat, and Anthropic models.
+    """
+
+    rows: list[dict[str, str]] = []
 
     def append_item(item: Any) -> None:
         if isinstance(item, str):
             value = item.strip()
+            owner = ""
+            api_format = ""
         elif isinstance(item, Mapping):
             value = str(item.get("id") or item.get("name") or "").strip()
+            owner = str(
+                item.get("owned_by")
+                or item.get("ownedBy")
+                or item.get("owner")
+                or ""
+            ).strip()
+            api_format = str(
+                item.get("api_format")
+                or item.get("apiFormat")
+                or item.get("protocol")
+                or item.get("api_mode")
+                or ""
+            ).strip()
         else:
             value = ""
+            owner = ""
+            api_format = ""
         if value:
-            rows.append(value)
+            rows.append(
+                {
+                    "id": value,
+                    "owned_by": owner,
+                    "api_format": api_format,
+                }
+            )
 
     data = parsed.get("data") if isinstance(parsed, Mapping) else []
     if isinstance(data, list):
@@ -7682,7 +7731,72 @@ def _model_ids_from_list_response(parsed: Any) -> list[str]:
     if isinstance(models, list):
         for item in models:
             append_item(item)
-    return list(dict.fromkeys(rows))
+    deduped: dict[str, dict[str, str]] = {}
+    for row in rows:
+        model_id = row["id"]
+        # Preserve first-seen ordering, while allowing a richer duplicate
+        # entry to fill missing metadata from an earlier minimal row.
+        if model_id not in deduped:
+            deduped[model_id] = dict(row)
+            continue
+        for key in ("owned_by", "api_format"):
+            if not deduped[model_id].get(key) and row.get(key):
+                deduped[model_id][key] = row[key]
+    return list(deduped.values())
+
+
+def _model_entries_from_report(report: Mapping[str, Any]) -> list[dict[str, str]]:
+    """Read private discovery entries while supporting legacy fake reports."""
+
+    raw_entries = report.get("model_entries")
+    if isinstance(raw_entries, list):
+        entries = [
+            {
+                "id": str(row.get("id") or "").strip(),
+                "owned_by": str(row.get("owned_by") or "").strip(),
+                "api_format": str(row.get("api_format") or "").strip(),
+            }
+            for row in raw_entries
+            if isinstance(row, Mapping) and str(row.get("id") or "").strip()
+        ]
+        if entries:
+            return entries
+    raw_ids = report.get("model_ids")
+    if not isinstance(raw_ids, list):
+        return []
+    return [
+        {"id": str(value).strip(), "owned_by": "", "api_format": ""}
+        for value in raw_ids
+        if str(value).strip()
+    ]
+
+
+def _discovered_api_format(
+    seed: ModelProfile,
+    *,
+    model_entry: Mapping[str, Any] | None = None,
+) -> str:
+    """Resolve a discovered model's concrete upstream protocol.
+
+    Explicit model metadata wins.  ``owned_by=anthropic`` is a conservative
+    gateway convention for Claude Messages.  ``owned_by=openai`` only
+    upgrades a Responses-configured seed, because many ordinary OpenAI
+    ``/models`` endpoints use the same owner value while serving Chat.
+    """
+
+    entry = model_entry if isinstance(model_entry, Mapping) else {}
+    explicit = _provider_adapter_format(
+        entry.get("api_format") or entry.get("protocol")
+    )
+    if str(entry.get("api_format") or entry.get("protocol") or "").strip():
+        return explicit
+    owner = str(entry.get("owned_by") or entry.get("ownedBy") or "").strip().lower()
+    model_name = str(entry.get("id") or entry.get("name") or "").strip().lower()
+    if owner == "anthropic" or model_name.startswith("claude-"):
+        return "anthropic"
+    if owner == "openai" and _provider_adapter_format(seed.api_format) == "responses":
+        return "responses"
+    return _provider_adapter_format(seed.api_format)
 
 
 def _provider_headers(*, content_type: bool) -> dict[str, str]:
@@ -7801,12 +7915,21 @@ def _probe_profile_metadata(profile: ModelProfile) -> dict[str, Any]:
 def _redact_provider_report(row: Mapping[str, Any]) -> dict[str, Any]:
     provider = str(row.get("provider") or "")
     model_ids = [str(item) for item in row.get("model_ids", []) if str(item)] if isinstance(row.get("model_ids"), list) else []
+    model_entries = row.get("model_entries") if isinstance(row.get("model_entries"), list) else []
+    format_counts: dict[str, int] = {}
+    for entry in model_entries:
+        if not isinstance(entry, Mapping):
+            continue
+        api_format = str(entry.get("api_format") or "").strip().lower()
+        if api_format:
+            format_counts[api_format] = format_counts.get(api_format, 0) + 1
     redacted = {
         "provider_sha256": sha256_text(provider) if provider else "",
         "status": str(row.get("status") or ""),
         "model_count": _safe_int(row.get("model_count"), default=len(model_ids)),
         "model_id_sha256s": [sha256_text(model_id) for model_id in model_ids[:200]],
         "model_id_set_sha256": sha256_text(stable_json(sorted(model_ids))) if model_ids else "",
+        "model_format_counts": dict(sorted(format_counts.items())),
         "base_url_sha256": str(row.get("base_url_sha256") or ""),
         "key_attempt_count": _safe_int(row.get("key_attempt_count"), default=0),
         "transport_attempt_count": _safe_int(row.get("transport_attempt_count"), default=0),

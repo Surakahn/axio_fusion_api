@@ -16,6 +16,8 @@ from dataclasses import replace
 from typing import Any, Callable, Mapping, Sequence
 
 from .providers import (
+    _discovered_api_format,
+    _model_entries_from_report,
     _safe_list_models,
     profile_credential_readiness,
     provider_base_url_readiness,
@@ -120,15 +122,19 @@ def discover_runtime_profiles(
         seed = seed_profiles[0]
         report = _safe_list_models(seed, timeout=bounded_timeout)
         reports.append(report)
-        model_ids = report.get("model_ids") if isinstance(report.get("model_ids"), list) else []
-        for model_id in model_ids:
-            model_name = str(model_id or "").strip()
+        model_entries = _model_entries_from_report(report)
+        for model_entry in model_entries:
+            model_name = str(model_entry.get("id") or "").strip()
             if not model_name:
                 continue
             discovered.append(
                 replace(
                     seed,
                     model=model_name,
+                    api_format=_discovered_api_format(
+                        seed,
+                        model_entry=model_entry,
+                    ),
                     canonical_model_id=model_name,
                     source="runtime_channel_discovery",
                     **_auto_image_profile_fields(
