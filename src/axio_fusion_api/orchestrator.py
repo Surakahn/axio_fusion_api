@@ -6524,6 +6524,24 @@ class FusionEngine:
                 (),
                 False,
             )
+        # ── Trust Primary Solver: skip expensive Synthesizer call when
+        # the primary answer matches consensus with high confidence ──
+        trust_primary_text = _trust_primary_solver_check(
+            candidates, judge_result, route_plan
+        )
+        if trust_primary_text:
+            return (
+                trust_primary_text,
+                0,
+                {
+                    **compression_receipt,
+                    "provider_synthesis_skipped": True,
+                    "trust_primary_solver": True,
+                    "trust_primary_reason": "primary_consensus_high_confidence",
+                },
+                (),
+                True,
+            )
         if synth_role and len(candidates) >= fusion_candidate_threshold:
             routed_profile = _profile_from_safe_dict(
                 synth_role.get("model")
@@ -12396,6 +12414,105 @@ def _text_excerpt_for_provider(text: str, *, max_chars: int) -> tuple[str, bool]
     tail = max(0, available - head)
     excerpt = value[:head] + marker + (value[-tail:] if tail else "")
     return excerpt[:max_chars], True
+
+
+def _trust_primary_solver_check(
+    candidates: Sequence[CandidateResult],
+    judge_result: Mapping[str, Any],
+    route_plan: Mapping[str, Any],
+) -> str | None:
+    """Return primary solver answer if it matches consensus with high confidence.
+
+    When the primary solver's answer agrees with at least one other
+    independent solver AND the Judge has not flagged the primary answer,
+    skip the expensive Synthesizer call and return the primary answer
+    directly.  This avoids noise introduction for well-solved tasks while
+    preserving the full Hermes MoA path for genuinely contentious cases.
+
+    Respects the Hermes plan: when Hermes requires an acting aggregator
+    or the route explicitly forbids consensus-based skipping, this check
+    returns None so the full synthesis path executes.
+    """
+    if len(candidates) < 2:
+        return None
+    # Respect Hermes plan: do not skip aggregator when Hermes is enabled
+    # and requires the acting aggregator for final output
+    hermes_plan = _effective_hermes_plan(route_plan)
+    if hermes_plan.get("enabled") is True:
+        # Only skip if aggregator is explicitly optional in this plan
+        if not hermes_plan.get("aggregator_consensus_skip_allowed") is True:
+            return None
+    # Route-level veto: some fusion strategies require synthesizer always
+    if route_plan.get("synthesizer_always_required") is True:
+        return None
+    # Find primary solver
+    primary = next(
+        (c for c in candidates if c.role == "primary_solver"),
+        None,
+    )
+    if primary is None or not primary.answer.strip():
+        return None
+    # Primary must have high confidence
+    if primary.confidence < 0.85:
+        return None
+    # Judge must have accepted the output (not rejected or failed)
+    if not _judge_output_accepted(judge_result):
+        return None
+    # Check consensus: at least one other independent candidate agrees
+    independent_roles = {"independent_solver", "critic", "domain_specialist"}
+    primary_answer_norm = _normalize_answer_for_comparison(primary.answer)
+    agreeing = 0
+    for c in candidates:
+        if c.candidate_id == primary.candidate_id:
+            continue
+        if c.role not in independent_roles:
+            continue
+        if not c.answer.strip():
+            continue
+        if _answers_agree(primary_answer_norm, _normalize_answer_for_comparison(c.answer)):
+            agreeing += 1
+    # Need at least 1 agreeing independent candidate
+    if agreeing < 1:
+        return None
+    # Primary answer quality must not be flagged by Judge
+    ranked = judge_result.get("ranked_candidates") if isinstance(judge_result.get("ranked_candidates"), list) else []
+    for entry in ranked:
+        if isinstance(entry, Mapping) and entry.get("candidate_id") == primary.candidate_id:
+            judge_score = float(entry.get("score") or entry.get("rank_score") or 0.5)
+            if judge_score < 0.65:
+                return None
+            break
+    return primary.answer.strip()
+
+
+def _normalize_answer_for_comparison(text: str) -> str:
+    """Normalize answer text for fuzzy consensus comparison."""
+    import re
+    t = text.strip().lower()
+    # Collapse whitespace
+    t = re.sub(r'\s+', ' ', t)
+    # Remove common wrappers
+    t = re.sub(r'^[\[\(\{]"|"[\]\)\}]$', '', t)
+    return t
+
+
+def _answers_agree(a: str, b: str) -> bool:
+    """Check if two normalized answers likely agree."""
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    # For short answers (MCQ), exact match
+    if len(a) <= 5 and len(b) <= 5:
+        return a == b
+    # For longer answers, check substantial overlap
+    a_words = set(a.split())
+    b_words = set(b.split())
+    if not a_words or not b_words:
+        return False
+    overlap = len(a_words & b_words)
+    min_size = min(len(a_words), len(b_words))
+    return overlap >= min_size * 0.75
 
 
 def _best_candidate_text(candidates: Sequence[CandidateResult], judge_result: Mapping[str, Any]) -> str:

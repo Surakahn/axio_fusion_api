@@ -4286,9 +4286,9 @@ def _terra_direct_cascade_preferred(
         utility_threshold_passed
         and request.public_model == "axio-terra"
         and float(analysis.get("quality_target") or 0.0) < 0.82
-        and float(analysis.get("complexity") or 0.0) < 0.42
-        and float(analysis.get("risk") or 0.0) < 0.35
-        and float(analysis.get("uncertainty") or 0.0) < 0.48
+        and float(analysis.get("complexity") or 0.0) < 0.25
+        and float(analysis.get("risk") or 0.0) < 0.22
+        and float(analysis.get("uncertainty") or 0.0) < 0.32
         and not bool(analysis.get("fusion_plugin_requested"))
         and not bool(analysis.get("needs_tools"))
         and not bool(analysis.get("factuality_signal"))
