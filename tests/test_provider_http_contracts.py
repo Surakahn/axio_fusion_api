@@ -19,7 +19,11 @@ if str(STANDALONE_SRC) not in sys.path:
 
 from axio_fusion_api.cli import build_parser
 from axio_fusion_api import providers as provider_module
-from axio_fusion_api.providers import HTTPProviderClient, probe_exposed_provider_models
+from axio_fusion_api.providers import (
+    HTTPProviderClient,
+    _discovered_api_format,
+    probe_exposed_provider_models,
+)
 from axio_fusion_api.registry import (
     build_registry_from_probe_artifacts,
     load_registry,
@@ -226,6 +230,59 @@ def test_provider_config_file_is_a_first_class_cli_input() -> None:
         ]
     )
     assert args.provider_config_file == "/private/manifest.json"
+
+
+@pytest.mark.parametrize(
+    ("model", "owner", "expected_format"),
+    (
+        ("claude-3-7-sonnet", "", "anthropic"),
+        ("anthropic/claude-3-7-sonnet", "", "anthropic"),
+        ("claude/sonnet", "", "anthropic"),
+        ("gpt-5.6-sol", "", "responses"),
+        ("qwen3-max", "", "responses"),
+    ),
+)
+def test_mixed_cpa_catalog_model_names_keep_protocol_local(
+    model: str,
+    owner: str,
+    expected_format: str,
+) -> None:
+    seed = normalize_profile(
+        {
+            "provider": "cpa_plus",
+            "model": "__discovery_seed__",
+            "api_format": "responses",
+        }
+    )
+
+    assert (
+        _discovered_api_format(
+            seed,
+            model_entry={"id": model, "owned_by": owner},
+        )
+        == expected_format
+    )
+
+
+def test_explicit_catalog_protocol_metadata_overrides_model_name() -> None:
+    seed = normalize_profile(
+        {
+            "provider": "cpa_plus",
+            "model": "__discovery_seed__",
+            "api_format": "responses",
+        }
+    )
+
+    assert (
+        _discovered_api_format(
+            seed,
+            model_entry={
+                "id": "claude-3-7-sonnet",
+                "api_format": "responses",
+            },
+        )
+        == "responses"
+    )
 
 
 @pytest.mark.parametrize(

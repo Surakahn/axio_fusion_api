@@ -131,7 +131,17 @@ image registry，必须经过 generation/editing 的端点绑定探针和 90 秒
 - **CPA Plus** (Responses/Anthropic per-model binding)：`https://cpa.co6.click/v1`，1 个 API key
 - **CPA Plus image lane**：`gpt-image-2` 使用 `images_api` generation/editing
   路径；仅 verified image registry 可服务
-- 注册表路径：`AXIO_FUSION_REGISTRY_PATH=private/current_channel_enrollment_20260728_combined_r1/runtime_registry.calibrated.private.json`
+- 生产注册表：必须显式设置 `AXIO_FUSION_REGISTRY_PATH` 指向当前通过
+  pre-Fusion handoff 的私有 registry；历史 `20260728` artifact 不能作为
+  默认或隐式 serving registry。
+
+### 4.6 混合渠道协议绑定
+- CPA Plus 的 `/models` 目录若返回显式 `api_format`/`protocol`，以该字段为准。
+- 没有显式协议时，`claude-*`、`claude/...`、`anthropic/...` 模型使用
+  Anthropic `/messages`；GPT 和中国模型继续继承 CPA Plus 的 Responses
+  transport。
+- 该规则只解决上游 wire protocol 选择，不是能力排序先验，也不等同于
+  流式可用性；每个物理 profile 仍必须通过完整 pre-Fusion 严格流式门禁。
 
 ---
 
@@ -294,7 +304,7 @@ L1: 语法 → L2: 导入 → L3a: 单元测试 → L3b: Dry-run → L3c: 连通
   generation 与 multipart editing 验证
 - [x] 图片参数兼容性：`input_fidelity` 和 `background: transparent` 现为
   profile-driven capability metadata，`gpt-image-2` 已声明 `unsupported`
-- [x] 本阶段完整回归：`999 passed, 0 failed`；18 个历史非图片失败已修复
+- [x] 本阶段完整回归：`1005 passed, 0 failed`；18 个历史非图片失败已修复
 - [x] 注册表诊断命令复用 pre-Fusion validator，r41 marker/binding mismatch
   只读输出 hash-only reason codes，不能绕过 fail-closed 加载
 - [x] 生产 `scripts/run_server.py` 不再默认加载历史 registry；必须显式提供

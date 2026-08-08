@@ -323,10 +323,20 @@ such as `config/provider_configs.example.json`. The file may contain provider
 labels, environment variable names, and model aliases, but never copied endpoint
 or credential values. `config/current_channels.example.json` is the non-secret
 starting point for the currently configured Responses and Chat Completions
-channels. The current manifest contains NVIDIA Chat Completions and TokenAPIs
-Responses; optional CPA Plus and AISZ labels remain supported by the generic
-loader but are not enabled in this manifest. The file intentionally contains
-no endpoint value, API key, or discovered model id.
+channels. The current manifest contains NVIDIA Chat Completions and CPA Plus
+mixed-protocol configuration. The file intentionally contains no endpoint
+value, API key, or discovered model id. CPA Plus uses its
+Responses-compatible route for GPT and Chinese model entries and its
+Anthropic Messages route for Claude entries. The image entry is classified
+separately and never enters the text pool.
+
+For a mixed-protocol `/models` catalog, an explicit per-model protocol field
+or `owned_by` value wins. When a gateway returns only an opaque model id, the
+CPA-compatible discovery rule recognizes `claude-*`, `claude/...`, and
+`anthropic/...` identifiers as Anthropic Messages models; all other models
+inherit the channel's configured Responses transport. This is a narrow
+compatibility rule for protocol selection, not a model quality or ranking
+prior, and it does not infer image capability.
 
 The CLI also accepts the manifest explicitly. Place the option before the
 subcommand so the same channel schema is used by the serving process and

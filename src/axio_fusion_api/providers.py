@@ -7792,11 +7792,18 @@ def _discovered_api_format(
         return explicit
     owner = str(entry.get("owned_by") or entry.get("ownedBy") or "").strip().lower()
     model_name = str(entry.get("id") or entry.get("name") or "").strip().lower()
-    if owner == "anthropic" or model_name.startswith("claude-"):
+    if owner == "anthropic" or _is_anthropic_model_identifier(model_name):
         return "anthropic"
     if owner == "openai" and _provider_adapter_format(seed.api_format) == "responses":
         return "responses"
     return _provider_adapter_format(seed.api_format)
+
+
+def _is_anthropic_model_identifier(model_name: str) -> bool:
+    """Recognize gateway aliases that identify an Anthropic Messages model."""
+
+    normalized = str(model_name or "").strip().casefold()
+    return normalized.startswith(("claude-", "claude/", "anthropic/"))
 
 
 def _provider_headers(*, content_type: bool) -> dict[str, str]:

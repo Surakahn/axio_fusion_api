@@ -40,6 +40,22 @@
 - [ ] Re-audit text Judge and structured-output role coverage; the current
   health result is `usable_with_warnings`.
 
+## Mixed-Protocol Channel Gate (2026-08-09)
+
+- [x] Verify both configured provider `/models` endpoints through the
+  process-local `auto` network policy and `10808` proxy path; both returned
+  `status=ok` without benchmark traffic.
+- [x] Confirm the current discovery census is 21 CPA profiles and 100 NVIDIA
+  profiles; CPA's image entry remains `model_kind=image` and is excluded from
+  text candidates.
+- [x] Preserve explicit catalog protocol metadata as the first decision.
+- [x] Route Claude/Anthropic model-id aliases to Anthropic Messages and keep
+  all other CPA catalog entries on Responses when metadata is absent.
+- [x] Add regression coverage for `claude-*`, `claude/...`, `anthropic/...`,
+  GPT, Chinese-model aliases, and explicit protocol override.
+- [x] Run the complete local regression after the transport-boundary change:
+  `1005 passed, 0 failed`; no benchmark request was made.
+
 ## Historical Execution Gate (2026-08-06, r26; reconciled 2026-08-09)
 
 - [x] Preserve r25 as terminal diagnostic evidence: its ranking conversion was
