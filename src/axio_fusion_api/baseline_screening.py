@@ -61,6 +61,9 @@ SCREENING_IDENTITY_ATTESTATION_SCHEMA = (
 SCREENING_TRANSPORT_ADMISSION_SCHEMA = (
     "axio_fusion_api.non_target_screening_transport_admission.v1"
 )
+SCREENING_PROVIDER_IDENTITY_NORMALIZATION = (
+    "casefold_and_replace_underscore_with_hyphen"
+)
 
 SUPPORTED_SCREENING_ADAPTERS = frozenset(
     {"jsonl_multiple_choice", "mmlu_pro", "livebench_official"}
@@ -667,6 +670,7 @@ def build_provider_identity_attestation_receipt(
             catalog_rows.append(
                 {
                     "provider": provider,
+                    "provider_key": _screening_provider_identity_key(provider),
                     "model_ids": set(model_ids),
                     "provider_sha256": sha256_text(provider),
                     "base_url_sha256": str(report.get("base_url_sha256") or ""),
@@ -691,7 +695,8 @@ def build_provider_identity_attestation_receipt(
         matches = [
             row
             for row in catalog_rows
-            if row["provider"] == profile.provider
+            if row["provider_key"]
+            == _screening_provider_identity_key(profile.provider)
             and profile.model in row["model_ids"]
         ]
         if not matches:
@@ -758,6 +763,9 @@ def build_provider_identity_attestation_receipt(
         ),
         "bindings": [bindings[key] for key in sorted(bindings)],
         "exact_channel_alias_match_required": True,
+        "provider_identity_normalization": (
+            SCREENING_PROVIDER_IDENTITY_NORMALIZATION
+        ),
         "fuzzy_identity_mapping_used": False,
         "ready": not blockers,
         "blockers": sorted(set(blockers)),
@@ -768,6 +776,12 @@ def build_provider_identity_attestation_receipt(
         "raw_provider_outputs_persisted": False,
         "secrets_persisted": False,
     }
+
+
+def _screening_provider_identity_key(value: Any) -> str:
+    """Normalize provider slugs without altering model aliases."""
+
+    return str(value or "").strip().casefold().replace("_", "-")
 
 
 def _safe_identity_attestation_receipt(
@@ -837,6 +851,9 @@ def _safe_identity_attestation_receipt(
         ],
         "exact_channel_alias_match_required": (
             receipt.get("exact_channel_alias_match_required") is True
+        ),
+        "provider_identity_normalization": str(
+            receipt.get("provider_identity_normalization") or ""
         ),
         "fuzzy_identity_mapping_used": (
             receipt.get("fuzzy_identity_mapping_used") is True

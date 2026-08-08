@@ -34,6 +34,9 @@ from .schemas import ModelProfile, sha256_text, stable_json
 AVAILABLE_MODEL_GENERATION_SCHEMA = (
     "axio_fusion_api.available_model_generation.v1"
 )
+PROVIDER_CATALOG_ATTESTATION_SCHEMA = (
+    "axio_fusion_api.provider_catalog_attestation.v1"
+)
 
 
 class AvailableModelGenerationError(RuntimeError):
@@ -163,6 +166,10 @@ def generate_available_model_set(
     if live and not stability_ready:
         blockers.append("registry:prefusion_registry_stream_stability_contract_invalid")
 
+    provider_catalog_attestation = _provider_catalog_attestation(
+        report,
+        redact_provider_identifiers=redact_provider_identifiers,
+    )
     artifact: dict[str, Any] = {
         "schema": AVAILABLE_MODEL_GENERATION_SCHEMA,
         "status": "ready" if ready else "blocked",
@@ -199,6 +206,7 @@ def generate_available_model_set(
             "replicas_are_not_independent_votes": True,
         },
         "fusion_handoff": _json_copy(handoff),
+        "provider_catalog_attestation": provider_catalog_attestation,
         "validation": {
             "screening_report_valid": report_validation.get("valid") is True,
             "screening_report_reason_codes": sorted(
@@ -258,6 +266,92 @@ def generate_available_model_set(
         artifact["fusion_handoff"].pop("fusion_registry", None)
         artifact["publication"]["private_registry_included"] = False
     return artifact
+
+
+def _provider_catalog_attestation(
+    report: Mapping[str, Any],
+    *,
+    redact_provider_identifiers: bool,
+) -> dict[str, Any]:
+    """Persist the exact discovery aliases needed by later identity gates.
+
+    The generation wrapper historically retained only the screened profiles.
+    That is sufficient for transport admission but insufficient for a later
+    exact channel-alias attestation.  Keep the discovery receipt here, with a
+    strict allowlist so no response body, URL, credential, or arbitrary
+    provider field can cross this boundary.
+    """
+
+    discovery = report.get("provider_discovery")
+    discovery = discovery if isinstance(discovery, Mapping) else {}
+    raw_reports = discovery.get("provider_reports")
+    raw_reports = raw_reports if isinstance(raw_reports, list) else []
+    rows: list[dict[str, Any]] = []
+    for raw in raw_reports:
+        if not isinstance(raw, Mapping):
+            continue
+        provider = str(raw.get("provider") or "").strip()
+        model_ids = sorted(
+            {
+                str(value).strip()
+                for value in (raw.get("model_ids") or [])
+                if str(value).strip()
+            }
+        ) if isinstance(raw.get("model_ids"), list) else []
+        row = {
+            "provider": provider,
+            "model_ids": model_ids,
+            "status": str(raw.get("status") or "")[:40],
+            "model_count": _nonnegative_count(raw.get("model_count")),
+            "base_url_sha256": str(raw.get("base_url_sha256") or ""),
+            "models_endpoint": str(raw.get("models_endpoint") or "")[:120],
+            "network_calls_performed": (
+                raw.get("network_calls_performed") is True
+            ),
+            "raw_provider_response_persisted": False,
+            "secrets_persisted": False,
+        }
+        if redact_provider_identifiers:
+            row = {
+                "provider_sha256": sha256_text(provider),
+                "model_id_sha256s": [
+                    sha256_text(value) for value in model_ids
+                ],
+                "status": row["status"],
+                "model_count": row["model_count"],
+                "base_url_sha256": row["base_url_sha256"],
+                "models_endpoint": row["models_endpoint"],
+                "network_calls_performed": row["network_calls_performed"],
+                "raw_provider_response_persisted": False,
+                "secrets_persisted": False,
+            }
+        rows.append(row)
+    return {
+        "schema": PROVIDER_CATALOG_ATTESTATION_SCHEMA,
+        "status": (
+            "ready"
+            if discovery.get("status") == "ready" and rows
+            else "unavailable"
+        ),
+        "source": "prefusion_provider_discovery",
+        "network_calls_performed": (
+            discovery.get("network_calls_performed") is True
+        ),
+        "provider_report_count": len(rows),
+        "provider_reports": rows,
+        "raw_provider_response_persisted": False,
+        "raw_provider_body_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _nonnegative_count(value: Any) -> int:
+    if isinstance(value, bool):
+        return 0
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 def publish_available_model_set(

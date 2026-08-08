@@ -85,6 +85,22 @@ two complete, pre-registered external source families or two independent
 pre-registered non-target evaluations over the complete pool. No partial union
 or manual alias mapping may be promoted.
 
+The r44 successor screening plan is now registered from the unchanged
+probe-bound r43 registry plus a fresh, non-target `/models` catalog
+revalidation. The catalog revalidation initially exposed a provider-slug
+normalization defect (`cpa_plus` versus `cpa-plus`); the control-plane fix
+normalizes only provider slugs while retaining exact model-alias matching and
+explicitly forbidding fuzzy model identity mapping. The resulting plan is
+ready with 10 canonical groups, 10 physical profiles, two independent source
+families, 20 serial tasks, 2,200 estimated provider calls, and
+`max_workers=1`. Its plan digest is
+`149b35317a5bfdfd8450e9d427d7316cfdf12a56b66373fcd8de4ce744b77c67`.
+The zero-network preflight is `preflight_ready` with zero provider and target
+suite calls. Live screening is running in the isolated r44 private root;
+partial checkpoints remain diagnostic until every registered task reaches a
+terminal state and the fixed transport-failure gate is evaluated. No ranking,
+baseline freeze, target-suite call, or superiority claim is authorized yet.
+
 ## Historical Execution Checkpoint (2026-08-05)
 
 The historical serving registry was the fresh, full-pool, strict-stream

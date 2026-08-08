@@ -145,6 +145,29 @@ def _generation_payload() -> dict:
     return {
         "schema": "axio_fusion_api.available_model_generation.v1",
         "status": "ready",
+        "provider_catalog_attestation": {
+            "schema": "axio_fusion_api.provider_catalog_attestation.v1",
+            "status": "ready",
+            "source": "prefusion_provider_discovery",
+            "network_calls_performed": True,
+            "provider_report_count": 1,
+            "provider_reports": [
+                {
+                    "provider": "fixture-provider",
+                    "model_ids": ["fixture-chat", "fixture-responses"],
+                    "status": "ok",
+                    "model_count": 2,
+                    "base_url_sha256": sha256_text("https://fixture.invalid/v1"),
+                    "models_endpoint": "/models",
+                    "network_calls_performed": True,
+                    "raw_provider_response_persisted": False,
+                    "secrets_persisted": False,
+                }
+            ],
+            "raw_provider_response_persisted": False,
+            "raw_provider_body_persisted": False,
+            "secrets_persisted": False,
+        },
         "fusion_handoff": {
             "status": "ready",
             "private_registry_included": True,
@@ -234,6 +257,8 @@ def test_generation_probe_export_revalidates_nested_bindings_and_redacts(
     assert payload["available_count"] == 2
     assert len(payload["probes"]) == 2
     assert all(row["stream_protocol"] == "sse" for row in payload["probes"])
+    assert len(payload["provider_reports"]) == 1
+    assert payload["provider_catalog_attestation"]["status"] == "ready"
 
     redacted = build_prefusion_generation_probe_artifact(
         generation,
@@ -245,6 +270,9 @@ def test_generation_probe_export_revalidates_nested_bindings_and_redacts(
     assert redacted["provider_identifier_redaction"]["enabled"] is True
     assert redacted["projection_network_calls_performed"] is False
     assert redacted["secrets_persisted"] is False
+    redacted_serialized = json.dumps(redacted["provider_catalog_attestation"])
+    assert "fixture-provider" not in redacted_serialized
+    assert "fixture-chat" not in redacted_serialized
 
 
 def test_generation_probe_export_cli_is_offline_and_schema_explicit(

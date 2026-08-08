@@ -1349,12 +1349,19 @@ def build_prefusion_generation_probe_artifact(
         )
         for profile_hash in sorted(model_by_hash)
     ]
+    catalog_attestation = payload.get("provider_catalog_attestation")
+    catalog_attestation = (
+        dict(catalog_attestation)
+        if isinstance(catalog_attestation, Mapping)
+        else {}
+    )
     source_digest = sha256_text(stable_json(payload))
     return _build_generation_probe_artifact(
         rows=rows,
         screening=screening,
         required_samples=required_samples,
         source_digest=source_digest,
+        provider_catalog_attestation=catalog_attestation,
         redact_provider_identifiers=redact_provider_identifiers,
     )
 
@@ -1365,8 +1372,19 @@ def _build_generation_probe_artifact(
     screening: Mapping[str, Any],
     required_samples: int,
     source_digest: str,
+    provider_catalog_attestation: Mapping[str, Any] | None,
     redact_provider_identifiers: bool,
 ) -> dict[str, Any]:
+    catalog_attestation = (
+        dict(provider_catalog_attestation)
+        if isinstance(provider_catalog_attestation, Mapping)
+        else {}
+    )
+    catalog_reports = (
+        catalog_attestation.get("provider_reports")
+        if isinstance(catalog_attestation.get("provider_reports"), list)
+        else []
+    )
     artifact: dict[str, Any] = {
         "schema": "axio_fusion_api.provider_probe.v1",
         "standalone_product": True,
@@ -1404,7 +1422,10 @@ def _build_generation_probe_artifact(
         "stream_requested_count": len(rows),
         "stream_observed_count": len(rows),
         "stream_fallback_count": 0,
-        "provider_reports": [],
+        "provider_catalog_attestation": catalog_attestation,
+        "provider_reports": [
+            dict(row) for row in catalog_reports if isinstance(row, Mapping)
+        ],
         "probes": rows,
         "raw_probe_prompt_persisted": False,
         "raw_provider_output_persisted": False,
@@ -1412,7 +1433,15 @@ def _build_generation_probe_artifact(
         "secrets_persisted": False,
     }
     if redact_provider_identifiers:
-        redacted = redact_provider_probe_artifact(artifact)
+        redaction_input = {
+            key: value
+            for key, value in artifact.items()
+            if key != "provider_catalog_attestation"
+        }
+        redacted = redact_provider_probe_artifact(redaction_input)
+        redacted["provider_catalog_attestation"] = (
+            _redact_generation_provider_catalog(catalog_attestation)
+        )
         redacted["generated_from_available_model_generation"] = True
         redacted["source_generation_schema"] = AVAILABLE_MODEL_GENERATION_SCHEMA
         redacted["source_generation_content_sha256"] = source_digest
@@ -1420,6 +1449,58 @@ def _build_generation_probe_artifact(
         redacted["projection_network_calls_performed"] = False
         return redacted
     return artifact
+
+
+def _redact_generation_provider_catalog(
+    catalog: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Keep catalog provenance while removing provider/model aliases."""
+
+    reports = catalog.get("provider_reports")
+    reports = reports if isinstance(reports, list) else []
+    safe_reports = [
+        {
+            "provider_sha256": sha256_text(str(row.get("provider") or "")),
+            "model_id_sha256s": [
+                sha256_text(str(value))
+                for value in (row.get("model_ids") or [])
+                if str(value)
+            ],
+            "status": str(row.get("status") or "")[:40],
+            "model_count": _nonnegative_count(row.get("model_count")),
+            "base_url_sha256": str(row.get("base_url_sha256") or ""),
+            "models_endpoint": str(row.get("models_endpoint") or "")[:120],
+            "network_calls_performed": (
+                row.get("network_calls_performed") is True
+            ),
+            "raw_provider_response_persisted": False,
+            "secrets_persisted": False,
+        }
+        for row in reports
+        if isinstance(row, Mapping)
+    ]
+    return {
+        "schema": str(catalog.get("schema") or ""),
+        "status": str(catalog.get("status") or ""),
+        "source": str(catalog.get("source") or ""),
+        "network_calls_performed": (
+            catalog.get("network_calls_performed") is True
+        ),
+        "provider_report_count": len(safe_reports),
+        "provider_reports": safe_reports,
+        "raw_provider_response_persisted": False,
+        "raw_provider_body_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _nonnegative_count(value: Any) -> int:
+    if isinstance(value, bool):
+        return 0
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _generation_probe_registry(payload: Mapping[str, Any]) -> dict[str, Any]:

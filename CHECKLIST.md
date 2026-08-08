@@ -1,5 +1,27 @@
 # Axio Fusion API Checklist
 
+## Current r44 Screening Gate (2026-08-09)
+
+- [x] Preserve the r43 probe-bound registry as immutable input and register a
+  new r44 source-manifest/selection-seed boundary.
+- [x] Revalidate the current provider `/models` catalogs through the configured
+  network policy; bind a private catalog receipt without credentials or raw
+  response bodies.
+- [x] Repair provider-slug identity normalization while keeping model aliases
+  exact; the regression suite covers underscore/hyphen provider aliases and
+  rejects renamed model aliases.
+- [x] Generate the r44 immutable plan: 10 canonical groups, 10 physical
+  profiles, two independent sources, 20 serial tasks, 2,200 estimated calls,
+  and `max_workers=1`.
+- [x] Complete zero-network preflight with zero provider and target-suite
+  calls; persist the plan/campaign digests and private root binding.
+- [ ] Complete all 20 live screening tasks in the isolated r44 root. Preserve
+  every transport failure in the denominator and do not reuse r26/r27/r43
+  answers, scores, checkpoints, or survivor subsets.
+- [ ] Convert only a terminal complete campaign into the external ranking
+  artifact; keep rank assignment and baseline freeze closed until all
+  identity, source, population, and evidence gates pass.
+
 ## Current r43 Evidence Gate (2026-08-09)
 
 - [x] Complete the r43 provider discovery, research-prior, strict streaming,

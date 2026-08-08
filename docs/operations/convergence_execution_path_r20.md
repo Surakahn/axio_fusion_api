@@ -102,6 +102,24 @@ The following order is the only path to a formal quality claim:
   provenance inputs only. They do not authorize target benchmark requests
   while provider baseline screening is incomplete.
 
+## r44 Screening Registration
+
+The next cohort is registered at
+`private/runs/2026-08-09-prefusion-cohort-r44/`. It keeps the r43
+probe-bound registry immutable and uses a new source-manifest selection seed.
+The provider catalog is revalidated independently through the configured
+network policy. Provider slugs are normalized only for provider identity
+comparison; model aliases still require an exact catalog match.
+
+The immutable r44 plan is ready with 10 canonical groups, 10 physical
+profiles, two independent non-target source families, 20 serial tasks, and
+2,200 estimated provider calls. The zero-network preflight completed with
+zero provider and target-suite calls. The live campaign is running serially
+under the registered 90-second request ceiling and fail-fast transport
+denominator. Its private checkpoints are diagnostic until every task is
+terminal. No partial score, survivor subset, rank assignment, baseline
+freeze, or target benchmark request may be reused or promoted.
+
 ## r43 Evidence Handoff
 
 The r43 screening process has already exited. Use the exact private generation

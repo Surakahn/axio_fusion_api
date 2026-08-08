@@ -1087,6 +1087,23 @@ def test_identity_attestation_requires_exact_catalog_alias(tmp_path):
     )
     assert ready["ready"] is True
     assert ready["attested_profile_count"] == 4
+    assert (
+        ready["provider_identity_normalization"]
+        == "casefold_and_replace_underscore_with_hyphen"
+    )
+
+    provider_alias_row = dict(_registry_rows()[0])
+    provider_alias_row["provider"] = provider_alias_row["provider"].replace(
+        "_", "-"
+    )
+    provider_alias = normalize_profile(provider_alias_row)
+    aliased = build_provider_identity_attestation_receipt(
+        profiles=[provider_alias],
+        private_probe_files=[probe_path],
+        attested_on="2026-07-20",
+    )
+    assert aliased["ready"] is True
+    assert aliased["attested_profile_count"] == 1
 
     renamed = normalize_profile(
         {
