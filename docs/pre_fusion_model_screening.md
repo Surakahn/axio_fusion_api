@@ -13,6 +13,44 @@ operational ranking, and the logical model list that Fusion may consume. The
 wrapper does not invent a second ranking algorithm and does not use benchmark
 cases or labels.
 
+### Generation-bound probe evidence
+
+`generate-available-models` emits a wrapper artifact rather than the raw
+`pre_fusion_model_screening.v1` report. The original `prefusion-probe-export`
+command therefore rejects that wrapper by design. Operators must use the
+explicit offline projection below:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m axio_fusion_api.cli \
+  prefusion-generation-probe-export \
+  --generation-file <PRIVATE_GENERATION_ARTIFACT.json> \
+  --output <PRIVATE_WORK_DIR>/provider_probe.from-generation.private.json
+
+PYTHONPATH=src .venv/bin/python -m axio_fusion_api.cli \
+  prefusion-generation-probe-export \
+  --generation-file <PRIVATE_GENERATION_ARTIFACT.json> \
+  --redact-provider-identifiers \
+  --output <SAFE_WORK_DIR>/provider_probe.from-generation.safe.json
+```
+
+This operation is not a live probe. It accepts only a ready generation
+artifact whose nested `fusion_registry` passes the pre-Fusion handoff
+validator. It then requires an exact one-to-one match between registry model
+profiles and `prefusion_screening.eligible_profile_bindings`, including the
+profile hash, live mode, requested/observed strict stream, SSE/NDJSON framing,
+non-empty output digest, measured latency at or below 90 seconds, and every
+required multi-sample success. Image-only rows are rejected. The output uses
+the standard `provider_probe.v1` shape so it can be consumed by
+`registry-from-probe`, `registry-bind-probe`, and the hash-only
+`provider-probe-evidence-audit` chain.
+
+The artifact records `generated_from_available_model_generation=true`,
+`source_projection=nested_prefusion_registry_bindings`, and
+`projection_network_calls_performed=false`. Those fields make the provenance
+explicit: this is a projection of already-bound transport evidence, not a
+new provider request and not a model ranking. It does not relax the external
+baseline-rank gate or authorize benchmark traffic.
+
 ## Contract
 
 The workflow has six ordered stages:

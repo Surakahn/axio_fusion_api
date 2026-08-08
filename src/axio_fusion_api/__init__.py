@@ -38,6 +38,7 @@ from .provider_enrollment import enroll_provider_channels, enroll_runtime_channe
 from .model_screening import (
     ModelScreeningError,
     apply_prefusion_handoff_metadata,
+    build_prefusion_generation_probe_artifact,
     build_prefusion_fusion_handoff,
     build_fusion_registry_from_screening,
     run_prefusion_model_screening,
@@ -104,6 +105,7 @@ __all__ = [
     "enroll_runtime_channels",
     "ModelScreeningError",
     "apply_prefusion_handoff_metadata",
+    "build_prefusion_generation_probe_artifact",
     "build_prefusion_fusion_handoff",
     "run_prefusion_model_screening",
     "build_fusion_registry_from_screening",

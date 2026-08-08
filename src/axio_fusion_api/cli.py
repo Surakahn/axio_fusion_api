@@ -99,6 +99,7 @@ from .available_model_generation import (
 )
 from .model_screening import (
     ModelScreeningError,
+    build_prefusion_generation_probe_artifact,
     build_prefusion_probe_artifact,
     run_prefusion_model_screening,
 )
@@ -661,6 +662,27 @@ def build_parser() -> argparse.ArgumentParser:
     prefusion_probe_export.add_argument("--redact-provider-identifiers", action="store_true")
     prefusion_probe_export.add_argument("--output", required=True)
     prefusion_probe_export.set_defaults(func=cmd_prefusion_probe_export)
+
+    prefusion_generation_probe_export = sub.add_parser(
+        "prefusion-generation-probe-export",
+        help=(
+            "Project a ready available-model generation artifact's nested "
+            "prefusion bindings into the standard offline provider probe contract."
+        ),
+    )
+    prefusion_generation_probe_export.add_argument(
+        "--generation-file",
+        required=True,
+        help="Private ready artifact produced by generate-available-models.",
+    )
+    prefusion_generation_probe_export.add_argument(
+        "--redact-provider-identifiers",
+        action="store_true",
+    )
+    prefusion_generation_probe_export.add_argument("--output", required=True)
+    prefusion_generation_probe_export.set_defaults(
+        func=cmd_prefusion_generation_probe_export
+    )
 
     available_models = sub.add_parser(
         "generate-available-models",
@@ -2282,6 +2304,30 @@ def cmd_prefusion_probe_export(args: argparse.Namespace) -> int:
             "status": "blocked",
             "blockers": [exc.code],
             "generated_from_prefusion_screening": False,
+            "raw_provider_output_persisted": False,
+            "secrets_persisted": False,
+        }
+        _emit_json(payload, output=args.output)
+        return 2
+    _emit_json(payload, output=args.output)
+    return 0
+
+
+def cmd_prefusion_generation_probe_export(args: argparse.Namespace) -> int:
+    """Project a ready generation artifact without performing network I/O."""
+
+    try:
+        payload = build_prefusion_generation_probe_artifact(
+            args.generation_file,
+            redact_provider_identifiers=bool(args.redact_provider_identifiers),
+        )
+    except ModelScreeningError as exc:
+        payload = {
+            "schema": "axio_fusion_api.provider_probe.v1",
+            "status": "blocked",
+            "blockers": [exc.code],
+            "generated_from_available_model_generation": False,
+            "projection_network_calls_performed": False,
             "raw_provider_output_persisted": False,
             "secrets_persisted": False,
         }

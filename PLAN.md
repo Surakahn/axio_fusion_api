@@ -55,6 +55,24 @@ Before a new cohort, the operator must verify the configured proxy path,
 provider deadline behavior, and endpoint health with a bounded non-benchmark
 connectivity check.
 
+The replacement r43 cohort is now terminal and ready for runtime admission:
+its complete filtered pool contains 10 logical models and 10 eligible physical
+profiles with strict three-sample streaming and role-probe evidence. The
+generation wrapper, handoff, and registry are bound by their content digests.
+The generation-bound probe projection was performed offline from the nested
+`eligible_profile_bindings`; its private and redacted artifacts were bound to
+a new r43 registry copy, and the hash-only provider-probe evidence audit is
+ready with zero blockers. This closes the evidence projection gap but does
+not create external rank 1/2/3 evidence, freeze provider baselines, activate
+benchmark traffic, or support an Axio superiority claim.
+
+The r43 external-ranking template remains template-only. The next required
+action is to obtain two common independent non-target ranking source families
+with complete-pool coverage, exact canonical identity attestations, source
+snapshots, and population counts. The old `prefusion-probe-export` command
+continues to accept only raw screening reports; generation wrappers must use
+the explicit `prefusion-generation-probe-export` command.
+
 ## Historical Execution Checkpoint (2026-08-05)
 
 The historical serving registry was the fresh, full-pool, strict-stream

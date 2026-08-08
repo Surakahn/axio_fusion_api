@@ -84,6 +84,9 @@ from .schemas import (
 
 
 PREFUSION_SCREENING_SCHEMA = "axio_fusion_api.pre_fusion_model_screening.v1"
+AVAILABLE_MODEL_GENERATION_SCHEMA = (
+    "axio_fusion_api.available_model_generation.v1"
+)
 PREFUSION_RESEARCH_OUTPUT_SCHEMA = "axio_fusion_api.prefusion_research_agent_output.v2"
 PREFUSION_FOCUS_MANIFEST_SCHEMA = "axio_fusion_api.prefusion_focus_manifest.v1"
 PREFUSION_SOURCE_MANIFEST_SCHEMA = "axio_fusion_api.prefusion_source_manifest.v1"
@@ -1305,6 +1308,381 @@ def build_prefusion_probe_artifact(
         ]
         return redacted
     return artifact
+
+
+def build_prefusion_generation_probe_artifact(
+    generation: Mapping[str, Any] | str | Path,
+    *,
+    redact_provider_identifiers: bool = False,
+) -> dict[str, Any]:
+    """Project bound generation evidence into the standard probe contract.
+
+    ``generate-available-models`` wraps the ready registry instead of
+    persisting the raw screening report.  Its nested registry still carries
+    endpoint-bound physical profile rows and strict streaming bindings.  This
+    projection consumes only those bindings, revalidates the complete
+    one-to-one profile set, and never treats the wrapper as a raw screening
+    report.  It is offline and does not create new provider evidence.
+    """
+
+    payload = (
+        dict(generation)
+        if isinstance(generation, Mapping)
+        else _load_optional_mapping(generation)
+    )
+    registry = _generation_probe_registry(payload)
+    screening = registry["prefusion_screening"]
+    models = registry["models"]
+    bindings = screening["eligible_profile_bindings"]
+    model_by_hash = _generation_probe_model_map(models)
+    binding_by_hash = _generation_probe_binding_map(bindings)
+    if set(model_by_hash) != set(binding_by_hash):
+        raise ModelScreeningError(
+            "prefusion_generation_probe_export_profile_binding_set_mismatch"
+        )
+    required_samples = _generation_probe_required_samples(screening)
+    rows = [
+        _project_generation_probe_row(
+            model_by_hash[profile_hash],
+            binding_by_hash[profile_hash],
+            required_samples=required_samples,
+        )
+        for profile_hash in sorted(model_by_hash)
+    ]
+    source_digest = sha256_text(stable_json(payload))
+    return _build_generation_probe_artifact(
+        rows=rows,
+        screening=screening,
+        required_samples=required_samples,
+        source_digest=source_digest,
+        redact_provider_identifiers=redact_provider_identifiers,
+    )
+
+
+def _build_generation_probe_artifact(
+    *,
+    rows: Sequence[Mapping[str, Any]],
+    screening: Mapping[str, Any],
+    required_samples: int,
+    source_digest: str,
+    redact_provider_identifiers: bool,
+) -> dict[str, Any]:
+    artifact: dict[str, Any] = {
+        "schema": "axio_fusion_api.provider_probe.v1",
+        "standalone_product": True,
+        "decoupled_from_asci_fs": True,
+        "generated_from_prefusion_screening": True,
+        "generated_from_available_model_generation": True,
+        "source_projection": "nested_prefusion_registry_bindings",
+        "source_generation_schema": AVAILABLE_MODEL_GENERATION_SCHEMA,
+        "source_generation_content_sha256": source_digest,
+        "source_screening_content_sha256": source_digest,
+        "mode": "live",
+        "network_calls_performed": True,
+        "projection_network_calls_performed": False,
+        "max_response_latency_ms": screening.get(
+            "max_response_latency_ms",
+            PROVIDER_MAX_RESPONSE_LATENCY_MS,
+        ),
+        "max_response_seconds": screening.get("max_response_seconds"),
+        "model_count": len(rows),
+        "candidate_model_count_before_selection": len(rows),
+        "available_count": len(rows),
+        "samples_per_profile": required_samples,
+        "stability_contract": dict(screening["stream_stability_contract"]),
+        "selection_policy": {
+            "source": "prefusion_registry_eligible_profile_bindings",
+            "all_bound_profiles_required": True,
+            "image_profiles_excluded": True,
+        },
+        "streaming_evidence_contract": {
+            "strict_streaming_required": True,
+            "sse_or_ndjson_required": True,
+            "ordinary_json_fallback_ineligible": True,
+            "bound_by_prefusion_registry": True,
+        },
+        "stream_requested_count": len(rows),
+        "stream_observed_count": len(rows),
+        "stream_fallback_count": 0,
+        "provider_reports": [],
+        "probes": rows,
+        "raw_probe_prompt_persisted": False,
+        "raw_provider_output_persisted": False,
+        "raw_provider_outputs_persisted": False,
+        "secrets_persisted": False,
+    }
+    if redact_provider_identifiers:
+        redacted = redact_provider_probe_artifact(artifact)
+        redacted["generated_from_available_model_generation"] = True
+        redacted["source_generation_schema"] = AVAILABLE_MODEL_GENERATION_SCHEMA
+        redacted["source_generation_content_sha256"] = source_digest
+        redacted["source_projection"] = "nested_prefusion_registry_bindings"
+        redacted["projection_network_calls_performed"] = False
+        return redacted
+    return artifact
+
+
+def _generation_probe_registry(payload: Mapping[str, Any]) -> dict[str, Any]:
+    if str(payload.get("schema") or "") != AVAILABLE_MODEL_GENERATION_SCHEMA:
+        raise ModelScreeningError(
+            "prefusion_generation_probe_export_generation_schema_invalid"
+        )
+    if str(payload.get("status") or "").casefold() != "ready":
+        raise ModelScreeningError(
+            "prefusion_generation_probe_export_generation_not_ready"
+        )
+    handoff = payload.get("fusion_handoff")
+    handoff = handoff if isinstance(handoff, Mapping) else {}
+    if str(handoff.get("status") or "").casefold() != "ready":
+        raise ModelScreeningError(
+            "prefusion_generation_probe_export_handoff_not_ready"
+        )
+    registry = handoff.get("fusion_registry")
+    registry = registry if isinstance(registry, Mapping) else {}
+    if not registry:
+        raise ModelScreeningError(
+            "prefusion_generation_probe_export_registry_missing"
+        )
+    if handoff.get("private_registry_included") is not True:
+        raise ModelScreeningError(
+            "prefusion_generation_probe_export_private_registry_missing"
+        )
+    _validate_generation_registry_digests(
+        payload=payload,
+        handoff=handoff,
+        registry=registry,
+    )
+    validation = validate_prefusion_registry_handoff(
+        registry,
+        require_ready=True,
+    )
+    if validation.get("valid") is not True:
+        raise ModelScreeningError(
+            "prefusion_generation_probe_export_registry_invalid"
+        )
+    models = registry.get("models")
+    screening = registry.get("prefusion_screening")
+    if not isinstance(models, list) or not models:
+        raise ModelScreeningError(
+            "prefusion_generation_probe_export_models_missing"
+        )
+    if not isinstance(screening, Mapping):
+        raise ModelScreeningError(
+            "prefusion_generation_probe_export_screening_binding_missing"
+        )
+    bindings = screening.get("eligible_profile_bindings")
+    if not isinstance(bindings, list) or len(bindings) != len(models):
+        raise ModelScreeningError(
+            "prefusion_generation_probe_export_profile_binding_count_mismatch"
+        )
+    if screening.get("screening_status") != "ready":
+        raise ModelScreeningError(
+            "prefusion_generation_probe_export_screening_not_ready"
+        )
+    normalized_models = [row for row in models if isinstance(row, Mapping)]
+    if len(normalized_models) != len(models):
+        raise ModelScreeningError(
+            "prefusion_generation_probe_export_model_rows_invalid"
+        )
+    return {
+        "models": normalized_models,
+        "prefusion_screening": dict(screening),
+    }
+
+
+def _validate_generation_registry_digests(
+    *,
+    payload: Mapping[str, Any],
+    handoff: Mapping[str, Any],
+    registry: Mapping[str, Any],
+) -> None:
+    registry_digest = sha256_text(stable_json(registry))
+    expected_handoff_digest = str(
+        handoff.get("registry_content_sha256") or ""
+    ).strip().lower()
+    source_receipt = payload.get("source_receipt")
+    expected_source_digest = (
+        str(source_receipt.get("registry_content_sha256") or "")
+        .strip()
+        .lower()
+        if isinstance(source_receipt, Mapping)
+        else ""
+    )
+    if expected_handoff_digest and expected_handoff_digest != registry_digest:
+        raise ModelScreeningError(
+            "prefusion_generation_probe_export_handoff_registry_digest_mismatch"
+        )
+    if expected_source_digest and expected_source_digest != registry_digest:
+        raise ModelScreeningError(
+            "prefusion_generation_probe_export_source_registry_digest_mismatch"
+        )
+
+
+def _generation_probe_model_map(
+    models: Sequence[Mapping[str, Any]],
+) -> dict[str, Mapping[str, Any]]:
+    result: dict[str, Mapping[str, Any]] = {}
+    for row in models:
+        profile_id = str(row.get("profile_id") or "").strip()
+        provider = str(row.get("provider") or "").strip()
+        model = str(row.get("model") or "").strip()
+        api_format = str(row.get("api_format") or "").strip()
+        model_kind = str(row.get("model_kind") or "text").casefold()
+        profile_hash = sha256_text(profile_id) if profile_id else ""
+        if (
+            not profile_id
+            or not provider
+            or not model
+            or not api_format
+            or not is_sha256_digest(profile_hash)
+            or profile_hash in result
+            or model_kind == "image"
+        ):
+            raise ModelScreeningError(
+                "prefusion_generation_probe_export_model_identity_invalid"
+            )
+        result[profile_hash] = row
+    return result
+
+
+def _generation_probe_binding_map(
+    bindings: Sequence[Mapping[str, Any]],
+) -> dict[str, Mapping[str, Any]]:
+    result: dict[str, Mapping[str, Any]] = {}
+    for row in bindings:
+        if not isinstance(row, Mapping):
+            raise ModelScreeningError(
+                "prefusion_generation_probe_export_binding_row_invalid"
+            )
+        profile_hash = str(row.get("profile_id_sha256") or "").strip().lower()
+        if not is_sha256_digest(profile_hash) or profile_hash in result:
+            raise ModelScreeningError(
+                "prefusion_generation_probe_export_binding_identity_invalid"
+            )
+        result[profile_hash] = row
+    return result
+
+
+def _generation_probe_required_samples(screening: Mapping[str, Any]) -> int:
+    if screening.get("multi_sample_stream_stability_required") is not True:
+        raise ModelScreeningError(
+            "prefusion_generation_probe_export_stability_contract_missing"
+        )
+    contract = screening.get("stream_stability_contract")
+    contract = contract if isinstance(contract, Mapping) else {}
+    if (
+        contract.get("schema")
+        != "axio_fusion_api.provider_probe_stability_contract.v1"
+        or contract.get("requires_all_samples_success") is not True
+        or contract.get("requires_each_sample_latency_at_or_below_90_seconds")
+        is not True
+        or contract.get("requires_each_sample_strict_streaming") is not True
+    ):
+        raise ModelScreeningError(
+            "prefusion_generation_probe_export_stability_contract_invalid"
+        )
+    try:
+        samples = int(contract.get("samples_per_profile"))
+    except (TypeError, ValueError):
+        samples = 0
+    if samples < 2 or samples > 5:
+        raise ModelScreeningError(
+            "prefusion_generation_probe_export_stability_sample_count_invalid"
+        )
+    return samples
+
+
+def _project_generation_probe_row(
+    model: Mapping[str, Any],
+    binding: Mapping[str, Any],
+    *,
+    required_samples: int,
+) -> dict[str, Any]:
+    profile_id = str(model.get("profile_id") or "").strip()
+    profile_hash = sha256_text(profile_id)
+    if str(binding.get("profile_id_sha256") or "").lower() != profile_hash:
+        raise ModelScreeningError(
+            "prefusion_generation_probe_export_profile_binding_mismatch"
+        )
+    if not _generation_probe_binding_is_eligible(
+        binding,
+        required_samples=required_samples,
+    ):
+        raise ModelScreeningError(
+            "prefusion_generation_probe_export_binding_not_eligible"
+        )
+    return {
+        "profile_id": profile_id,
+        "provider": model.get("provider"),
+        "model": model.get("model"),
+        "api_format": model.get("api_format"),
+        "status": "available",
+        "probe_mode": "live",
+        "live_probe_evidence": True,
+        "output_sha256": binding.get("output_sha256"),
+        "latency_ms": binding.get("latency_ms"),
+        "p50_latency_ms": binding.get("p50_latency_ms"),
+        "p95_latency_ms": binding.get("p95_latency_ms"),
+        "latency_eligibility": binding.get("latency_eligibility"),
+        "stream_requested": True,
+        "strict_streaming_requested": True,
+        "stream_observed": True,
+        "stream_fallback_used": False,
+        "stream_protocol": binding.get("stream_protocol"),
+        "stream_frame_count": binding.get("stream_frame_count"),
+        "stability_sample_count": binding.get("stability_sample_count"),
+        "stability_completed_sample_count": binding.get(
+            "stability_completed_sample_count"
+        ),
+        "stability_success_count": binding.get("stability_success_count"),
+        "stability_failure_count": binding.get("stability_failure_count"),
+        "stability_success_rate": binding.get("stability_success_rate"),
+        "all_samples_eligible": True,
+        "sample_receipts_sha256": binding.get("sample_receipts_sha256"),
+        "raw_provider_output_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _generation_probe_binding_is_eligible(
+    binding: Mapping[str, Any],
+    *,
+    required_samples: int,
+) -> bool:
+    if (
+        binding.get("status") != "available"
+        or binding.get("probe_mode") != "live"
+        or binding.get("live_probe_evidence") is not True
+        or binding.get("stream_requested") is not True
+        or binding.get("strict_streaming_requested") is not True
+        or binding.get("stream_observed") is not True
+        or binding.get("stream_fallback_used") is True
+        or not is_sha256_digest(binding.get("output_sha256"))
+        or binding.get("all_samples_eligible") is not True
+    ):
+        return False
+    if str(binding.get("stream_protocol") or "").casefold() not in {
+        "sse",
+        "ndjson",
+    }:
+        return False
+    if measured_stream_latency_eligibility(binding).get("eligible") is not True:
+        return False
+    if streaming_evidence_eligibility(binding).get("eligible") is not True:
+        return False
+    try:
+        sample_count = int(binding.get("stability_sample_count"))
+        completed = int(binding.get("stability_completed_sample_count"))
+        successes = int(binding.get("stability_success_count"))
+        failures = int(binding.get("stability_failure_count"))
+    except (TypeError, ValueError):
+        return False
+    return (
+        sample_count == required_samples
+        and completed == required_samples
+        and successes == required_samples
+        and failures == 0
+    )
 
 
 def load_prefusion_focus_manifest(

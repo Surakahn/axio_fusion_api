@@ -1,5 +1,26 @@
 # Axio Fusion API Checklist
 
+## Current r43 Evidence Gate (2026-08-09)
+
+- [x] Complete the r43 provider discovery, research-prior, strict streaming,
+  multi-sample, role-probe, and registry handoff generation without benchmark
+  traffic; retain 10 logical/10 physical eligible profiles.
+- [x] Keep the raw `prefusion-probe-export` schema boundary fail-closed; a
+  generation wrapper is not accepted as a raw screening report.
+- [x] Add and test the explicit `prefusion-generation-probe-export` offline
+  projection from nested, endpoint-bound `eligible_profile_bindings`.
+- [x] Revalidate profile identity, strict SSE/NDJSON evidence, three-sample
+  success, measured latency, and text-only modality before projection.
+- [x] Bind the projected probe to a new private copy of the r43 registry and
+  pass the hash-only provider-probe evidence audit with zero blockers.
+- [ ] Complete two independent common non-target ranking source families,
+  exact model identity attestations, population counts, stable snapshots, and
+  derive the complete rank-1/rank-2/rank-3 provider baseline freeze.
+- [ ] Activate and live-verify all three Axio tiers across Chat Completions,
+  Responses, Anthropic Messages, and Gemini streaming surfaces.
+- [ ] Run the independent 9-category/21-suite campaign only after baseline
+  freeze and official/audited harness imports are ready.
+
 ## Current Image Capability Gate (2026-08-09)
 
 - [x] Discover current CPA Plus `/models` through the configured `auto`
