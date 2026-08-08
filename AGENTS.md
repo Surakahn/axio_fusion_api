@@ -86,7 +86,8 @@ Git commit + push
 
 ### 3.4 服务器重启检查清单
 - [ ] `curl http://127.0.0.1:18900/health` 返回 `status: ready`
-- [ ] `model_count` 符合预期（当前 29，不含辅助模型）
+- [ ] `model_count` 与明确绑定的当前 pre-Fusion registry 一致（r43 当前为
+  10 个文本 physical profiles；公开模型仍为 3 个）
 - [ ] `network.mode` 正确（当前 auto）
 - [ ] `network.selected_transport` 为 `proxy` 或 `direct`
 - [ ] 至少一个模型的 dry-run route plan 生成成功

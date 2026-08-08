@@ -49,7 +49,7 @@
   `/health` reports one generation and one editing profile with
   `text_fusion_isolated=true`.
 - [x] Repair and revalidate the 18 pre-existing non-image regression failures;
-  the current full standalone regression is `999 passed, 0 failed`.
+  the current full standalone regression is `1009 passed, 0 failed`.
 - [x] Add profile-driven image parameter compatibility checks for
   `input_fidelity` and transparent backgrounds; unsupported or unknown options
   fail before prompt composition/provider I/O.

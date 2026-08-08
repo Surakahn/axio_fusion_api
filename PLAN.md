@@ -167,8 +167,9 @@ the image lane is isolated from text Fusion. The overall health status remains
 `usable_with_warnings` because the current text serving registry reports weak
 or missing Judge and structured-output candidates.
 
-The final standalone regression for this worktree is now `999 passed, 0
-failed`, including the image parameter capability contract. The earlier
+The final standalone regression for that image re-audit was `999 passed, 0
+failed`, including the image parameter capability contract. The current
+standalone regression is `1009 passed, 0 failed`. The earlier
 18 legacy panel/latency and provider/registry failures were repaired in the
 same engineering re-audit and are retained only in prior receipts for
 provenance. A green code regression does not promote the text serving registry
@@ -217,18 +218,18 @@ the original user intent on any composition failure. Image output limits,
 multipart limits, proxy policy, key rotation, and same-model failover remain
 enforced independently of text Fusion.
 
-The 2026-07-22 v6 handoff is historical one-sample operational evidence, not
-the current serving or benchmark input. It remains available for migration
-audits but must not be reused for a new baseline freeze, runtime activation, or
-superiority claim. The current 2026-07-23 v9 cohort was newly discovered and
-fully reranked across 131 candidates, then admitted only 34 profiles after
-three successful strict-stream samples per profile. Its calibrated registry
-preserves that text-admission envelope and has 18 operationally proven native
-tool profiles. It is the current serving input pending independent public API
-live evidence; neither the research ranking nor the tool probe is benchmark
-evidence. The stopped 2026-07-23 v8 non-target baseline campaign is invalid for
-ranking because its observed transport-failure rate exceeded the pre-registered
-2% ceiling. It must never be overwritten, resumed, or used as ranking evidence.
+The 2026-07-22 v6 handoff and 2026-07-23 v9 cohort are historical operational
+evidence, not the current serving or benchmark input. They remain available for
+migration audits but must not be reused for a new baseline freeze, runtime
+activation, or superiority claim. The current r43 generation cohort is the
+explicit replacement: it contains 10 profiles after complete discovery,
+strict three-sample streaming admission, and role-probe binding, and its
+generation-bound provider evidence audit is ready. It is eligible for
+runtime-admission follow-up, but it is not an external baseline ranking and
+does not authorize benchmark traffic. The stopped 2026-07-23 v8 non-target
+baseline campaign remains invalid for ranking because its observed transport-
+failure rate exceeded the pre-registered 2% ceiling; it must never be
+overwritten, resumed, or used as ranking evidence.
 
 ## Baseline Contract
 
