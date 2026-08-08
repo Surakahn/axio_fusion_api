@@ -1645,7 +1645,7 @@ def _safe_nonnegative_int(value: Any) -> int:
         return 0
 
 
-def serve(host: str = "127.0.0.1", port: int = 8789, *, live: bool = False, require_prefusion: bool = True) -> None:
+def serve(host: str = "127.0.0.1", port: int = 8789, *, live: bool = True, require_prefusion: bool = True) -> None:
     profiles = load_registry(require_prefusion=require_prefusion)
     if not profiles:
         raise ValueError("production pre-Fusion registry contains no enabled profiles")

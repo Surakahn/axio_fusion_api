@@ -1324,7 +1324,7 @@ class FusionPolicy:
     max_total_model_calls: int | None = None
     fusion_depth: int = 0
     max_fusion_depth: int = 2
-    live: bool = False
+    live: bool = True
 
 
 @dataclass(frozen=True)
