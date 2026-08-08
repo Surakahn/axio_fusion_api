@@ -67,8 +67,8 @@ def _load_credentials(path: Path) -> None:
         raise RuntimeError("credential_file_parse_failed")
     os.environ["AXIO_NVIDIA_BASE_URL"] = "https://integrate.api.nvidia.com/v1"
     os.environ["AXIO_NVIDIA_API_KEYS"] = ",".join(nvidia_keys)
-    os.environ["AXIO_TOKENAPIS_BASE_URL"] = "https://tokenapis.com/v1"
-    os.environ["AXIO_TOKENAPIS_API_KEY"] = token_keys[-1]
+    os.environ["AXIO_CPA_PLUS_BASE_URL"] = "https://cpa.co6.click/v1"
+    os.environ["AXIO_CPA_PLUS_API_KEY"] = token_keys[-1]
     os.environ["AXIO_FUSION_NETWORK_MODE"] = "auto"
     os.environ["PYTHONUNBUFFERED"] = "1"
 

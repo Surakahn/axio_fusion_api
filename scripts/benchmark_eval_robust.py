@@ -8,12 +8,13 @@ import json, os, sys, time, re, random, urllib.request, traceback
 from pathlib import Path
 from typing import Any
 
-# ── Self-contained environment setup (no shell dependency) ──
-os.environ.setdefault('AXIO_CPA_PLUS_BASE_URL', 'https://cpa.co6.click/v1')
-os.environ.setdefault('AXIO_CPA_PLUS_API_KEY', 'sk-S9APc6QARCPCC4AeM')
-os.environ.setdefault('AXIO_NVIDIA_BASE_URL', 'https://integrate.api.nvidia.com/v1')
-os.environ.setdefault('AXIO_NVIDIA_API_KEYS',
-    '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')
+# ── Environment setup ──
+# Credentials must be injected by the operator or a secret manager. Never
+# provide fallback values in a tracked benchmark script.
+os.environ.setdefault('AXIO_CPA_PLUS_BASE_URL', '')
+os.environ.setdefault('AXIO_CPA_PLUS_API_KEY', '')
+os.environ.setdefault('AXIO_NVIDIA_BASE_URL', '')
+os.environ.setdefault('AXIO_NVIDIA_API_KEYS', '')
 os.environ.setdefault('AXIO_FUSION_NETWORK_MODE', 'off')
 os.environ.setdefault('AXIO_FUSION_SYSTEM_PROXY', '')
 os.environ.setdefault('AXIO_FUSION_REGISTRY_PATH',

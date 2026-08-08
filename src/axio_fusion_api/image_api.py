@@ -127,6 +127,18 @@ def image_request_max_bytes() -> int:
     return max(1_048_576, min(128 * 1024 * 1024, value))
 
 
+def image_response_max_bytes() -> int:
+    raw = os.getenv(
+        "AXIO_FUSION_IMAGE_MAX_RESPONSE_BYTES",
+        str(64 * 1024 * 1024),
+    ).strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 64 * 1024 * 1024
+    return max(1_048_576, min(256 * 1024 * 1024, value))
+
+
 def image_request_timeout() -> float:
     raw = os.getenv("AXIO_FUSION_IMAGE_TIMEOUT_SECONDS", str(PROVIDER_MAX_RESPONSE_SECONDS)).strip()
     try:
@@ -139,6 +151,13 @@ def image_request_timeout() -> float:
 def parse_generation_payload(body: bytes | str | None) -> dict[str, Any]:
     if body in (None, b"", ""):
         raise ImageRequestError("Image generation request body is required.", code="image_request_body_missing")
+    raw_body = body if isinstance(body, bytes) else str(body).encode("utf-8")
+    if len(raw_body) > image_request_max_bytes():
+        raise ImageRequestError(
+            "Image generation request is too large.",
+            code="image_request_too_large",
+            status=413,
+        )
     raw = body.decode("utf-8") if isinstance(body, bytes) else str(body)
     try:
         payload = json.loads(raw)
@@ -671,7 +690,7 @@ class ImageProviderClient:
 def _read_image_json(request: urllib.request.Request, *, timeout: float) -> Mapping[str, Any]:
     try:
         with _open_provider_url(request, timeout=timeout) as response:
-            raw = response.read().decode("utf-8")
+            raw = _read_bounded_image_response(response).decode("utf-8")
     except urllib.error.HTTPError:
         raise
     except (TimeoutError, socket.timeout) as exc:
@@ -687,6 +706,88 @@ def _read_image_json(request: urllib.request.Request, *, timeout: float) -> Mapp
     return value
 
 
+def _read_bounded_image_response(response: Any) -> bytes:
+    limit = image_response_max_bytes()
+    content_length = _response_content_length(response)
+    if content_length is not None and content_length > limit:
+        raise ProviderExecutionError(
+            "provider image response exceeded the configured size limit",
+            error_code="image_response_too_large",
+        )
+    try:
+        chunks: list[bytes] = []
+        total = 0
+        while total <= limit:
+            chunk = response.read(min(64 * 1024, limit - total + 1))
+            if not chunk:
+                break
+            if not isinstance(chunk, (bytes, bytearray)):
+                chunk = str(chunk).encode("utf-8")
+            encoded = bytes(chunk)
+            chunks.append(encoded)
+            total += len(encoded)
+            if total > limit:
+                raise ProviderExecutionError(
+                    "provider image response exceeded the configured size limit",
+                    error_code="image_response_too_large",
+                )
+        return b"".join(chunks)
+    except TypeError:
+        # Small test doubles and a few compatible wrappers expose only
+        # ``read()`` without the optional byte-count argument.
+        raw = response.read()
+        if not isinstance(raw, (bytes, bytearray)):
+            raw = str(raw).encode("utf-8")
+        if len(raw) > limit:
+            raise ProviderExecutionError(
+                "provider image response exceeded the configured size limit",
+                error_code="image_response_too_large",
+            )
+        return bytes(raw)
+
+
+def _response_content_length(response: Any) -> int | None:
+    headers = getattr(response, "headers", {})
+    raw = headers.get("Content-Length") if hasattr(headers, "get") else None
+    try:
+        value = int(str(raw or "").strip())
+    except (TypeError, ValueError):
+        return None
+    return value if value >= 0 else None
+
+
+class _BoundedImageStream:
+    """Expose provider ``readline`` while enforcing a total byte budget."""
+
+    def __init__(self, response: Any, *, max_bytes: int) -> None:
+        self._response = response
+        self._max_bytes = max(1, int(max_bytes))
+        self._seen_bytes = 0
+        self.headers = getattr(response, "headers", {})
+
+    def readline(self) -> Any:
+        line = self._response.readline()
+        if isinstance(line, bytes):
+            size = len(line)
+        else:
+            size = len(str(line).encode("utf-8"))
+        self._seen_bytes += size
+        if self._seen_bytes > self._max_bytes:
+            raise ProviderExecutionError(
+                "provider image stream exceeded the configured size limit",
+                error_code="image_stream_too_large",
+            )
+        return line
+
+    def close(self) -> None:
+        close = getattr(self._response, "close", None)
+        if callable(close):
+            close()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._response, name)
+
+
 def _read_image_stream(
     request: urllib.request.Request,
     *,
@@ -699,9 +800,20 @@ def _read_image_stream(
     protocol = ""
     try:
         with _open_provider_url(request, timeout=timeout) as response:
+            content_length = _response_content_length(response)
+            response_limit = image_response_max_bytes()
+            if content_length is not None and content_length > response_limit:
+                raise ProviderExecutionError(
+                    "provider image stream exceeded the configured size limit",
+                    error_code="image_stream_too_large",
+                )
             content_type = str(getattr(response, "headers", {}).get("Content-Type", "") or "").lower()
             protocol = _stream_protocol_from_content_type(content_type)
-            for event_name, payload in _iter_stream_events(response, deadline_at, protocol_state={}, timeout_error_code="provider_response_timeout_exceeded_90s"):
+            bounded_response = _BoundedImageStream(
+                response,
+                max_bytes=response_limit,
+            )
+            for event_name, payload in _iter_stream_events(bounded_response, deadline_at, protocol_state={}, timeout_error_code="provider_response_timeout_exceeded_90s"):
                 if payload == "[DONE]" or not isinstance(payload, Mapping):
                     continue
                 safe = _safe_image_event(event_name, payload, event_prefix=event_prefix)
@@ -738,8 +850,8 @@ def _safe_image_event(event_name: str, payload: Mapping[str, Any], *, event_pref
         for item in output:
             if not isinstance(item, Mapping) or str(item.get("type") or "") != "image_generation_call":
                 continue
-            result = item.get("result")
-            if isinstance(result, str) and result:
+            result = _bounded_image_text(item.get("result"), field="result")
+            if result:
                 return {"type": f"{event_prefix}.completed", "b64_json": result}
         return {}
     kind = response_kind_map.get(kind, kind)
@@ -749,11 +861,21 @@ def _safe_image_event(event_name: str, payload: Mapping[str, Any], *, event_pref
     result: dict[str, Any] = {"type": kind}
     for key in ("b64_json", "url", "revised_prompt", "partial_image_index", "output_format", "size"):
         if key in payload and payload.get(key) not in (None, ""):
-            result[key] = payload[key]
-    if isinstance(payload.get("partial_image_b64"), str) and payload.get("partial_image_b64"):
-        result["b64_json"] = payload["partial_image_b64"]
-    if isinstance(payload.get("result"), str) and payload.get("result"):
-        result["b64_json"] = payload["result"]
+            if key in {"b64_json"}:
+                result[key] = _bounded_image_text(payload[key], field=key)
+            elif key in {"url", "revised_prompt"}:
+                result[key] = _bounded_image_text(payload[key], field=key, metadata=True)
+            else:
+                result[key] = payload[key]
+    partial_image = _bounded_image_text(
+        payload.get("partial_image_b64"),
+        field="partial_image_b64",
+    )
+    if partial_image:
+        result["b64_json"] = partial_image
+    provider_result = _bounded_image_text(payload.get("result"), field="result")
+    if provider_result:
+        result["b64_json"] = provider_result
     return result if len(result) > 1 else {}
 
 
@@ -776,8 +898,8 @@ def _result_from_payload(
                 continue
             if str(item.get("type") or "") != "image_generation_call":
                 continue
-            result = item.get("result")
-            if isinstance(result, str) and result:
+            result = _bounded_image_text(item.get("result"), field="result")
+            if result:
                 rows.append({"b64_json": result})
     if not rows:
         indexed: dict[int, dict[str, Any]] = {}
@@ -813,10 +935,31 @@ def _safe_image_item(value: Any) -> dict[str, Any]:
         return {}
     result: dict[str, Any] = {}
     for key in ("b64_json", "url", "revised_prompt"):
-        raw = value.get(key)
-        if raw not in (None, "") and isinstance(raw, str):
+        raw = _bounded_image_text(
+            value.get(key),
+            field=key,
+            metadata=key != "b64_json",
+        )
+        if raw:
             result[key] = raw
     return result
+
+
+def _bounded_image_text(
+    value: Any,
+    *,
+    field: str,
+    metadata: bool = False,
+) -> str:
+    if not isinstance(value, str) or not value:
+        return ""
+    limit = 64 * 1024 if metadata else image_response_max_bytes()
+    if len(value.encode("utf-8")) > limit:
+        raise ProviderExecutionError(
+            f"provider image field {field} exceeded the configured size limit",
+            error_code="image_response_too_large",
+        )
+    return value
 
 
 def _safe_created(value: Any) -> int:

@@ -9,8 +9,8 @@ for k in ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY']:
     os.environ.pop(k, None)
 
 AXIO_URL = "http://127.0.0.1:18900"
-TOKENAPIS_URL = os.environ.get("AXIO_TOKENAPIS_BASE_URL", "https://tokenapis.com/v1").rstrip("/")
-TOKENAPIS_KEY = os.environ.get("AXIO_TOKENAPIS_API_KEY", "").strip()
+CPA_URL = os.environ.get("AXIO_CPA_PLUS_BASE_URL", "https://cpa.co6.click/v1").rstrip("/")
+CPA_KEY = os.environ.get("AXIO_CPA_PLUS_API_KEY", "").strip()
 BENCHMARK_DIR = "data/benchmarks"
 RESULTS_DIR = "data/evaluation_results"
 MAX_SAMPLES = 15
@@ -59,11 +59,11 @@ def call_axio(model, messages, max_tokens=256):
     return call_api(f"{AXIO_URL}/v1/chat/completions", payload, {"Content-Type": "application/json"})
 
 def call_provider(model, messages, max_tokens=256):
-    if not TOKENAPIS_KEY:
-        return None, "AXIO_TOKENAPIS_API_KEY is not configured"
+    if not CPA_KEY:
+        return None, "AXIO_CPA_PLUS_API_KEY is not configured"
     payload = {"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": 0.0, "stream": False}
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {TOKENAPIS_KEY}"}
-    return call_api(f"{TOKENAPIS_URL}/v1/chat/completions", payload, headers)
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {CPA_KEY}"}
+    return call_api(f"{CPA_URL}/chat/completions", payload, headers)
 
 def normalize_answer(text):
     if not text: return ""

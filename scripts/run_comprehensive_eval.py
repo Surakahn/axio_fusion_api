@@ -16,13 +16,13 @@ TIMEOUT = 90
 
 # Single-model baselines: call directly via CPA provider
 CPA_BASE = "https://cpa.co6.click/v1"
-CPA_KEY = os.environ.get("AXIO_TOKENAPIS_API_KEY", "")
+CPA_KEY = os.environ.get("AXIO_CPA_PLUS_API_KEY", "")
 if not CPA_KEY:
     # Try to load from env file
     env_file = Path("private/current_channels.env")
     if env_file.exists():
         for line in env_file.read_text().splitlines():
-            if line.startswith("export AXIO_TOKENAPIS_API_KEY="):
+            if line.startswith("export AXIO_CPA_PLUS_API_KEY="):
                 CPA_KEY = line.split("=", 1)[1].strip().strip('"').strip("'")
 
 BASELINE_MODELS = {

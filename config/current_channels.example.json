@@ -25,6 +25,15 @@
       "api_key_env": "AXIO_CPA_PLUS_API_KEY",
       "models_env": "AXIO_CPA_PLUS_MODELS",
       "models": [],
+      "image_capabilities": {
+        "status": "candidate",
+        "transport": "images_api",
+        "operations": ["generation", "editing"],
+        "generation_path": "/images/generations",
+        "editing_path": "/images/edits",
+        "streaming": true,
+        "max_input_images": 1
+      },
       "traffic_control": {
         "scope": "profile",
         "max_in_flight": 0,

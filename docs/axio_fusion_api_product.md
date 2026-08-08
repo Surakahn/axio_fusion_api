@@ -51,6 +51,15 @@ may serve image generation and editing through the dedicated Images routes;
 image artifacts are not passed into text candidate, Judge, or Synthesizer
 stages as if they were language-model answers.
 
+For the current CPA Plus enrollment, `gpt-image-2` is discovered from the
+Responses-compatible channel but is routed through its separately verified
+OpenAI Images-compatible generation/editing paths. The image registry is
+promoted only after independent streamed generation and multipart-edit probes
+pass the 90-second ceiling. Prompt composition is an optional text-model
+preparation step performed after image capability admission; it cannot run when
+the image lane is unavailable and it never turns an image request into a text
+Fusion answer.
+
 ## Composition Runtime
 
 The runtime is a bounded orchestration graph:
@@ -89,7 +98,8 @@ in process memory. The example manifests are:
 - `config/provider_configs.example.json` for arbitrary providers and all four
   formats.
 - `config/current_channels.example.json` for the current NVIDIA Chat
-  Completions and TokenAPIs Responses channel shapes.
+  Completions and CPA Plus Responses/Anthropic channel shapes, including the
+  candidate `gpt-image-2` image lane.
 - `config/research_agent.example.json` for the pre-Fusion research-ranking
   agent.
 
@@ -130,6 +140,12 @@ connection is used. `on` requires the configured proxy and `off` forces a
 direct connection. Provider streaming calls have a 90-second admission
 ceiling; a profile that exceeds it is not eligible for the Fusion serving
 list.
+
+The optional image registry is configured independently through
+`AXIO_FUSION_IMAGE_REGISTRY_PATH`. It must be produced by `image-probe-bind`;
+an unverified or mixed text/image registry is rejected at startup. Without
+that variable, image endpoints remain available as a stable 503 capability
+response and do not invoke text Fusion.
 
 ## Runtime Safety
 

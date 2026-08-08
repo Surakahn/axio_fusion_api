@@ -145,6 +145,7 @@ from .registry import (
     build_probe_bound_registry,
     build_provider_portfolio_audit,
     build_registry_from_probe_artifacts,
+    load_image_probe_candidates,
     load_registry,
     provider_configured_profiles_from_env,
     provider_configuration_source_summary,
@@ -2068,7 +2069,7 @@ def cmd_reasoning_probe(args: argparse.Namespace) -> int:
 
 
 def cmd_image_probe(args: argparse.Namespace) -> int:
-    profiles = load_registry(args.registry, include_disabled=True)
+    profiles = load_image_probe_candidates(args.registry, include_disabled=True)
     live = bool(args.live or os.getenv("AXIO_FUSION_PROBE_LIVE") == "1")
     _emit_json(
         probe_image_capabilities(

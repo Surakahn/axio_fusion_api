@@ -30,7 +30,7 @@
         "excluded_unlisted_class": "auxiliary_or_out_of_cohort"
       },
       {
-        "provider": "tokenapis",
+        "provider": "cpa_plus",
         "allow_models": [
           "gpt-5.2",
           "gpt-5.5",
@@ -186,7 +186,7 @@
       "ranking_prior_forbidden": true
     },
     {
-      "provider": "tokenapis",
+      "provider": "cpa_plus",
       "model": "gpt-5.2",
       "canonical_model_id": "gpt-5.2",
       "api_format": "responses",
@@ -198,7 +198,7 @@
       "ranking_prior_forbidden": true
     },
     {
-      "provider": "tokenapis",
+      "provider": "cpa_plus",
       "model": "gpt-5.5",
       "canonical_model_id": "gpt-5.5",
       "api_format": "responses",
@@ -210,7 +210,7 @@
       "ranking_prior_forbidden": true
     },
     {
-      "provider": "tokenapis",
+      "provider": "cpa_plus",
       "model": "gpt-5.6-luna",
       "canonical_model_id": "gpt-5.6-luna",
       "api_format": "responses",
@@ -222,7 +222,7 @@
       "ranking_prior_forbidden": true
     },
     {
-      "provider": "tokenapis",
+      "provider": "cpa_plus",
       "model": "gpt-5.6-terra",
       "canonical_model_id": "gpt-5.6-terra",
       "api_format": "responses",
@@ -234,7 +234,7 @@
       "ranking_prior_forbidden": true
     },
     {
-      "provider": "tokenapis",
+      "provider": "cpa_plus",
       "model": "gpt-5.6-sol",
       "canonical_model_id": "gpt-5.6-sol",
       "api_format": "responses",

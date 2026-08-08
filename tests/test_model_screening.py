@@ -547,21 +547,21 @@ def test_candidate_policy_without_provider_rule_preserves_open_compatibility():
     assert receipt["excluded_text_profile_count"] == 0
 
 
-def test_repository_focus_manifest_declares_only_formal_tokenapis_text_models():
+def test_repository_focus_manifest_declares_only_formal_cpa_plus_text_models():
     manifest_path = Path(__file__).resolve().parents[1] / "config" / "nvidia_focus_models.json"
     focus = model_screening.load_prefusion_focus_manifest(manifest_path)
     rules = focus["candidate_policy"]["provider_rules"]
-    tokenapis_rule = next(row for row in rules if row["provider"] == "tokenapis")
+    cpa_plus_rule = next(row for row in rules if row["provider"] == "cpa-plus")
 
-    assert tokenapis_rule["allow_models"] == [
+    assert cpa_plus_rule["allow_models"] == [
         "gpt-5.2",
         "gpt-5.5",
         "gpt-5.6-luna",
         "gpt-5.6-terra",
         "gpt-5.6-sol",
     ]
-    assert tokenapis_rule["allow_unlisted"] is False
-    assert tokenapis_rule["excluded_unlisted_class"] == "auxiliary"
+    assert cpa_plus_rule["allow_unlisted"] is False
+    assert cpa_plus_rule["excluded_unlisted_class"] == "auxiliary"
 
 
 @pytest.mark.parametrize(

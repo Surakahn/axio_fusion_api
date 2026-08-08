@@ -1052,15 +1052,16 @@ are rejected, and proxy values are never written to receipts.
 The current convenience seeds keep common channel formats separate. The current
 deployment manifest contains only these two channels:
 
-- `tokenapis`: Responses API compatible; configure it through
-  `AXIO_TOKENAPIS_BASE_URL`, `AXIO_TOKENAPIS_API_KEY`, and optionally
-  `AXIO_TOKENAPIS_MODELS`.
+- `cpa-plus`: Responses/Anthropic per-model compatible; configure it through
+  `AXIO_CPA_PLUS_BASE_URL`, `AXIO_CPA_PLUS_API_KEY`, and optionally
+  `AXIO_CPA_PLUS_MODELS`. Its verified `gpt-image-2` image lane is configured
+  separately through `AXIO_FUSION_IMAGE_REGISTRY_PATH`.
 - `nvidia`: Chat Completions compatible, discovered/probed through `/v1/models`
   and `/v1/chat/completions`.
 
-`aisz` and `cpa-plus` remain supported generic Responses-compatible provider
-labels for future manifests, but they are not part of the current runtime pool
-unless explicitly configured and successfully enrolled.
+Other provider labels remain supported through arbitrary manifests, but they
+are not part of the current runtime pool unless explicitly configured and
+successfully enrolled.
 - `openai-compatible`: generic Chat Completions-compatible gateway convention.
 - `anthropic-compatible`: generic Anthropic Messages-compatible gateway
   convention.

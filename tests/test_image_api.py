@@ -17,6 +17,7 @@ from axio_fusion_api.image_api import (
     ImageProviderClient,
     ImageProviderResult,
     ImageRequestError,
+    ImagePromptTransformer,
     ImageRouter,
     _encode_multipart,
     parse_edit_payload,
@@ -28,7 +29,8 @@ from axio_fusion_api.image_probe import (
     redact_image_probe_artifact,
 )
 from axio_fusion_api.orchestrator import FusionEngine
-from axio_fusion_api.registry import load_image_registry
+from axio_fusion_api.providers import ProviderExecutionError
+from axio_fusion_api.registry import load_image_probe_candidates, load_image_registry
 from axio_fusion_api.schemas import ModelProfile
 
 
@@ -123,6 +125,26 @@ def test_discovered_gpt_image_names_enter_unverified_image_lane_only():
     assert image.image_generation_eligible is False
     assert text.model_kind == "text"
     assert text.text_model_eligible is True
+
+
+def test_image_probe_candidate_loader_reads_unpromoted_image_registry(tmp_path):
+    profile = _image_profile(probe_status="not_run", capability_status="candidate")
+    path = Path(tmp_path) / "image-candidates.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema": "axio_fusion_api.registry.v1",
+                "image_capability_registry_ready": False,
+                "models": [profile.safe_dict()],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = load_image_probe_candidates(path, include_disabled=True)
+
+    assert [item.model for item in loaded] == ["gpt-image-2"]
+    assert loaded[0].image_generation_eligible is False
 
 
 def test_image_capability_requires_verified_capability_and_probe():
@@ -248,6 +270,98 @@ def test_generation_parser_uses_official_partial_image_limit():
             json.dumps({"model": "axio-pro", "prompt": "x", "partial_images": 4})
         )
     assert error.value.code == "image_field_invalid"
+
+
+def test_generation_parser_enforces_request_size_limit(monkeypatch):
+    monkeypatch.setenv("AXIO_FUSION_IMAGE_MAX_REQUEST_BYTES", "1048576")
+    with pytest.raises(ImageRequestError) as error:
+        parse_generation_payload(
+            json.dumps({"model": "axio-pro", "prompt": "x" * 1_100_000})
+        )
+    assert error.value.code == "image_request_too_large"
+    assert error.value.status == 413
+
+
+def test_image_provider_rejects_oversized_non_stream_response(monkeypatch):
+    monkeypatch.setenv("AXIO_FUSION_IMAGE_MAX_RESPONSE_BYTES", "1048576")
+    profile = _image_profile(runtime_keys=("image-key",))
+
+    class Response:
+        headers = {
+            "Content-Type": "application/json",
+            "Content-Length": "1048577",
+        }
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, *_args):
+            raise AssertionError("content length must reject before reading")
+
+    monkeypatch.setattr(
+        "axio_fusion_api.image_api._open_provider_url",
+        lambda request, *, timeout: Response(),
+    )
+
+    with pytest.raises(ProviderExecutionError) as error:
+        ImageProviderClient().generate(
+            profile,
+            {"model": "axio-terra", "prompt": "blue square"},
+            timeout=5,
+        )
+    assert error.value.error_code == "image_response_too_large"
+
+
+class _FakePromptComposerEngine:
+    def __init__(self, response_text: str) -> None:
+        self.response_text = response_text
+        self.requests = []
+        self.profiles = [
+            ModelProfile(provider="text-provider", model="text-model", model_kind="text")
+        ]
+
+    def complete(self, request, *, live):
+        self.requests.append((request, live))
+        return type("Response", (), {"text": self.response_text})()
+
+
+def test_image_prompt_transformer_composes_intent_with_fixed_json_contract():
+    engine = _FakePromptComposerEngine(
+        '{"prompt":"A precise editorial product photo of a blue ceramic cup on white linen."}'
+    )
+    transformer = ImagePromptTransformer(engine)
+
+    payload, receipt = transformer.transform(
+        {"model": "axio-terra", "prompt": "make my cup photo look clean"},
+        operation="editing",
+    )
+
+    assert payload["prompt"].startswith("A precise editorial")
+    assert receipt.applied is True
+    assert receipt.reason == "text_prompt_composed"
+    request, live = engine.requests[0]
+    assert live is True
+    assert "<user_image_intent>" in request.prompt
+    assert "make my cup photo look clean" in request.prompt
+    assert receipt.safe_dict()["raw_transformed_prompt_persisted"] is False
+
+
+def test_image_prompt_transformer_falls_back_on_non_json_model_output():
+    original = "remove the background and keep the subject unchanged"
+    engine = _FakePromptComposerEngine("I would rewrite that as a detailed prompt.")
+    transformer = ImagePromptTransformer(engine)
+
+    payload, receipt = transformer.transform(
+        {"model": "axio-pro", "prompt": original},
+        operation="editing",
+    )
+
+    assert payload["prompt"] == original
+    assert receipt.applied is False
+    assert receipt.reason == "text_prompt_composer_invalid"
 
 
 def test_edit_parser_supports_mask_and_multiple_image_parts():

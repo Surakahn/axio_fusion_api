@@ -1,10 +1,10 @@
 {
   "schema": "axio_fusion_api.prefusion_research_agent_config.v1",
-  "provider": "tokenapis",
+  "provider": "cpa_plus",
   "model": "gpt-5.6-sol",
   "api_format": "responses",
-  "base_url_env": "AXIO_TOKENAPIS_BASE_URL",
-  "api_key_env": "AXIO_TOKENAPIS_API_KEY",
+  "base_url_env": "AXIO_CPA_PLUS_BASE_URL",
+  "api_key_env": "AXIO_CPA_PLUS_API_KEY",
   "auth_scheme": "bearer",
   "selection_basis": "operator_configured_formal_model_remote_agent_only",
   "ranking_prior_forbidden": true,
@@ -13,19 +13,19 @@
   "merge_strategy": "deterministic_research_quality_confidence_candidate_id",
   "fallbacks": [
     {
-      "provider": "tokenapis",
+      "provider": "cpa_plus",
       "model": "gpt-5.6-terra",
       "api_format": "responses",
-      "base_url_env": "AXIO_TOKENAPIS_BASE_URL",
-      "api_key_env": "AXIO_TOKENAPIS_API_KEY",
+      "base_url_env": "AXIO_CPA_PLUS_BASE_URL",
+      "api_key_env": "AXIO_CPA_PLUS_API_KEY",
       "auth_scheme": "bearer"
     },
     {
-      "provider": "tokenapis",
+      "provider": "cpa_plus",
       "model": "gpt-5.6-luna",
       "api_format": "responses",
-      "base_url_env": "AXIO_TOKENAPIS_BASE_URL",
-      "api_key_env": "AXIO_TOKENAPIS_API_KEY",
+      "base_url_env": "AXIO_CPA_PLUS_BASE_URL",
+      "api_key_env": "AXIO_CPA_PLUS_API_KEY",
       "auth_scheme": "bearer"
     },
     {

@@ -27,7 +27,7 @@ in [docs/operations/convergence_execution_path_r20.md](docs/operations/convergen
 3. Ensure public output compatibility across the four API surfaces.
 4. Run smoke tests with fake clients first, then live provider probing only when credentials are available through the environment or an explicit process-local secret resolver.
 5. Produce auditable benchmark campaign artifacts: methodology, source manifest, case hashes, dataset readiness, run matrix, provider probe evidence audit, provider baseline freeze manifest, runs, scorecard, claim audit, final audit, and evidence pack.
-6. Treat provider input as fully configuration-driven: arbitrary providers and model lists may be supplied with mixed Chat Completions, Responses, Anthropic, or Gemini-compatible transports; current CPA Plus/NVIDIA/TokenAPIs conventions are optional seeds, not Fusion system dependencies.
+6. Treat provider input as fully configuration-driven: arbitrary providers and model lists may be supplied with mixed Chat Completions, Responses, Anthropic, or Gemini-compatible transports; current CPA Plus/NVIDIA conventions are optional seeds, not Fusion system dependencies.
 7. When claims fail, produce a shadow-only failure analysis and ablation plan that maps evidence/API/score/statistical/latency failures to bounded routing, orchestration, prompt-context, and synthesis knobs without applying benchmark-tuned policy automatically.
 8. Audit arbitrary provider portfolios before expensive live campaigns so missing baseline tiers, API-format diversity, Fusion roles, fast-path capacity, pricing/context metadata, and 9-category capability coverage are visible as safe hashes and reason codes.
 9. Audit official/audited harness imports before live campaigns so source-manifest, case-hash, harness-pin, prompt, decoding, and imported-run receipts are bound before provider budget is spent.
@@ -120,6 +120,22 @@ provider/model identifiers and never includes the private registry. Legacy
 single-sample `*_observed_p50_latency_ms` aliases are normalized to explicit
 `*_observed_latency_ms` fields at this boundary without treating them as
 percentile statistics.
+
+## Image Capability Lane (2026-08-09)
+
+Image generation/editing is a sibling serving capability, not another Fusion
+expert role. The current CPA Plus discovery found `gpt-image-2`; the endpoint-
+bound probe passed generation and editing independently with streamed SSE
+frames under the 90-second ceiling. Its verified private image registry is
+loaded only through `AXIO_FUSION_IMAGE_REGISTRY_PATH`.
+
+The image lane has its own candidate loader, probe artifact, redacted binding
+receipt, and atomic promotion. The text registry continues to exclude all
+`gpt-image-*` names. Prompt composition is bounded and optional: it runs only
+after image profile selection, accepts a fixed JSON response, and falls back to
+the original user intent on any composition failure. Image output limits,
+multipart limits, proxy policy, key rotation, and same-model failover remain
+enforced independently of text Fusion.
 
 The 2026-07-22 v6 handoff is historical one-sample operational evidence, not
 the current serving or benchmark input. It remains available for migration

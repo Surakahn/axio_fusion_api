@@ -24,8 +24,8 @@ if os.path.exists(env_file):
             os.environ[k] = v.strip('"').strip("'")
 
 import urllib.request
-CPA_BASE = os.environ.get('AXIO_TOKENAPIS_BASE_URL', 'https://cpa.co6.click/v1')
-CPA_KEY = os.environ.get('AXIO_TOKENAPIS_API_KEY', '')
+CPA_BASE = os.environ.get('AXIO_CPA_PLUS_BASE_URL', 'https://cpa.co6.click/v1')
+CPA_KEY = os.environ.get('AXIO_CPA_PLUS_API_KEY', '')
 
 SAMPLES = 5  # Per benchmark per model
 

@@ -377,6 +377,8 @@ def load_image_registry(
         raise ValueError("image registry contains no profiles")
     if any(profile.text_model_eligible for profile in profiles):
         raise ValueError("image registry contains text profiles")
+    if any(profile.model_kind not in {"image", "multimodal"} for profile in profiles):
+        raise ValueError("image registry contains non-image profiles")
     if not include_disabled:
         profiles = [profile for profile in profiles if profile.enabled]
     if not profiles:
@@ -386,6 +388,42 @@ def load_image_registry(
         for profile in profiles
     ):
         raise ValueError("image registry contains no verified image operations")
+    return _dedupe_profiles(profiles)
+
+
+def load_image_probe_candidates(
+    path: str | Path | None = None,
+    *,
+    include_disabled: bool = False,
+) -> list[ModelProfile]:
+    """Load image candidates for the endpoint-bound probe control plane only.
+
+    Text ``load_registry`` deliberately excludes image-only model names. The
+    image probe therefore needs a separate reader; this function must never be
+    used by serving code or treated as image admission evidence.
+    """
+
+    selected = str(path or "").strip()
+    if not selected:
+        raise ValueError("image probe registry path is required")
+    payload = _load_registry_payload(selected)
+    rows = payload.get("models") if isinstance(payload.get("models"), list) else []
+    profiles = [normalize_profile(row) for row in rows if isinstance(row, Mapping)]
+    if not profiles:
+        raise ValueError("image probe registry contains no profiles")
+    if any(profile.text_model_eligible for profile in profiles):
+        raise ValueError("image probe registry contains text profiles")
+    if not all(
+        profile.model_kind in {"image", "multimodal"}
+        and profile.image_operations
+        and profile.image_capabilities.get("transport")
+        for profile in profiles
+    ):
+        raise ValueError("image probe registry contains undeclared image profiles")
+    if not include_disabled:
+        profiles = [profile for profile in profiles if profile.enabled]
+    if not profiles:
+        raise ValueError("image probe registry contains no enabled profiles")
     return _dedupe_profiles(profiles)
 
 

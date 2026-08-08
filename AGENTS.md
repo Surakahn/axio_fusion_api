@@ -101,6 +101,12 @@ Git commit + push
 - `gpt-image-1`, `gpt-image-1.5`, `gpt-image-2`（生图模型，非文本 LLM）
 - 过滤位置：`registry.py:_is_auxiliary_model()` + `load_registry()`
 
+这不表示图片能力被系统永久禁用。`gpt-image-*` 只能进入独立的
+image registry，必须经过 generation/editing 的端点绑定探针和 90 秒流式
+门禁；生产服务通过 `load_image_registry()` 加载已提升 registry。未提升时
+图片请求必须返回 `image_capability_unavailable`，不得调用文本 Fusion 伪造
+图片结果。
+
 ### 4.2 能力分注入
 - GPT-5.6 系列：0.88-0.90（各维度）
 - GPT-5.5 系列：0.84
@@ -122,7 +128,9 @@ Git commit + push
 
 ### 4.5 渠道配置
 - **NVIDIA** (chat/completions)：`https://integrate.api.nvidia.com/v1`，5 个 API key
-- **TokenAPIs → CPA** (responses)：`https://cpa.co6.click/v1`，1 个 API key
+- **CPA Plus** (Responses/Anthropic per-model binding)：`https://cpa.co6.click/v1`，1 个 API key
+- **CPA Plus image lane**：`gpt-image-2` 使用 `images_api` generation/editing
+  路径；仅 verified image registry 可服务
 - 注册表路径：`AXIO_FUSION_REGISTRY_PATH=private/current_channel_enrollment_20260728_combined_r1/runtime_registry.calibrated.private.json`
 
 ---
@@ -225,6 +233,10 @@ L1: 语法 → L2: 导入 → L3a: 单元测试 → L3b: Dry-run → L3c: 连通
     - 不得泄露 API key 或原始 provider URL
 14. **并发安全性**：`_DeadlineBudget` 的所有公共方法必须在 `self._lock` 下操作共享状态
 15. **资源释放**：stage 完成后必须调用 `release_pending_stage_reservations` 归还预算
+16. **图片能力隔离**：图片请求必须先命中 verified image profile，再允许
+    prompt composer 和上游图片调用；generation/editing 的 multipart、响应体、
+    SSE 总字节数和 base64 字段都必须经过边界校验，任何失败不得回退为文本
+    Fusion 的伪图片结果。
 
 ### 7.4 修复验证模板
 
@@ -277,6 +289,9 @@ L1: 语法 → L2: 导入 → L3a: 单元测试 → L3b: Dry-run → L3c: 连通
 - [x] 延迟预算guard（5.0x multiplier）
 - [x] 快速评测：axio-pro/terra/fast在科学/数学/逻辑题上正确
 - [x] Git管理，已推送至 github.com:Surakahn/axio_fusion_api
+- [x] 图片能力独立模块：gpt-image-2 已通过 generation/editing
+  endpoint-bound 流式探针，并在 verified image registry 下完成真实服务级
+  generation 与 multipart editing 验证
 
 ### 待完成
 - [ ] Anthropic和Gemini API格式的完整验证
@@ -284,7 +299,6 @@ L1: 语法 → L2: 导入 → L3a: 单元测试 → L3b: Dry-run → L3c: 连通
 - [ ] axio-pro输出过于冗长的问题（包含完整JSON reasoning结构）
 - [ ] NVIDIA渠道模型实际能力校准（许多模型的能力分为注入prior，非实测）
 - [ ] 推理强度参数(reasoning_effort)的透传支持
-- [ ] 图片生成/编辑模块（独立于fusion系统）
 - [ ] 自适应渠道接入时的prompt recalibration机制
 
 ### 已知限制
@@ -296,4 +310,4 @@ L1: 语法 → L2: 导入 → L3a: 单元测试 → L3b: Dry-run → L3c: 连通
 
 ---
 
-*最后更新：2026-08-08 01:40 CST*
+*最后更新：2026-08-09 — 图片能力生产级门禁与验证已完成*

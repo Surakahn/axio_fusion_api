@@ -4,6 +4,41 @@ Images are a sibling capability lane. They share provider enrollment,
 credentials, proxy policy, latency gates, and key failover with text Fusion,
 but image artifacts never enter the text candidate/Judge/Synthesizer graph.
 
+## Current CPA Plus Enrollment
+
+The current CPA Plus channel exposes `gpt-image-2` as an image model. Its
+model-list protocol is Responses-compatible, but the image operation is bound
+to the OpenAI Images-compatible transport:
+
+- generation: `POST /v1/images/generations`;
+- editing: `POST /v1/images/edits` with `multipart/form-data`;
+- upstream profile: `model_kind=image`, `transport=images_api`;
+- public Axio aliases: `axio-fast`, `axio-terra`, and `axio-pro`.
+
+The model is never admitted to the text Fusion registry. A model-list entry
+only creates `candidate/not_run` image metadata. The private operator workflow
+must run both operation probes before promotion:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m axio_fusion_api.cli \
+  --registry private/runs/<image-cohort>/gpt-image-2.registry.candidate.private.json \
+  image-probe --live --max-workers 1 --timeout 90 \
+  --output private/runs/<image-cohort>/gpt-image-2.image_probe.private.json
+
+PYTHONPATH=src .venv/bin/python -m axio_fusion_api.cli \
+  image-probe-bind \
+  --registry-file private/runs/<image-cohort>/gpt-image-2.registry.candidate.private.json \
+  --probe-file private/runs/<image-cohort>/gpt-image-2.image_probe.private.json \
+  --output-registry private/runs/<image-cohort>/gpt-image-2.registry.verified.private.json \
+  --output private/runs/<image-cohort>/gpt-image-2.image_probe_binding.safe.json
+```
+
+The 2026-08-09 CPA probe passed generation and editing independently, sent
+both with `stream=true`, observed SSE frames for both, and measured each
+operation below the hard 90-second provider ceiling. This is capability and
+serving-admission evidence only. It is not text-model quality evidence and
+does not alter the independent baseline or 21-suite benchmark gates.
+
 ## OpenAI Images API
 
 Generation uses `POST /v1/images/generations` with a JSON body such as:
@@ -45,12 +80,44 @@ A profile enters the image registry only when it explicitly declares:
 Names such as `gpt-image-*` are not enough to admit a model into text Fusion.
 Likewise, a text model that can describe an image is not an image generator.
 
+Promotion is atomic at the registry boundary. A missing, failed,
+endpoint-mismatched, stale, or partially completed probe cannot replace the
+active image registry. `load_image_probe_candidates()` exists only for the
+probe control plane; serving calls `load_image_registry()`, which requires a
+ready binding and at least one verified operation.
+
 ## Streaming and Artifacts
 
 When an upstream supports partial image events, the image lane emits only
 validated image events. Base64 payloads are bounded and are never inserted into
 text prompts or operational logs. A failed partial image route does not fall
 back to text synthesis and claim that an image was created.
+
+Before dispatch, the gateway validates the JSON or multipart request size. The
+provider client bounds non-stream response bodies, total SSE/NDJSON bytes, and
+image metadata fields. The default response limit is
+`AXIO_FUSION_IMAGE_MAX_RESPONSE_BYTES=64 MiB`; it can be lowered by the
+operator within the configured safe range. A limit violation is a provider
+failure and is eligible for the normal same-model replica/key failover path,
+not a partial success.
+
+## Prompt Composition
+
+Only after a verified image profile has been selected does the optional
+`ImagePromptTransformer` call a text model. It receives the user's image
+intent as data inside a fixed system contract and accepts exactly:
+
+```json
+{"prompt":"..."}
+```
+
+The composer preserves requested subject, identity, composition, style,
+lighting, language, text, and edit constraints; it must not invent important
+facts. Invalid JSON, unavailable text profiles, timeout, or provider failure
+falls back to the user's original prompt. The original and transformed prompt
+remain process-local and are excluded from receipts. If no verified image
+profile exists, the router returns `503 image_capability_unavailable` before
+the composer is invoked, so a text model cannot pretend to generate an image.
 
 ## Security and Limits
 

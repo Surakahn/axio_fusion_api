@@ -1,5 +1,26 @@
 # Axio Fusion API Checklist
 
+## Current Image Capability Gate (2026-08-09)
+
+- [x] Discover current CPA Plus `/models` through the configured `auto`
+  network policy and classify `gpt-image-2` as image-only
+  `candidate/not_run`; keep it out of text Fusion.
+- [x] Keep the image probe control plane separate from text
+  `load_registry()` so auxiliary image names are probeable without becoming
+  text candidates.
+- [x] Probe generation and editing as separate operations with `stream=true`;
+  both returned validated SSE frames within the 90-second ceiling.
+- [x] Bind the exact candidate/profile/endpoint set and promote the private
+  verified image registry atomically; safe binding receipt contains no
+  credentials, prompts, image bytes, or raw provider output.
+- [x] Configure `AXIO_FUSION_IMAGE_REGISTRY_PATH` for the operator runtime.
+- [x] Run new service-level live generation and multipart-edit requests after
+  the serving process loads this verified registry; both returned
+  `text/event-stream` responses with validated image partial/completed events
+  and no raw prompt in the public stream.
+- [x] Keep image capability evidence separate from the provider baseline freeze,
+  Axio quality claim, and independent 9-category/21-suite benchmark campaign.
+
 ## Current Execution Gate (2026-08-06, r26)
 
 - [x] Preserve r25 as terminal diagnostic evidence: its ranking conversion was

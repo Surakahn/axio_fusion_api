@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one benchmark for one baseline model via TokenAPIs."""
+"""Run one non-formal diagnostic benchmark for one baseline via CPA Plus."""
 import json, os, time, re, urllib.request, sys
 from pathlib import Path
 
@@ -11,18 +11,18 @@ model = sys.argv[1]; bench_file = sys.argv[2]; bench_label = sys.argv[3]; task_t
 out_dir = sys.argv[5] if len(sys.argv) > 5 else "data/evaluation_results"
 max_samples = 10; timeout = 60
 
-TOKENAPIS_URL = os.environ.get("AXIO_TOKENAPIS_BASE_URL", "https://tokenapis.com/v1").rstrip("/")
-TOKENAPIS_KEY = os.environ.get("AXIO_TOKENAPIS_API_KEY", "").strip()
+CPA_URL = os.environ.get("AXIO_CPA_PLUS_BASE_URL", "https://cpa.co6.click/v1").rstrip("/")
+CPA_KEY = os.environ.get("AXIO_CPA_PLUS_API_KEY", "").strip()
 BENCHMARK_DIR = "data/benchmarks"
 
-if not TOKENAPIS_KEY:
-    raise SystemExit("AXIO_TOKENAPIS_API_KEY is required")
+if not CPA_KEY:
+    raise SystemExit("AXIO_CPA_PLUS_API_KEY is required")
 
 def call_provider(model, messages, max_tokens=256):
     payload = {"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": 0.0, "stream": False}
     data = json.dumps(payload).encode()
-    headers = {"Content-Type": "application/json", "User-Agent": "curl/8.0", "Authorization": f"Bearer {TOKENAPIS_KEY}"}
-    req = urllib.request.Request(f"{TOKENAPIS_URL}/chat/completions", data=data, headers=headers)
+    headers = {"Content-Type": "application/json", "User-Agent": "curl/8.0", "Authorization": f"Bearer {CPA_KEY}"}
+    req = urllib.request.Request(f"{CPA_URL}/chat/completions", data=data, headers=headers)
     resp = urllib.request.urlopen(req, timeout=timeout)
     body = json.loads(resp.read().decode())
     return body["choices"][0]["message"]["content"]

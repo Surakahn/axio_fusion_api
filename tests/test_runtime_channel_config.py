@@ -198,28 +198,70 @@ def test_runtime_manifest_supports_direct_four_protocol_credentials_without_pers
 def test_current_channel_template_keeps_reasoning_transport_protocol_local():
     """The operator template must not conflate Chat and Responses wire fields."""
 
-    manifest = json.loads(
-        (ROOT / "config" / "current_channels.example.json").read_text(
-            encoding="utf-8"
-        )
-    )
+    manifest = {
+        "providers": [
+            {
+                "provider": "nvidia",
+                "api_format": "chat",
+                "base_url_env": "AXIO_NVIDIA_BASE_URL",
+                "api_key_env": "AXIO_NVIDIA_API_KEYS",
+                "models_env": "AXIO_NVIDIA_MODELS",
+                "models": [
+                    {
+                        "model": "openai/gpt-oss-120b",
+                        "reasoning_transport": {
+                            "scope": "model",
+                            "status": "candidate",
+                            "transport": "chat_reasoning_effort",
+                            "supported_efforts": ["low", "medium", "high"],
+                            "effort_map": {"max": "high", "xhigh": "high"},
+                        },
+                    }
+                ],
+            },
+            {
+                "provider": "cpa_plus",
+                "api_format": "responses",
+                "base_url_env": "AXIO_CPA_PLUS_BASE_URL",
+                "api_key_env": "AXIO_CPA_PLUS_API_KEY",
+                "models_env": "AXIO_CPA_PLUS_MODELS",
+                "models": [
+                    {
+                        "model": "gpt-5.6-sol",
+                        "reasoning_transport": {
+                            "scope": "model",
+                            "status": "candidate",
+                            "transport": "responses_reasoning",
+                            "supported_efforts": [
+                                "low",
+                                "medium",
+                                "high",
+                                "xhigh",
+                                "max",
+                            ],
+                        },
+                    }
+                ],
+            },
+        ]
+    }
     profiles = build_runtime_profiles(
         manifest,
         environment={
             "AXIO_NVIDIA_BASE_URL": "https://nvidia.fixture/v1",
             "AXIO_NVIDIA_API_KEYS": "nvidia-fixture-key",
             "AXIO_NVIDIA_MODELS": "nvidia-fixture-model",
-            "AXIO_TOKENAPIS_BASE_URL": "https://responses.fixture/v1",
-            "AXIO_TOKENAPIS_API_KEY": "responses-fixture-key",
-            "AXIO_TOKENAPIS_MODELS": "responses-fixture-model",
+            "AXIO_CPA_PLUS_BASE_URL": "https://responses.fixture/v1",
+            "AXIO_CPA_PLUS_API_KEY": "responses-fixture-key",
+            "AXIO_CPA_PLUS_MODELS": "responses-fixture-model",
         },
     )
 
     by_model = {(profile.provider, profile.model): profile for profile in profiles}
     nvidia = by_model[("nvidia", "openai/gpt-oss-120b")]
-    tokenapis = by_model[("tokenapis", "gpt-5.6-sol")]
+    cpa_plus = by_model[("cpa_plus", "gpt-5.6-sol")]
     nvidia_seed = by_model[("nvidia", "nvidia-fixture-model")]
-    tokenapis_seed = by_model[("tokenapis", "responses-fixture-model")]
+    cpa_plus_seed = by_model[("cpa_plus", "responses-fixture-model")]
 
     assert nvidia.api_format == "chat"
     assert nvidia.reasoning_transport == {
@@ -232,8 +274,8 @@ def test_current_channel_template_keeps_reasoning_transport_protocol_local():
         "budget_tokens_by_effort": {},
         "api_format_compatible": True,
     }
-    assert tokenapis.api_format == "responses"
-    assert tokenapis.reasoning_transport == {
+    assert cpa_plus.api_format == "responses"
+    assert cpa_plus.reasoning_transport == {
         "scope": "model",
         "status": "candidate",
         "transport": "responses_reasoning",
@@ -244,9 +286,9 @@ def test_current_channel_template_keeps_reasoning_transport_protocol_local():
         "api_format_compatible": True,
     }
     assert nvidia.resolve_reasoning_transport("high") == ("", "")
-    assert tokenapis.resolve_reasoning_transport("high") == ("", "")
+    assert cpa_plus.resolve_reasoning_transport("high") == ("", "")
     assert nvidia_seed.reasoning_transport["status"] == "unknown"
-    assert tokenapis_seed.reasoning_transport["status"] == "unknown"
+    assert cpa_plus_seed.reasoning_transport["status"] == "unknown"
 
 
 def test_runtime_discovery_and_probe_use_direct_credentials_for_all_protocols():
@@ -813,7 +855,7 @@ def test_current_channel_manifest_binds_the_three_supplied_channels_without_secr
     manifest_path = ROOT / "config" / "current_channels.example.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
-    assert [row["provider"] for row in manifest["providers"]] == ["nvidia", "tokenapis"]
+    assert [row["provider"] for row in manifest["providers"]] == ["nvidia", "cpa_plus"]
     assert [row["api_format"] for row in manifest["providers"]] == [
         "chat/completions",
         "responses",
@@ -821,25 +863,13 @@ def test_current_channel_manifest_binds_the_three_supplied_channels_without_secr
     assert all("base_url" not in row and "api_key" not in row for row in manifest["providers"])
     assert manifest["providers"][0]["reasoning_transport"] == {}
     assert manifest["providers"][1]["reasoning_transport"] == {}
-    nvidia_models = {
-        row["model"]: row for row in manifest["providers"][0]["models"]
-    }
-    tokenapis_models = {
-        row["model"]: row for row in manifest["providers"][1]["models"]
-    }
-    assert nvidia_models["openai/gpt-oss-120b"]["reasoning_transport"]["scope"] == "model"
-    assert nvidia_models["openai/gpt-oss-120b"]["reasoning_transport"]["transport"] == "chat_reasoning_effort"
-    assert tokenapis_models["gpt-5.6-sol"]["reasoning_transport"]["scope"] == "model"
-    assert tokenapis_models["gpt-5.6-sol"]["reasoning_transport"]["supported_efforts"] == [
-        "low",
-        "medium",
-        "high",
-        "xhigh",
-        "max",
-    ]
+    assert manifest["providers"][0]["models"] == []
+    assert manifest["providers"][1]["models"] == []
+    assert manifest["providers"][0]["models_env"] == "AXIO_NVIDIA_MODELS"
+    assert manifest["providers"][1]["models_env"] == "AXIO_CPA_PLUS_MODELS"
     env_example = (ROOT / "config" / "current_channels.env.example").read_text(encoding="utf-8")
     assert "https://integrate.api.nvidia.com/v1" in env_example
-    assert "https://tokenapis.com/v1" in env_example
+    assert "https://cpa.co6.click/v1" in env_example
     assert "sk-" not in env_example
     assert "nvapi-" not in env_example
 
@@ -853,15 +883,15 @@ def test_current_channel_reasoning_candidates_propagate_to_models_env_rows():
             "AXIO_NVIDIA_BASE_URL": "https://nvidia.fixture/v1",
             "AXIO_NVIDIA_API_KEYS": "nvidia-fixture-key",
             "AXIO_NVIDIA_MODELS": "candidate-chat-model",
-            "AXIO_TOKENAPIS_BASE_URL": "https://tokenapis.fixture/v1",
-            "AXIO_TOKENAPIS_API_KEY": "tokenapis-fixture-key",
-            "AXIO_TOKENAPIS_MODELS": "candidate-responses-model",
+            "AXIO_CPA_PLUS_BASE_URL": "https://cpa.fixture/v1",
+            "AXIO_CPA_PLUS_API_KEY": "cpa-fixture-key",
+            "AXIO_CPA_PLUS_MODELS": "candidate-responses-model",
         },
     )
     by_provider = {profile.provider: profile for profile in profiles}
 
     assert by_provider["nvidia"].reasoning_transport["status"] == "unknown"
-    assert by_provider["tokenapis"].reasoning_transport["status"] == "unknown"
+    assert by_provider["cpa_plus"].reasoning_transport["status"] == "unknown"
 
 
 def test_runtime_http_server_can_enroll_discovered_four_protocol_channels():

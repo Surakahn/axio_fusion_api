@@ -66,6 +66,7 @@ from .registry import (
     build_default_registry,
     build_probe_bound_registry,
     load_image_registry,
+    load_image_probe_candidates,
     load_registry,
     validate_prefusion_registry_handoff,
 )
@@ -91,6 +92,7 @@ __all__ = [
     "build_default_registry",
     "build_probe_bound_registry",
     "load_image_registry",
+    "load_image_probe_candidates",
     "build_runtime_profiles",
     "create_runtime_http_server",
     "build_route_plan",
