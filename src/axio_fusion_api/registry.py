@@ -1923,6 +1923,12 @@ def normalize_profile(raw: Mapping[str, Any]) -> ModelProfile:
                 else {}
             )
         ),
+        runtime_base_url=str(raw.get("runtime_base_url") or ""),
+        runtime_api_keys=tuple(
+            raw.get("runtime_api_keys")
+            if isinstance(raw.get("runtime_api_keys"), list)
+            else ()
+        ),
     )
 
 
