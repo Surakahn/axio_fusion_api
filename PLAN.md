@@ -46,6 +46,15 @@ running, and neither partial result may be resumed into a baseline or used to
 choose a survivor subset. A new cohort must be registered from the current
 provider configuration after the transport cause is understood.
 
+The retained failure telemetry is transport-dominated rather than a scoring
+failure: r26 contains 115 provider timeouts, 82 transport/network errors, one
+provider 5xx, and two empty outputs; r27 contains 27 provider timeouts and
+three empty outputs. This is sufficient to quarantine the cohorts, but not
+to infer a model ranking or diagnose a live endpoint from partial evidence.
+Before a new cohort, the operator must verify the configured proxy path,
+provider deadline behavior, and endpoint health with a bounded non-benchmark
+connectivity check.
+
 ## Historical Execution Checkpoint (2026-08-05)
 
 The historical serving registry was the fresh, full-pool, strict-stream

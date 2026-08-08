@@ -23,6 +23,10 @@ offline test paths remain available through explicit non-production APIs.
   transport-failure gates with `ready_for_ranking=false`.
 - No screening process was running at reconciliation time; neither partial
   cohort is resumed or promoted.
+- Offline telemetry shows r26 is dominated by provider timeout and transport
+  errors with a small 5xx/empty-output tail; r27 is dominated by timeout and
+  empty-output failures. This is treated as a transport gate lesson, not a
+  quality or ranking signal.
 - No provider or benchmark request was made.
 - Full benchmark execution remains blocked until a complete provider cohort,
   external baseline freeze, and official/audited harness imports exist.

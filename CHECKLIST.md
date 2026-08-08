@@ -51,6 +51,9 @@
   transport-failure gate.
 - [x] Reconcile the on-disk r26 and r27 artifacts: both are partial,
   `ready_for_ranking=false`, and no screening process is currently running.
+- [x] Record the transport-only lesson: r26 has timeout/network/5xx/empty
+  output failures and r27 has timeout/empty-output failures; no score or
+  ranking inference is permitted.
 - [x] Quarantine the partial r26/r27 executions: retain their transport
   failures and `ready_for_ranking=false`; do not resume, merge, or rank them.
 - [ ] Register a fresh full-pool cohort after the transport cause is

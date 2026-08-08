@@ -316,7 +316,8 @@ L1: 语法 → L2: 导入 → L3a: 单元测试 → L3b: Dry-run → L3c: 连通
 5. 评测脚本直接HTTP调用较脆弱，建议改用FusionEngine直接调用
 6. 图片参数的未知能力状态返回受控错误，不静默丢弃不兼容字段
 7. r41 serving artifact 的 marker/binding 不一致使其继续 fail-closed，不用于生产
-8. r26/r27 screening artifacts 均为 partial 且当前无后台进程，不恢复部分结果
+8. r26/r27 screening artifacts 均为 partial 且当前无后台进程；失败以 timeout/
+   network/empty-output 为主，不恢复部分结果
 9. baseline freeze 和 21-suite campaign 尚未完成，不做 superiority claim
 
 ---
