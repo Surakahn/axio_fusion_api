@@ -689,7 +689,7 @@ def _budget_for_request(
         max_models = 2 if fast_light_verify else 1
         max_depth = 0
         max_cost = 0.0015 if fast_light_verify else 0.001
-        max_latency = 15000 if fast_light_verify else 12000
+        max_latency = 15000 if fast_light_verify else FAST_DIRECT_DEFAULT_DEADLINE_MS
     elif model == "axio-pro":
         max_models = 6 if complexity >= 0.72 else 4
         max_depth, max_cost, max_latency = 2, 0.02, 60000

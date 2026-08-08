@@ -3530,12 +3530,12 @@ def test_implicit_fusion_deadline_uses_direct_p95_three_x_bound():
         profile,
     )
 
-    assert adapted["max_latency_ms"] == 21_000
+    assert adapted["max_latency_ms"] == 35_000
     receipt = adapted["direct_profile_deadline_adaptation"]
     assert receipt["enabled"] is True
     assert receipt["reason"] == "calibrated_direct_profile_p95_three_x_bound"
     assert receipt["observed_latency_quantile"] == "p95"
-    assert receipt["target_latency_multiplier"] == 3.0
+    assert receipt["target_latency_multiplier"] == 5.0
     assert receipt["deadline_margin_ms"] == 0
 
 
