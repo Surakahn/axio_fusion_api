@@ -112,6 +112,12 @@ active image registry. `load_image_probe_candidates()` exists only for the
 probe control plane; serving calls `load_image_registry()`, which requires a
 ready binding and at least one verified operation.
 
+For each declared operation, the probe records the measured operation latency.
+An operation that returns after the hard 90-second provider ceiling is marked
+failed even when it includes a non-empty image result. The profile cannot be
+promoted until every declared operation passes this latency and streaming
+contract.
+
 ## Streaming and Artifacts
 
 When an upstream supports partial image events, the image lane emits only
@@ -126,6 +132,18 @@ image metadata fields. The default response limit is
 operator within the configured safe range. A limit violation is a provider
 failure and is eligible for the normal same-model replica/key failover path,
 not a partial success.
+
+Editing has an additional input contract before prompt composition or provider
+I/O:
+
+- the request media type must be `multipart/form-data` with a valid boundary;
+- `image`, `image[]`, and `mask` file parts must declare an `image/*` content
+  type;
+- at most one `mask` part is accepted.
+
+These checks prevent a generic binary upload or a second mask from being
+forwarded as if it were a valid image edit. A rejected input returns a bounded
+4xx error and never enters provider failover.
 
 ## Prompt Composition
 

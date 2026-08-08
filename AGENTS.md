@@ -248,6 +248,10 @@ L1: 语法 → L2: 导入 → L3a: 单元测试 → L3b: Dry-run → L3c: 连通
     prompt composer 和上游图片调用；generation/editing 的 multipart、响应体、
     SSE 总字节数和 base64 字段都必须经过边界校验，任何失败不得回退为文本
     Fusion 的伪图片结果。
+17. **图片输入与时延门禁**：editing 只接受 `multipart/form-data`，每个文件
+    part 必须声明 `image/*`，最多一个 mask；generation/editing 探针必须把
+    每个实际操作超过 90 秒的结果标记为不可用，不能仅因返回了非空图片而
+    promotion。
 
 ### 7.4 修复验证模板
 
@@ -333,4 +337,4 @@ L1: 语法 → L2: 导入 → L3a: 单元测试 → L3b: Dry-run → L3c: 连通
 
 ---
 
-*最后更新：2026-08-09 — 图片参数兼容性强化与门禁同步*
+*最后更新：2026-08-09 — 图片输入合同与单次操作 90 秒探针门禁同步*

@@ -177,6 +177,12 @@ def parse_edit_payload(
         raise ImageRequestError("Image edit request body is required.", code="image_request_body_missing")
     if len(raw) > image_request_max_bytes():
         raise ImageRequestError("Image edit request is too large.", code="image_request_too_large", status=413)
+    media_type = str(content_type or "").split(";", 1)[0].strip().casefold()
+    if media_type != "multipart/form-data":
+        raise ImageRequestError(
+            "Image edits require multipart/form-data.",
+            code="multipart_required",
+        )
     header = (
         f"Content-Type: {str(content_type or '')}\r\n"
         "MIME-Version: 1.0\r\n\r\n"
@@ -200,11 +206,12 @@ def parse_edit_payload(
                 continue
             if not value:
                 raise ImageRequestError("Image file part is empty.", code="image_file_empty")
+            content_type_value = _safe_image_content_type(part.get_content_type())
             files.append(
                 ImagePart(
                     field_name=name,
                     filename=_safe_filename(filename),
-                    content_type=_safe_image_content_type(part.get_content_type()),
+                    content_type=content_type_value,
                     data=value,
                 )
             )
@@ -214,8 +221,7 @@ def parse_edit_payload(
         except UnicodeDecodeError as exc:
             raise ImageRequestError("Image form field is not valid UTF-8.", code="invalid_form_field") from exc
         fields[name] = text
-    if not any(part.field_name in {"image", "image[]"} for part in files):
-        raise ImageRequestError("At least one image file is required.", code="image_file_missing")
+    _validate_image_parts(files)
     prompt = str(fields.get("prompt") or "").strip()
     if not prompt:
         raise ImageRequestError("Image edit prompt is required.", code="image_prompt_missing")
@@ -261,7 +267,31 @@ def _safe_filename(value: str) -> str:
 
 def _safe_image_content_type(value: str) -> str:
     normalized = str(value or "application/octet-stream").split(";", 1)[0].strip().lower()
-    return normalized if normalized.startswith("image/") else "application/octet-stream"
+    return normalized
+
+
+def _validate_image_parts(files: Sequence[ImagePart]) -> None:
+    """Validate edit files before prompt composition or provider failover."""
+
+    parts = tuple(files)
+    if not any(part.field_name in {"image", "image[]"} for part in parts):
+        raise ImageRequestError("At least one image file is required.", code="image_file_missing")
+    mask_count = 0
+    for part in parts:
+        if part.field_name not in {"image", "image[]", "mask"}:
+            raise ImageRequestError("Unsupported image file field.", code="image_file_field_invalid")
+        if not part.data:
+            raise ImageRequestError("Image file part is empty.", code="image_file_empty")
+        if not str(part.content_type or "").strip().lower().startswith("image/"):
+            raise ImageRequestError(
+                "Image file parts must declare an image content type.",
+                code="image_file_type_invalid",
+                status=415,
+            )
+        if part.field_name == "mask":
+            mask_count += 1
+    if mask_count > 1:
+        raise ImageRequestError("Only one image mask is allowed.", code="image_mask_multiple")
 
 
 def _coerce_bool(value: Any) -> bool:
@@ -592,6 +622,7 @@ class ImageProviderClient:
         stream_observer: Callable[[Mapping[str, Any]], bool] | None = None,
     ) -> ImageProviderResult:
         _validate_image_profile_request(profile, fields, operation="editing")
+        _validate_image_parts(files)
         form_fields = {key: value for key, value in fields.items() if key != "model"}
         form_fields["model"] = profile.model
         body, content_type = _encode_multipart(form_fields, files)
@@ -1140,6 +1171,7 @@ class ImageRouter:
         timeout: float | None = None,
         stream_observer: Callable[[Mapping[str, Any]], bool] | None = None,
     ) -> tuple[dict[str, Any], ImageProviderResult, ModelProfile]:
+        _validate_image_parts(files)
         public_model = canonical_public_model(str(payload.get("model") or "axio-terra"))
         selected = self._select(
             public_model,

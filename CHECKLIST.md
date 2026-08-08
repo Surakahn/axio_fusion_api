@@ -49,10 +49,14 @@
   `/health` reports one generation and one editing profile with
   `text_fusion_isolated=true`.
 - [x] Repair and revalidate the 18 pre-existing non-image regression failures;
-  the current full standalone regression is `1009 passed, 0 failed`.
+  the current full standalone regression is `1013 passed, 0 failed`.
 - [x] Add profile-driven image parameter compatibility checks for
   `input_fidelity` and transparent backgrounds; unsupported or unknown options
   fail before prompt composition/provider I/O.
+- [x] Require `multipart/form-data` editing requests, `image/*` file parts,
+  and at most one mask before provider I/O.
+- [x] Make the image admission probe reject any individual generation/editing
+  operation whose measured latency exceeds the hard 90-second ceiling.
 - [x] Add a read-only hash-only `registry-diagnostic` command that exposes
   precise pre-Fusion marker/binding/catalog reason codes while keeping
   `load_registry()` fail-closed.

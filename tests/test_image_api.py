@@ -24,6 +24,7 @@ from axio_fusion_api.image_api import (
     parse_generation_payload,
 )
 from axio_fusion_api.image_probe import (
+    _successful_operation_row,
     build_image_probe_bound_registry,
     probe_image_capabilities,
     redact_image_probe_artifact,
@@ -454,6 +455,70 @@ def test_edit_parser_supports_mask_and_multiple_image_parts():
     assert payload["stream"] is False
     assert [part.field_name for part in files] == ["image", "image[]", "mask"]
     assert [part.data for part in files] == [b"one", b"two", b"mask"]
+
+
+def test_edit_parser_requires_form_data_and_image_mime_parts():
+    body, content_type = _encode_multipart(
+        {"model": "axio-terra", "prompt": "replace the sky"},
+        [ImagePart("image", "source.bin", "application/octet-stream", b"data")],
+    )
+
+    with pytest.raises(ImageRequestError) as media_error:
+        parse_edit_payload(body, "multipart/mixed" + content_type.split("multipart/form-data", 1)[1])
+    assert media_error.value.code == "multipart_required"
+
+    with pytest.raises(ImageRequestError) as type_error:
+        parse_edit_payload(body, content_type)
+    assert type_error.value.code == "image_file_type_invalid"
+    assert type_error.value.status == 415
+
+
+def test_edit_parser_rejects_duplicate_masks():
+    body, content_type = _encode_multipart(
+        {"model": "axio-terra", "prompt": "replace the sky"},
+        [
+            ImagePart("image", "source.png", "image/png", b"source"),
+            ImagePart("mask", "mask-a.png", "image/png", b"mask-a"),
+            ImagePart("mask", "mask-b.png", "image/png", b"mask-b"),
+        ],
+    )
+
+    with pytest.raises(ImageRequestError) as error:
+        parse_edit_payload(body, content_type)
+    assert error.value.code == "image_mask_multiple"
+
+
+def test_image_router_rejects_invalid_edit_files_before_composition_or_provider():
+    fake = _FakeImageClient()
+    router = ImageRouter([_image_profile()], client=fake)
+
+    with pytest.raises(ImageRequestError) as error:
+        router.edit(
+            {"model": "axio-terra", "prompt": "replace the sky"},
+            [],
+        )
+
+    assert error.value.code == "image_file_missing"
+    assert fake.edit_calls == []
+
+
+def test_image_probe_marks_operation_over_90_seconds_ineligible():
+    result = ImageProviderResult(
+        data=({"b64_json": "encoded"},),
+        created=1,
+        stream_events=({"type": "image_generation.completed"},),
+        stream_protocol="sse",
+    )
+
+    row = _successful_operation_row(
+        "generation",
+        result,
+        stream_requested=True,
+        latency_ms=90_000.001,
+    )
+
+    assert row["status"] == "failed"
+    assert row["reason_code"] == "provider_response_timeout_exceeded_90s"
 
 
 def test_image_router_enforces_streaming_and_input_limits():

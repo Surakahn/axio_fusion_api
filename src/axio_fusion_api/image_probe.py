@@ -18,6 +18,7 @@ from typing import Any, Mapping, Sequence
 
 from .compat import normalize_api_format
 from .image_api import ImagePart, ImageProviderClient, ImageProviderResult
+from .latency_policy import PROVIDER_MAX_RESPONSE_LATENCY_MS
 from .providers import (
     ProviderExecutionError,
     _base_url,
@@ -459,6 +460,9 @@ def _successful_operation_row(
     elif stream_requested and not stream_observed:
         status = "failed"
         reason_code = "declared_stream_not_observed"
+    elif latency_ms > PROVIDER_MAX_RESPONSE_LATENCY_MS:
+        status = "failed"
+        reason_code = "provider_response_timeout_exceeded_90s"
     return {
         "operation": operation,
         "status": status,
