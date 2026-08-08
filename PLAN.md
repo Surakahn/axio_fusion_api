@@ -121,6 +121,21 @@ single-sample `*_observed_p50_latency_ms` aliases are normalized to explicit
 `*_observed_latency_ms` fields at this boundary without treating them as
 percentile statistics.
 
+## Post-Image Engineering Re-audit (2026-08-09)
+
+The image capability lane is independently ready: focused image/config/provider
+contracts pass `107` tests, the promoted image registry loads one verified
+generation/editing profile, and a no-upstream loopback health check confirms
+the image lane is isolated from text Fusion. The overall health status remains
+`usable_with_warnings` because the current text serving registry reports weak
+or missing Judge and structured-output candidates.
+
+The final standalone regression for this worktree is `976 passed, 18 failed`.
+Those failures are retained as a non-image follow-up gate covering legacy
+panel/latency expectations and old provider/registry fixtures. This section
+does not promote the earlier `983 passed` engineering receipt and does not
+authorize provider ranking or target benchmark traffic.
+
 ## Image Capability Lane (2026-08-09)
 
 Image generation/editing is a sibling serving capability, not another Fusion

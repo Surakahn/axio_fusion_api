@@ -21,6 +21,17 @@
 - [x] Keep image capability evidence separate from the provider baseline freeze,
   Axio quality claim, and independent 9-category/21-suite benchmark campaign.
 
+## Post-Image Regression Gate (2026-08-09)
+
+- [x] Run L1/L2 checks and focused image/config/provider contracts (`107 passed`).
+- [x] Load the verified image registry into a temporary HTTP service and verify
+  `/health` reports one generation and one editing profile with
+  `text_fusion_isolated=true`.
+- [ ] Repair and revalidate the 18 pre-existing non-image regression failures
+  before declaring the entire standalone suite green.
+- [ ] Re-audit text Judge and structured-output role coverage; the current
+  health result is `usable_with_warnings`.
+
 ## Current Execution Gate (2026-08-06, r26)
 
 - [x] Preserve r25 as terminal diagnostic evidence: its ranking conversion was
