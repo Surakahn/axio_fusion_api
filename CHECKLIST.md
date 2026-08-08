@@ -13,6 +13,10 @@
   success, measured latency, and text-only modality before projection.
 - [x] Bind the projected probe to a new private copy of the r43 registry and
   pass the hash-only provider-probe evidence audit with zero blockers.
+- [x] Fetch and hash current non-target ranking snapshots through the `10808`
+  proxy and store them on the mechanical disk outside the repository.
+- [x] Audit exact identity coverage against all 10 r43 canonical groups and
+  preserve the zero-common-complete-source result as a fail-closed receipt.
 - [ ] Complete two independent common non-target ranking source families,
   exact model identity attestations, population counts, stable snapshots, and
   derive the complete rank-1/rank-2/rank-3 provider baseline freeze.

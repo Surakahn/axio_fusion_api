@@ -73,6 +73,18 @@ snapshots, and population counts. The old `prefusion-probe-export` command
 continues to accept only raw screening reports; generation wrappers must use
 the explicit `prefusion-generation-probe-export` command.
 
+The current r43 source-coverage audit is recorded in
+`docs/external_ranking_source_audit_2026-08-09-r43.md` and its hash-only
+private receipt. Fresh LiveBench, Chatbot Arena, and SimpleBench snapshots
+were checked through the configured proxy. Their literal identity coverage is
+0/10, 1/10, and 1/10 respectively; their diagnostic suffix/namespace
+variants do not count as identity coverage. No source covers the complete
+10-model pool, so the audit produced zero common complete source families and
+the ranking template remains unchanged. The next admissible step is either
+two complete, pre-registered external source families or two independent
+pre-registered non-target evaluations over the complete pool. No partial union
+or manual alias mapping may be promoted.
+
 ## Historical Execution Checkpoint (2026-08-05)
 
 The historical serving registry was the fresh, full-pool, strict-stream
