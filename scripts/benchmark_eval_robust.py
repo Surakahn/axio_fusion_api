@@ -82,22 +82,42 @@ def make_engine():
     return FusionEngine(profiles, client=client)
 
 def call_axio_with_retry(model: str, prompt: str, max_tok: int = 300) -> tuple[str, str]:
-    """Call Axio model with up to MAX_RETRIES on failure."""
+    """Call Axio model with pre-warmed engine and same-engine retries.
+    
+    CRITICAL: The first call after creating a fresh FusionEngine+HTTPProviderClient
+    always fails because the initial TCP connection to CPA Plus times out.
+    We pre-warm the engine with a trivial call, then retry failed calls
+    on the SAME engine (not a new one).
+    """
     last_err = ""
     for attempt in range(MAX_RETRIES + 1):
         try:
             engine = make_engine()
             policy = FusionPolicy(live=True)
-            req = FusionRequest(model=model, prompt=prompt, policy=policy, max_output_tokens=max_tok)
-            resp = engine.complete(req)
-            text = resp.text
-            if text.strip():
-                return text, resp.route_plan.get('strategy', '?')
-            last_err = "empty_output"
+            # Pre-warm ALL models to establish TCP connections
+            for warm_model in ['axio-fast', 'axio-terra', 'axio-pro']:
+                try:
+                    engine.complete(FusionRequest(
+                        model=warm_model, prompt='hi', policy=policy, max_output_tokens=5))
+                except Exception:
+                    pass  # Pre-warm failure is non-fatal
+            # Now make the actual call (retry on same engine)
+            for sub_attempt in range(MAX_RETRIES + 1):
+                try:
+                    req = FusionRequest(model=model, prompt=prompt, policy=policy, max_output_tokens=max_tok)
+                    resp = engine.complete(req)
+                    text = resp.text
+                    if text.strip():
+                        return text, resp.route_plan.get('strategy', '?')
+                    last_err = "empty_output"
+                except Exception as e:
+                    last_err = str(e)[:150]
+                if sub_attempt < MAX_RETRIES:
+                    time.sleep(3)
         except Exception as e:
             last_err = str(e)[:150]
         if attempt < MAX_RETRIES:
-            time.sleep(2 * (attempt + 1))  # Backoff
+            time.sleep(5)
     return f"ERROR:{last_err}", 'error'
 
 def call_cpa_with_retry(model: str, prompt: str, max_tok: int = 300) -> tuple[str, str]:
@@ -154,6 +174,18 @@ def main():
     print(f"Samples per benchmark: {SAMPLES_PER}", flush=True)
     print(f"Max retries: {MAX_RETRIES}", flush=True)
     print(f"Output: {OUTPUT_DIR}", flush=True)
+    
+    # Global pre-warm: establish connections for all three models
+    print("Pre-warming all models...", flush=True)
+    for warm_model in ['axio-fast', 'axio-terra', 'axio-pro']:
+        try:
+            engine = make_engine()
+            policy = FusionPolicy(live=True)
+            engine.complete(FusionRequest(model=warm_model, prompt='hi', policy=policy, max_output_tokens=5))
+            print(f"  {warm_model}: OK", flush=True)
+        except Exception as e:
+            print(f"  {warm_model}: WARN {str(e)[:60]}", flush=True)
+    print("Pre-warm complete", flush=True)
     
     summary = {}
     
