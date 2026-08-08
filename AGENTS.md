@@ -297,6 +297,8 @@ L1: 语法 → L2: 导入 → L3a: 单元测试 → L3b: Dry-run → L3c: 连通
 - [x] 本阶段完整回归：`999 passed, 0 failed`；18 个历史非图片失败已修复
 - [x] 注册表诊断命令复用 pre-Fusion validator，r41 marker/binding mismatch
   只读输出 hash-only reason codes，不能绕过 fail-closed 加载
+- [x] 生产 `scripts/run_server.py` 不再默认加载历史 registry；必须显式提供
+  当前 `AXIO_FUSION_REGISTRY_PATH` 且通过 `require_prefusion=True`
 
 ### 待完成
 - [ ] Anthropic和Gemini API格式的完整验证
@@ -314,7 +316,8 @@ L1: 语法 → L2: 导入 → L3a: 单元测试 → L3b: Dry-run → L3c: 连通
 5. 评测脚本直接HTTP调用较脆弱，建议改用FusionEngine直接调用
 6. 图片参数的未知能力状态返回受控错误，不静默丢弃不兼容字段
 7. r41 serving artifact 的 marker/binding 不一致使其继续 fail-closed，不用于生产
-8. r26 baseline freeze 和 21-suite campaign 尚未完成，不做 superiority claim
+8. r26/r27 screening artifacts 均为 partial 且当前无后台进程，不恢复部分结果
+9. baseline freeze 和 21-suite campaign 尚未完成，不做 superiority claim
 
 ---
 

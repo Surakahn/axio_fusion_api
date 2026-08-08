@@ -36,11 +36,21 @@ in [docs/operations/convergence_execution_path_r20.md](docs/operations/convergen
 12. Keep a top-level completion audit after evidence-pack/final-audit generation, mapping every product, provider, API-surface, benchmark, statistical, latency, contamination, and final-claim requirement to concrete hash-only evidence or a precise blocker.
 13. Treat system development readiness and LLM benchmark validation as separate phases: engineering readiness is proven by standalone code-test receipts, dry protocol/adapter self-tests, runtime construction, and operator runbook templates; model superiority is proven only later by the separate 9-category 21-suite live benchmark campaign.
 
-## Current Execution Checkpoint (2026-08-05)
+## Current Execution Reconciliation (2026-08-09)
 
-The current serving registry remains the fresh, full-pool, strict-stream
+The on-disk r26 cohort and its r27 successor are both partial diagnostic
+artifacts, not active background jobs: r26 completed one unit and r27
+completed two units before their transport-failure gate blocked progress.
+Both retain `ready_for_ranking=false`; no screening process is currently
+running, and neither partial result may be resumed into a baseline or used to
+choose a survivor subset. A new cohort must be registered from the current
+provider configuration after the transport cause is understood.
+
+## Historical Execution Checkpoint (2026-08-05)
+
+The historical serving registry was the fresh, full-pool, strict-stream
 registry from the private r22 provider enrollment. Its 22 logical models are
-the fixed candidate pool for the next baseline cohort. The r24 fail-fast
+retained as provenance, not as the current production pool. The r24 fail-fast
 screening attempt was intentionally interrupted after a private checkpoint
 showed a source-contract defect: MMLU-Pro question numbers were not globally
 unique. Its 16 completed/partial units and checkpoint remain diagnostic-only;
@@ -62,16 +72,16 @@ instead of raising while aggregating an empty list. The former r25 full-pool
 attempt reached a terminal partial result and its transport-only successor
 admission retained no eligible canonical model; it remains diagnostic only.
 
-The active gate is the fresh r26 configured-provider full-pool cohort from
+The historical r26 plan was the fresh configured-provider full-pool cohort from
 the 2026-08-06 enrollment. Its zero-network preflight authenticated five
 canonical model groups, two independent source families, ten source-model
 tasks, serial execution, and plan digest
 `81c20ba9d20ede6f062e5f0d26043ac17fddb9935d8b146f9b48f153b241219c`.
-The r26 plan binds the existing source-manifest content digest and must not be
-rewritten while the run is live. Ranking conversion, provider baseline freeze,
-official harness import validation, and the separate 9-category/21-suite
-target campaign remain closed. No provider baseline or Axio superiority claim
-is currently trusted.
+The plan binds the existing source-manifest content digest. Its on-disk
+partial execution is superseded by the current reconciliation above.
+Ranking conversion, provider baseline freeze, official harness import
+validation, and the separate 9-category/21-suite target campaign remain
+closed. No provider baseline or Axio superiority claim is currently trusted.
 
 The `prefusion-probe-export` command now turns a ready screening artifact into
 the standard provider probe contract offline. This removes the last manual
@@ -156,6 +166,13 @@ It returns a blocked exit status for an invalid artifact but never changes the
 fail-closed behavior of `load_registry()`. The r41 serving artifact now
 produces actionable binding, catalog, probe-binding, and role-coverage
 reasons; r42 remains explicitly unpromoted.
+
+The production `scripts/run_server.py` entrypoint no longer selects the
+historical 2026-07-28 calibrated registry when the operator has not bound a
+current text registry. It requires `AXIO_FUSION_REGISTRY_PATH` and loads it
+with `require_prefusion=True`; until a complete cohort is promoted, startup
+stops before creating a live engine. Diagnostic and offline test paths remain
+available through their explicit non-production flags.
 
 ## Image Capability Lane (2026-08-09)
 

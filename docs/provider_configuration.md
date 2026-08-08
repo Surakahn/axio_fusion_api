@@ -635,6 +635,13 @@ with a fixed non-benchmark prompt, generates a probe-bound runtime registry,
 runs the fixed native-tool probe, and applies only operational calibration. A
 failed stage never marks a partial registry as the serving registry.
 
+The production `scripts/run_server.py` wrapper also requires an explicit
+`AXIO_FUSION_REGISTRY_PATH` and validates it with `require_prefusion=True`.
+It intentionally has no historical registry fallback: a missing, partial,
+stale, or binding-invalid cohort stops startup before a live engine is
+created. Use the diagnostic CLI above to inspect a blocked artifact; use
+explicit diagnostic-only constructors for offline development.
+
 The manifest never contains a literal URL or key. A literal transport value in
 `base_url_env` or `api_key_env` is rejected. This keeps arbitrary endpoints and
 credentials usable without making them part of source control, process output,

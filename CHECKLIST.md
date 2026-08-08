@@ -35,10 +35,12 @@
 - [x] Add a read-only hash-only `registry-diagnostic` command that exposes
   precise pre-Fusion marker/binding/catalog reason codes while keeping
   `load_registry()` fail-closed.
+- [x] Remove the live server's historical registry fallback; startup now
+  requires an explicit current pre-Fusion serving registry.
 - [ ] Re-audit text Judge and structured-output role coverage; the current
   health result is `usable_with_warnings`.
 
-## Current Execution Gate (2026-08-06, r26)
+## Historical Execution Gate (2026-08-06, r26; reconciled 2026-08-09)
 
 - [x] Preserve r25 as terminal diagnostic evidence: its ranking conversion was
   template-only and transport-only successor admission retained zero eligible
@@ -47,12 +49,15 @@
   five canonical model groups, two independent non-target source families,
   ten serial tasks, fixed task order, 90-second per-request ceiling, and a 2%
   transport-failure gate.
-- [ ] Complete every r26 task with all timeout and transport outcomes retained
-  in the pre-registered denominator; do not launch side-channel provider
-  traffic, retry completed cases, or mutate the plan.
-- [ ] Run exactly one r26 screening-to-ranking conversion after terminal state;
-  accept only a complete, evidence-derived ranking and never a partial
-  survivor subset.
+- [x] Reconcile the on-disk r26 and r27 artifacts: both are partial,
+  `ready_for_ranking=false`, and no screening process is currently running.
+- [x] Quarantine the partial r26/r27 executions: retain their transport
+  failures and `ready_for_ranking=false`; do not resume, merge, or rank them.
+- [ ] Register a fresh full-pool cohort after the transport cause is
+  understood, with a new immutable plan and complete denominator.
+- [ ] Run exactly one screening-to-ranking conversion only after that new
+  cohort is terminal; accept only a complete evidence-derived ranking and
+  never a partial survivor subset.
 - [ ] Freeze the derived rank-1/rank-2/rank-3 provider baselines, activate and
   live-verify all Axio tiers across four public streaming API formats, then
   execute the independent 9-category/21-suite campaign.

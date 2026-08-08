@@ -2,10 +2,6 @@ import os, sys, signal, threading
 
 os.environ.setdefault('AXIO_FUSION_NETWORK_MODE', 'auto')
 os.environ.setdefault('AXIO_FUSION_SYSTEM_PROXY', 'http://127.0.0.1:10808')
-os.environ.setdefault('AXIO_FUSION_REGISTRY_PATH', os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    'private/current_channel_enrollment_20260728_combined_r1/runtime_registry.calibrated.private.json'
-))
 os.environ.setdefault('AXIO_NVIDIA_BASE_URL', 'https://integrate.api.nvidia.com/v1')
 os.environ.setdefault('AXIO_CPA_PLUS_BASE_URL', 'https://cpa.co6.click/v1')
 
@@ -18,6 +14,13 @@ if missing_secrets:
         + '. Source private/current_channels.env before starting the server.'
     )
 
+registry_path = os.environ.get('AXIO_FUSION_REGISTRY_PATH', '').strip()
+if not registry_path:
+    raise SystemExit(
+        'AXIO_FUSION_REGISTRY_PATH must point to the current '
+        'pre-Fusion serving registry before starting the live server.'
+    )
+
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'src'))
 
 from axio_fusion_api.registry import load_registry
@@ -26,7 +29,7 @@ from axio_fusion_api.orchestrator import FusionEngine
 from axio_fusion_api.providers import HTTPProviderClient
 from axio_fusion_api.server import create_http_server
 
-profiles = load_registry(require_prefusion=False)
+profiles = load_registry(registry_path, require_prefusion=True)
 print(f'Loaded {len(profiles)} profiles', file=sys.stderr, flush=True)
 
 engine = FusionEngine(profiles, client=HTTPProviderClient(require_streaming=True))
