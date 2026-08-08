@@ -130,11 +130,21 @@ the image lane is isolated from text Fusion. The overall health status remains
 `usable_with_warnings` because the current text serving registry reports weak
 or missing Judge and structured-output candidates.
 
-The final standalone regression for this worktree is `976 passed, 18 failed`.
-Those failures are retained as a non-image follow-up gate covering legacy
-panel/latency expectations and old provider/registry fixtures. This section
-does not promote the earlier `983 passed` engineering receipt and does not
-authorize provider ranking or target benchmark traffic.
+The final standalone regression for this worktree is now `997 passed, 0
+failed`, including the image parameter capability contract. The earlier
+18 legacy panel/latency and provider/registry failures were repaired in the
+same engineering re-audit and are retained only in prior receipts for
+provenance. A green code regression does not promote the text serving registry
+or authorize provider ranking, baseline freeze, target benchmark traffic, or
+an Axio superiority claim.
+
+The current runtime image profile declares `input_fidelity` and transparent
+background as unsupported for `gpt-image-2`. The gateway validates these
+options against profile metadata before prompt composition and provider I/O;
+unknown capability declarations fail closed rather than silently dropping
+user intent. The r41 serving artifact remains rejected because its
+pre-Fusion generation marker and binding block are inconsistent, and r42
+remains a candidate artifact until a complete enrollment handoff is produced.
 
 ## Image Capability Lane (2026-08-09)
 

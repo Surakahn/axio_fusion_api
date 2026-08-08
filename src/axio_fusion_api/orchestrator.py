@@ -828,10 +828,10 @@ def _runtime_fusion_latency_budget(
     if baseline <= 0.0:
         baseline = _safe_float(direct_candidate.get("estimated_latency_ms"), default=0.0)
     try:
-        target_multiplier = float(guard.get("target_max_vs_single_model") or 5.0)
+        target_multiplier = float(guard.get("target_max_vs_single_model") or 3.0)
     except (TypeError, ValueError):
-        target_multiplier = 5.0
-    target_multiplier = max(1.0, min(8.0, target_multiplier))
+        target_multiplier = 3.0
+    target_multiplier = max(1.0, min(3.0, target_multiplier))
     receipt.update(
         {
             "enabled": True,
@@ -842,10 +842,9 @@ def _runtime_fusion_latency_budget(
     )
     if baseline <= 0.0:
         return requested, receipt
-    # Keep a transport floor high enough that a proxy-based provider
-    # with SSL overhead can complete its handshake before timeout.
-    # 6_000 ms provides headroom for proxy tunnel + SSL + first token.
-    ceiling = max(6_000, int(baseline * target_multiplier))
+    # Keep a small transport floor so an unusually optimistic probe does not
+    # create a sub-second Fusion deadline that cannot carry one real stream.
+    ceiling = max(3_000, int(baseline * target_multiplier))
     effective = min(requested, ceiling)
     receipt.update(
         {

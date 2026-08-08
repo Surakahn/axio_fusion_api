@@ -41,7 +41,11 @@ The configuration shape is:
     "transport": "images_api",
     "operations": ["generation", "editing"],
     "streaming": true,
-    "max_input_images": 1
+    "max_input_images": 1,
+    "parameter_support": {
+      "input_fidelity": "unsupported",
+      "background_transparent": "unsupported"
+    }
   },
   "image_probe_status": "not_run"
 }

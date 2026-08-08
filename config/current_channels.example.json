@@ -32,7 +32,11 @@
         "generation_path": "/images/generations",
         "editing_path": "/images/edits",
         "streaming": true,
-        "max_input_images": 1
+        "max_input_images": 1,
+        "parameter_support": {
+          "input_fidelity": "unsupported",
+          "background_transparent": "unsupported"
+        }
       },
       "traffic_control": {
         "scope": "profile",

@@ -275,6 +275,60 @@ def _coerce_bool(value: Any) -> bool:
     return bool(value)
 
 
+def _image_parameter_support_state(profile: ModelProfile, parameter: str) -> str:
+    declared = profile.image_capabilities.get("parameter_support", {})
+    if not isinstance(declared, Mapping):
+        return "unknown"
+    state = str(declared.get(parameter) or "").strip().casefold()
+    return state if state in {"supported", "unsupported", "unknown"} else "unknown"
+
+
+def _validate_image_profile_request(
+    profile: ModelProfile,
+    payload: Mapping[str, Any],
+    *,
+    operation: str,
+) -> None:
+    """Reject options the selected image endpoint cannot safely receive.
+
+    The profile owns this compatibility decision.  The gateway does not infer
+    support from a model name, and it never silently drops a user option that
+    changes image semantics.
+    """
+
+    if "input_fidelity" in payload:
+        if operation != "editing":
+            raise ImageRequestError(
+                "input_fidelity is valid only for image editing requests.",
+                code="image_parameter_unsupported",
+            )
+        state = _image_parameter_support_state(profile, "input_fidelity")
+        if state != "supported":
+            code = (
+                "image_parameter_capability_unverified"
+                if state == "unknown"
+                else "image_parameter_unsupported"
+            )
+            raise ImageRequestError(
+                "The selected image provider does not declare input_fidelity support.",
+                code=code,
+            )
+
+    background = str(payload.get("background") or "").strip().casefold()
+    if background == "transparent":
+        state = _image_parameter_support_state(profile, "background_transparent")
+        if state != "supported":
+            code = (
+                "image_parameter_capability_unverified"
+                if state == "unknown"
+                else "image_background_not_supported"
+            )
+            raise ImageRequestError(
+                "The selected image provider does not declare transparent background support.",
+                code=code,
+            )
+
+
 def _responses_image_generation_payload(
     profile: ModelProfile,
     payload: Mapping[str, Any],
@@ -508,6 +562,7 @@ class ImageProviderClient:
         timeout: float | None = None,
         stream_observer: Callable[[Mapping[str, Any]], bool] | None = None,
     ) -> ImageProviderResult:
+        _validate_image_profile_request(profile, payload, operation="generation")
         if profile.image_capabilities.get("transport") == "responses_image_generation":
             wire = _responses_image_generation_payload(profile, payload)
             event_prefix = "image_generation"
@@ -536,6 +591,7 @@ class ImageProviderClient:
         timeout: float | None = None,
         stream_observer: Callable[[Mapping[str, Any]], bool] | None = None,
     ) -> ImageProviderResult:
+        _validate_image_profile_request(profile, fields, operation="editing")
         form_fields = {key: value for key, value in fields.items() if key != "model"}
         form_fields["model"] = profile.model
         body, content_type = _encode_multipart(form_fields, files)
@@ -1032,6 +1088,7 @@ class ImageRouter:
         )
         if not selected:
             raise ImageRequestError("No verified image generation model is available.", code="image_capability_unavailable", status=503)
+        selected = self._filter_request_compatible(selected, payload, operation="generation")
         effective_payload, transform = self._transform_payload(
             payload,
             operation="generation",
@@ -1091,6 +1148,7 @@ class ImageRouter:
         )
         if not selected:
             raise ImageRequestError("No verified image editing model is available.", code="image_capability_unavailable", status=503)
+        selected = self._filter_request_compatible(selected, payload, operation="editing")
         effective_payload, transform = self._transform_payload(
             payload,
             operation="editing",
@@ -1148,6 +1206,34 @@ class ImageRouter:
                     raise
                 failures.append(exc)
         raise ImageRequestError("All eligible image editing providers failed.", code="image_provider_unavailable", status=502) from (failures[-1] if failures else None)
+
+    @staticmethod
+    def _filter_request_compatible(
+        profiles: Sequence[ModelProfile],
+        payload: Mapping[str, Any],
+        *,
+        operation: str,
+    ) -> list[ModelProfile]:
+        compatible: list[ModelProfile] = []
+        incompatibilities: list[ImageRequestError] = []
+        for profile in profiles:
+            try:
+                _validate_image_profile_request(profile, payload, operation=operation)
+            except ImageRequestError as exc:
+                incompatibilities.append(exc)
+            else:
+                compatible.append(profile)
+        if compatible:
+            return compatible
+        if incompatibilities:
+            # Selection order is deterministic, so the first error is also a
+            # deterministic explanation when all same-model replicas disagree.
+            raise incompatibilities[0]
+        raise ImageRequestError(
+            "No image provider is compatible with this request.",
+            code="image_capability_unavailable",
+            status=503,
+        )
 
     def _transform_payload(
         self,

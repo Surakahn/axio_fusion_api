@@ -11,8 +11,8 @@ from .policy_control import resolve_routing_policy
 from .schemas import CAPABILITY_AXES, FusionRequest, ModelProfile, sha256_text, stable_json
 
 
-FUSION_LATENCY_MULTIPLIER_GUARD = 5.0
-FUSION_OPERATIONAL_LATENCY_TARGET = 4.5
+FUSION_LATENCY_MULTIPLIER_GUARD = 3.0
+FUSION_OPERATIONAL_LATENCY_TARGET = 2.5
 LOCAL_CONSENSUS_OVERHEAD_MS = 75
 # A single parallel redundancy seat is useful when a newly enrolled provider
 # has no domain-quality evidence yet.  It does not add a serial stage, but it

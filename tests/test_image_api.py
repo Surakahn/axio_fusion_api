@@ -44,20 +44,24 @@ def _image_profile(
     runtime_keys: tuple[str, ...] = (),
     transport: str = "images_api",
     api_format: str = "chat/completions",
+    parameter_support: dict[str, object] | None = None,
 ) -> ModelProfile:
+    image_capabilities = {
+        "status": capability_status,
+        "transport": transport,
+        "operations": ["generation", "editing"],
+        "streaming": streaming,
+        "max_input_images": max_input_images,
+    }
+    if parameter_support is not None:
+        image_capabilities["parameter_support"] = parameter_support
     return ModelProfile(
         provider="image-provider",
         model="gpt-image-2",
         api_format=api_format,
         model_kind="image",
         image_probe_status=probe_status,
-        image_capabilities={
-            "status": capability_status,
-            "transport": transport,
-            "operations": ["generation", "editing"],
-            "streaming": streaming,
-            "max_input_images": max_input_images,
-        },
+        image_capabilities=image_capabilities,
         p95_latency_ms=p95_latency_ms,
         runtime_base_url="https://image-provider.invalid/v1",
         runtime_api_keys=runtime_keys,
@@ -151,6 +155,76 @@ def test_image_capability_requires_verified_capability_and_probe():
     assert _image_profile(capability_status="candidate").image_generation_eligible is False
     assert _image_profile(probe_status="not_run").image_generation_eligible is False
     assert _image_profile(probe_status="failed").image_generation_eligible is False
+
+
+def test_image_parameter_support_is_normalized_as_closed_profile_metadata():
+    profile = _image_profile(
+        parameter_support={
+            "inputFidelity": True,
+            "transparentBackground": False,
+            "provider_specific": "discarded",
+        }
+    )
+
+    assert profile.image_capabilities["parameter_support"] == {
+        "input_fidelity": "supported",
+        "background_transparent": "unsupported",
+    }
+
+
+def test_image_router_rejects_unsupported_image_parameters_before_composition():
+    fake = _FakeImageClient()
+    profile = _image_profile(
+        parameter_support={
+            "input_fidelity": "unsupported",
+            "background_transparent": "unsupported",
+        }
+    )
+    router = ImageRouter([profile], client=fake)
+
+    with pytest.raises(ImageRequestError) as generation_error:
+        router.generate(
+            {
+                "model": "axio-terra",
+                "prompt": "blue square",
+                "background": "transparent",
+            }
+        )
+    assert generation_error.value.code == "image_background_not_supported"
+    assert fake.generate_calls == []
+
+    with pytest.raises(ImageRequestError) as editing_error:
+        router.edit(
+            {
+                "model": "axio-terra",
+                "prompt": "keep the subject",
+                "input_fidelity": "high",
+            },
+            [ImagePart("image", "source.png", "image/png", b"png")],
+        )
+    assert editing_error.value.code == "image_parameter_unsupported"
+    assert fake.edit_calls == []
+
+
+def test_image_router_forwards_declared_supported_edit_parameter():
+    fake = _FakeImageClient()
+    profile = _image_profile(
+        parameter_support={
+            "input_fidelity": "supported",
+            "background_transparent": "supported",
+        }
+    )
+
+    _response, _result, _profile = ImageRouter([profile], client=fake).edit(
+        {
+            "model": "axio-terra",
+            "prompt": "keep the subject",
+            "input_fidelity": "high",
+        },
+        [ImagePart("image", "source.png", "image/png", b"png")],
+    )
+
+    assert fake.edit_calls[0][0]["input_fidelity"] == "high"
 
 
 def test_load_image_registry_requires_promoted_image_only_binding(tmp_path):

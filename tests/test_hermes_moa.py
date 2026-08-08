@@ -1743,7 +1743,11 @@ def test_hermes_feedback_deadline_budget_blocks_reference_and_rejudge_atomically
     repeated = engine.complete(request, live=True)
     assert repeated.trace["cache_hit"] is False
     assert client.calls.count("feedback_reference") == 0
-    assert client.judge_calls == 2
+    # The first run calibrates the repeated primary profile from the
+    # deterministic fixture's near-zero execution time. The next route then
+    # correctly applies the hard 3x guard and degrades to a direct answer.
+    assert client.judge_calls == 1
+    assert repeated.route_plan["strategy"] == "pro_direct_with_verifier_gap"
 
 
 def test_hermes_failed_feedback_without_rejudge_is_explicitly_incomplete() -> None:

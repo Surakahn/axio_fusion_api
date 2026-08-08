@@ -286,12 +286,15 @@ L1: 语法 → L2: 导入 → L3a: 单元测试 → L3b: Dry-run → L3c: 连通
 - [x] 29个模型profiles加载
 - [x] 辅助模型过滤（codex-auto-review, gpt-image-*）
 - [x] 网络代理配置（auto模式，10808端口）
-- [x] 延迟预算guard（5.0x multiplier）
+- [x] 延迟预算guard（3.0x multiplier, operational target 2.5x）
 - [x] 快速评测：axio-pro/terra/fast在科学/数学/逻辑题上正确
 - [x] Git管理，已推送至 github.com:Surakahn/axio_fusion_api
 - [x] 图片能力独立模块：gpt-image-2 已通过 generation/editing
   endpoint-bound 流式探针，并在 verified image registry 下完成真实服务级
   generation 与 multipart editing 验证
+- [x] 图片参数兼容性：`input_fidelity` 和 `background: transparent` 现为
+  profile-driven capability metadata，`gpt-image-2` 已声明 `unsupported`
+- [x] 本阶段完整回归：`997 passed, 0 failed`；18 个历史非图片失败已修复
 
 ### 待完成
 - [ ] Anthropic和Gemini API格式的完整验证
@@ -307,7 +310,10 @@ L1: 语法 → L2: 导入 → L3a: 单元测试 → L3b: Dry-run → L3c: 连通
 3. CPA渠道通过代理访问，额外延迟~1-2秒（SSL握手）
 4. Python 3.8不兼容部分测试（需3.11+）
 5. 评测脚本直接HTTP调用较脆弱，建议改用FusionEngine直接调用
+6. 图片参数的未知能力状态返回受控错误，不静默丢弃不兼容字段
+7. r41 serving artifact 的 marker/binding 不一致使其继续 fail-closed，不用于生产
+8. r26 baseline freeze 和 21-suite campaign 尚未完成，不做 superiority claim
 
 ---
 
-*最后更新：2026-08-09 — 图片能力生产级门禁与验证已完成*
+*最后更新：2026-08-09 — 图片参数兼容性强化与门禁同步*

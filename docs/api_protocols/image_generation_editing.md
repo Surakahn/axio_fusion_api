@@ -45,12 +45,12 @@ Generation uses `POST /v1/images/generations` with a JSON body such as:
 
 ```json
 {
-  "model": "gpt-image-1",
+  "model": "gpt-image-2",
   "prompt": "A clean technical illustration of a model gateway",
   "n": 1,
   "size": "1024x1024",
   "quality": "high",
-  "background": "transparent",
+  "background": "opaque",
   "output_format": "png",
   "stream": false
 }
@@ -60,7 +60,33 @@ Editing uses `POST /v1/images/edits` as `multipart/form-data`, with one or more
 `image` parts, an optional `mask`, and text fields including `prompt`, `model`,
 `n`, `size`, `quality`, `input_fidelity`, and output options. The multipart
 boundary, file name, content type, and request size must be validated before
-forwarding.
+forwarding. `input_fidelity` is not a generation parameter; it is forwarded
+only when the selected editing profile explicitly declares support.
+
+Image parameter compatibility is profile metadata, not a model-name heuristic:
+
+```json
+{
+  "parameter_support": {
+    "input_fidelity": "unsupported",
+    "background_transparent": "unsupported"
+  }
+}
+```
+
+The values are `supported`, `unsupported`, or `unknown`. A requested
+`input_fidelity` or transparent background is rejected before prompt
+composition and provider I/O unless every selected replica declares the
+corresponding parameter as `supported`. An explicit `unsupported` declaration
+returns a bounded compatibility error; an omitted declaration fails closed as
+`image_parameter_capability_unverified`. This prevents a provider-specific
+400 from becoming a late, ambiguous image failure.
+
+For the current CPA Plus `gpt-image-2` profile, `input_fidelity` and
+transparent backgrounds are explicitly marked `unsupported`. The gateway
+therefore preserves the documented `gpt-image-2` contract and does not send
+either option upstream. Other image models can opt into either feature
+through their own endpoint-bound capability manifest without changing code.
 
 Responses API image generation is a separate tool transport. It uses an
 `image_generation` tool in the Responses request and returns an image

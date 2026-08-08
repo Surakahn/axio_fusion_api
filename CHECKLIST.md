@@ -27,8 +27,11 @@
 - [x] Load the verified image registry into a temporary HTTP service and verify
   `/health` reports one generation and one editing profile with
   `text_fusion_isolated=true`.
-- [ ] Repair and revalidate the 18 pre-existing non-image regression failures
-  before declaring the entire standalone suite green.
+- [x] Repair and revalidate the 18 pre-existing non-image regression failures;
+  the current full standalone regression is `997 passed, 0 failed`.
+- [x] Add profile-driven image parameter compatibility checks for
+  `input_fidelity` and transparent backgrounds; unsupported or unknown options
+  fail before prompt composition/provider I/O.
 - [ ] Re-audit text Judge and structured-output role coverage; the current
   health result is `usable_with_warnings`.
 

@@ -60,6 +60,11 @@ IMAGE_MODEL_KINDS = ("text", "multimodal", "image")
 IMAGE_OPERATIONS = ("generation", "editing")
 IMAGE_TRANSPORTS = ("images_api", "responses_image_generation")
 IMAGE_CAPABILITY_STATUSES = ("unknown", "candidate", "verified", "unsupported")
+IMAGE_PARAMETER_SUPPORT_STATES = ("supported", "unsupported", "unknown")
+IMAGE_PARAMETER_SUPPORT_KEYS = (
+    "input_fidelity",
+    "background_transparent",
+)
 _IMAGE_DEFAULT_GENERATION_PATH = "/images/generations"
 _IMAGE_DEFAULT_EDIT_PATH = "/images/edits"
 
@@ -716,6 +721,46 @@ def _normalize_image_path(value: Any, default: str) -> str:
     return default
 
 
+def _normalize_image_parameter_support(value: Any) -> dict[str, str]:
+    """Normalize explicitly declared image parameter capability.
+
+    Image providers do not share one parameter contract.  This closed map
+    lets a profile reject a known unsupported option before prompt composition
+    or provider I/O, while an omitted declaration remains ``unknown`` and can
+    be handled by a future endpoint-specific admission policy.
+    """
+
+    raw = value if isinstance(value, Mapping) else {}
+    aliases = {
+        "input_fidelity": ("input_fidelity", "inputFidelity"),
+        "background_transparent": (
+            "background_transparent",
+            "backgroundTransparent",
+            "transparent_background",
+            "transparentBackground",
+        ),
+    }
+    normalized: dict[str, str] = {}
+    for key in IMAGE_PARAMETER_SUPPORT_KEYS:
+        candidate: Any = None
+        for alias in aliases[key]:
+            if alias in raw:
+                candidate = raw.get(alias)
+                break
+        if isinstance(candidate, bool):
+            state = "supported" if candidate else "unsupported"
+        else:
+            state = str(candidate or "").strip().casefold().replace("-", "_")
+            if state not in IMAGE_PARAMETER_SUPPORT_STATES:
+                continue
+        normalized[key] = state
+    return {
+        key: normalized[key]
+        for key in IMAGE_PARAMETER_SUPPORT_KEYS
+        if key in normalized
+    }
+
+
 def _normalize_image_capabilities(value: Any) -> dict[str, Any]:
     raw = value if isinstance(value, Mapping) else {}
     status = str(raw.get("status") or "unknown").strip().casefold()
@@ -753,6 +798,9 @@ def _normalize_image_capabilities(value: Any) -> dict[str, Any]:
         max_input_images = 1
     max_input_images = max(1, min(16, max_input_images))
     streaming = bool(raw.get("streaming", raw.get("supports_streaming", False)))
+    parameter_support = _normalize_image_parameter_support(
+        raw.get("parameter_support", raw.get("parameterSupport", {}))
+    )
     generation_default = (
         "/responses"
         if transport == "responses_image_generation"
@@ -772,6 +820,7 @@ def _normalize_image_capabilities(value: Any) -> dict[str, Any]:
         ),
         "max_input_images": max_input_images,
         "streaming": streaming,
+        "parameter_support": parameter_support,
         "raw_payload_paths_persisted": False,
     }
 

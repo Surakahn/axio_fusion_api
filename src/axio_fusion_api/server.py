@@ -3677,7 +3677,12 @@ def _api_surface_self_test_payload(
             "/v1/responses",
             {
                 "model": model,
-                "input": prompt,
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": prompt}],
+                    }
+                ],
                 "instructions": "Answer briefly and avoid hidden reasoning.",
                 "task_type": task_type,
                 "temperature": 0,
@@ -3709,7 +3714,13 @@ def _api_surface_self_test_payload(
         "/v1/chat/completions",
         {
             "model": model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "Answer briefly and avoid hidden reasoning.",
+                },
+                {"role": "user", "content": prompt},
+            ],
             "task_type": task_type,
             "temperature": 0,
             "max_tokens": 96,

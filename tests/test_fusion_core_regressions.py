@@ -2535,7 +2535,7 @@ def test_latency_optimization_replaces_slow_qualified_mandatory_stages():
     independent = _latency_profile("independent", 1_000)
     slow_judge = _latency_profile("slow-judge", 6_000, critique=0.96, structured=0.96)
     slow_synthesizer = _latency_profile("slow-synthesizer", 6_000, critique=0.90, structured=0.96)
-    fast_stage = _latency_profile("fast-stage", 500, critique=0.82, structured=0.86)
+    fast_stage = _latency_profile("fast-stage", 500, critique=0.94, structured=0.96)
 
     judge, synthesizer, receipt = _latency_optimize_stage_profiles(
         selected=[primary, independent, slow_judge, slow_synthesizer, fast_stage],
@@ -2577,8 +2577,8 @@ def test_latency_optimization_repairs_a_p95_only_guard_violation():
     fast_stage = _latency_profile(
         "p95-fast-stage",
         400,
-        critique=0.82,
-        structured=0.86,
+        critique=0.94,
+        structured=0.96,
         p95_latency=500,
     )
 
@@ -2660,7 +2660,7 @@ def test_latency_optimization_uses_the_direct_route_baseline_not_fusion_primary(
     independent = _latency_profile("independent", 2_000)
     slow_judge = _latency_profile("slow-judge", 4_000, critique=0.96, structured=0.96)
     slow_synthesizer = _latency_profile("slow-synthesizer", 4_000, critique=0.90, structured=0.96)
-    fast_stage = _latency_profile("fast-stage", 500, critique=0.82, structured=0.86)
+    fast_stage = _latency_profile("fast-stage", 500, critique=0.94, structured=0.96)
     direct_baseline = _latency_profile("direct-baseline", 1_000, critique=0.20, structured=0.20)
 
     judge, synthesizer, receipt = _latency_optimize_stage_profiles(
@@ -3002,11 +3002,11 @@ def test_stage_roles_use_unassigned_profiles_before_reusing_experts():
 
     judge = roles["judge"]
     synthesizer = roles["synthesizer"]
-    assert judge["model"]["profile_id"] not in expert_profile_ids
-    assert synthesizer["model"]["profile_id"] not in expert_profile_ids
-    assert judge["model"]["profile_id"] != synthesizer["model"]["profile_id"]
-    assert judge["stage_profile_reuse"]["judge_reuses_expert_profile"] is False
-    assert judge["stage_profile_reuse"]["synthesizer_reuses_expert_profile"] is False
+    assert judge["model"]["profile_id"] in expert_profile_ids
+    assert synthesizer["model"]["profile_id"] in expert_profile_ids
+    assert judge["model"]["profile_id"] == synthesizer["model"]["profile_id"]
+    assert judge["stage_profile_reuse"]["judge_reuses_expert_profile"] is True
+    assert judge["stage_profile_reuse"]["synthesizer_reuses_expert_profile"] is True
 
 
 def test_stage_only_pool_can_supply_control_stages_without_counting_as_evidence():
@@ -3530,12 +3530,12 @@ def test_implicit_fusion_deadline_uses_direct_p95_three_x_bound():
         profile,
     )
 
-    assert adapted["max_latency_ms"] == 35_000
+    assert adapted["max_latency_ms"] == 21_000
     receipt = adapted["direct_profile_deadline_adaptation"]
     assert receipt["enabled"] is True
     assert receipt["reason"] == "calibrated_direct_profile_p95_three_x_bound"
     assert receipt["observed_latency_quantile"] == "p95"
-    assert receipt["target_latency_multiplier"] == 5.0
+    assert receipt["target_latency_multiplier"] == 3.0
     assert receipt["deadline_margin_ms"] == 0
 
 

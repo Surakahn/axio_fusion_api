@@ -1019,7 +1019,7 @@ def test_standalone_latency_multiplier_guard_blocks_known_over_3x_fusion():
     assert "fusion_latency_exceeds_3x_single_model_guard" in admission["blocked_reasons"]
     assert "pro_tier_independent_verification_policy" in admission["force_reasons"]
     assert admission["latency_multiplier_guard"]["blocked"] is True
-    assert admission["latency_multiplier_guard"]["target_max_vs_single_model"] == 5.0
+    assert admission["latency_multiplier_guard"]["target_max_vs_single_model"] == 3.0
     assert admission["latency_multiplier_vs_single_model"] > 3.0
     assert route_plan["strategy"] == "pro_direct_with_verifier_gap"
 
@@ -3728,8 +3728,8 @@ def test_standalone_live_execution_prompts_receive_role_scoped_task_dag_without_
     assert "bounded_deliberative_branch_and_verify" in primary_prompt
     assert "latency_multiplier_guard" in primary_prompt
     assert (
-        '"target_max_vs_single_model": 5.0' in primary_prompt
-        or '"target_max_vs_single_model":5.0' in primary_prompt
+        '"target_max_vs_single_model": 3.0' in primary_prompt
+        or '"target_max_vs_single_model":3.0' in primary_prompt
     )
     assert "answer_policy" in primary_prompt
     assert '"quality_target": 0.95' in primary_prompt or '"quality_target":0.95' in primary_prompt
@@ -3759,7 +3759,7 @@ def test_standalone_live_execution_prompts_receive_role_scoped_task_dag_without_
     assert response.route_plan["deliberative_search_policy"]["enabled"] is True
     assert response.route_plan["deliberative_search_policy"]["anti_cheating_contract"]["no_training_on_eval_cases"] is True
     assert response.route_plan["runtime_guards"]["deliberative_search_policy_enabled"] is True
-    assert response.route_plan["runtime_guards"]["latency_multiplier_guard"]["target_max_vs_single_model"] == 5.0
+    assert response.route_plan["runtime_guards"]["latency_multiplier_guard"]["target_max_vs_single_model"] == 3.0
     assert "safe_routing_context" in response.route_plan["orchestration_scaffold"]["context_assembly"]["judge_context"]
     assert "deliberative_search_contract" in response.route_plan["orchestration_scaffold"]["context_assembly"]["judge_context"]
     assert response.route_plan["orchestration_scaffold"]["deliberative_search_policy"]["branch_count"] >= 3
@@ -4081,7 +4081,7 @@ def test_standalone_live_panel_skips_optional_repair_after_reference_quorum():
     assert response.text == "repaired final answer"
     assert "down/unstable" in fake.calls
     assert "gamma/backup-judge" in fake.calls
-    assert "delta/independent-fallback" in fake.calls
+    assert "delta/independent-fallback" not in fake.calls
     assert fake.judge_candidate_packets
     assert {row["candidate_id"] for row in fake.judge_candidate_packets[0]} == {"primary_solver", "critic"}
     assert response.trace["provider_call_count"] == 5
@@ -12613,7 +12613,7 @@ def test_standalone_aisz_provider_uses_responses_api_and_safe_env_registry(monke
     def fake_urlopen(request, timeout=None):
         captured.append({"url": request.full_url, "method": request.get_method()})
         if request.get_method() == "GET":
-            return FakeResponse({"data": [{"id": "gpt-5.4-mini", "object": "model"}]})
+            return FakeResponse({"data": [{"id": "gpt-5.5", "object": "model"}]})
         return FakeResponse({"output_text": "AXIO_PROBE_OK"})
 
     monkeypatch.setattr(provider_module.urllib.request, "urlopen", fake_urlopen)
@@ -12623,7 +12623,7 @@ def test_standalone_aisz_provider_uses_responses_api_and_safe_env_registry(monke
     monkeypatch.delenv("AXIO_OPENAI_COMPAT_MODELS", raising=False)
     monkeypatch.setenv("AXIO_AISZ_BASE_URL", "https://aisz.example/v1")
     monkeypatch.setenv("AXIO_AISZ_API_KEY", "aisz-secret-key")
-    monkeypatch.setenv("AXIO_AISZ_MODELS", "gpt-5.4-mini")
+    monkeypatch.setenv("AXIO_AISZ_MODELS", "gpt-5.5")
 
     registry_profiles = load_registry()
     report = probe_exposed_provider_models(providers=["aisz"], live=True, max_workers=1)
@@ -13546,9 +13546,9 @@ def test_standalone_registry_from_probe_artifact_keeps_only_available_safe_profi
                     "secrets_persisted": False,
                 },
                 {
-                    "profile_id": "cpa-plus/gpt-5.4-mini",
+                    "profile_id": "cpa-plus/gpt-5.5",
                     "provider": "cpa-plus",
-                    "model": "gpt-5.4-mini",
+                    "model": "gpt-5.5",
                     "api_format": "responses",
                     "status": "available",
                     "latency_ms": 2100.0,
@@ -13592,7 +13592,7 @@ def test_standalone_registry_from_probe_artifact_keeps_only_available_safe_profi
     assert registry["readiness"]["final_claim_registry_ready"] is True
     assert registry["readiness"]["probe_mode_counts"] == {"live": 3}
     assert registry["source_artifacts"]["mode_counts"] == {"live": 3}
-    assert model_ids == {"openai/gpt-oss-120b", "gpt-5.4-mini"}
+    assert model_ids == {"openai/gpt-oss-120b", "gpt-5.5"}
     assert all(row["health"] == "available" for row in registry["models"])
     assert all(row["api_key_persisted"] is False for row in registry["models"])
     assert all(row["base_url_persisted"] is False for row in registry["models"])
