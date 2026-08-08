@@ -2547,7 +2547,7 @@ def _select_panel(
                 continue
             add(profile)
             break
-    diverse_min_score = best_score * 0.55
+    diverse_min_score = best_score * (0.82 if request.public_model == "axio-pro" else 0.65 if request.public_model == "axio-terra" else 0.55)
     for profile, score in scored:
         if len(selected) >= max_models or len(seen_providers) >= target_provider_count:
             break
