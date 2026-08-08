@@ -652,6 +652,26 @@ seed in this state. This prevents a newly configured deployment from silently
 serving an unrelated stale model pool; a configured calibrated registry still
 has precedence.
 
+For an operator-safe explanation of why a registry is or is not admissible,
+use the read-only diagnostic command:
+
+```bash
+axio-fusion-api-standalone \
+  --registry <PRIVATE_REGISTRY.json> \
+  registry-diagnostic \
+  --require-prefusion \
+  --output <SAFE_WORK_DIR>/registry_diagnostic.safe.json
+```
+
+The command performs no provider or benchmark request. It reuses the same
+pre-Fusion validator as production loading, returns a non-zero exit status
+for a blocked artifact, and records only reason codes, counts, profile-set
+hashes, readiness projections, and a hash of the registry path. A malformed
+or stale artifact remains fail-closed; this command only makes the rejection
+actionable. In particular, an r41-style mismatch reports the binding/catalog
+reason codes instead of exposing an apparently empty but unexplained runtime
+pool.
+
 For a channel alias that is known to run the same real model as another
 channel, configure the exact same `canonical_model_id` on both model rows:
 

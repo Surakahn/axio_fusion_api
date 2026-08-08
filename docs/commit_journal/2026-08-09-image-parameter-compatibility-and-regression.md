@@ -30,7 +30,8 @@ without a model-name branch in the request path.
 - Image API regression: `32 passed`.
 - Image, runtime-channel, provider-enrollment, and pre-Fusion admission
   regression: `89 passed`.
-- Full standalone regression: `997 passed, 0 failed` in 197.45 seconds.
+- Full standalone regression before the registry diagnostic stage:
+  `997 passed, 0 failed` in 197.45 seconds.
 - No provider or benchmark network request was made by the code regression.
 - Existing image generation/editing service evidence remains separate and
   unchanged.

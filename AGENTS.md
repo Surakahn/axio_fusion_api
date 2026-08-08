@@ -294,7 +294,9 @@ L1: 语法 → L2: 导入 → L3a: 单元测试 → L3b: Dry-run → L3c: 连通
   generation 与 multipart editing 验证
 - [x] 图片参数兼容性：`input_fidelity` 和 `background: transparent` 现为
   profile-driven capability metadata，`gpt-image-2` 已声明 `unsupported`
-- [x] 本阶段完整回归：`997 passed, 0 failed`；18 个历史非图片失败已修复
+- [x] 本阶段完整回归：`999 passed, 0 failed`；18 个历史非图片失败已修复
+- [x] 注册表诊断命令复用 pre-Fusion validator，r41 marker/binding mismatch
+  只读输出 hash-only reason codes，不能绕过 fail-closed 加载
 
 ### 待完成
 - [ ] Anthropic和Gemini API格式的完整验证

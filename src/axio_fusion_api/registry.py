@@ -347,6 +347,250 @@ def load_registry(
     return _dedupe_profiles(profiles)
 
 
+def registry_load_diagnostic(
+    path: str | Path | None = None,
+    *,
+    require_prefusion: bool = False,
+) -> dict[str, Any]:
+    """Explain registry admission without weakening the load boundary.
+
+    This control-plane read is deliberately separate from ``load_registry``:
+    a malformed or stale screening registry still yields zero routable
+    profiles, while operators receive stable reason codes and hash-only
+    counts explaining the rejection.
+    """
+
+    selected = str(path or os.getenv("AXIO_FUSION_REGISTRY_PATH", "")).strip()
+    artifact = _read_registry_for_diagnostic(selected)
+    if artifact.get("status") == "blocked":
+        return {
+            **artifact,
+            "schema": "axio_fusion_api.registry_load_diagnostic.v1",
+            "require_prefusion": bool(require_prefusion),
+            "raw_provider_model_ids_persisted": False,
+            "raw_provider_names_persisted": False,
+            "raw_provider_urls_persisted": False,
+            "raw_provider_outputs_persisted": False,
+            "secrets_persisted": False,
+        }
+
+    payload = artifact.get("payload")
+    payload = payload if isinstance(payload, Mapping) else {}
+    generated = payload.get("generated_from_prefusion_screening") is True
+    reason_codes: set[str] = set()
+    contract: dict[str, Any] = {}
+    effective_payload = dict(payload)
+    if generated:
+        contract = validate_prefusion_registry_handoff(
+            payload,
+            require_ready=True,
+        )
+        effective_payload = _validate_prefusion_registry_payload(payload)
+        readiness = effective_payload.get("readiness")
+        if isinstance(readiness, Mapping):
+            reason_codes.update(
+                str(item)
+                for item in readiness.get("blockers", [])
+                if str(item)
+            )
+            reason_codes.update(
+                str(item)
+                for item in readiness.get("contract_reason_codes", [])
+                if str(item)
+            )
+        reason_codes.update(
+            str(item)
+            for item in contract.get("reason_codes", [])
+            if str(item)
+        )
+    elif require_prefusion:
+        contract = validate_prefusion_registry_handoff(
+            payload,
+            require_ready=True,
+        )
+        reason_codes.update(
+            str(item)
+            for item in contract.get("reason_codes", [])
+            if str(item)
+        )
+    profiles, profile_errors = _diagnostic_profiles_from_payload(effective_payload)
+    reason_codes.update(profile_errors)
+    readiness = registry_readiness(profiles)
+    if not generated and not require_prefusion:
+        reason_codes.update(
+            str(item)
+            for item in readiness.get("blockers", [])
+            if str(item)
+        )
+    contract_valid = not contract or contract.get("valid") is True
+    status = (
+        "ready"
+        if contract_valid and not profile_errors and (
+            generated or readiness.get("status") != "blocked"
+        )
+        else "blocked"
+    )
+    if require_prefusion and not generated:
+        status = "blocked"
+    return {
+        "schema": "axio_fusion_api.registry_load_diagnostic.v1",
+        "status": status,
+        "require_prefusion": bool(require_prefusion),
+        "registry_artifact_provided": bool(selected),
+        "registry_artifact_exists": artifact.get("registry_artifact_exists") is True,
+        "registry_artifact_json_valid": True,
+        "registry_path_sha256": sha256_text(selected) if selected else "",
+        "generated_from_prefusion_screening": generated,
+        "raw_model_row_count": _model_row_count(payload),
+        "effective_profile_count": len(profiles),
+        "enabled_profile_count": sum(1 for profile in profiles if profile.enabled),
+        "profile_set_sha256": sha256_text(
+            stable_json(sorted(profile.profile_id for profile in profiles))
+        ),
+        "reason_codes": sorted(reason_codes),
+        "prefusion_validation": _safe_prefusion_diagnostic_contract(contract),
+        "readiness": _safe_registry_diagnostic_readiness(readiness),
+        "raw_provider_model_ids_persisted": False,
+        "raw_provider_names_persisted": False,
+        "raw_provider_urls_persisted": False,
+        "raw_provider_outputs_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _read_registry_for_diagnostic(selected: str) -> dict[str, Any]:
+    if not selected:
+        try:
+            return {
+                "status": "ready",
+                "registry_artifact_exists": False,
+                "payload": _load_registry_payload(None),
+            }
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            return {
+                "status": "blocked",
+                "registry_artifact_provided": False,
+                "registry_artifact_exists": False,
+                "registry_artifact_json_valid": False,
+                "reason_codes": ["registry_artifact_unreadable"],
+                "error_type": type(exc).__name__,
+            }
+    selected_path = Path(selected)
+    if not selected_path.is_file():
+        return {
+            "status": "blocked",
+            "registry_artifact_provided": True,
+            "registry_artifact_exists": False,
+            "registry_artifact_json_valid": False,
+            "registry_path_sha256": sha256_text(selected),
+            "reason_codes": ["registry_artifact_missing"],
+        }
+    try:
+        with selected_path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        return {
+            "status": "blocked",
+            "registry_artifact_provided": True,
+            "registry_artifact_exists": True,
+            "registry_artifact_json_valid": False,
+            "registry_path_sha256": sha256_text(selected),
+            "reason_codes": ["registry_artifact_unreadable"],
+            "error_type": type(exc).__name__,
+        }
+    if isinstance(payload, list):
+        payload = {"models": payload}
+    if not isinstance(payload, Mapping):
+        return {
+            "status": "blocked",
+            "registry_artifact_provided": True,
+            "registry_artifact_exists": True,
+            "registry_artifact_json_valid": False,
+            "registry_path_sha256": sha256_text(selected),
+            "reason_codes": ["registry_artifact_must_be_object"],
+        }
+    return {
+        "status": "ready",
+        "registry_artifact_provided": True,
+        "registry_artifact_exists": True,
+        "payload": dict(payload),
+    }
+
+
+def _diagnostic_profiles_from_payload(
+    payload: Mapping[str, Any],
+) -> tuple[list[ModelProfile], set[str]]:
+    rows = payload.get("models") if isinstance(payload.get("models"), list) else []
+    profiles: list[ModelProfile] = []
+    errors: set[str] = set()
+    for row in rows:
+        if not isinstance(row, Mapping):
+            errors.add("registry_model_row_invalid")
+            continue
+        try:
+            profile = normalize_profile(row)
+        except (KeyError, TypeError, ValueError):
+            errors.add("registry_model_row_invalid")
+            continue
+        if profile.enabled and not _is_auxiliary_model(profile.model):
+            profiles.append(profile)
+    return _dedupe_profiles(profiles), errors
+
+
+def _model_row_count(payload: Mapping[str, Any]) -> int:
+    rows = payload.get("models")
+    return len(rows) if isinstance(rows, list) else 0
+
+
+def _safe_prefusion_diagnostic_contract(
+    contract: Mapping[str, Any],
+) -> dict[str, Any]:
+    if not contract:
+        return {
+            "provided": False,
+            "valid": None,
+            "reason_codes": [],
+        }
+    return {
+        "provided": True,
+        "valid": contract.get("valid") is True,
+        "reason_codes": [
+            str(item)[:120]
+            for item in contract.get("reason_codes", [])
+            if str(item)
+        ],
+        "physical_profile_count": int(contract.get("physical_profile_count") or 0),
+        "logical_model_count": int(contract.get("logical_model_count") or 0),
+        "probe_binding_count": int(contract.get("probe_binding_count") or 0),
+        "ranking_candidate_count": int(contract.get("ranking_candidate_count") or 0),
+        "raw_provider_output_persisted": contract.get(
+            "raw_provider_output_persisted"
+        ) is True,
+        "secrets_persisted": contract.get("secrets_persisted") is True,
+    }
+
+
+def _safe_registry_diagnostic_readiness(
+    readiness: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {
+        "status": str(readiness.get("status") or "blocked"),
+        "ready": readiness.get("ready") is True,
+        "blockers": [
+            str(item)[:120]
+            for item in readiness.get("blockers", [])
+            if str(item)
+        ],
+        "warnings": [
+            str(item)[:120]
+            for item in readiness.get("warnings", [])
+            if str(item)
+        ],
+        "model_count": int(readiness.get("model_count") or 0),
+        "provider_count": int(readiness.get("provider_count") or 0),
+    }
+
+
 def load_image_registry(
     path: str | Path | None = None,
     *,

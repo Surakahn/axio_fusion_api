@@ -68,6 +68,7 @@ from .registry import (
     load_image_registry,
     load_image_probe_candidates,
     load_registry,
+    registry_load_diagnostic,
     validate_prefusion_registry_handoff,
 )
 from .router import build_route_plan
@@ -93,6 +94,7 @@ __all__ = [
     "build_probe_bound_registry",
     "load_image_registry",
     "load_image_probe_candidates",
+    "registry_load_diagnostic",
     "build_runtime_profiles",
     "create_runtime_http_server",
     "build_route_plan",

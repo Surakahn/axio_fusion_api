@@ -149,6 +149,7 @@ from .registry import (
     load_registry,
     provider_configured_profiles_from_env,
     provider_configuration_source_summary,
+    registry_load_diagnostic,
     registry_report,
 )
 from .server import (
@@ -756,6 +757,14 @@ def build_parser() -> argparse.ArgumentParser:
     provider_adapter.add_argument("--system", default=None)
     provider_adapter.add_argument("--output", default=None)
     provider_adapter.set_defaults(func=cmd_provider_input_adapter_self_test)
+
+    registry_diagnostic = sub.add_parser(
+        "registry-diagnostic",
+        help="Explain registry admission without contacting providers.",
+    )
+    registry_diagnostic.add_argument("--require-prefusion", action="store_true")
+    registry_diagnostic.add_argument("--output", default=None)
+    registry_diagnostic.set_defaults(func=cmd_registry_diagnostic)
 
     execution_boundary = sub.add_parser("remote-api-execution-audit")
     execution_boundary.add_argument("--output", default=None)
@@ -2416,6 +2425,15 @@ def cmd_provider_input_adapter_self_test(args: argparse.Namespace) -> int:
     )
     _emit_json(payload, output=args.output)
     return 0
+
+
+def cmd_registry_diagnostic(args: argparse.Namespace) -> int:
+    payload = registry_load_diagnostic(
+        args.registry,
+        require_prefusion=bool(args.require_prefusion),
+    )
+    _emit_json(payload, output=args.output)
+    return 0 if payload.get("status") != "blocked" else 2
 
 
 def cmd_remote_api_execution_audit(args: argparse.Namespace) -> int:

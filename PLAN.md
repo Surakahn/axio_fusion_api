@@ -130,7 +130,7 @@ the image lane is isolated from text Fusion. The overall health status remains
 `usable_with_warnings` because the current text serving registry reports weak
 or missing Judge and structured-output candidates.
 
-The final standalone regression for this worktree is now `997 passed, 0
+The final standalone regression for this worktree is now `999 passed, 0
 failed`, including the image parameter capability contract. The earlier
 18 legacy panel/latency and provider/registry failures were repaired in the
 same engineering re-audit and are retained only in prior receipts for
@@ -145,6 +145,17 @@ unknown capability declarations fail closed rather than silently dropping
 user intent. The r41 serving artifact remains rejected because its
 pre-Fusion generation marker and binding block are inconsistent, and r42
 remains a candidate artifact until a complete enrollment handoff is produced.
+
+## Registry Admission Diagnostics (2026-08-09)
+
+`registry_load_diagnostic` and the `registry-diagnostic` CLI now expose the
+same pre-Fusion validation reason codes used by the production load boundary.
+The command is read-only and network-free: it reports only hash-safe artifact
+status, row/profile counts, readiness projections, and a registry-path digest.
+It returns a blocked exit status for an invalid artifact but never changes the
+fail-closed behavior of `load_registry()`. The r41 serving artifact now
+produces actionable binding, catalog, probe-binding, and role-coverage
+reasons; r42 remains explicitly unpromoted.
 
 ## Image Capability Lane (2026-08-09)
 
