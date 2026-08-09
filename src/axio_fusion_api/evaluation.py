@@ -22751,8 +22751,29 @@ def _canonical_campaign_candidate_id(profiles: Sequence[ModelProfile], candidate
     if surface:
         candidate, api_format = surface
         return _axio_api_surface_id(candidate, api_format)
-    if not str(candidate_id or "").startswith("provider::"):
-        return str(candidate_id or "")
+    text = str(candidate_id or "").strip()
+    if not text.startswith("provider::"):
+        if _is_axio_public_candidate(text):
+            return text
+        exact_matches = [
+            profile
+            for profile in profiles
+            if text in {
+                str(profile.model or ""),
+                str(profile.canonical_model_id or ""),
+            }
+        ]
+        canonical_groups = {
+            str(profile.canonical_identity_sha256 or sha256_text(profile.canonical_identity))
+            for profile in exact_matches
+        }
+        if len(canonical_groups) == 1 and exact_matches:
+            representative = sorted(
+                exact_matches,
+                key=lambda profile: str(profile.profile_id or ""),
+            )[0]
+            return _provider_candidate_id(representative)
+        return text
     suffix = str(candidate_id)[len("provider::") :]
     if _looks_like_sha256(suffix):
         return f"provider::{suffix.lower()}"

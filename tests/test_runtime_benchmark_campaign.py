@@ -127,6 +127,44 @@ def test_runtime_engine_is_used_by_all_public_benchmark_surfaces(tmp_path, monke
     assert all(call["profile_id"] == "runtime-responses/runtime-reasoner" for call in client.calls)
 
 
+def test_benchmark_exact_provider_model_alias_uses_native_provider_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("AXIO_FUSION_API_KEYS", "local-benchmark-key")
+    dataset_path = tmp_path / "fixture.jsonl"
+    dataset_path.write_text(
+        json.dumps(
+            {
+                "question": "Which option is correct?",
+                "options": ["wrong", "correct", "also wrong"],
+                "answer": "B",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    client = _BenchmarkClient()
+    profiles = build_runtime_profiles(_runtime_manifest())
+    engine = FusionEngine(profiles, client=client, cache_enabled=False)
+
+    run = run_multiple_choice_benchmark(
+        suite_id="arc_challenge",
+        dataset_path=dataset_path,
+        candidate_id="runtime-reasoner",
+        api_format="",
+        live=True,
+        engine=engine,
+        provider_profiles=profiles,
+        max_latency_ms=15_000,
+    )
+
+    assert run["candidate_id"].startswith("provider::")
+    assert run["api_format"] == "provider_native"
+    assert run["case_results"][0]["status"] == "completed"
+    assert run["case_results"][0]["correct"] is True
+    assert len(client.calls) == 1
+    serialized = json.dumps(run, ensure_ascii=False)
+    assert "runtime-reasoner" not in serialized
+
+
 def test_runtime_campaign_is_diagnostic_only_and_resumable(tmp_path, monkeypatch):
     monkeypatch.setenv("AXIO_FUSION_API_KEYS", "local-benchmark-key")
     dataset_path = tmp_path / "fixture.jsonl"
