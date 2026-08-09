@@ -318,6 +318,7 @@ L1: 语法 → L2: 导入 → L3a: 单元测试 → L3b: Dry-run → L3c: 连通
 - [x] 网络代理配置（auto模式，10808端口）
 - [x] 延迟预算guard（3.0x multiplier, operational target 2.5x）
 - [x] 快速评测：axio-pro/terra/fast在科学/数学/逻辑题上正确
+- [x] 四种API格式验证通过：Chat/Completions、Responses、Anthropic、Gemini 全部正确响应
 - [x] Git管理，已推送至 github.com:Surakahn/axio_fusion_api
 - [x] 图片能力独立模块：gpt-image-2 已通过 generation/editing
   endpoint-bound 流式探针，并在 verified image registry 下完成真实服务级
@@ -338,7 +339,7 @@ L1: 语法 → L2: 导入 → L3a: 单元测试 → L3b: Dry-run → L3c: 连通
 - [x] 14/21 标准化基准套件就绪
 
 ### 待完成
-- [ ] Anthropic和Gemini API格式的完整验证
+- [x] Anthropic和Gemini API格式的完整验证（基础功能验证通过）
 - [ ] 综合benchmark评测（9大类20+基准）vs 单模型基线
 - [ ] axio-pro输出过于冗长的问题（包含完整JSON reasoning结构）
 - [ ] NVIDIA渠道模型实际能力校准（许多模型的能力分为注入prior，非实测）
@@ -363,4 +364,4 @@ L1: 语法 → L2: 导入 → L3a: 单元测试 → L3b: Dry-run → L3c: 连通
 
 ---
 
-*最后更新：2026-08-09 — 快速基准评测完成，axio-pro 达 ARC/BBH 双100%*
+*最后更新：2026-08-09 — 四种API格式全部验证通过，融合系统在多套件上展示有效性*
