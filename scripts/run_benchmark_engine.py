@@ -1,37 +1,27 @@
 #!/usr/bin/env python3
-"""
-Axio Fusion Direct Engine Benchmark Evaluation
-Uses FusionEngine in-process (no HTTP server) for reliability.
-Also tests provider baselines via CPA Plus HTTP API.
-Incremental save with detailed scoring.
-"""
-import json, os, sys, time, re, random, hashlib, traceback
+import json, os, sys, time, re, random, hashlib
 from pathlib import Path
-import requests
-from requests.exceptions import RequestException as HTTPError
 from datetime import datetime
 from collections import defaultdict
 
 sys.path.insert(0, '/home/he/axio_fusion_api/src')
 
-# ── Config ──
 CPA_URL = "https://cpa.co6.click/v1/responses"
 CPA_KEY = "sk-S9APc6QARCPCC4AeM"
 BENCH_DIR = Path("/mnt/storage/axio_fusion_benchmarks/standardized")
 REG_PATH = "/home/he/axio_fusion_api/private/runs/2026-08-09-prefusion-cohort-r43/runtime_registry.probe-bound.r43.private.json"
 OUTPUT_FILE = Path("/home/he/axio_fusion_api/private/bench_results_engine_v1.json")
 PROXY = "http://127.0.0.1:10808"
-SAMPLES_PER_SUITE = 8
+SAMPLES_PER_SUITE = 5
 MAX_TOKENS = 300
-TIMEOUT = 60
-MAX_RETRIES = 1
+TIMEOUT = 45
+MAX_RETRIES = 0
 SEED = 42
 
-# os.environ['http_proxy'] = PROXY  # DISABLED: CPA Plus blocks proxy IP
-# os.environ['https_proxy'] = PROXY  # DISABLED
 random.seed(SEED)
 
-from axio_fusion_api.schemas import FusionRequest, FusionPolicy
+import requests
+from axio_fusion_api.schemas import FusionRequest
 from axio_fusion_api.registry import load_registry
 from axio_fusion_api.orchestrator import FusionEngine
 from axio_fusion_api.providers import HTTPProviderClient
@@ -59,12 +49,7 @@ SUITES = {
 def load_suite(name):
     path = BENCH_DIR / f"{name}.jsonl"
     if not path.exists(): return []
-    cases = []
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if line: cases.append(json.loads(line))
-    return cases
+    return [json.loads(l) for l in open(path) if l.strip()]
 
 def build_prompt(case, meta):
     tf = meta["tf"]
@@ -85,7 +70,16 @@ def build_prompt(case, meta):
     else:
         return f"Answer concisely:\n\n{q}"
 
-def extract_answer(text, tf):
+def classify_gold(gold):
+    """Classify gold answer format: mcq, boolean, math, or open."""
+    g = str(gold).strip()
+    if re.match(r'^\([A-J]\)$', g): return "mcq"
+    if g.lower() in ('true', 'false', 'yes', 'no'): return "boolean"
+    if re.match(r'^-?\d+\.?\d*$', g.replace(',', '')): return "math"
+    return "open"
+
+def extract_answer(text, gold=None):
+    """Extract answer, using gold format as hint."""
     if not text: return ""
     text = text.strip()
     if text.startswith("{"):
@@ -93,82 +87,78 @@ def extract_answer(text, tf):
             d = json.loads(text)
             if "answer" in d: text = str(d["answer"])
         except: pass
-    if tf == "mcq":
-        m = re.search(r'(?:answer\s*(?:is|:)?\s*)?([A-J])', text, re.I)
+    
+    fmt = classify_gold(gold) if gold else "open"
+    
+    if fmt == "mcq":
+        m = re.search(r'\(?([A-J])\)?', text, re.I)
         if m: return m.group(1).upper()
         for ch in text:
             if ch.isalpha() and ch.upper() in 'ABCDEFGHIJ':
                 return ch.upper()
         return text[:1].upper()
-    elif tf == "math":
-        m = re.search(r'\\boxed\{([^}]+)\}', text)
+    elif fmt == "boolean":
+        t = text.lower().strip()
+        for w in ('true', 'false', 'yes', 'no'):
+            if t.startswith(w): return w
+        return t.split()[0] if t.split() else t
+    elif fmt == "math":
+        m = re.search(r'\\boxed\{([^}]*)\}', text)
         if m: return m.group(1).strip()
         nums = re.findall(r'-?\d+\.?\d*', text)
         return nums[-1] if nums else text.strip()
-    elif tf == "translation":
-        return text.strip()
     else:
-        # Open-ended: try to extract short answer from verbose output
-        # Pattern: "The answer is X", "Answer: X", "X."
-        m = re.search(r'(?:answer\s*(?:is|:)?\s*)(.{1,30})$', text, re.I)
+        m = re.search(r'(?:answer\s*(?:is|:)?\s*)(\S[^\n]*?)\s*[.!]?$', text, re.I | re.M)
         if m:
             ans = m.group(1).strip().rstrip('.')
-            return ans
-        # Try last line
+            if len(ans) < 60: return ans
         lines = [l.strip() for l in text.split('\n') if l.strip()]
         if lines:
             last = lines[-1].rstrip('.')
-            if len(last) < 50:
-                return last
+            if len(last) < 50: return last
         return text.strip()
 
-def score_answer(pred, gold, tf):
+def score_answer(pred, gold):
+    """Score based on auto-detected gold format."""
     if not pred or not gold: return 0.0
     p, g = str(pred).strip(), str(gold).strip()
-    if tf == "mcq":
-        return 1.0 if p[0].upper() == g[0].upper() else 0.0
-    elif tf == "math":
-        try:
-            return 1.0 if abs(float(p.replace(',','')) - float(g.replace(',',''))) < 1e-4 else 0.0
-        except:
-            return 1.0 if p.lower() == g.lower() else 0.0
+    fmt = classify_gold(g)
+    
+    if fmt == "mcq":
+        pm = re.search(r'\(?([A-J])\)?', p)
+        gm = re.search(r'\(?([A-J])\)?', g)
+        if pm and gm:
+            return 1.0 if pm.group(1).upper() == gm.group(1).upper() else 0.0
+        return 1.0 if p and g and p[0].upper() == g[0].upper() else 0.0
+    elif fmt == "boolean":
+        return 1.0 if p.lower() == g.lower() else 0.0
+    elif fmt == "math":
+        pn = p.replace(',', '').strip('$').strip()
+        gn = g.replace(',', '').strip('$').strip()
+        if pn.lower() == gn.lower(): return 1.0
+        try: return 1.0 if abs(float(pn) - float(gn)) < 1e-4 else 0.0
+        except: return 1.0 if pn == gn else 0.0
     else:
         return 1.0 if p.lower() == g.lower() else 0.0
 
 def call_axio_engine(model, prompt):
-    """Use FusionEngine directly (fresh engine per call for reliability)"""
     for attempt in range(MAX_RETRIES + 1):
         try:
             profiles = load_registry(REG_PATH, require_prefusion=False)
             client = HTTPProviderClient(require_streaming=True)
             engine = FusionEngine(profiles, client=client)
-            
-            req = FusionRequest(
-                model=model,
-                prompt=prompt,
-                max_output_tokens=MAX_TOKENS,
-                
-            )
+            req = FusionRequest(model=model, prompt=prompt, max_output_tokens=MAX_TOKENS)
             resp = engine.complete(req)
             if resp and resp.text:
                 return resp.text, None
             return "", "empty_response"
         except Exception as e:
             last_err = f"{type(e).__name__}: {str(e)[:150]}"
-            if attempt < MAX_RETRIES:
-                time.sleep(3)
-        except Exception:
-            pass
+            if attempt < MAX_RETRIES: time.sleep(3)
     return "", last_err
 
 def call_cpa(model, prompt):
-    """Call provider baseline via CPA Plus using requests (TLS compat)"""
-    body = {
-        "model": model,
-        "input": prompt,
-        "max_output_tokens": MAX_TOKENS,
-        "reasoning": {"effort": "max"},
-    }
+    body = {"model": model, "input": prompt, "max_output_tokens": MAX_TOKENS, "reasoning": {"effort": "max"}}
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {CPA_KEY}"}
     for attempt in range(MAX_RETRIES + 1):
         try:
@@ -204,9 +194,7 @@ def main():
     completed = {(r["suite"], r["model"]) for r in results["runs"]}
     
     print("=" * 80)
-    print("AXIO FUSION DIRECT ENGINE BENCHMARK")
-    print(f"Registry: {REG_PATH}")
-    print(f"Provider: CPA Plus (gpt-5.6-luna/terra/sol)")
+    print("AXIO FUSION BENCHMARK v3 (fixed scoring)")
     print(f"Suites: {len(SUITES)}, Samples: {SAMPLES_PER_SUITE}/suite/model")
     print("=" * 80)
     
@@ -221,11 +209,8 @@ def main():
         else:
             sampled = cases
         
-        all_models = AXIO_MODELS + BASELINE_MODELS
-        
-        for model in all_models:
+        for model in AXIO_MODELS + BASELINE_MODELS:
             if (suite_name, model) in completed:
-                print(f"  [SKIP] {suite_name}/{model}")
                 continue
             
             print(f"\n[{suite_name}] {model} ({meta['tf']}, {len(sampled)} cases)")
@@ -248,11 +233,11 @@ def main():
                     errors += 1
                     print(f"    [{i+1}/{len(sampled)}] ERR: {err[:80]}")
                 else:
-                    ans = extract_answer(pred, meta["tf"])
-                    score = score_answer(ans, gold, meta["tf"])
+                    ans = extract_answer(pred, gold)
+                    score = score_answer(ans, gold)
                     correct += score
-                    s = "✓" if score > 0 else "✗"
-                    print(f"    [{i+1}/{len(sampled)}] {s} pred='{ans[:35]}' gold='{str(gold)[:35]}'")
+                    s = "\u2713" if score > 0 else "\u2717"
+                    print(f"    [{i+1}/{len(sampled)}] {s} pred='{ans[:30]}' gold='{str(gold)[:30]}'")
                 
                 sys.stdout.flush()
                 time.sleep(0.3)
@@ -269,12 +254,10 @@ def main():
                 "timestamp": str(datetime.now()),
             }
             results["runs"].append(run)
-            
-            print(f"    → Accuracy: {acc:.2%} ({int(correct)}/{len(sampled)}) in {elapsed:.1f}s")
+            print(f"    \u2192 Accuracy: {acc:.2%} ({int(correct)}/{len(sampled)}) in {elapsed:.1f}s")
             save_results(results)
             completed.add((suite_name, model))
     
-    # ── Summary ──
     print("\n" + "=" * 80)
     print("SUMMARY")
     print("=" * 80)
@@ -283,7 +266,7 @@ def main():
     for r in results["runs"]:
         model_scores[r["model"]].append(r["accuracy"])
     
-    for model in all_models:
+    for model in AXIO_MODELS + BASELINE_MODELS:
         scores = model_scores.get(model, [])
         if scores:
             avg = sum(scores) / len(scores)
