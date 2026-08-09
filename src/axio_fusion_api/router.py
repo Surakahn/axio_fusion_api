@@ -11,8 +11,8 @@ from .policy_control import resolve_routing_policy
 from .schemas import CAPABILITY_AXES, FusionRequest, ModelProfile, sha256_text, stable_json
 
 
-FUSION_LATENCY_MULTIPLIER_GUARD = 3.0
-FUSION_OPERATIONAL_LATENCY_TARGET = 2.5
+FUSION_LATENCY_MULTIPLIER_GUARD = 4.5
+FUSION_OPERATIONAL_LATENCY_TARGET = 3.5
 LOCAL_CONSENSUS_OVERHEAD_MS = 75
 # A single parallel redundancy seat is useful when a newly enrolled provider
 # has no domain-quality evidence yet.  It does not add a serial stage, but it
@@ -30,7 +30,7 @@ FAST_DIRECT_LATENCY_WEIGHT = 0.08
 FAST_DIRECT_RELIABILITY_WEIGHT = 0.10
 FAST_DIRECT_CASCADE_SAFETY_MARGIN_MS = 150
 FAST_DIRECT_DEFAULT_DEADLINE_MS = 25000
-FAST_DIRECT_DEADLINE_MULTIPLIER = 2.5
+FAST_DIRECT_DEADLINE_MULTIPLIER = 3.5
 FAST_DIRECT_DEADLINE_MARGIN_MS = 500
 FAST_DIRECT_MAX_DEADLINE_MS = 60_000
 # A pre-Fusion role prior is allowed to open a bounded stage call when the
