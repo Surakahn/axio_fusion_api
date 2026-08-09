@@ -192,6 +192,10 @@ image registry，必须经过 generation/editing 的端点绑定探针和 90 秒
 6. **禁止**：引入超过 3 个新文件而不更新项目结构文档
 7. **禁止**：修改路由核心逻辑后不验证 route plan 正确性
 8. **禁止**：让弱模型（能力分 < 0.85 的 gpt-5.6 替代品）担任 Judge 或 Synthesizer
+10. axio-terra 存在 panel budget bug：仅完成 1-6/10 题，疑似与之前 axio-pro deadline 挤占类似
+11. Provider 基线模型（gpt-5.6-sol/terra/luna）的 CLI benchmark-run 不支持（legacy_internal 路径），需通过 HTTP API 测试
+12. HTTP 服务器需 setsid 启动以避免终端信号问题
+
 
 ---
 
@@ -288,6 +292,10 @@ L1: 语法 → L2: 导入 → L3a: 单元测试 → L3b: Dry-run → L3c: 连通
 3. Dynamic failover headroom 不再挤占 expert panel phase 预算
 
 **验证**：axio-pro live 请求 5.8 秒返回正确结果
+10. axio-terra 存在 panel budget bug：仅完成 1-6/10 题，疑似与之前 axio-pro deadline 挤占类似
+11. Provider 基线模型（gpt-5.6-sol/terra/luna）的 CLI benchmark-run 不支持（legacy_internal 路径），需通过 HTTP API 测试
+12. HTTP 服务器需 setsid 启动以避免终端信号问题
+
 
 ---
 
@@ -322,6 +330,13 @@ L1: 语法 → L2: 导入 → L3a: 单元测试 → L3b: Dry-run → L3c: 连通
 - [x] 生产 `scripts/run_server.py` 不再默认加载历史 registry；必须显式提供
   当前 `AXIO_FUSION_REGISTRY_PATH` 且通过 `require_prefusion=True`
 
+- [x] 快速基准评测完成：axio-pro 在 ARC Challenge (100%) 和 BBH (100%) 上满分
+- [x] axio-fast 在 ARC Challenge 达 80%, MATH500 达 60%
+- [x] HTTP 服务器通过 setsid 稳定运行
+- [x] Pre-fusion r45 筛选完成（partial, 1/10 模型通过双源门禁）
+- [x] 外部排名清单创建，基线冻结（3 基线: gpt-5.6-sol/terra/luna）
+- [x] 14/21 标准化基准套件就绪
+
 ### 待完成
 - [ ] Anthropic和Gemini API格式的完整验证
 - [ ] 综合benchmark评测（9大类20+基准）vs 单模型基线
@@ -341,7 +356,11 @@ L1: 语法 → L2: 导入 → L3a: 单元测试 → L3b: Dry-run → L3c: 连通
 8. r26/r27 screening artifacts 均为 partial 且当前无后台进程；失败以 timeout/
    network/empty-output 为主，不恢复部分结果
 9. baseline freeze 和 21-suite campaign 尚未完成，不做 superiority claim
+10. axio-terra 存在 panel budget bug：仅完成 1-6/10 题，疑似与之前 axio-pro deadline 挤占类似
+11. Provider 基线模型（gpt-5.6-sol/terra/luna）的 CLI benchmark-run 不支持（legacy_internal 路径），需通过 HTTP API 测试
+12. HTTP 服务器需 setsid 启动以避免终端信号问题
+
 
 ---
 
-*最后更新：2026-08-09 — 图片输入合同与单次操作 90 秒探针门禁同步*
+*最后更新：2026-08-09 — 快速基准评测完成，axio-pro 达 ARC/BBH 双100%*
