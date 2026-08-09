@@ -27,6 +27,12 @@ DEFAULT_SYSTEM_PROXY = "http://127.0.0.1:10808"
 NETWORK_MODES = ("auto", "on", "off")
 _LEGACY_HTTP_PROXY_ENV = "AXIO_FUSION_HTTP_PROXY"
 _LEGACY_USE_SYSTEM_PROXY_ENV = "AXIO_FUSION_USE_SYSTEM_PROXY"
+
+_PROXY_BYPASS_HOSTS_ENV = "AXIO_FUSION_PROXY_BYPASS_HOSTS"
+
+# Per-host proxy bypass: hosts in this env var (comma-separated)
+# always go DIRECT even when global proxy is auto/on.
+_proxy_bypass_hosts_cache: tuple[str, ...] | None = None
 _NETWORK_MODE_ENV = "AXIO_FUSION_NETWORK_MODE"
 _SYSTEM_PROXY_ENV = "AXIO_FUSION_SYSTEM_PROXY"
 
@@ -423,9 +429,11 @@ def provider_proxy_runtime_summary() -> dict[str, Any]:
     """Return a secret-free snapshot of the selected network transport."""
 
     policy = resolve_network_policy()
+    bypass_hosts = _resolve_proxy_bypass_hosts()
     return {
         "schema": "axio_fusion_api.provider_proxy_runtime.v2",
         "mode": policy.legacy_label or policy.mode,
+        "proxy_bypass_host_count": len(bypass_hosts),
         "configured": policy.configured,
         "valid": policy.valid,
         "listener_detected": policy.listener_detected,
@@ -438,6 +446,38 @@ def provider_proxy_runtime_summary() -> dict[str, Any]:
     }
 
 
+
+class _BypassProxyHandler(urllib.request.ProxyHandler):
+    """ProxyHandler that skips the proxy for configured bypass hosts."""
+
+    def __init__(self, proxies, *, bypass_hosts=()):
+        super().__init__(proxies)
+        self._bypass_hosts = frozenset(
+            host.strip().casefold()
+            for host in bypass_hosts
+            if host.strip()
+        )
+
+    def proxy_open(self, req, proxy, type_):
+        hostname = urllib.parse.urlsplit(req.get_full_url()).hostname
+        if hostname and hostname.casefold() in self._bypass_hosts:
+            return None  # urllib interprets None as "no proxy for this request"
+        return super().proxy_open(req, proxy, type_)
+
+
+def _resolve_proxy_bypass_hosts() -> tuple[str, ...]:
+    """Return configured proxy bypass hosts, cached for the process lifetime."""
+    global _proxy_bypass_hosts_cache
+    if _proxy_bypass_hosts_cache is not None:
+        return _proxy_bypass_hosts_cache
+    raw = os.getenv(_PROXY_BYPASS_HOSTS_ENV, "").strip()
+    hosts: list[str] = []
+    for part in raw.split(","):
+        host = part.strip().casefold()
+        if host:
+            hosts.append(host)
+    _proxy_bypass_hosts_cache = tuple(hosts)
+    return _proxy_bypass_hosts_cache
 class _UserAgentHandler(urllib.request.BaseHandler):
     """Inject a plain User-Agent header so Cloudflare-protected upstreams
     (TokenAPIs and similar) do not return 403/1010 blocks."""
