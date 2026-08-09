@@ -6,7 +6,7 @@ from collections import defaultdict
 
 sys.path.insert(0, '/home/he/axio_fusion_api/src')
 
-CPA_URL = "https://cpa.co6.click/v1/responses"
+CPA_URL = "http://127.0.0.1:8317/v1/responses"
 CPA_KEY = "sk-S9APc6QARCPCC4AeM"
 BENCH_DIR = Path("/mnt/storage/axio_fusion_benchmarks/standardized")
 REG_PATH = "/home/he/axio_fusion_api/private/runs/2026-08-09-prefusion-cohort-r43/runtime_registry.probe-bound.r43.private.json"
@@ -43,7 +43,15 @@ SUITES = {
     "financebench": {"category": "vertical", "tf": "open", "qk": "prompt"},
     "legalbench": {"category": "vertical", "tf": "mcq", "qk": "question", "ok": "options"},
     "bizbench": {"category": "vertical", "tf": "open", "qk": "prompt"},
-    "policyllm_policybench": {"category": "vertical", "tf": "mcq", "qk": "question", "ok": "options"},
+    "policyllm_policybench":
+
+# Ensure direct CPA access without proxy
+import os as _os
+_os.environ.setdefault('AXIO_CPA_PLUS_BASE_URL', CPA_URL.replace('/responses', ''))
+_os.environ.setdefault('AXIO_CPA_PLUS_API_KEY', CPA_KEY)
+_os.environ.setdefault('no_proxy', '127.0.0.1,localhost')
+_os.environ.setdefault('NO_PROXY', '127.0.0.1,localhost')
+ {"category": "vertical", "tf": "mcq", "qk": "question", "ok": "options"},
 }
 
 def load_suite(name):
@@ -142,17 +150,26 @@ def score_answer(pred, gold):
         return 1.0 if p.lower() == g.lower() else 0.0
 
 def call_axio_engine(model, prompt):
+    import signal as _signal
     for attempt in range(MAX_RETRIES + 1):
         try:
             profiles = load_registry(REG_PATH, require_prefusion=False)
             client = HTTPProviderClient(require_streaming=True)
             engine = FusionEngine(profiles, client=client)
             req = FusionRequest(model=model, prompt=prompt, max_output_tokens=MAX_TOKENS)
-            resp = engine.complete(req)
-            if resp and resp.text:
-                return resp.text, None
-            return "", "empty_response"
+            # Set a 60s timeout via signal
+            _signal.alarm(60)
+            try:
+                resp = engine.complete(req)
+                _signal.alarm(0)
+                if resp and resp.text:
+                    return resp.text, None
+                return "", "empty_response"
+            except Exception as _e:
+                _signal.alarm(0)
+                raise _e
         except Exception as e:
+            _signal.alarm(0)
             last_err = f"{type(e).__name__}: {str(e)[:150]}"
             if attempt < MAX_RETRIES: time.sleep(3)
     return "", last_err

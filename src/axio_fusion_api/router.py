@@ -5571,7 +5571,7 @@ def _role_assignments(
             for profile in effective_stage_profile_pool
             if _screening_role_allowed(profile, "judge")
             and profile_latency_eligibility(profile).get("eligible") is not False
-            and min(profile.capability("critique"), profile.capability("structured_output")) >= 0.50
+            and min(profile.capability("critique"), profile.capability("structured_output")) >= 0.45
         ]
         eligible_judge_operational_unassigned_profiles = [
             profile
