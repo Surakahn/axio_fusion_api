@@ -9,7 +9,7 @@ OUTPUT = Path('/home/he/axio_fusion_api/private/bench_results_v3.json')
 WORKER = '/home/he/axio_fusion_api/scripts/_bench_worker.py'
 PYTHON = '/home/he/axio_fusion_api/.venv/bin/python'
 SAMPLES = 8
-TIMEOUT_SEC = 95
+TIMEOUT_SEC = 60
 
 AXIO_MODELS = ['axio-fast', 'axio-terra', 'axio-pro']
 BASELINE_MODELS = ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol']

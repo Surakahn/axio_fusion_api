@@ -6,7 +6,7 @@ AXIO_URL = 'http://127.0.0.1:18900/v1/chat/completions'
 CPA_URL = "http://127.0.0.1:8317/v1/responses"
 CPA_KEY = 'sk-S9APc6QARCPCC4AeM'
 MAX_TOKENS = 512
-TIMEOUT = 90
+TIMEOUT = 60
 
 def run_axio(model, prompt):
     body = json.dumps({
