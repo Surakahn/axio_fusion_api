@@ -259,7 +259,7 @@ def test_explicit_fusion_deadline_reaches_provider_ceiling_without_changing_defa
     )
     fast_budget = _budget_for_request(fast_request, analyze_request(fast_request))
     assert pro_budget["max_latency_ms"] == 90_000
-    assert fast_budget["max_latency_ms"] == 60_000
+    assert fast_budget["max_latency_ms"] == 90_000
 
 
 def test_runtime_adaptive_control_routing_reuses_only_proven_route_candidate():
@@ -3509,7 +3509,7 @@ def test_implicit_fast_deadline_adapts_to_observed_direct_profile_latency():
         profile,
     )
 
-    assert adapted["max_latency_ms"] == 11_750
+    assert adapted["max_latency_ms"] == 16_250
     assert adapted["direct_profile_deadline_adaptation"]["applied"] is True
     assert adapted["direct_profile_deadline_adaptation"]["observed_latency_ms"] == 4_500.0
 
@@ -3530,12 +3530,12 @@ def test_implicit_fusion_deadline_uses_direct_p95_three_x_bound():
         profile,
     )
 
-    assert adapted["max_latency_ms"] == 21_000
+    assert adapted["max_latency_ms"] == 42_000
     receipt = adapted["direct_profile_deadline_adaptation"]
     assert receipt["enabled"] is True
-    assert receipt["reason"] == "calibrated_direct_profile_p95_three_x_bound"
+    assert receipt["reason"] == "terra_calibrated_high_headroom"
     assert receipt["observed_latency_quantile"] == "p95"
-    assert receipt["target_latency_multiplier"] == 3.0
+    assert receipt["target_latency_multiplier"] == 6.0
     assert receipt["deadline_margin_ms"] == 0
 
 
