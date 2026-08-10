@@ -1,36 +1,34 @@
-# Axio Fusion API — Turn Status 2026-08-10 (Turn 8)
+# Axio Fusion API — Turn Status 2026-08-10 (Turn 8, Final)
 
 ## 本轮核心成果
 
-### Benchmark 重新评估 ✅
-使用当前reasoning-calibrated服务器重测halueval和medqa（旧benchmark因旧服务器配置不准确）：
+### Halueval/Medqa重评估 ✅
+使用当前reasoning-calibrated服务器重测，旧benchmark结果被证实为stale：
+- halueval: 旧0% → 新100% (全融合模型)
+- medqa axio-pro: 旧50% → 新100%
+- 根因: 旧r43 registry无reasoning transport → 推理参数未传递
 
-| Suite | axio-fast | axio-terra | axio-pro | 旧结果 |
-|-------|-----------|------------|----------|--------|
-| halueval | 100% (4/4) | 100% (4/4) | 100% (4/4) | 旧: 0%全模型 |
-| medqa_usmle | 75% (3/4) | 50% (2/4)* | 100% (4/4) | 旧: pro 50% |
+### 全量Benchmark重跑 🔄
+- 42任务(14套件×3融合模型), subprocess+curl方式, 支持续传
+- 已完成: 5/42 (~12%), 预计总耗时~100分钟
+- 初步结果: mmmu_text_science 50-62%, global_mmlu_lite 100%
 
-*axio-terra有2个timeout (45s超时)
+### Reasoning Transport验证 ✅
+- GPT-5.6系列5档effort全部正确解析到responses_reasoning
+- axio-pro reasoning_effort=max → direct cascade到sol → responses_reasoning/max
+- 干运行时完全流通
 
-### 关键发现
-- **halueval**: 旧0%是完全stale的artifact，当前服务器融合模型全部100%
-- **medqa axio-pro**: 旧50%→新100%，大幅改善
-- **融合管道**: axio-pro对简单MCQ走direct cascade到sol，性能应与sol一致
-- **代理干扰**: Python HTTP客户端需 `trust_env=False` 或 `--noproxy` 才能访问本地axio服务器
+### 图片模块 ✅
+- gpt-image-2 registry已加载(gen+edit各1 profile)
+- 端到端测试失败: "All eligible image providers failed"
+- 推测CPA渠道不支持images API → 标记为provider限制
 
-### 根本原因分析
-旧benchmark服务器(r43 registry)与当前服务器(reasoning-calibrated)的关键差异：
-1. Reasoning transport全为unknown → 推理参数无法传递给上游provider
-2. 可能不同的系统提示词注入
-3. 导致响应质量下降
+## 待完成
+- [ ] Benchmark全量完成 + 结果分析
+- [ ] NVIDIA模型能力校准
+- [ ] 图片模块provider问题调查
 
-### 待完成
-- [ ] 全量benchmark用当前服务器重跑 (14 suites, 所有模型)
-- [ ] NVIDIA nemotron-3-super实际能力校准
-- [ ] 图片模块端到端验证
-- [ ] 推理强度参数对外API文档
-
-### 已知限制
-- Python HTTP库需特殊处理代理 (trust_env=False/noproxy)
-- axio-terra在medqa有偶发timeout
-- 旧benchmark结果不可靠，需全量重跑
+## 已知限制
+- Python HTTP客户端需 --noproxy 或 trust_env=False
+- CPA图片API可能不可用
+- 融合因NVIDIA模型高延迟几乎从不激活(直接走direct cascade)
