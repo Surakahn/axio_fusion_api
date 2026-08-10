@@ -2690,6 +2690,27 @@ class FusionEngine:
         if not isinstance(route_plan, dict):
             route_plan = dict(route_plan)
         roles = [role for role in route_plan.get("roles", []) if isinstance(role, Mapping)]
+        # ── Safety net: if fusion roles have no profiles, force direct mode ──
+        _has_models = bool(route_plan.get("selected_models"))
+        _roles_missing_profiles = any(
+            not (role.get("model") or role.get("profile_hashes") or role.get("profile_id"))
+            for role in roles
+        ) if roles else False
+        if _has_models and _roles_missing_profiles and len(roles) > 1:
+            # Rewrite to single-role direct using first selected model
+            first_model = route_plan["selected_models"][0] if isinstance(route_plan["selected_models"], list) and route_plan["selected_models"] else {}
+            route_plan["roles"] = [{
+                "role": "primary_solver",
+                "model": first_model if isinstance(first_model, Mapping) else {},
+                "replicas": 1,
+            }]
+            route_plan["strategy"] = route_plan.get("strategy", "") + "_safe_direct_fallback"
+            if isinstance(route_plan.get("budget"), dict):
+                route_plan["budget"]["fusion_finalization_mode"] = "direct"
+            if isinstance(route_plan.get("judge_contract"), dict):
+                route_plan["judge_contract"]["required"] = False
+            roles = route_plan["roles"]
+        # ──────────────────────────────────────────────────────────────────
         budget = route_plan.get("budget") if isinstance(route_plan.get("budget"), Mapping) else {}
         guards = route_plan.get("runtime_guards") if isinstance(route_plan.get("runtime_guards"), Mapping) else {}
         max_total_model_calls = _safe_int(
@@ -3054,16 +3075,47 @@ class FusionEngine:
                     if deadline_budget.expired:
                         break
         if not completed:
-            call_budget.release_pending_mandatory_stage_reservations(
-                reason="provider_recovery_exhausted_before_fusion_finalization",
-            )
-            deadline_budget.release_pending_stage_reservations(
-                reason="provider_recovery_exhausted_before_fusion_finalization",
-            )
-            raise FusionExecutionError(
-                "provider_execution_failed",
-                "All selected provider branches failed or returned empty output.",
-                trace={
+            # ── Degraded direct fallback: try one best untried profile ──
+            tried_ids = {c.profile_id for c in candidates if c.profile_id}
+            best_direct = None
+            for row in route_plan.get("selected_models", []):
+                if not isinstance(row, Mapping):
+                    continue
+                pid = str(row.get("profile_id") or "")
+                if pid and pid not in tried_ids:
+                    for p in self.profiles:
+                        if p.profile_id == pid and not self._circuit_open(pid):
+                            best_direct = p
+                            break
+                if best_direct:
+                    break
+            if best_direct and not deadline_budget.expired:
+                direct_role = {
+                    "role": "degraded_direct_solver",
+                    "assignment": "degraded_fallback_after_panel_exhaustion",
+                    "model": best_direct.safe_dict(),
+                }
+                dc = self._run_role(
+                    request, direct_role,
+                    route_plan=route_plan, call_budget=call_budget,
+                    cost_budget=cost_budget, deadline_budget=deadline_budget,
+                    prompt_budget=prompt_budget,
+                )
+                candidates.append(dc)
+                if dc.status == "completed" and (dc.answer.strip() or dc.tool_calls):
+                    completed.append(dc)
+            # ────────────────────────────────────────────────────────────
+            if not completed:
+                call_budget.release_pending_mandatory_stage_reservations(
+                    reason="provider_recovery_exhausted_before_fusion_finalization",
+                )
+                deadline_budget.release_pending_stage_reservations(
+                    reason="provider_recovery_exhausted_before_fusion_finalization",
+                )
+                raise FusionExecutionError(
+                    "provider_execution_failed",
+                    "All selected provider branches failed or returned empty output.",
+                    trace={
                     "route_plan": route_plan,
                     "candidate_receipts": [candidate.safe_dict() for candidate in candidates],
                     "panel_repair": panel_repair,
@@ -3721,6 +3773,13 @@ class FusionEngine:
     ) -> CandidateResult:
         model = role.get("model") if isinstance(role.get("model"), Mapping) else {}
         routed_profile = _profile_from_safe_dict(model)
+        # ── Fallback: if role has no profile, use first available ──
+        if routed_profile is None and self.profiles:
+            for p in self.profiles:
+                if not self._circuit_open(p.profile_id):
+                    routed_profile = p
+                    break
+        # ──────────────────────────────────────────────────────────
         role_name = str(role.get("role") or "primary_solver")
         hermes_plan = _effective_hermes_plan(route_plan)
         recursion_guard = (
