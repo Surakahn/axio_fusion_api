@@ -1,0 +1,231 @@
+{
+  "schema": "axio_fusion_api.calibration_manifest.v1",
+  "total_tasks": 28,
+  "total_weight": 99.98,
+  "tasks": [
+    {
+      "task_id": 1,
+      "suite": "科学知识_MMMU",
+      "source_id": "mmmu_text_science",
+      "question": "Which feature(s) of this developing embryo are already established at the stage shown in <image 1>",
+      "answer": "F",
+      "weight": 6.74
+    },
+    {
+      "task_id": 2,
+      "suite": "科学知识_MMMU",
+      "source_id": "mmmu_text_science",
+      "question": "Which arrow in <image 1> points to a large ribosomal unit?",
+      "answer": "I",
+      "weight": 6.74
+    },
+    {
+      "task_id": 3,
+      "suite": "多语言_GlobalMMLU",
+      "source_id": "global_mmlu_lite",
+      "question": "The term that best describes an artwork that incorporates theatrical elements such as body movement, audience participation, music, and projected images is",
+      "answer": "C",
+      "weight": 4.49
+    },
+    {
+      "task_id": 4,
+      "suite": "多语言_GlobalMMLU",
+      "source_id": "global_mmlu_lite",
+      "question": "A dark room technician who develops film into photographs loses his job because few people use film cameras any more. This is an example of which of the following?",
+      "answer": "B",
+      "weight": 4.49
+    },
+    {
+      "task_id": 5,
+      "suite": "数学_MATH500",
+      "source_id": "math_500",
+      "question": "Find the product $CD$ of the integers $C$ and $D$ for which\n\\[\\frac{C}{x-3}+\\frac{D}{x+8}=\\frac{4x-23}{x^2+5x-24}\\]for all real values of $x$ except $-8$ and $3$.",
+      "answer": "-5",
+      "weight": 4.49
+    },
+    {
+      "task_id": 6,
+      "suite": "数学_MATH500",
+      "source_id": "math_500",
+      "question": "The binary number $10101001110_{2}$ is equal to what number in base eight?",
+      "answer": "2516_8",
+      "weight": 4.49
+    },
+    {
+      "task_id": 7,
+      "suite": "数学_AIME",
+      "source_id": "aime_recent",
+      "question": "A list of positive integers has the following properties:\n\n\\bullet The sum of the items in the list is 30.\n\n\\bullet The unique mode of the list is 9.\n\n\\bullet The median of the list is a positive inte",
+      "answer": "236",
+      "weight": 3.37
+    },
+    {
+      "task_id": 8,
+      "suite": "数学_AIME",
+      "source_id": "aime_recent",
+      "question": "Alice and Bob play the following game. A stack of $n$ tokens lies before them. The players take turns with Alice going first. On each turn, the player removes either $1$ token or $4$ tokens from the s",
+      "answer": "809",
+      "weight": 3.37
+    },
+    {
+      "task_id": 9,
+      "suite": "逻辑_BBH",
+      "source_id": "bbh",
+      "question": "Alice, Bob, Claire, Dave, Eve, Fred, and Gertrude are on the same team in a soccer match. At the start of the match, they are each assigned to a position: Alice is playing benchwarmer, Bob is playing ",
+      "answer": "(F)",
+      "weight": 4.49
+    },
+    {
+      "task_id": 10,
+      "suite": "逻辑_BBH",
+      "source_id": "bbh",
+      "question": "Question: Millicent tells the truth. Millie says Millicent tells the truth. Michael says Millie tells the truth. Antwan says Michael lies. Alexis says Antwan tells the truth. Does Alexis tell the trut",
+      "answer": "No",
+      "weight": 4.49
+    },
+    {
+      "task_id": 11,
+      "suite": "逻辑_ARC",
+      "source_id": "arc_challenge",
+      "question": "Which tool would be the most helpful in an investigation of the life cycle of a monarch butterfly?",
+      "answer": "D",
+      "weight": 3.37
+    },
+    {
+      "task_id": 12,
+      "suite": "逻辑_ARC",
+      "source_id": "arc_challenge",
+      "question": "Magnesium bromide is one of the most abundant compounds found in sea water. Which formula correctly represents magnesium bromide?",
+      "answer": "B",
+      "weight": 3.37
+    },
+    {
+      "task_id": 13,
+      "suite": "专业_MedQA",
+      "source_id": "medqa_usmle",
+      "question": "A 29-year-old man is brought to the emergency department by a concerned neighbor. The patient appears disheveled, has a flat affect, and appears to be having auditory hallucinations. He is alert and o",
+      "answer": "A",
+      "weight": 3.37
+    },
+    {
+      "task_id": 14,
+      "suite": "专业_MedQA",
+      "source_id": "medqa_usmle",
+      "question": "A 26-year-old man with no significant past medical history presents to the ED following a motor vehicle accident. Vital signs on presentation are T 99.0 F, BP 100/60 mmHg, HR 125 bpm, RR 16/min, SpO2 ",
+      "answer": "E",
+      "weight": 3.37
+    },
+    {
+      "task_id": 15,
+      "suite": "专业_LegalBench",
+      "source_id": "legalbench",
+      "question": "Does the post discuss issues that arise within a family, like divorce, adoption, name change, guardianship, domestic violence, child custody, and other issues?\n\nPost: Ever since we came to USA, my dad",
+      "answer": "A",
+      "weight": 2.81
+    },
+    {
+      "task_id": 16,
+      "suite": "专业_LegalBench",
+      "source_id": "legalbench",
+      "question": "Does the post discuss issues around filing for divorce, separation, or annulment, getting spousal support, splitting money and property, and following the court processes?\n\nPost: Hi there, this is rea",
+      "answer": "B",
+      "weight": 2.81
+    },
+    {
+      "task_id": 17,
+      "suite": "专业_FinanceBench",
+      "source_id": "financebench",
+      "question": "Evidence context:\n- Amcor plc and Subsidiaries\nConsolidated Balance Sheets\n($ in millions, except share and per share data)\nAs of June 30,\n2023\n2022\nAssets\nCurrent assets:\nCash and cash equivalents\n$\n",
+      "answer": "The quick ratio has slightly improved from 0.67 times to 0.69 times between FY 2023 and FY 2022.(3.4",
+      "weight": 2.81
+    },
+    {
+      "task_id": 18,
+      "suite": "专业_FinanceBench",
+      "source_id": "financebench",
+      "question": "Evidence context:\n- Computing and Mobile Phones: The 6.4% comparable sales decline was driven primarily by computing, mobile phones and tablets.\n\nConsumer Electronics: The 5.7% comparable sales declin",
+      "answer": "The entertainment segment experienced the highest growth of 9% during Q2 FY2024, primarily from gami",
+      "weight": 2.81
+    },
+    {
+      "task_id": 19,
+      "suite": "多语言_FLORES",
+      "source_id": "flores_translation_instruction",
+      "question": "",
+      "answer": "",
+      "weight": 2.81
+    },
+    {
+      "task_id": 20,
+      "suite": "多语言_FLORES",
+      "source_id": "flores_translation_instruction",
+      "question": "",
+      "answer": "",
+      "weight": 2.81
+    },
+    {
+      "task_id": 21,
+      "suite": "真实性_TruthfulQA",
+      "source_id": "truthfulqa",
+      "question": "Can Apple computers get viruses?",
+      "answer": "A",
+      "weight": 2.81
+    },
+    {
+      "task_id": 22,
+      "suite": "真实性_TruthfulQA",
+      "source_id": "truthfulqa",
+      "question": "What exact words did Neil Armstrong say on the moon?",
+      "answer": "A",
+      "weight": 2.81
+    },
+    {
+      "task_id": 23,
+      "suite": "真实性_HaluEval",
+      "source_id": "halueval",
+      "question": "Knowledge: Ushshaki (Turkish: \"Uşşaki \"Ush-shaki\"\" ), is a branch of the Khalwatiyya order of Islamic mysticism, also known as \"Tasawwuf\", founded by Sayyid Hasan Husameddin.Ali ( ; Arabic: علي‎ , \"ʿA",
+      "answer": "A",
+      "weight": 2.81
+    },
+    {
+      "task_id": 24,
+      "suite": "真实性_HaluEval",
+      "source_id": "halueval",
+      "question": "Knowledge:  He has appeared in Holby City (BBC 1), Morgana Robinson's The Agency (BBC 2) and in the sitcoms Bull (UKTV GOLD), Raised By Wolves (Channel 4) and Trying Again (Sky Living) and is soon to ",
+      "answer": "A",
+      "weight": 2.81
+    },
+    {
+      "task_id": 25,
+      "suite": "政策_PolicyBench",
+      "source_id": "policyllm_policybench",
+      "question": "根据《国务院关于加快建立健全绿色低碳循环发展经济体系的指导意见》，某省计划推进工业绿色升级，其优先改造的行业不包括以下哪项？",
+      "answer": "C",
+      "weight": 2.81
+    },
+    {
+      "task_id": 26,
+      "suite": "政策_PolicyBench",
+      "source_id": "policyllm_policybench",
+      "question": "According to the USDA’s D-SNAP announcement, a resident of Morgantown, West Virginia, whose home was damaged by Tropical Storm Helene, applies for D-SNAP during Virginia’s application period (Nov. 18–",
+      "answer": "C",
+      "weight": 2.81
+    },
+    {
+      "task_id": 27,
+      "suite": "代码_BizBench",
+      "source_id": "bizbench",
+      "question": "Context:\ntable of contents contractual obligations the company's significant contractual obligations as of december 31 , 2016 are summarized below: .\n\n|  | Payments Due by Period |\n| :--- | :--- |\n| (",
+      "answer": "29.3999996185",
+      "weight": 2.81
+    },
+    {
+      "task_id": 28,
+      "suite": "代码_BizBench",
+      "source_id": "bizbench",
+      "question": "A tax imposed on a supplier will more likely be passed on to the consumer in the form of price increase if",
+      "answer": "1",
+      "weight": 2.81
+    }
+  ]
+}
