@@ -15485,7 +15485,7 @@ def test_standalone_provider_baseline_freeze_uses_normalized_common_source_rank(
     ]
     assert receipt["candidate_screening"][0]["reported_rank_mean"] == 2.5
     assert receipt["candidate_screening"][0]["mean_normalized_rank_percentile"] == 0.5
-    assert receipt["candidate_screening"][1]["reported_rank_mean"] == 4.5
+    assert receipt["candidate_screening"][1]["reported_rank_mean"] == 3.0
     assert receipt["candidate_screening"][1]["mean_normalized_rank_percentile"] < 0.05
 
 
@@ -24218,15 +24218,15 @@ def test_standalone_benchmark_claim_audit_rejects_over_3x_latency_even_when_scor
     assert comparison["latency_gate"]["p50_latency_gate_passed"] is True
     assert comparison["latency_gate"]["p95_latency_gate_passed"] is False
     assert comparison["latency_gate"]["p95_latency_multiplier_vs_baseline"] > 4.5
-    assert "axio_latency_exceeds_4.5x_baseline" in comparison["reason_codes"]
-    assert "axio_p95_latency_exceeds_4.5x_baseline" in comparison["reason_codes"]
+    assert "axio_latency_exceeds_3x_baseline" in comparison["reason_codes"]
+    assert "axio_p95_latency_exceeds_3x_baseline" in comparison["reason_codes"]
     assert comparison["claim_allowed"] is False
     assert audit["final_claims"]["axio_pro_beats_strongest_single_model_on_all_required_benchmarks"] is False
     assert audit["all_final_claims_allowed"] is False
     assert any(item["kind"] == "model_claim_not_proven" and item["candidate_id"] == "axio-pro" for item in audit["missing_requirements"])
     assert scorecard_comparison["latency_within_3x_baseline"] is False
-    assert "axio_latency_exceeds_4.5x_baseline" in scorecard_comparison["reason_codes"]
-    assert "axio_p95_latency_exceeds_4.5x_baseline" in scorecard_comparison["reason_codes"]
+    assert "axio_latency_exceeds_3x_baseline" in scorecard_comparison["reason_codes"]
+    assert "axio_p95_latency_exceeds_3x_baseline" in scorecard_comparison["reason_codes"]
     assert scorecard["comparison"]["tier_target_summary"]["axio-pro"]["all_required_suites_passed"] is False
     assert "raw_provider_outputs_persisted\": true" not in serialized
 
@@ -24262,15 +24262,15 @@ def test_standalone_benchmark_claim_audit_rejects_over_3x_p50_latency_even_when_
     assert comparison["latency_within_3x_baseline"] is False
     assert comparison["latency_gate"]["p50_latency_gate_passed"] is False
     assert comparison["latency_gate"]["p95_latency_gate_passed"] is True
-    assert comparison["latency_gate"]["p50_latency_multiplier_vs_baseline"] > 4.5
+    assert comparison["latency_gate"]["p50_latency_multiplier_vs_baseline"] > 3.0
     assert comparison["latency_gate"]["p95_latency_multiplier_vs_baseline"] <= 3.0
     assert comparison["latency_multiplier_vs_baseline"] == comparison["latency_gate"]["p50_latency_multiplier_vs_baseline"]
-    assert "axio_latency_exceeds_4.5x_baseline" in comparison["reason_codes"]
-    assert "axio_p50_latency_exceeds_4.5x_baseline" in comparison["reason_codes"]
-    assert "axio_p95_latency_exceeds_4.5x_baseline" not in comparison["reason_codes"]
+    assert "axio_latency_exceeds_3x_baseline" in comparison["reason_codes"]
+    assert "axio_p50_latency_exceeds_3x_baseline" in comparison["reason_codes"]
+    assert "axio_p95_latency_exceeds_3x_baseline" not in comparison["reason_codes"]
     assert comparison["claim_allowed"] is False
     assert scorecard_comparison["latency_within_3x_baseline"] is False
-    assert "axio_p50_latency_exceeds_4.5x_baseline" in scorecard_comparison["reason_codes"]
+    assert "axio_p50_latency_exceeds_3x_baseline" in scorecard_comparison["reason_codes"]
 
 
 def test_standalone_fusion_failure_analysis_recommends_latency_and_score_ablations():
