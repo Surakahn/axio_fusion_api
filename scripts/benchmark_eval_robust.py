@@ -70,7 +70,8 @@ def score_pred(pred: str, gold: str, ttype: str) -> float:
     if not pred or not gold: return 0.0
     p, g = extract_ans(pred, ttype), extract_ans(gold, ttype)
     if not p or not g: return 0.0
-    if ttype == 'mcq': return 1.0 if p[0].upper() == g[0].upper() else 0.0
+    if ttype == "mcq": return 1.0 if p[0].upper() == g[0].upper() else 0.0
+    if ttype == "code": return 1.0 if g.strip() in p.strip() else 0.0
     if ttype == 'math':
         try: return 1.0 if abs(float(p.replace(',','')) - float(g.replace(',',''))) < 1e-4 else 0.0
         except: return 1.0 if p.strip().lower() == g.strip().lower() else 0.0
@@ -157,7 +158,7 @@ SUITES = [
     ('global_mmlu_lite.jsonl', 'DailyWork', 'mcq'),
     ('legalbench.jsonl', 'Vertical', 'mcq'),
     ('financebench.jsonl', 'Vertical', 'text'),
-    ('bizbench.jsonl', 'Vertical', 'mcq'),
+    ('bizbench.jsonl', 'Vertical', 'code'),
     ('policyllm_policybench.jsonl', 'Vertical', 'mcq'),
     ('flores_translation_instruction.jsonl', 'Multilingual', 'text'),
     ('halueval.jsonl', 'Hallucination', 'mcq'),
