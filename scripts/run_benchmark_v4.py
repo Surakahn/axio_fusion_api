@@ -22,7 +22,7 @@ BASELINE_MODELS = ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol']
 SUITES = {
     'mmmu_text_science':     {'cat': 'science',       'fmt': 'mcq',  'qk': 'question', 'ok': 'options', 'ak': 'answer'},
     'global_mmlu_lite':      {'cat': 'multilingual',  'fmt': 'mcq',  'qk': 'question', 'ok': 'options', 'ak': 'answer'},
-    'flores_translation_instruction': {'cat': 'multilingual', 'fmt': 'open', 'qk': 'prompt', 'ak': 'answer'},
+    'flores_translation_instruction': {'cat': 'multilingual', 'fmt': 'open', 'qk': 'source', 'ak': 'reference'},
     'math_500':              {'cat': 'math',          'fmt': 'math', 'qk': 'prompt',   'ak': 'answer'},
     'aime_recent':           {'cat': 'math',          'fmt': 'math', 'qk': 'prompt',   'ak': 'answer'},
     'arc_challenge':         {'cat': 'logic',         'fmt': 'mcq',  'qk': 'question', 'ok': 'options', 'ak': 'answer'},
