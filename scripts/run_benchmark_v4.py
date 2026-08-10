@@ -31,7 +31,7 @@ SUITES = {
     'halueval':              {'cat': 'hallucination', 'fmt': 'open', 'qk': 'prompt',   'ak': 'answer'},
     'medqa_usmle':           {'cat': 'vertical',      'fmt': 'mcq',  'qk': 'question', 'ok': 'options', 'ak': 'answer'},
     'legalbench':            {'cat': 'vertical',      'fmt': 'mcq',  'qk': 'question', 'ok': 'options', 'ak': 'answer'},
-    'bizbench':              {'cat': 'vertical',      'fmt': 'open', 'qk': 'prompt',   'ak': 'answer'},
+    'bizbench':              {'cat': 'vertical',      'fmt': 'code', 'qk': 'prompt',   'ak': 'answer'},
     'financebench':          {'cat': 'vertical',      'fmt': 'open', 'qk': 'prompt',   'ak': 'answer'},
     'policyllm_policybench': {'cat': 'vertical',      'fmt': 'mcq',  'qk': 'question', 'ok': 'options', 'ak': 'answer'},
 }
@@ -82,7 +82,24 @@ def score_open(pred, gold):
     if len(g) > 5 and g in p: return 0.5
     return 0.0
 
-SCORERS = {'mcq': score_mcq, 'open': score_open, 'math': score_math}
+def score_code(pred, gold):
+    p = str(pred).strip()
+    g = str(gold).strip()
+    if not p or not g: return 0.0
+    if g in p: return 1.0
+    # 标准化空白后匹配
+    pn = ' '.join(p.split())
+    gn = ' '.join(g.split())
+    if gn and gn in pn: return 1.0
+    # 代码块提取后匹配
+    import re
+    blocks = re.findall(r'```(?:python)?\s*\n(.*?)\n```', p, re.DOTALL)
+    for block in blocks:
+        bn = ' '.join(block.split())
+        if gn and gn in bn: return 1.0
+    return 0.0
+
+SCORERS = {'mcq': score_mcq, 'open': score_open, 'math': score_math, 'code': score_code}
 
 def score(pred, gold, fmt):
     return SCORERS.get(fmt, score_open)(pred, gold)
