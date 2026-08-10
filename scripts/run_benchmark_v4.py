@@ -3,14 +3,17 @@
 import os, sys, json, time, random, re
 from pathlib import Path
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed, wait, TimeoutError, FIRST_COMPLETED
 import urllib.request, urllib.error
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))
+
+from axio_fusion_api.benchmark_execution import run_parallel_with_deadline
 
 BENCH_DIR = Path('/mnt/storage/axio_fusion_benchmarks/standardized')
 OUTPUT = Path('/home/he/axio_fusion_api/private/bench_results_v4.json')
 SAMPLES = 8
 TIMEOUT_SEC = 60
-MAX_WORKERS = 6  # Parallel HTTP calls
+MAX_WORKERS = 8  # Parallel HTTP calls
 
 AXIO_URL = 'http://127.0.0.1:18900/v1/chat/completions'
 CPA_URL = 'http://127.0.0.1:8317/v1/responses'
@@ -219,41 +222,33 @@ def main():
             correct = 0.0; errors = 0; t0 = time.time()
             call_fn = call_cpa if model.startswith('gpt-') else call_axio
             
-            # Parallel calls with total timeout
-            futures = {}
-            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-                for idx, prompt, gold in prompts:
-                    futures[executor.submit(call_fn, model, prompt)] = (idx, prompt, gold)
-                
-                total_timeout = TIMEOUT_SEC + 10  # Per-call timeout + grace
-                deadline = __import__('time').time() + total_timeout
-                remaining = set(futures.keys())
-                
-                while remaining and __import__('time').time() < deadline:
-                    done, remaining = wait(remaining, timeout=10, return_when=FIRST_COMPLETED)
-                    for future in done:
-                        idx, prompt, gold = futures[future]
-                        try:
-                            pred = future.result(timeout=5)
-                            if pred is None:
-                                errors += 1
-                                sym = 'E'
-                            else:
-                                s = score(pred, gold, meta['fmt'])
-                                correct += s
-                                sym = '✓' if s >= 1.0 else ('~' if s >= 0.5 else '✗')
-                            ps = str(pred or 'ERR')[:55].replace('\n', ' ').strip()
-                            gs = str(gold)[:35].replace('\n', ' ').strip()
-                            print(f'  [{idx+1}/{len(prompts)}] {sym} p={ps} | g={gs}', flush=True)
-                        except (TimeoutError, Exception):
-                            errors += 1
-                            print(f'  [{idx+1}/{len(prompts)}] TIMEOUT/ERR', flush=True)
-                
-                # Any remaining are timed out
-                for future in remaining:
-                    idx, prompt, gold = futures[future]
+            def run_sample(idx: int, prompt: str, gold: str):
+                pred = call_fn(model, prompt)
+                return (pred, score(pred, gold, meta['fmt'])) if pred is not None else (None, 0.0)
+
+            completed, pending = run_parallel_with_deadline(
+                [
+                    (idx, lambda idx=idx, p=prompt, g=gold: run_sample(idx, p, g))
+                    for idx, prompt, gold in prompts
+                ],
+                TIMEOUT_SEC,
+            )
+
+            for idx, prompt, gold in prompts:
+                if idx in pending:
                     errors += 1
                     print(f'  [{idx+1}/{len(prompts)}] TIMEOUT', flush=True)
+                    continue
+                pred, s = completed[idx]
+                if pred is None:
+                    errors += 1
+                    sym = 'E'
+                else:
+                    correct += s
+                    sym = '✓' if s >= 1.0 else ('~' if s >= 0.5 else '✗')
+                ps = str(pred or 'ERR')[:55].replace('\n', ' ').strip()
+                gs = str(gold)[:35].replace('\n', ' ').strip()
+                print(f'  [{idx+1}/{len(prompts)}] {sym} p={ps} | g={gs}', flush=True)
             
             acc = correct / len(prompts)
             elapsed = time.time() - t0
