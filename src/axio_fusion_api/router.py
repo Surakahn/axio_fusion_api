@@ -32,7 +32,8 @@ FAST_DIRECT_CASCADE_SAFETY_MARGIN_MS = 150
 FAST_DIRECT_DEFAULT_DEADLINE_MS = 25000
 FAST_DIRECT_DEADLINE_MULTIPLIER = 3.5
 FAST_DIRECT_DEADLINE_MARGIN_MS = 500
-FAST_DIRECT_MAX_DEADLINE_MS = 60_000
+FAST_DIRECT_MAX_DEADLINE_MS = 90_000
+TERRA_DEADLINE_MULTIPLIER = 6.0  # axio-terra gets more headroom for fragile panel fusion
 # A pre-Fusion role prior is allowed to open a bounded stage call when the
 # operational capability vector is still the explicit neutral/unknown value.
 # It never overwrites that vector or becomes benchmark evidence.  The margin
@@ -854,6 +855,10 @@ def _budget_with_direct_profile_deadline(
         target_multiplier = FAST_DIRECT_DEADLINE_MULTIPLIER
         margin_ms = FAST_DIRECT_DEADLINE_MARGIN_MS
         reason = "calibrated_direct_profile_latency"
+    elif request.public_model == "axio-terra":
+        target_multiplier = TERRA_DEADLINE_MULTIPLIER
+        margin_ms = 0
+        reason = "terra_calibrated_high_headroom"
     else:
         target_multiplier = FUSION_LATENCY_MULTIPLIER_GUARD
         margin_ms = 0
