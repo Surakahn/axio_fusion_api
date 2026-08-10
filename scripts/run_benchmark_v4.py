@@ -22,7 +22,7 @@ BASELINE_MODELS = ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol']
 SUITES = {
     'mmmu_text_science':     {'cat': 'science',       'fmt': 'mcq',  'qk': 'question', 'ok': 'options', 'ak': 'answer'},
     'global_mmlu_lite':      {'cat': 'multilingual',  'fmt': 'mcq',  'qk': 'question', 'ok': 'options', 'ak': 'answer'},
-    'flores_translation_instruction': {'cat': 'multilingual', 'fmt': 'open', 'qk': 'source', 'ak': 'reference'},
+    'flores_translation_instruction': {'cat': 'multilingual', 'fmt': 'translation', 'qk': 'source', 'ak': 'reference'},
     'math_500':              {'cat': 'math',          'fmt': 'math', 'qk': 'prompt',   'ak': 'answer'},
     'aime_recent':           {'cat': 'math',          'fmt': 'math', 'qk': 'prompt',   'ak': 'answer'},
     'arc_challenge':         {'cat': 'logic',         'fmt': 'mcq',  'qk': 'question', 'ok': 'options', 'ak': 'answer'},
@@ -32,7 +32,7 @@ SUITES = {
     'medqa_usmle':           {'cat': 'vertical',      'fmt': 'mcq',  'qk': 'question', 'ok': 'options', 'ak': 'answer'},
     'legalbench':            {'cat': 'vertical',      'fmt': 'mcq',  'qk': 'question', 'ok': 'options', 'ak': 'answer'},
     'bizbench':              {'cat': 'vertical',      'fmt': 'code', 'qk': 'prompt',   'ak': 'answer'},
-    'financebench':          {'cat': 'vertical',      'fmt': 'open', 'qk': 'prompt',   'ak': 'answer'},
+    'financebench':          {'cat': 'vertical',      'fmt': 'numeric', 'qk': 'prompt',   'ak': 'answer'},
     'policyllm_policybench': {'cat': 'vertical',      'fmt': 'mcq',  'qk': 'question', 'ok': 'options', 'ak': 'answer'},
 }
 
@@ -82,6 +82,40 @@ def score_open(pred, gold):
     if len(g) > 5 and g in p: return 0.5
     return 0.0
 
+def score_translation(pred, gold):
+    """翻译评分: 归一化字符重叠率, 对直译/意译均合理评分。"""
+    import re
+    p = re.sub(r'[^\w\u4e00-\u9fff]', '', str(pred).strip().lower())
+    g = re.sub(r'[^\w\u4e00-\u9fff]', '', str(gold).strip().lower())
+    if not g: return 0.0
+    if p == g: return 1.0
+    # 字符级 Jaccard / 包含度
+    p_chars, g_chars = set(p), set(g)
+    if not p_chars: return 0.0
+    jaccard = len(p_chars & g_chars) / len(p_chars | g_chars)
+    if jaccard >= 0.7: return 1.0
+    if jaccard >= 0.5: return 0.6
+    if jaccard >= 0.3: return 0.3
+    return 0.0
+
+def score_numeric(pred, gold):
+    """数值评分: 支持货币符号、千分位、相对误差。"""
+    import re
+    def parse_num(text):
+        m = re.findall(r'-?\d+(?:[.,]\d+)?', str(text))
+        if not m: return None
+        raw = m[-1].replace(',', '')
+        try: return float(raw)
+        except ValueError: return None
+    pn = parse_num(pred)
+    gn = parse_num(gold)
+    if pn is None or gn is None: return 0.0
+    if gn == 0: return 1.0 if pn == 0 else 0.0
+    rel = abs(pn - gn) / gn
+    if rel < 0.01: return 1.0
+    if rel < 0.05: return 0.6
+    return 0.0
+
 def score_code(pred, gold):
     p = str(pred).strip()
     g = str(gold).strip()
@@ -99,7 +133,7 @@ def score_code(pred, gold):
         if gn and gn in bn: return 1.0
     return 0.0
 
-SCORERS = {'mcq': score_mcq, 'open': score_open, 'math': score_math, 'code': score_code}
+SCORERS = {'mcq': score_mcq, 'open': score_open, 'math': score_math, 'code': score_code, 'translation': score_translation, 'numeric': score_numeric}
 
 def score(pred, gold, fmt):
     return SCORERS.get(fmt, score_open)(pred, gold)
