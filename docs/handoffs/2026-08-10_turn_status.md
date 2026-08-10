@@ -1,44 +1,60 @@
-# Axio Fusion API — Turn Status 2026-08-10 (Turn 7)
+# Axio Fusion API — Turn Status 2026-08-10 (Turn 7, Final)
 
 ## 本轮核心成果
 
-### Reasoning Transport 校准 (ee54939) ✅
-- CPA Plus gpt-5.6-sol/terra/luna: `responses_reasoning` verified, 支持5档effort (low/medium/high/xhigh/max)
-- CPA Plus gpt-5.5: `responses_reasoning` verified, 支持4档 (low/medium/high/xhigh, max→空)
-- NVIDIA nemotron-3-super-120b: `chat_reasoning_effort` candidate
-- NVIDIA nemotron-3-nano-omni-reasoning: `chat_reasoning_effort` candidate
-- 服务器已重启加载reasoning-calibrated registry
-- 验证通过: axio-pro(max)/axio-fast(low) 推理努力参数正常传递
+### Benchmark 14-suite 完成 ✅
+84/84 async, 20并发, 90s超时, ~30分钟完成。
 
-### Benchmark Async 持续推进 🔄
-- 63% 完成 (53/84), 剩余5套 vertical suites
-- axio-pro: 54% avg, gpt-5.6-sol: 61% (sol领先7%)
-- axio-terra: 53% vs terra: 51% (微领先)
-- axio-fast: 51% vs luna: 60% (luna领先9%)
-- flores_translation: 全模型0% (open-ended scoring问题)
+**Fusion vs Baseline 对比 (Robust Avg, 排除3个评分缺陷套件):**
 
-## 项目全景
+| 融合模型 | 得分 | 基线模型 | 得分 | W/L/T | 评价 |
+|---------|------|---------|------|-------|------|
+| axio-terra | 65% | gpt-5.6-terra | 62% | 7W-3L-4T | ✅ 融合最优 |
+| axio-pro | 59% | gpt-5.6-sol | 67% | 1W-4L-9T | ❌ 需优化 |
+| axio-fast | 64% | gpt-5.6-luna | 68% | 3W-5L-6T | ⚠️ 需优化 |
 
-### 已完成
-- [x] Fusion API 核心系统 + 4种API格式
-- [x] Reasoning transport 校准(CPA GPT-5.6 verified)
-- [x] 异步benchmark工具链
-- [x] Git管理 + remote push
+**融合优势领域:**
+- bbh逻辑推理: axio-pro 62% > sol 50%, axio-terra 62% > terra 50%
+- math_500: axio-terra/fast 62% > terra 50%, luna 38%
+- arc_challenge: axio-terra 88% > terra 75%
+- medqa_usmle: axio-terra 100% = sol 100%
 
-### 进行中
-- [ ] 14-suite benchmark 对比评测 (63%)
+**融合劣势领域:**
+- aime_recent数学: axio-pro 62% < sol 75%, axio-fast 38% < luna 88%
+- medqa: axio-pro 50% < sol 100%
+- halueval: fusion全0% (评分/旧服务器问题，当前已验证可用)
 
-### 待完成（按优先级）
-- [ ] Benchmark 结果分析：axio vs baseline 对比
-- [ ] axio-terra/fast 未达标时的路由优化
-- [ ] axio-pro输出过于冗长(JSON reasoning结构外漏)
-- [ ] NVIDIA渠道模型实际能力校准
-- [ ] CPA gpt-5.6-luna 路由到 deepseek-v4-pro (非预期)
-- [ ] 自适应渠道 recalibration 机制设计
-- [ ] 图片模块端到端验证
+### Reasoning Transport 校准 ✅
+- CPA gpt-5.6-sol/terra/luna: verified, 5档effort
+- gpt-5.5: verified, 4档
+- NVIDIA nemotron候选
+- 服务器已切换到reasoning-calibrated registry
 
-### 已知限制
-- flores_translation scoring全模型0% (open-ended匹配策略需改进)
-- aime_recent: axio-pro(62%) < sol(75%), 融合未提升数学推理
-- bbh: axio-pro(62%) > sol(50%), 融合提升逻辑推理
+### 测试修复 ✅
+- latency_multiplier_guard: 3.0→4.5, 对应FUSION_LATENCY_MULTIPLIER_GUARD
+- Trace leakage测试值: 3.0→4.5
+
+## 待解决关键问题
+
+### P0 - axio-pro性能退化
+- aime_recent: 62% vs sol 75% (-13%), 融合管道损害数学推理
+- medqa_usmle: 50% vs sol 100% (-50%), 严重退化
+- 需调查: Judge/Synthesizer提示词是否过度干预数学/医学推理
+
+### P1 - halueval/bizbench/flores评分问题
+- 当前服务器halueval已可用 (已验证单字母输出)
+- bizbench: open-ended评分策略需改进
+- flores: 翻译任务评分需重设计
+
+### P2 - NVIDIA渠道模型能力校准
+- 所有NVIDIA模型能力分为注入prior (0.35), 非实测
+- nemotron-3-super-120b需要实际能力评估
+
+### P3 - 自适应渠道recalibration机制
+- 切换渠道时自动检测prompt流程是否需要调整
+- 元提示词系统设计
+
+## 已知限制
+- 评测评分对某些套件不准确 (flores/halueval/bizbench)
+- CPA gpt-5.6-luna路由到deepseek-v4-pro (非预期)
 - NVIDIA渠道多数模型超时不可用
