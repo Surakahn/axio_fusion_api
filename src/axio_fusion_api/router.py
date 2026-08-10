@@ -5005,7 +5005,25 @@ def _role_latency_ms(
         except (TypeError, ValueError):
             parsed = None
         if parsed is not None and math.isfinite(parsed) and parsed > 0.0:
-            return parsed
+            # Sanity check: role-specific latency must be at least 5% of
+            # the profile-level latency.  A stale operational probe that
+            # records implausibly low per-role values (e.g. a 1 ms
+            # placeholder) must not silently override calibrated profile
+            # latency and inflate the fusion latency multiplier guard
+            # into a permanent block.
+            try:
+                profile_value = float(fallback)
+            except (TypeError, ValueError):
+                profile_value = None
+            if (
+                profile_value is not None
+                and math.isfinite(profile_value)
+                and profile_value > 0.0
+                and parsed < profile_value * 0.05
+            ):
+                pass  # fall through to profile fallback
+            else:
+                return parsed
     try:
         parsed_fallback = float(fallback)
     except (TypeError, ValueError):
