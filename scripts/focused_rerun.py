@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Focused re-benchmark for axio-terra/fast after deadline fix."""
+"""Focused re-benchmark v2: verify axio-terra/fast improvements after deadline fixes."""
 import json, subprocess, time, re, random, sys
 from pathlib import Path
 
 BENCH_DIR = Path('/mnt/storage/axio_fusion_benchmarks/standardized')
-SAMPLES = 6
+SAMPLES = 5
 
+# halueval is actually MCQ format (has options field)
 FOCUS = [
     ('legalbench', 'mcq'),
     ('financebench', 'open'),
@@ -45,11 +46,10 @@ def call_model(model, prompt):
     cmd = [sys.executable, '/home/he/axio_fusion_api/scripts/_bench_worker.py',
            '--mode', mode, '--model', model]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, input=prompt,
-                          timeout=120)
+        r = subprocess.run(cmd, capture_output=True, text=True, input=prompt, timeout=180)
         if r.returncode == 0 and r.stdout.strip():
             return r.stdout.strip(), None
-        return '', f'RC{r.returncode}:{r.stderr[:80]}'
+        return '', f'RC{r.returncode}:{r.stderr[-80:]}' if r.stderr else f'RC{r.returncode}'
     except subprocess.TimeoutExpired:
         return '', 'TIMEOUT'
     except Exception as e:
@@ -83,7 +83,10 @@ for sname, fmt in FOCUS:
                     if isinstance(opts, str):
                         try: opts = eval(opts)
                         except: opts = {}
-                    olines = '\n'.join(f'{k}: {v}' for k,v in sorted(opts.items()))
+                    if isinstance(opts, dict):
+                        olines = '\n'.join(f'{k}: {v}' for k,v in sorted(opts.items()))
+                    else:
+                        olines = str(opts)
                     prompt = f'{q}\n\nOptions:\n{olines}\n\nAnswer with just the option letter.'
                 else:
                     prompt = q
@@ -95,30 +98,29 @@ for sname, fmt in FOCUS:
                 else:
                     s = score(pred, gold, fmt)
                     correct += s
-                    sys.stdout.write('✓' if s>=1 else ('~' if s>=0.5 else 'x'))
+                    sys.stdout.write('v' if s>=1 else ('~' if s>=0.5 else 'x'))
                 sys.stdout.flush()
             
             acc = correct/len(sampled); elapsed = time.time()-t0
             all_results[key] = {'acc': acc, 'errs': errors, 'elapsed': elapsed}
-            print(f' {acc:.0%} errs={errors} {elapsed:.0f}s', flush=True)
+            print(f' {acc:.0%} e{errors} {elapsed:.0f}s', flush=True)
 
 # Summary
 print('\n' + '='*60)
+print('FOCUSED RERUN RESULTS (with TERRA 6.0x deadline)')
 for am, bm in pairs:
-    a_keys = [k for k in all_results if k.startswith(f'{am}/')]
-    b_keys = [k for k in all_results if k.startswith(f'{bm}/')]
+    a_keys = sorted([k for k in all_results if k.startswith(f'{am}/')])
+    b_keys = sorted([k for k in all_results if k.startswith(f'{bm}/')])
     a_accs = [all_results[k]['acc'] for k in a_keys]
     b_accs = [all_results[k]['acc'] for k in b_keys]
     aa = sum(a_accs)/len(a_accs) if a_accs else 0
     ba = sum(b_accs)/len(b_accs) if b_accs else 0
     dlt = aa-ba
-    sym = '▲' if dlt>0 else ('▼' if dlt<0 else '=')
-    print(f'{am} vs {bm}: {sym} {dlt:+.1%} ({aa:.1%} vs {ba:.1%})')
+    sym = 'BETTER' if dlt>0 else ('WORSE' if dlt<0 else 'TIED')
+    print(f'\n{am} vs {bm}: {sym} {dlt:+.1%} ({aa:.1%} vs {ba:.1%})')
     for k in a_keys:
         sn = k.split('/')[0]
         bv = all_results.get(f'{sn}/{bm}', {})
-    aacc = all_results[k]["acc"]
-    bacc = bv.get("acc", 0)
-    aerr = all_results[k]["errs"]
-    print(f"  {sn}: {aacc:.0%} vs {bacc:.0%} (errs={aerr})")
-    print(f"  {sn}: {aacc:.0%} vs {bacc:.0%} (errs={aerr})")
+        aacc = all_results[k]['acc']; bacc = bv.get('acc',0)
+        aerr = all_results[k]['errs']
+        print(f'  {sn:25s}: {aacc:.0%} vs {bacc:.0%} (e{aerr})')
