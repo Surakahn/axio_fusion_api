@@ -831,7 +831,10 @@ def _runtime_fusion_latency_budget(
         target_multiplier = float(guard.get("target_max_vs_single_model") or 3.0)
     except (TypeError, ValueError):
         target_multiplier = 3.0
-    target_multiplier = max(1.0, min(3.0, target_multiplier))
+    # Use the guard's own hard ceiling (e.g. 4.5 for terra, 4.5 for pro)
+    # so the panel phase budget isn't artificially squeezed below MIN_WINDOW.
+    hard_ceiling = max(3.0, float(guard.get("hard_latency_multiplier_target") or 3.0))
+    target_multiplier = max(1.0, min(hard_ceiling, target_multiplier))
     receipt.update(
         {
             "enabled": True,
@@ -841,6 +844,18 @@ def _runtime_fusion_latency_budget(
         }
     )
     if baseline <= 0.0:
+        return requested, receipt
+    # Guard against placeholder/unsampled p95 values (< 100 ms is not a real
+    # provider measurement; a 1.0 ms p95 is the router's uncalibrated default).
+    # Clamping below the transport floor would collapse the panel-phase budget
+    # and cause every candidate to be skipped (DeadlineExceeded).
+    if baseline < 100.0:
+        receipt.update(
+            {
+                "reason": "single_model_baseline_below_measurement_floor",
+                "baseline_ms": round(baseline, 3),
+            }
+        )
         return requested, receipt
     # Keep a small transport floor so an unusually optimistic probe does not
     # create a sub-second Fusion deadline that cannot carry one real stream.
