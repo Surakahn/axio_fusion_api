@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from .schemas import sha256_text
+from .router import FUSION_LATENCY_MULTIPLIER_GUARD
 
 
 def build_learning_signal_report(
@@ -1942,7 +1943,7 @@ def _shadow_patch_candidates(bucket: Mapping[str, Any], *, min_examples: int) ->
                     "max_models_min": 2,
                     "max_depth_delta": 0,
                     "min_judge_candidate_count_delta": 1,
-                    "preserve_latency_multiplier_guard": 3.0,
+                    "preserve_latency_multiplier_guard": FUSION_LATENCY_MULTIPLIER_GUARD,
                     "automatic_policy_change": False,
                 },
             )
