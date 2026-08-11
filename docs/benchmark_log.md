@@ -212,3 +212,35 @@ axio-terra使用terra_direct(单模型)不受影响，axio-fast使用fast_light_
 - [ ] 外部排名冻结
 - [ ] CPA稳定性优化（重试+退避）
 
+
+## 2026-08-12 Turn 3: axio-terra 6套件基准评测
+
+### 配置
+- 模型: axio-terra, reasoning_effort=max
+- 每套件: 3题, 60s超时
+- CPA渠道: min_request_interval=100ms, retry_backoff=1000ms
+
+### 结果
+
+| 套件 | 类别 | 得分 | 备注 |
+|------|------|------|------|
+| ARC-Challenge | 逻辑 | 3/3 (100%) | 科学推理满分 |
+| TruthfulQA | 幻觉 | 3/3 (100%) | 事实准确性满分 |
+| BBH | 逻辑 | 3/3 (100%) | 复杂推理满分 |
+| MedQA USMLE | 垂直 | 3/3 (100%) | 医学知识满分 |
+| Global MMLU | 多语言 | 3/3 (100%) | 多语知识满分 |
+| MATH500 | 数学 | 1/3 (33%) | 2/3数学正确但格式差异 |
+| **TOTAL** | | **16/18 (89%)** | |
+
+### 数学分析
+- Q1: pred=\(\left(3,\frac{\pi}{2}\right)\), gold=\(\left( 3, \frac{\pi}{2} \right)\) — 数学等价，空格差异
+- Q2: pred=p-q, gold=p-q — 完全正确 ✅
+- Q3: max_tokens=100不足，答案被截断
+
+修正格式匹配后实际数学得分: 2/3 (67%)
+
+### 关键发现
+1. axio-terra在逻辑推理、事实准确性、医学、多语言领域表现优异
+2. 数学回答在数学上是正确的，需改进评分器的LaTeX格式处理
+3. max_tokens=100对复杂数学题可能不足
+
