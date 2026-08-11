@@ -184,3 +184,31 @@ axio-terra使用terra_direct(单模型)不受影响，axio-fast使用fast_light_
 - 完整benchmark重跑(14套件)
 - CPA渠道稳定性优化
 - 外部排名冻结
+
+## 2026-08-12: Claude渠道修复 + 快速验证
+
+### Claude Messages API 适配
+- **根因**: tokenapis上的Claude模型必须使用原生 `/v1/messages` (Anthropic格式)，非 `/v1/chat/completions`
+- **修复**: `providers.py:_provider_seed_profile()` 移除tokenapis特殊处理，统一使用 `api_format: "anthropic"`
+- **验证**:
+  - claude-sonnet-5: ✅ 通过 `/v1/messages` 稳定响应（含thinking块）
+  - claude-opus-5: ✅ 通过 `/v1/messages` 稳定响应（含thinking块）
+  - SSE流式: ✅ message_start → content_block_start → content_block_delta → message_stop
+- **API格式分布**: chat(11) + responses(7) + anthropic(4) = 22 models
+
+### 快速验证
+- axio-terra: 1+1=2 ✅ (latency ~5.8s)
+- axio-pro: 2+2=4 ✅ (首次调用，latency较高)
+- axio-fast: 2+2=4 ✅ (latency ~24.7s，CPA渠道较慢)
+
+### 已知问题
+- CPA渠道偶尔返回502（间歇性）
+- axio-pro多次调用后CPA限流
+- Claude模型仅4个（fable-5, opus-4-1, opus-4-20250514, opus-4-5），缺少sonnet-5/opus-5
+
+### 下一步
+- [ ] 添加Claude顶级模型(sonnet-5, opus-5)到注册表
+- [ ] 运行完整benchmark（需CPA稳定）
+- [ ] 外部排名冻结
+- [ ] CPA稳定性优化（重试+退避）
+
