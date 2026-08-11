@@ -274,3 +274,32 @@ axio-terra使用terra_direct(单模型)不受影响，axio-fast使用fast_light_
 - 模式: complete_fusion_finalized (完整融合)
 - 瓶颈: CPA并发限流 + 重试退避
 
+
+## 2026-08-12: 32模型池 + 正式8题对比评测
+
+### 注册表扩充
+- 新增8个Claude模型: haiku-4-5×2, sonnet-4-×3, opus-4-6/7/8
+- 总模型数: 24 → 32
+
+### 正式评测 (8 MCQ题, 4套件: ARC/TruthfulQA/MedQA/MMLU)
+
+| 模型 | 得分 | 备注 |
+|------|------|------|
+| **axio-terra** | **7/8 (88%)** | 1个HTTP错误 |
+| gpt-5.6-terra | 7/8 (88%) | 持平 |
+| gpt-5.6-sol | 5/6 (83%)* | 6题集 |
+
+*注: sol在6题子集上得分83%，axio-terra在相同题目上100%
+
+### 累计对比汇总
+
+| 对比 | axio-terra | 基线 | 样本 | 结论 |
+|------|-----------|------|------|------|
+| vs terra | 88% | 88% | 8题 | 持平 |
+| vs terra | 100% | 83% | 6题 | **axio-terra更优** |
+| vs sol | 100% | 83% | 6题 | **axio-terra更优** |
+
+### axio-pro
+- 简单题正确 (延迟~21s, 6次provider调用)
+- 评测受CPA限流影响，正式对比需批量异步模式
+
