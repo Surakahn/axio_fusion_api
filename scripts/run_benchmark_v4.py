@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Axio Fusion Benchmark v4 — concurrent HTTP, parallel model calls, 14 suites."""
-import os, sys, json, time, random, re
+import os, sys, json, time, random, re, argparse
 from pathlib import Path
 from collections import defaultdict
 import urllib.request, urllib.error
@@ -12,12 +12,12 @@ from axio_fusion_api.benchmark_execution import run_parallel_with_deadline
 BENCH_DIR = Path('/mnt/storage/axio_fusion_benchmarks/standardized')
 OUTPUT = Path('/home/he/axio_fusion_api/private/bench_results_v4.json')
 SAMPLES = 8
-TIMEOUT_SEC = 60
+TIMEOUT_SEC = 90
 MAX_WORKERS = 8  # Parallel HTTP calls
 
-AXIO_URL = 'http://127.0.0.1:18900/v1/chat/completions'
-CPA_URL = 'http://127.0.0.1:8317/v1/responses'
-CPA_KEY = 'sk-S9APc6QARCPCC4AeM'
+AXIO_URL = os.environ.get('AXIO_BASE_URL', 'http://127.0.0.1:18900/v1/chat/completions')
+CPA_URL = os.environ.get('CPA_BASE_URL', 'http://127.0.0.1:8317/v1/responses')
+CPA_KEY = os.environ.get('CPA_API_KEY') or os.environ.get('AXIO_CPA_PLUS_API_KEY', '')
 
 AXIO_MODELS = ['axio-fast', 'axio-terra', 'axio-pro']
 BASELINE_MODELS = ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol']
@@ -31,13 +31,25 @@ SUITES = {
     'arc_challenge':         {'cat': 'logic',         'fmt': 'mcq',  'qk': 'question', 'ok': 'options', 'ak': 'answer'},
     'bbh':                   {'cat': 'logic',         'fmt': 'open', 'qk': 'prompt',   'ak': 'answer'},
     'truthfulqa':            {'cat': 'hallucination', 'fmt': 'mcq',  'qk': 'question', 'ok': 'options', 'ak': 'answer'},
-    'halueval':              {'cat': 'hallucination', 'fmt': 'open', 'qk': 'prompt',   'ak': 'answer'},
+    'halueval':              {'cat': 'hallucination', 'fmt': 'mcq', 'qk': 'question', 'ok': 'options', 'ak': 'answer'},
     'medqa_usmle':           {'cat': 'vertical',      'fmt': 'mcq',  'qk': 'question', 'ok': 'options', 'ak': 'answer'},
     'legalbench':            {'cat': 'vertical',      'fmt': 'mcq',  'qk': 'question', 'ok': 'options', 'ak': 'answer'},
     'bizbench':              {'cat': 'vertical',      'fmt': 'code', 'qk': 'prompt',   'ak': 'answer'},
     'financebench':          {'cat': 'vertical',      'fmt': 'numeric', 'qk': 'prompt',   'ak': 'answer'},
     'policyllm_policybench': {'cat': 'vertical',      'fmt': 'mcq',  'qk': 'question', 'ok': 'options', 'ak': 'answer'},
 }
+
+
+def should_rerun(suite: str, model: str, specs: list[str]) -> bool:
+    """判断 suite 或 suite:model 是否属于强制重跑范围。"""
+    for spec in specs:
+        if ':' in spec:
+            suite_spec, model_spec = spec.split(':', 1)
+            if suite_spec == suite and model_spec == model:
+                return True
+        elif spec == suite:
+            return True
+    return False
 
 # ── scoring (same as v3) ──
 def extract_math_answer(text):
@@ -69,11 +81,13 @@ def score_math(pred, gold):
     return 0.0
 
 def score_mcq(pred, gold):
-    p = str(pred).strip().upper()[:5]
-    g = str(gold).strip().upper()
-    for ch in p:
+    p = str(pred).strip().upper()
+    g = MCQ_DIGIT_TO_LETTER.get(str(gold).strip().upper(), str(gold).strip().upper())
+    for ch in p[:10]:
         if ch in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
             return 1.0 if ch == g else 0.0
+    if len(g) == 1 and g.isalpha() and re.search(rf'\b{g}\b', p):
+        return 1.0
     if g.lower() in str(pred).lower()[:50]: return 1.0
     return 0.0
 
@@ -138,6 +152,8 @@ def score_code(pred, gold):
 
 SCORERS = {'mcq': score_mcq, 'open': score_open, 'math': score_math, 'code': score_code, 'translation': score_translation, 'numeric': score_numeric}
 
+MCQ_DIGIT_TO_LETTER = {'1': 'A', '2': 'B', '3': 'C', '4': 'D'}
+
 def score(pred, gold, fmt):
     return SCORERS.get(fmt, score_open)(pred, gold)
 
@@ -153,8 +169,17 @@ def build_prompt(case, meta):
         opts = case.get(meta.get('ok', 'options'), {})
         if isinstance(opts, str):
             return f'{q}\n\n{opts}\n\nAnswer with just the option letter.'
+        if isinstance(opts, dict) and all(str(k) in MCQ_DIGIT_TO_LETTER for k in opts):
+            opts = {MCQ_DIGIT_TO_LETTER[str(k)]: v for k, v in opts.items()}
         olines = [f'{k}: {v}' for k, v in sorted(opts.items())] if isinstance(opts, dict) else [str(opts)]
         return f'{q}\n\nOptions:\n' + '\n'.join(olines) + '\n\nAnswer with just the option letter.'
+    if meta['fmt'] == 'translation':
+        source_lang = case.get('source_language', 'source')
+        target_lang = case.get('target_language', 'target language')
+        return (
+            f'Translate the following {source_lang} text into {target_lang}. '
+            f'Output only the translation.\n\n{q}'
+        )
     return q
 
 # ── HTTP calls ──
@@ -164,7 +189,10 @@ def call_axio(model, prompt):
     req = urllib.request.Request(AXIO_URL, data=body, headers={'Content-Type': 'application/json'})
     try:
         resp = urllib.request.urlopen(req, timeout=TIMEOUT_SEC)
-        return json.loads(resp.read()).get('choices', [{}])[0].get('message', {}).get('content', '')
+        data = json.loads(resp.read())
+        if data.get('error'):
+            return None
+        return data.get('choices', [{}])[0].get('message', {}).get('content', '') or None
     except Exception as e:
         return None
 
@@ -176,19 +204,32 @@ def call_cpa(model, prompt):
     try:
         resp = urllib.request.urlopen(req, timeout=TIMEOUT_SEC)
         data = json.loads(resp.read())
+        if data.get('error'):
+            return None
         for item in data.get('output', []):
             if item.get('type') == 'message':
                 for c in item.get('content', []):
                     if c.get('type') == 'output_text':
                         return c['text']
-        return json.dumps(data)[:500]
+        return None
     except Exception as e:
         return None
 
 # ── Main ──
-def main():
+def main(argv=None):
+    parser = argparse.ArgumentParser(description='Axio Fusion Benchmark v4')
+    parser.add_argument(
+        '--rerun',
+        action='append',
+        default=[],
+        help='suite 或 suite:model 强制重跑, 可重复传入',
+    )
+    args = parser.parse_args(argv)
+
+    random.seed(20260810)
+
     import socket
-    socket.setdefaulttimeout(65)
+    socket.setdefaulttimeout(TIMEOUT_SEC + 5)
     os.environ['no_proxy'] = '127.0.0.1,localhost'
     
     # Load existing results
@@ -196,6 +237,11 @@ def main():
         with open(OUTPUT) as f: results = json.load(f)
     else:
         results = {'runs': [], 'meta': {'samples': SAMPLES}}
+    kept = [r for r in results['runs'] if not should_rerun(r['suite'], r['model'], args.rerun)]
+    if len(kept) != len(results['runs']):
+        results['runs'] = kept
+        with open(OUTPUT, 'w') as f:
+            json.dump(results, f, indent=2, ensure_ascii=False)
     done = {(r['suite'], r['model']) for r in results['runs']}
     
     total = sum(1 for s in SUITES if load_suite(s)) * 6
