@@ -674,6 +674,69 @@ def _policy_optional_int(value: Any) -> int | None:
         return None
 
 
+
+def _fast_message_heuristic_complexity(request: Any) -> float:
+    """Estimate task complexity from user message without calling any model.
+
+    Inspects visible user text for math, code, multi-step, and domain signals.
+    Returns 0.0–1.0; values >= 0.08 indicate non-trivial tasks.
+    """
+    text_parts: list[str] = []
+    for part in getattr(request, "content_parts", ()) or ():
+        if not isinstance(part, dict):
+            continue
+        if str(part.get("role", "") or "").casefold() == "user":
+            part_text = str(part.get("text", part.get("content", "")) or "").strip()
+            if part_text:
+                text_parts.append(part_text)
+    if not text_parts:
+        fallback = str(getattr(request, "prompt", "") or "").strip()
+        if fallback:
+            text_parts.append(fallback)
+    if not text_parts:
+        return 0.0
+    text = " ".join(text_parts).lower()
+    score = 0.0
+    # Length
+    if len(text) > 400:
+        score += 0.22
+    elif len(text) > 150:
+        score += 0.12
+    elif len(text) > 60:
+        score += 0.05
+    # Math signals
+    math_kw = ["solve", "derivative", "integral", "equation", "theorem", "proof",
+               "calculate", "compute", "find the value", "sin ", "cos ", "tan ",
+               "log ", "ln ", "exp ", "sqrt", "sum ", "x=", "y=", "f(x)",
+               "dx", "dy", "limit", "matrix", "polynomial", "factor"]
+    math_hits = sum(1 for kw in math_kw if kw in text)
+    if "\\" in text or "$$" in text:
+        math_hits += 2
+    score += min(0.40, math_hits * 0.10)
+    # Code signals
+    code_kw = ["def ", "function ", "import ", "class ", "```", "html",
+               "css", "javascript", "python", "rust", "sql", "api",
+               "endpoint", "const ", "let ", "var ", "quicksort", "algorithm"]
+    code_hits = sum(1 for kw in code_kw if kw in text)
+    if "`" in text:
+        code_hits += 1
+    score += min(0.35, code_hits * 0.08)
+    # Step signals
+    step_kw = ["first", "second", "third", "finally", "then", "next",
+               "after that", "step 1", "step 2", "1.", "2.", "3."]
+    step_hits = sum(1 for kw in step_kw if kw in text)
+    score += min(0.25, step_hits * 0.08)
+    # Domain signals
+    domain_kw = ["algorithm", "complexity", "optimization", "architecture",
+                 "diagnosis", "treatment", "symptom", "disease", "medical",
+                 "lawsuit", "contract", "liability", "statute", "regulation",
+                 "revenue", "valuation", "financial", "portfolio", "investment"]
+    domain_hits = sum(1 for kw in domain_kw if kw in text)
+    score += min(0.20, domain_hits * 0.07)
+    return min(1.0, round(score, 4))
+
+
+
 def _budget_for_request(
     request: FusionRequest,
     analysis: Mapping[str, Any],
@@ -686,7 +749,13 @@ def _budget_for_request(
     quality_pressure = _quality_pressure(quality_target)
     routing_policy = routing_policy if isinstance(routing_policy, Mapping) else {}
     plugin_summary = _fusion_plugin_directive_summary(request)
-    fast_light_verify = _fast_light_verify_requested(request, analysis)
+    fast_light_verify = (
+        _fast_light_verify_requested(request, analysis)
+        or (
+            request.public_model == "axio-fast"
+            and _fast_message_heuristic_complexity(request) >= 0.04
+        )
+    )
     if model == "axio-fast":
         max_models = 2 if fast_light_verify else 1
         max_depth = 0
@@ -4538,6 +4607,7 @@ def _fast_light_verify_requested(request: FusionRequest, analysis: Mapping[str, 
         or (uncertainty >= 0.58 and complexity >= 0.35)
         or (complexity >= 0.25 and uncertainty >= 0.30)
         or _non_fusion_tools_declared(request)
+        or _fast_message_heuristic_complexity(request) >= 0.04
     )
 
 
