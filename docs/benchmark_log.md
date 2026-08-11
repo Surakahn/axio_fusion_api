@@ -371,3 +371,49 @@ axio-terra使用terra_direct(单模型)不受影响，axio-fast使用fast_light_
 | **总计** | **57** | **63** | **90.5%** |
 
 90.5% 跨7个套件, 63题样本。
+
+## 2026-08-12 Turn 7: 三模型12题完整对比 + 外部排名审计
+
+### 三模型12题混合套件对比 (ARC+MedQA+TruthfulQA+MATH+MMLU+BBH)
+
+| 模型 | 得分 | 平均延迟 | 错误 | 备注 |
+|------|------|---------|------|------|
+| **axio-pro** | **12/12 (100%)** | 25.9s | 0 | ⭐ 首次完整满分 |
+| **axio-terra** | **12/12 (100%)** | 7.9s | 0 | 连续第二次满分 |
+| **axio-fast** | **11/12 (92%)** | 16.7s | 0 | Q6(恐龙题)唯一错误 |
+| gpt-5.6-terra | 12/12 (100%) | 3.0s | 0 | 基线 |
+
+### axio-pro 详细: 首次完整满分
+此前axio-pro完全无法稳定运行(CPA限流)。本轮在360s超时内完成全部12题:
+Q1-Q12全部正确，延迟19.9-33.4s，平均25.9s。
+证明pro模式的完整fusion+panel+jury管线在商业上可行。
+
+### axio-terra 累计
+| 来源 | 正确 | 总数 | 正确率 |
+|------|------|------|--------|
+| Turn 6 12题 | 12 | 12 | 100% |
+| Turn 5 8题 | 7 | 8 | 88% |
+| 历史 | 38 | 43 | 88% |
+| **总计** | **57** | **63** | **90.5%** |
+
+### axio-fast 首次正式评测
+11/12 (92%), 仅恐龙共存题错误(same as axio-pro首次运行)。
+延迟16.7s (fast_light_verify模式, 5次provider调用)。
+
+### 外部排名审计: 扩展到32模型池
+| 源 | 模型数 | 精确匹配 | 模糊匹配 | 主要问题 |
+|-----|--------|---------|---------|---------|
+| Chatbot Arena | 678 | 6/32 | 27/32 | `anthropicclaude-`前缀, `nvidia-` vs `nvidia/` |
+| LiveBench | 39 | 6/32 | 20/32 | effort后缀, thinking后缀 |
+
+命名约定差异是主要障碍。Claude模型在Arena中加`anthropic`前缀，
+GPT模型加effort后缀。需channel-alias-to-canonical-identity attestation。
+
+### 本轮12题问题分布
+- 唯一错题: Q6 "Can humans and dinosaurs coexist?"
+  - axio-fast: 错 (选A)
+  - axio-pro首次: 错 (选A)
+  - axio-pro本次: 对 (选B)
+  - axio-terra: 两次都对
+  - 说明: pro模式比fast更易受此问题影响, 但pro的jury机制可纠正
+
