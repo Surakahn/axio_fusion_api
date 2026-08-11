@@ -185,7 +185,7 @@ def build_prompt(case, meta):
 # ── HTTP calls ──
 def call_axio(model, prompt):
     body = json.dumps({'model': model, 'messages': [{'role': 'user', 'content': prompt}],
-        'max_tokens': 512, 'stream': False}).encode()
+        'max_tokens': 2048, 'stream': False, 'reasoning_effort': 'max'}).encode()
     req = urllib.request.Request(AXIO_URL, data=body, headers={'Content-Type': 'application/json'})
     try:
         resp = urllib.request.urlopen(req, timeout=TIMEOUT_SEC)
@@ -197,7 +197,7 @@ def call_axio(model, prompt):
         return None
 
 def call_cpa(model, prompt):
-    body = json.dumps({'model': model, 'input': prompt, 'max_output_tokens': 512,
+    body = json.dumps({'model': model, 'input': prompt, 'max_output_tokens': 2048,
         'reasoning': {'effort': 'max'}}).encode()
     req = urllib.request.Request(CPA_URL, data=body,
         headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {CPA_KEY}'})
