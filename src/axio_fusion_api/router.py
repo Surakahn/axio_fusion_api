@@ -4523,7 +4523,8 @@ def _fast_light_verify_requested(request: FusionRequest, analysis: Mapping[str, 
         quality_target >= 0.82
         or bool(analysis.get("routing_policy_fast_light_verify"))
         or risk >= 0.55
-        or (uncertainty >= 0.58 and complexity >= 0.46)
+        or (uncertainty >= 0.58 and complexity >= 0.35)
+        or (complexity >= 0.25 and uncertainty >= 0.30)
         or _non_fusion_tools_declared(request)
     )
 
