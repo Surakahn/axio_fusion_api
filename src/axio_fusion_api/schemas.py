@@ -1404,6 +1404,7 @@ class FusionRequest:
     structured_output: Mapping[str, Any] = field(default_factory=dict)
     temperature: float | None = None
     top_p: float | None = None
+    top_k: int | None = None
     max_output_tokens: int | None = None
     stop: tuple[str, ...] = ()
     tools: tuple[Mapping[str, Any], ...] = ()
@@ -1501,6 +1502,7 @@ class FusionRequest:
             "max_output_tokens": self.max_output_tokens,
             "temperature": self.temperature,
             "top_p": self.top_p,
+            "top_k": self.top_k,
             "stop_sequence_count": len(self.stop),
             "stop_sha256": sha256_text(stable_json(list(self.stop))),
             "request_fingerprint": self.request_fingerprint,

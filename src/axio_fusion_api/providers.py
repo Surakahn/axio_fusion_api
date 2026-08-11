@@ -6449,6 +6449,8 @@ def _anthropic_payload(
         payload["temperature"] = request.temperature
     if request.top_p is not None:
         payload["top_p"] = request.top_p
+    if request.top_k is not None:
+        payload["top_k"] = request.top_k
     if request.stop:
         payload["stop_sequences"] = list(request.stop)
     reasoning_transport, reasoning_budget = profile.resolve_reasoning_budget(

@@ -303,3 +303,22 @@ axio-terra使用terra_direct(单模型)不受影响，axio-fast使用fast_light_
 - 简单题正确 (延迟~21s, 6次provider调用)
 - 评测受CPA限流影响，正式对比需批量异步模式
 
+
+## 2026-08-12: Claude渠道验证 + top_k支持
+
+### Claude快速基准 (4 MCQ, 知识+逻辑+数学)
+| 模型 | 得分 | 延迟 |
+|------|------|------|
+| claude-opus-5 | 4/4 (100%) | 4.3s |
+| claude-sonnet-5 | 4/4 (100%) | 4.8s |
+| claude-haiku-4-5 | 4/4 (100%) | 4.9s |
+
+### 改进
+- 添加top_k参数支持 (FusionRequest + anthropic payload)
+- Anthropic API参考文档更新 (SDK 0.72.0验证)
+- CPA responses端点正常(32.3s), chat端点正常(2.9s)
+
+### 下一轮
+- axio-terra vs terra更大样本对比
+- CPA稳定性监控
+- 尝试融合Claude模型到axio-pro panel
