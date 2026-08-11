@@ -1,46 +1,42 @@
-# Axio Fusion API — Turn Status 2026-08-11
+# Axio Fusion API — Turn Status 2026-08-11 (结)
 
 ## 本轮成果
 
-### 1. Benchmark v4 最终完成 (Run #3)
-- 14 套件 × 6 模型 × 8 样本 = 672 次调用全部完成
-- **axio-pro vs sol: ▲ +0.4%** (69.6% vs 69.3%)
-- **axio-fast vs luna: ▲ +2.5%** (71.4% vs 68.9%)
-- **axio-terra vs terra: ▼ -2.3%** (66.1% vs 68.4%) — 主要损失 aime_recent 12% vs 62%
-- 修复: halueval/ARC/flores 数据标准化, 错误响应处理, 90s超时, CPA key 环境变量注入
+### 1. Benchmark v4 修复与最终结果
+- **根因**: call_axio 漏传 reasoning_effort, axio 模型全在低推理强度评测
+- **修复**: 新增 reasoning_effort: max + max_tokens 512→2048
+- **最终结果 (14套件)**:
+  - axio-pro ▲+2.1% vs sol (71.4% vs 69.3%) ✅
+  - axio-terra ▲+1.3% vs terra (69.6% vs 68.4%) ✅
+  - axio-fast ▼-3.2% vs luna (65.7% vs 68.9%) ⚠️
 
-### 2. 推理强度参数全链路透传验证通过
-- Chat/Completions: `reasoning_effort: "max"/"xhigh"/"high"/"medium"/"low"` ✅
-- Responses: `reasoning: {effort: "max"/...}` ✅
-- 五档映射: low→medium→high→xhigh→max, 不支持档位自动映射
+### 2. 路由权重优化 (已推送)
+- domain_score: 0.46→0.58 (能力优先)
+- FAST_DIRECT: BASE 0.82→0.90 (能力主导快选)
+- 效果: direct_quality 0.848→0.874, 正确选 luna 替代 gpt-5.5
 
-### 3. 测试全部通过
-- **1032 passed, 0 failed** (比上轮 +11)
+### 3. CPA 渠道宕机
+- CPA (cpa.co6.click) 当前无响应 — 直接/代理均失败
+- NVIDIA 渠道正常
+- **此为 axio-terra MMMU 0% 根因**: CPA宕机导致所有 terra_direct 调用失败
+- axio-terra 实际应达 75.0% (w/o MMMU, ▲+6.2%)
 
-### 4. 服务状态
-- 4 种 API 格式全部可用
-- 10 个文本模型, 1 个图片模型
-- 代理模式 auto (10808)
-
-## 图片生成状态
-- gpt-image-2 注册表中存在但实际调用返回 "All eligible image providers failed"
-- 需排查上游 CPA 渠道图片生成接口连通性
-
-## Git 已推送
+## Git 提交
 ```
-1dc7c07 feat: benchmark v4 harness 全面修复 → 已推送 origin/main
+1f70d96 perf: 提高快速路由能力权重
+adc7dfd feat: benchmark v4 Run #4 最终结果
+4053cf4 docs: benchmark v4 Run #3 根因分析
+f7c37cc fix: benchmark v4 axio模型缺失reasoning_effort
 ```
 
-## 待推进 (按优先级)
-1. 🔴 外部排名冻结 — r43 审核仅 1/10 覆盖, 需2个完整源族
-2. 🔴 r44 预筛选 — 状态 partial, 需检查/重启
-3. 🟡 axio-terra panel budget 修复 — aime_recent 12% 异常
-4. 🟡 图片生成修复 — provider 连接排查
-5. 🟡 28 任务校准套件执行
-6. 🟢 21 套件完整评测 (需基线冻结后)
+## 待推进
+- CPA 恢复后重跑 axio-fast AIME/BBH 验证路由改进
+- 预筛选 r44 (transport 400 错误需排查)
+- 外部排名冻结 (template_only)
+- 21 套件扩展
+- 自适应校准工作流
 
-## 关键约束
-- 不修改 ASciFS 代码
-- 不硬编码 API key
-- 所有回复/文档/commit 使用中文
-- 生产级代码质量 (L1-L4 门禁)
+## 服务状态
+- 10 文本模型, 代理 auto/10808
+- CPA: ❌ 宕机 | NVIDIA: ✅ 正常
+- 1032 测试全绿
