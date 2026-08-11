@@ -2830,10 +2830,15 @@ class FusionEngine:
             parallel_cancel_event = threading.Event()
             executor = ThreadPoolExecutor(max_workers=max_parallel)
             futures = {}
+            # Stagger parallel submissions to avoid provider rate-limiting
+            # when multiple roles target the same upstream gateway.
+            _stagger_delay_s = 0.50
             for role_index, role in enumerate(expert_roles):
                 # ThreadPoolExecutor does not inherit ContextVars. Give each
                 # role a private context copy so a public stream observer and
                 # its cancellation signal remain visible in worker threads.
+                if role_index > 0 and _stagger_delay_s > 0:
+                    time.sleep(_stagger_delay_s)
                 role_context = copy_context()
                 panel_role = {**dict(role), "runtime_panel_phase": True}
                 future = executor.submit(
