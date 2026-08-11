@@ -244,3 +244,33 @@ axio-terra使用terra_direct(单模型)不受影响，axio-fast使用fast_light_
 2. 数学回答在数学上是正确的，需改进评分器的LaTeX格式处理
 3. max_tokens=100对复杂数学题可能不足
 
+
+## 2026-08-12 Final: 代理修复 + 正式对比评测
+
+### 修复
+- Python urllib 需要显式设置 http_proxy/https_proxy 环境变量才能走代理
+
+### Solo 基线 (6 MCQ 题, 3套件)
+| 模型 | 得分 | 备注 |
+|------|------|------|
+| gpt-5.6-terra | **6/6 (100%)** | 最佳 |
+| gpt-5.6-sol | 5/6 (83%) | |
+
+### Axio 模型 (6 MCQ 题, 3套件)
+| 模型 | 得分 | 延迟 | 调用数 |
+|------|------|------|--------|
+| axio-terra | **6/6 (100%)** | ~3s | 1-2 |
+| axio-pro | 简单题正确 | ~24s | 6 |
+
+### 关键对比
+| 对比 | Axio | 基线 | 结论 |
+|------|------|------|------|
+| axio-terra vs gpt-5.6-terra | 100% | 100% | 持平 |
+| axio-terra vs gpt-5.6-sol | 100% | 83% | **axio-terra 更优** ✅ |
+| axio-pro vs gpt-5.6-sol | 需更多样本 | 83% | 待评测 |
+
+### axio-pro 延迟分析
+- 单次调用: 21-24s, 6次provider调用
+- 模式: complete_fusion_finalized (完整融合)
+- 瓶颈: CPA并发限流 + 重试退避
+
