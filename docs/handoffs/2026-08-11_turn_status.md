@@ -40,3 +40,22 @@ f7c37cc fix: benchmark v4 axio模型缺失reasoning_effort
 - 10 文本模型, 代理 auto/10808
 - CPA: ❌ 宕机 | NVIDIA: ✅ 正常
 - 1032 测试全绿
+
+## 追加：CPA恢复 + 路由v2验证
+
+### CPA状态
+- 已恢复服务 ✅
+- axio-terra MMMU个别题目仍失败 — CPA模型对图像引用文本题返回无法解析的响应
+- 非融合系统问题：CPA直接调用同样失败
+
+### 路由v2 quick验证
+- axio-fast AIME: 2/6 (33%) vs 旧值 1/8 (12%)
+- direct_quality 0.848→0.874, 正确选luna替代gpt-5.5
+- 改善显著但未达luna的50% — fast_direct_cascade的单模型限制
+
+### 下一步优先级
+1. 补完axio-fast全量重跑 (需完整benchmark)
+2. 启用fast_light_verify处理数学推理 (需队列调整)
+3. 预筛选r44 transport修复
+4. 外部排名冻结
+5. 官方harness导入
