@@ -97,3 +97,23 @@
    - 根因: terra_direct 路径对图像引用文本题处理异常 (全部返回ERR)
    - 移除该套件后 axio-terra 达 75.0% (+6.2%)
 4. axio-fast 略低于 luna，主要损失在 aime_recent (12% vs 50%) 和 bbh (25% vs 50%)
+
+## Run #5 本轮状态 (2026-08-11 晚)
+
+### 完成
+- ✅ Claude渠道(tokenapis)集成：4模型通过流式门禁
+- ✅ 推理强度参数透传链路验证完整
+- ✅ Provider检测修复(tokenapis→chat格式)
+- ✅ 注册表合并：14模型/3Provider
+- ✅ 全部1025测试通过
+- ✅ 服务正常运行
+
+### 本轮关键指标
+- 服务器：14模型，3Provider，4种API格式
+- 图片模块：独立运行
+- axio-fast: fast_light_verify策略已激活
+
+### 下一步
+- axio-fast benchmark重跑（验证Claude加入和fast_light_verify效果）
+- 全量benchmark重跑
+- CPA渠道外部排名冻结
