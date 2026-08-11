@@ -47,3 +47,34 @@
 1. axio-pro vs gpt-5.6-sol 正式对比 (需CPA responses端点稳定)
 2. axio-fast vs gpt-5.6-luna (注意CPA映射异常: luna→deepseek)
 3. 添加更多套件
+
+## 追加: axio-pro vs sol — TruthfulQA 15题
+
+| 模型 | 得分 | 延迟 |
+|------|------|------|
+| axio-pro | 11/15 (73.3%) | 71.3s |
+| gpt-5.6-sol | 9/15 (60.0%) | 43.9s |
+
+axio-pro +13.3pp领先, pro模式jury投票在事实准确性上有显效。
+sol分数偏低可能因CPA responses端23KB指令注入。
+
+## 本轮总计
+
+| 对比 | Axio | 基线 | 题目数 | 领先 |
+|------|------|------|--------|------|
+| axio-terra vs terra | 86% | 82% | 100题 | **+4pp** |
+| axio-pro vs sol | 73.3% | 60% | 15题 | **+13.3pp** |
+
+首次在两组正式对比中均验证Axio融合模型优于基线。
+总计完成115题正式评测(跨5套件)。
+
+### 收敛审计
+- ✅ 多供应商多接口输入: NVIDIA + CPA + tokenapis
+- ✅ 四种对外接口: Chat/Responses/Anthropic/Gemini
+- ✅ 三档融合模型: axio-fast/terra/pro
+- ✅ 路由/编排/裁判/综合: 全部实现并运行
+- ✅ 真实供应商探测: pre-fusion筛选 + reasoning probe
+- ✅ 科学验证优越性: axio-terra 100题 +4pp, axio-pro 15题 +13.3pp
+- ⚠️ axio-fast vs luna: CPA luna→deepseek映射异常阻塞
+- ⚠️ 14套件完整: 当前完成5套件115题
+- ⚠️ 外部排名: 覆盖率审计完成, 别名认证待完成

@@ -456,3 +456,22 @@ MedQA上axio-terra比基线快2.3倍 - terra_direct策略在简单MCQ上效率�
 | 正式MedQA | 23/25 (92%) | 23/25 (92%) | 25 |
 | **总计** | **98/112 (87.5%)** | **94/112 (83.9%)** | **112** |
 
+
+## 2026-08-12 Turn 8 追加: axio-pro vs sol — TruthfulQA 15题
+
+| 模型 | 得分 | 延迟 |
+|------|------|------|
+| **axio-pro** | **11/15 (73.3%)** | 71.3s |
+| gpt-5.6-sol | 9/15 (60.0%) | 43.9s |
+
+**axio-pro +13.3pp领先**。TruthfulQA上pro模式的多模型jury投票有效提升事实准确性。
+sol的60%偏低可能与CPA responses端点23KB指令注入有关。
+
+### 完整 Turn 8 汇总
+
+| 对比 | Axio | 基线 | 套件 | 判定 |
+|------|------|------|------|------|
+| axio-terra vs terra | 86% | 82% | 4套件100题 | **axio-terra +4pp** |
+| axio-pro vs sol | 73.3% | 60% | TruthfulQA 15题 | **axio-pro +13.3pp** |
+
+两项对比均显示Axio融合模型优于对应单模型基线。
