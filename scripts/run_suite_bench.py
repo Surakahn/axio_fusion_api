@@ -84,6 +84,22 @@ def load_medqa(n: int) -> list[dict]:
     random.shuffle(rows)
     return rows[:n]
 
+def load_aime_recent(n: int) -> list[dict]:
+    """Load AIME 2024 problems."""
+    import pandas as pd, glob as _glob
+    files = _glob.glob(f'{BENCH_ROOT}/raw/aime_recent/*.parquet')
+    if not files:
+        return []
+    df = pd.read_parquet(files[0])
+    rows = []
+    for i in range(min(len(df), n)):
+        row = df.iloc[i]
+        prompt = str(row["Problem"]) + "\n\nProvide the final integer answer."
+        answer = str(row['Answer']).strip()
+        rows.append({'prompt': prompt, 'answer': answer, 'id': str(row.get('ID', i))})
+    random.shuffle(rows)
+    return rows[:n]
+
 def load_global_mmlu(n: int) -> list[dict]:
     path = f'{BENCH_ROOT}/raw/global_mmlu/test'
     if not os.path.exists(path):
@@ -116,20 +132,26 @@ def load_global_mmlu(n: int) -> list[dict]:
     return rows[:n]
 
 def load_bbh(n: int) -> list[dict]:
+    """Load BBH from 27 task files, sampling evenly across tasks."""
     path = f'{BENCH_ROOT}/raw/BIG-Bench-Hard/bbh'
     if not os.path.exists(path):
         return []
+    task_files = sorted([f for f in os.listdir(path) if f.endswith('.json')])
+    per_task = max(1, n // len(task_files))
     rows = []
-    for fn in os.listdir(path):
-        if fn.endswith('.json'):
-            fp = os.path.join(path, fn)
-            with open(fp) as f:
-                data = json.load(f)
-            examples = data.get('examples', [])
-            for ex in examples[:max(2, n//8)]:
-                prompt = ex.get('input', '')
-                answer = ex.get('target', '')
-                rows.append({'prompt': prompt, 'answer': str(answer).strip(), 'id': fn[:30]})
+    for fn in task_files:
+        fp = os.path.join(path, fn)
+        with open(fp) as f:
+            data = json.load(f)
+        examples = data.get('examples', [])
+        # Take first per_task from each task
+        for ex in examples[:per_task]:
+            prompt = str(ex.get('input', '')).strip()
+            answer = str(ex.get('target', '')).strip()
+            if prompt and answer:
+                task_name = fn.replace('.json', '')
+                prompt = task_name + ': ' + prompt
+                rows.append({'prompt': prompt, 'answer': answer, 'id': fn[:20]})
     random.shuffle(rows)
     return rows[:n]
 
@@ -140,6 +162,7 @@ LOADERS = {
     'medqa_usmle': load_medqa,
     'global_mmlu_lite': load_global_mmlu,
     'bbh': load_bbh,
+    'aime_recent': load_aime_recent,
 }
 
 # ── Scoring ──
@@ -171,6 +194,20 @@ def score_truthfulqa(pred: str, gold: str) -> bool:
     matches = sum(1 for w in key_words if w in pred_lower)
     return matches / len(key_words) >= 0.4
 
+def score_numeric(pred: str, gold: str) -> bool:
+    import re as _re
+    pred_nums = _re.findall(r'\d+', pred)
+    gold_num = gold.strip()
+    return gold_num in pred_nums
+
+def score_bbh(pred: str, gold: str) -> bool:
+    pred = pred.strip()
+    gold = gold.strip()
+    if gold.startswith('(') and gold.endswith(')'):
+        inner = gold[1:-1]
+        return inner.lower() in pred.lower()
+    return gold.lower() in pred.lower()
+
 # ── Main runner ──
 
 def run_bench(suite: str, model: str, questions: list[dict], timeout: int) -> dict:
@@ -179,7 +216,14 @@ def run_bench(suite: str, model: str, questions: list[dict], timeout: int) -> di
     latencies = []
     errors = 0
     
-    scorer = score_truthfulqa if suite == 'truthfulqa' else score_exact
+    if suite == 'truthfulqa':
+        scorer = score_truthfulqa
+    elif suite == 'aime_recent':
+        scorer = score_numeric
+    elif suite == 'bbh':
+        scorer = score_bbh
+    else:
+        scorer = score_exact
     
     for i, q in enumerate(questions):
         start = time.monotonic()
