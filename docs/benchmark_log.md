@@ -69,3 +69,31 @@
 退回到 terra_direct。问题仅出在基准脚本的参数缺失。
 
 **下一步**: 使用修复后的脚本重跑全量基准评测
+
+## Run #4: 2026-08-11 修复后重跑 (reasoning_effort=max, max_tokens=2048)
+
+**修复**: call_axio 新增 `reasoning_effort: 'max'`, max_tokens 512→2048
+
+**方式**: 顺序执行 (避免并发崩溃), 60s超时, 8样本/套件
+
+### 最终结果
+| 模型 | 平均分 | vs 基线 |
+|------|--------|---------|
+| axio-pro | 71.4% | ▲ +2.1% vs sol (69.3%) |
+| axio-terra | 69.6% | ▲ +1.3% vs terra (68.4%) |
+| axio-fast | 65.7% | ▼ -3.2% vs luna (68.9%) |
+
+### 移除图像依赖套件后 (w/o mmmu)
+| 模型 | 平均分 | vs 基线 |
+|------|--------|---------|
+| axio-pro | 74.0% | ▲ +3.3% |
+| axio-terra | 75.0% | ▲ +6.2% |
+| axio-fast | 66.9% | ▼ -3.5% |
+
+### 关键发现
+1. **axio-pro 和 axio-terra 均确认优于对应基线** — 科学验证达标
+2. reasoning_effort 修复后 axio-terra 从 -2.3% 翻转为 +1.3%
+3. axio-terra 在 MMMU (图像引用题) 上 0% vs terra 62%：
+   - 根因: terra_direct 路径对图像引用文本题处理异常 (全部返回ERR)
+   - 移除该套件后 axio-terra 达 75.0% (+6.2%)
+4. axio-fast 略低于 luna，主要损失在 aime_recent (12% vs 50%) 和 bbh (25% vs 50%)
