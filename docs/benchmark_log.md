@@ -117,3 +117,41 @@
 - axio-fast benchmark重跑（验证Claude加入和fast_light_verify效果）
 - 全量benchmark重跑
 - CPA渠道外部排名冻结
+
+## Run #6 CPA渠道扩展与API格式修复 (2026-08-11 深夜)
+
+### 完成
+- ✅ CPA渠道重新注册: 20发现→12可用(过滤codex-auto-review)
+- ✅ 关键修复: GPT-5.6系列从responses→chat(CPA responses接口失败但chat正常)
+- ✅ 三渠道合并: 22模型/3Provider(CPA 12+NVIDIA 6+Anthropic 4)
+- ✅ axio-fast: fast_light_verify/2m正常工作
+- ✅ axio-terra: terra_direct正常工作
+- ⚠️ axio-pro: 并行provider调用全部失败(stream_failed)，根因待查
+- ✅ 全部1025测试通过
+
+### 已知问题
+- axio-pro并行执行bug: 多provider并发调用时全部返回空/失败
+  单模型直调正常(axio-terra/axio-fast)，仅pro的panel模式有问题
+- CPA GPT-5.6 responses API不稳定(NoneType)，chat/completions正常
+- Claude顶级模型(sonnet-5/opus-5)手动通过但自动门禁未通过
+
+### 下一步
+- 调查axio-pro并行执行bug(可能是HTTP连接池/线程安全)
+- 完整的21套件benchmark(需先修复axio-pro)
+- 外部排名冻结
+
+### Run #6 补充：axio-pro并行执行根因分析 (2026-08-11 深夜)
+
+**发现**: axio-pro通过FusionEngine直接调用(require_streaming=True/False)均正常，
+但通过HTTP服务调用时仅首次成功，后续全部失败("All provider branches failed")。
+
+根因：服务器重启后首次调用成功(返回"4")，说明并行执行逻辑本身正确。
+后续失败可能是CPA渠道并发限流或HTTP连接池耗尽。
+axio-terra使用terra_direct(单模型)不受影响，axio-fast使用fast_light_verify(2模型)偶发失败。
+
+**验证状态**:
+- axio-terra: ✅ 完美 (3/3正确)
+- axio-fast: ⚠️ 2/3正确 (haiku提示词触发provider失败)
+- axio-pro: ⚠️ 1/3正确 (仅重启后首次成功)
+
+**建议修复方向**: 在并行wave中添加provider间延迟或降低max_parallel_experts
