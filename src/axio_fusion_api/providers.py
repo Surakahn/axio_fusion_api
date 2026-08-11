@@ -7643,7 +7643,7 @@ def _provider_seed_profile(provider: str) -> ModelProfile:
             }
         )
     if normalized in {"anthropic", "anthropic-compatible", "claude"}:
-        _ant_api_format = "chat" if "tokenapis" in os.environ.get("AXIO_ANTHROPIC_BASE_URL", "") else "anthropic"
+        _ant_api_format = "anthropic"
         return normalize_profile(
             {
                 "provider": "anthropic-compatible",
