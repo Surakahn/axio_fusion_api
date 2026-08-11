@@ -50,3 +50,22 @@
 - 修复 axio-terra panel budget 问题
 - 推理强度参数对外暴露和透传验证
 - 外部排名冻结(当前仍为 template_only)
+
+## Run #3 根因分析 (2026-08-11)
+
+**关键发现**: benchmark v4 的 `call_axio()` 未传递 `reasoning_effort` 参数!
+
+- 三个 axio 模型在基准测试中使用默认(低)推理强度
+- 基线模型(call_cpa)正确使用 `reasoning: {effort: 'max'}`
+- 这是 axio-terra aime_recent 12% vs terra 62% 的根本原因
+- axio-pro (+0.4%) 和 axio-fast (+2.5%) 也受不同程度影响
+
+**修复** (commit f7c37cc):
+- `call_axio()` 新增 `reasoning_effort: 'max'`
+- `max_tokens` 512→2048 (AIME推理链需更长输出)
+
+**融合系统自身验证**: 融合准入正确判断 AIME 题目 direct 模式更优
+(期望质量增益不足以覆盖 24.5s 额外延迟和成本惩罚)，axio-terra 正确地
+退回到 terra_direct。问题仅出在基准脚本的参数缺失。
+
+**下一步**: 使用修复后的脚本重跑全量基准评测
