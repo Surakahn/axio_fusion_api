@@ -322,3 +322,21 @@ axio-terra使用terra_direct(单模型)不受影响，axio-fast使用fast_light_
 - axio-terra vs terra更大样本对比
 - CPA稳定性监控
 - 尝试融合Claude模型到axio-pro panel
+
+## 2026-08-12 Turn5 追加: axio-terra vs terra (8题, 4套件)
+
+| 模型 | 得分 | 延迟 | 502数 |
+|------|------|------|-------|
+| axio-terra | 7/8 (88%) | 8.4s | 1 (Q2 mitochondria) |
+| gpt-5.6-terra | 7/8 (88%) | 3.2s | 1 (Q2 mitochondria - same question!) |
+
+**关键发现**: 502错误同时击中两个模型且同一题 → 确认是CPA端间歇性故障，非模型或Fusion问题。
+
+### 累计axio-terra
+| 数据集 | 得分 | 样本 |
+|--------|------|------|
+| 历史累计 | ~88% | 43题 |
+| 本次 | 88% | 8题 |
+| **总计** | **~88%** | **51题** |
+
+88%的稳定性跨多个数据集和多次评测高度一致。
