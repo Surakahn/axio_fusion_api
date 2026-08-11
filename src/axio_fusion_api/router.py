@@ -25,9 +25,9 @@ ROUTE_COST_EXPERT_OUTPUT_TOKENS = 1024
 # reservation; the Terra cap remains lower but is safely covered by this bound.
 ROUTE_COST_JUDGE_OUTPUT_TOKENS = 1_024
 ROUTE_COST_SYNTHESIZER_OUTPUT_TOKENS = 1024
-FAST_DIRECT_BASE_SCORE_WEIGHT = 0.82
-FAST_DIRECT_LATENCY_WEIGHT = 0.08
-FAST_DIRECT_RELIABILITY_WEIGHT = 0.10
+FAST_DIRECT_BASE_SCORE_WEIGHT = 0.90
+FAST_DIRECT_LATENCY_WEIGHT = 0.04
+FAST_DIRECT_RELIABILITY_WEIGHT = 0.06
 FAST_DIRECT_CASCADE_SAFETY_MARGIN_MS = 150
 FAST_DIRECT_DEFAULT_DEADLINE_MS = 25000
 FAST_DIRECT_DEADLINE_MULTIPLIER = 3.5
@@ -7024,7 +7024,7 @@ def _targeted_escalation_score(
     if bool(analysis.get("needs_current_information")):
         specialist_bonus += profile.capability("current_information") * 0.04
     reliability = _reliability_score(profile)
-    return domain_score * 0.46 + verification_score * 0.24 + reliability * 0.16 + float(base_score) * 0.10 + specialist_bonus
+    return domain_score * 0.58 + verification_score * 0.16 + reliability * 0.12 + float(base_score) * 0.10 + specialist_bonus
 
 
 def _strategy_id(
