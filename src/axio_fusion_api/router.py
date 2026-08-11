@@ -28,6 +28,7 @@ ROUTE_COST_SYNTHESIZER_OUTPUT_TOKENS = 1024
 FAST_DIRECT_BASE_SCORE_WEIGHT = 0.90
 FAST_DIRECT_LATENCY_WEIGHT = 0.04
 FAST_DIRECT_RELIABILITY_WEIGHT = 0.06
+FAST_DIRECT_DOMAIN_WEIGHT = 0.10  # Domain-specific capability boost for math/logic tasks
 FAST_DIRECT_CASCADE_SAFETY_MARGIN_MS = 150
 FAST_DIRECT_DEFAULT_DEADLINE_MS = 25000
 FAST_DIRECT_DEADLINE_MULTIPLIER = 3.5
@@ -2375,6 +2376,7 @@ def _legacy_neutral_capability(profile: ModelProfile, axis: str) -> bool:
 def _fast_direct_candidate_order(
     scored: Sequence[tuple[ModelProfile, float]],
     budget: Mapping[str, Any],
+    analysis: Mapping[str, Any] | None = None,
 ) -> list[tuple[ModelProfile, float]]:
     """Order the bounded Fast cascade by deadline feasibility and speed utility."""
 
@@ -2427,14 +2429,24 @@ def _fast_direct_candidate_order(
         if pair_feasible:
             candidates = pair_feasible
 
+    _analysis = analysis if isinstance(analysis, Mapping) else {}
+    _domain_axes = _analysis_capability_axes(_analysis)
+    _has_domain_info = bool(_domain_axes)
+
     def sort_key(row: tuple[ModelProfile, float]) -> tuple[float, int, float, str]:
         profile, base_score = row
         observed_latency = profile.p50_latency_ms
         latency_sort_value = int(observed_latency) if observed_latency is not None else max_latency_ms + 1
+        domain_boost = (
+            _domain_average(profile, _domain_axes) * FAST_DIRECT_DOMAIN_WEIGHT
+            if _has_domain_info
+            else 0.0
+        )
         speed_utility = (
-            float(base_score) * FAST_DIRECT_BASE_SCORE_WEIGHT
+            float(base_score) * (FAST_DIRECT_BASE_SCORE_WEIGHT - (FAST_DIRECT_DOMAIN_WEIGHT if _has_domain_info else 0.0))
             + _latency_score(profile) * FAST_DIRECT_LATENCY_WEIGHT
             + _reliability_score(profile) * FAST_DIRECT_RELIABILITY_WEIGHT
+            + domain_boost
         )
         return (
             -round(speed_utility, 8),
@@ -2459,7 +2471,7 @@ def _select_panel(
     max_models = int(budget.get("max_models") or 1)
     fast_light_verify = _fast_light_verify_enabled(request, analysis, budget)
     if request.public_model == "axio-fast" and not fast_light_verify:
-        fast_candidates = _fast_direct_candidate_order(scored, budget)
+        fast_candidates = _fast_direct_candidate_order(scored, budget, analysis)
         return [fast_candidates[0][0]] if fast_candidates else []
     selected: list[ModelProfile] = []
     seen_profiles: set[str] = set()
