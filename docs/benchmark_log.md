@@ -18,3 +18,35 @@
 - vs基线(sol 52.7%/terra 49.1%/luna 58.9%): 全部优于基线
 - 残留问题: aime_recent数学推理劣势, bizbench需专用harness, NVIDIA latency guard过严
 - 下一轮: 分析aime_recent根因, 修复NVIDIA latency guard使融合可激活
+
+## Run #3: 2026-08-11 v4 Final (当前服务器, reasoning-calibrated r1)
+- 套件: 14 (aime_recent, arc_challenge, bbh, bizbench, financebench, flores, global_mmlu_lite, halueval, legalbench, math_500, medqa_usmle, mmmu_text_science, policyllm_policybench, truthfulqa)
+- 模型: axio-pro/terra/fast + gpt-5.6-sol/terra/luna (6模型全配对)
+- 方式: 串行+并行混合, 90s超时, Random seed=20260810, 每个套件8题, 共672次调用
+- 修复: halueval字段映射(mcq), flores翻译提示词前缀, ARC选项映射(1-4→A-D), 错误响应处理, CPA key环境变量注入, 超时从60s→90s
+
+### 总体结果
+| 模型 | 平均分 | 样本数 |
+|------|--------|--------|
+| axio-fast | 71.4% | 112 |
+| axio-pro | 69.6% | 112 |
+| gpt-5.6-sol | 69.3% | 112 |
+| gpt-5.6-luna | 68.9% | 112 |
+| gpt-5.6-terra | 68.4% | 112 |
+| axio-terra | 66.1% | 112 |
+
+### 融合 vs 基线
+- axio-pro vs gpt-5.6-sol: ▲ +0.4% (14 suites) — 有效但微弱优势
+- axio-terra vs gpt-5.6-terra: ▼ -2.3% (14 suites) — **主要损失在 aime_recent: 12% vs 62%**，疑与panel budget bug相关(AGENTS.md已知问题#10)
+- axio-fast vs gpt-5.6-luna: ▲ +2.5% (14 suites) — 稳定优势
+
+### 关键发现
+- axio-terra aime_recent 仅 12% (terra 62%)，疑似 deadline budget 挤占 panel phase
+- financebench 全局困难(sol 最高 50%)
+- flores/halueval/legalbench 接近满分(100%)
+- bbh 所有模型偏低(25-50%)
+
+### 下一步
+- 修复 axio-terra panel budget 问题
+- 推理强度参数对外暴露和透传验证
+- 外部排名冻结(当前仍为 template_only)
