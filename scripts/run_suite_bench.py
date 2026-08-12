@@ -69,7 +69,7 @@ def load_medqa(n: int) -> list[dict]:
             q = d.get('question', '')
             opts = d.get('options', {})
             ans_text = d.get('answer', '')
-            ans_letter = str(ans).strip().upper()
+            ans_letter = str(ans_text).strip().upper()
             for k, v in opts.items():
                 if v == ans_text:
                     ans_letter = k
@@ -115,9 +115,9 @@ def load_policyllm(n: int) -> list[dict]:
             q = item.get('question', '')
             choice_dict = item.get('choice', {})
             ans = item.get('answer', '')
-            ans_letter = str(ans).strip().upper()
+            ans_letter = str(ans_text).strip().upper()
             if isinstance(choice_dict, dict):
-                ans_letter = str(ans).strip().upper()
+                ans_letter = str(ans_text).strip().upper()
                 # Verify it is a valid choice key
                 if ans_letter not in choice_dict:
                     for k, v in choice_dict.items():
