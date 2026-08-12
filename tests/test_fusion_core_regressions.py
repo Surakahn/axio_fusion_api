@@ -158,6 +158,30 @@ def test_runtime_fusion_latency_budget_enforces_three_x_direct_p95_guard():
     assert receipt["reason"] == "three_x_single_model_latency_guard"
 
 
+def test_runtime_fusion_latency_budget_uses_guard_target_as_hard_ceiling():
+    route_plan = {
+        "budget": {"fusion_finalization_mode": "provider_judge_synthesis"},
+        "runtime_guards": {
+            "latency_multiplier_guard": {
+                "enabled": True,
+                "target_max_vs_single_model": 4.5,
+            }
+        },
+        "fusion_admission": {
+            "direct_candidate": {
+                "p95_estimated_latency_ms": 4_978,
+            }
+        },
+    }
+
+    effective, receipt = _runtime_fusion_latency_budget(route_plan, 60_000)
+
+    assert effective == 22_401
+    assert receipt["guard_ceiling_ms"] == 22_401
+    assert receipt["target_multiplier"] == 4.5
+    assert receipt["applied"] is True
+
+
 def test_runtime_fusion_latency_budget_preserves_tighter_caller_cap():
     route_plan = {
         "budget": {"fusion_finalization_mode": "provider_judge_synthesis"},
@@ -179,6 +203,37 @@ def test_runtime_fusion_latency_budget_preserves_tighter_caller_cap():
     assert effective == 30_000
     assert receipt["applied"] is False
     assert receipt["reason"] == "within_three_x_single_model_latency_guard"
+
+
+def test_runtime_fusion_latency_budget_preserves_full_deadline_for_high_effort():
+    route_plan = {
+        "budget": {"fusion_finalization_mode": "provider_judge_synthesis"},
+        "runtime_guards": {
+            "latency_multiplier_guard": {
+                "enabled": True,
+                "target_max_vs_single_model": 4.5,
+            }
+        },
+        "fusion_admission": {
+            "direct_candidate": {"p95_estimated_latency_ms": 4_978},
+        },
+    }
+    request = FusionRequest(
+        model="axio-pro",
+        prompt="reasoning task",
+        reasoning_effort="max",
+    )
+
+    effective, receipt = _runtime_fusion_latency_budget(
+        route_plan,
+        60_000,
+        request=request,
+    )
+
+    assert effective == 60_000
+    assert receipt["applied"] is False
+    assert receipt["reason"] == "reasoning_effort_requires_full_request_deadline"
+    assert receipt["reasoning_effort"] == "max"
 
 
 def test_initial_stage_failover_does_not_consume_explicitly_reserved_initial_shape():
@@ -1297,6 +1352,27 @@ def test_fusion_panel_phase_preserves_a_fractional_control_window(monkeypatch):
     assert budget.safe_dict()["phase_deadlines_ms"] == {"fusion_panel": 58_500}
 
 
+def test_fusion_panel_phase_caps_measured_control_to_keep_minimum_window(monkeypatch):
+    clock = {"now": 0.0}
+    monkeypatch.setattr(orchestrator_module.time, "monotonic", lambda: clock["now"])
+    budget = _DeadlineBudget(
+        22_401,
+        mandatory_stage_reservations_ms={"judge": 6_403, "synthesizer": 6_403},
+    )
+    route_plan = {
+        "judge_contract": {"required": True},
+        "budget": {"fusion_finalization_mode": "provider_judge_synthesis"},
+    }
+
+    receipt = _configure_fusion_panel_phase(route_plan, budget)
+
+    assert receipt["enabled"] is True
+    assert receipt["configured"] is True
+    assert receipt["control_window_ms"] == 10_401
+    assert receipt["panel_phase_budget_ms"] == 12_000
+    assert budget.safe_dict()["phase_deadlines_ms"] == {"fusion_panel": 12_000}
+
+
 def test_fusion_panel_phase_timeout_and_admission_stop_at_phase_boundary(monkeypatch):
     clock = {"now": 0.0}
     monkeypatch.setattr(orchestrator_module.time, "monotonic", lambda: clock["now"])
@@ -1875,6 +1951,45 @@ def test_fusion_candidate_timeout_adds_bounded_runtime_context_allowance():
     assert receipt["fusion_candidate_context_extension_ms"] == 1_500
     assert receipt["fusion_candidate_context_shape_applied"] is True
     assert receipt["fusion_candidate_timeout_multiplier"] == 1.75
+
+
+def test_fusion_candidate_timeout_applies_reasoning_effort_floor():
+    profile = normalize_profile(
+        {
+            "provider": "screened-provider",
+            "model": "screened-expert",
+            "p50_latency_ms": 8_000,
+            "p95_latency_ms": 10_000,
+        }
+    )
+    request = FusionRequest(
+        model="axio-pro",
+        prompt="reasoning task",
+        reasoning_effort="max",
+    )
+
+    timeout, receipt = _timeout_for_role(
+        request,
+        _DeadlineBudget(90_000),
+        route_plan={
+            "strategy": "pro_panel_judge_escalation",
+            "budget": {
+                "max_total_model_calls": 8,
+                "fusion_finalization_mode": "provider_judge_synthesis",
+            },
+        },
+        role_name="primary_solver",
+        profile=profile,
+    )
+
+    # p95 * 1.25 + 750ms is 13.25s, but a verified max-thinking request is
+    # allowed to consume a much longer bounded attempt rather than being cut
+    # off before the upstream can stream a first token.
+    assert timeout == 45.0
+    assert receipt["fusion_candidate_timeout_applied"] is True
+    assert receipt["fusion_candidate_timeout_reasoning_effort"] == "max"
+    assert receipt["fusion_candidate_timeout_reasoning_floor_ms"] == 45_000
+    assert receipt["fusion_candidate_timeout_cap_ms"] == 45_000
 
 
 def test_fusion_candidate_timeout_leaves_unknown_profiles_and_fast_cascade_unchanged(

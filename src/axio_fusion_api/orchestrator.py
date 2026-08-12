@@ -149,7 +149,7 @@ _MANDATORY_STAGE_DEADLINE_MAX_RESERVATION_MS = 12_000
 _FUSION_CONTROL_WINDOW_FRACTION_NUMERATOR = 35
 _FUSION_CONTROL_WINDOW_FRACTION_DENOMINATOR = 100
 _FUSION_PANEL_PHASE_NAME = "fusion_panel"
-_FUSION_PANEL_PHASE_MIN_WINDOW_MS = 5_000
+_FUSION_PANEL_PHASE_MIN_WINDOW_MS = 12_000
 # Parallel expert submissions are staggered only when the request has enough
 # remaining provider-execution window to absorb the delay. A tight explicit
 # deadline must not serialize experts into missing the mandatory Judge stage.
@@ -165,6 +165,16 @@ _FUSION_CANDIDATE_TIMEOUT_MULTIPLIER_DENOMINATOR = 4
 _FUSION_CANDIDATE_TIMEOUT_MARGIN_MS = 750
 _FUSION_CANDIDATE_TIMEOUT_MIN_MS = 4_000
 _FUSION_CANDIDATE_TIMEOUT_MAX_MS = 45_000
+# High reasoning efforts can legitimately require substantially longer than
+# the short-prompt screening p95 that bounds ordinary expert attempts.  Keep
+# the p95 cap as the base policy, but give verified high/xhigh/max efforts a
+# reasoning-aware floor so a max-thinking candidate is not killed before its
+# upstream has a realistic chance to stream the first token.
+_REASONING_AWARE_CANDIDATE_TIMEOUT_FLOOR_MS = {
+    "high": 30_000,
+    "xhigh": 45_000,
+    "max": 45_000,
+}
 # Recovery is already a bounded substitution wave. Keep each replacement
 # short enough that several screened alternatives can be tried before the
 # protected Judge/Synthesizer window, while the initial panel retains its
@@ -759,7 +769,19 @@ def _configure_fusion_panel_phase(
         + _FUSION_CONTROL_WINDOW_FRACTION_DENOMINATOR
         - 1
     ) // _FUSION_CONTROL_WINDOW_FRACTION_DENOMINATOR
-    control_window_ms = max(measured_control_ms, fractional_control_ms)
+    measured_or_fractional_control_ms = max(measured_control_ms, fractional_control_ms)
+    # The panel is the one bounded window where optional expert work may run.
+    # If a conservative mandatory-stage tail would leave no usable panel, cap
+    # the control window at the smallest boundary that still protects the
+    # minimum expert window. Mandatory stages are still protected per-role
+    # when they are acquired after the panel closes.
+    control_window_ms = max(
+        0,
+        min(
+            measured_or_fractional_control_ms,
+            outer_ms - _FUSION_PANEL_PHASE_MIN_WINDOW_MS,
+        ),
+    )
     panel_phase_ms = max(0, outer_ms - control_window_ms)
     receipt.update(
         {
@@ -787,6 +809,8 @@ def _configure_fusion_panel_phase(
 def _runtime_fusion_latency_budget(
     route_plan: Mapping[str, Any],
     requested_max_latency_ms: Any,
+    *,
+    request: FusionRequest | None = None,
 ) -> tuple[int, dict[str, Any]]:
     """Apply the advertised Fusion-vs-direct latency guard at execution time."""
 
@@ -820,6 +844,19 @@ def _runtime_fusion_latency_budget(
     }
     if finalization_mode != "provider_judge_synthesis" or guard.get("enabled") is not True:
         return requested, receipt
+    requested_effort = normalize_reasoning_effort(
+        request.reasoning_effort if request is not None else ""
+    )
+    if requested_effort in {"high", "xhigh", "max"}:
+        receipt.update(
+            {
+                "enabled": True,
+                "reasoning_effort": requested_effort,
+                "reason": "reasoning_effort_requires_full_request_deadline",
+                "applied": False,
+            }
+        )
+        return requested, receipt
     direct_candidate = (
         route_plan.get("fusion_admission", {}).get("direct_candidate")
         if isinstance(route_plan.get("fusion_admission"), Mapping)
@@ -836,9 +873,15 @@ def _runtime_fusion_latency_budget(
         target_multiplier = float(guard.get("target_max_vs_single_model") or 3.0)
     except (TypeError, ValueError):
         target_multiplier = 3.0
-    # Use the guard's own hard ceiling (e.g. 4.5 for terra, 4.5 for pro)
-    # so the panel phase budget isn't artificially squeezed below MIN_WINDOW.
-    hard_ceiling = max(3.0, float(guard.get("hard_latency_multiplier_target") or 3.0))
+    # Use the guard's own hard ceiling.  Runtime guards carry the target as
+    # ``target_max_vs_single_model``; some historical plans also expose the
+    # latency-constrained-panel field as ``hard_latency_multiplier_target``.
+    hard_ceiling_value = (
+        guard.get("hard_latency_multiplier_target")
+        or guard.get("target_max_vs_single_model")
+        or 3.0
+    )
+    hard_ceiling = max(3.0, _safe_float(hard_ceiling_value, default=3.0))
     target_multiplier = max(1.0, min(hard_ceiling, target_multiplier))
     receipt.update(
         {
@@ -2754,6 +2797,7 @@ class FusionEngine:
         effective_max_latency_ms, latency_budget_receipt = _runtime_fusion_latency_budget(
             route_plan,
             requested_max_latency_ms,
+            request=request,
         )
         route_plan["runtime_fusion_latency_budget"] = latency_budget_receipt
         deadline_budget = _DeadlineBudget(
@@ -13759,6 +13803,25 @@ def _timeout_for_role(
                 _FUSION_CANDIDATE_TIMEOUT_MAX_MS,
                 cap_ms + context_extension_ms,
             )
+            requested_effort = normalize_reasoning_effort(
+                request.reasoning_effort
+            )
+            reasoning_floor_ms = _REASONING_AWARE_CANDIDATE_TIMEOUT_FLOOR_MS.get(
+                requested_effort,
+                0,
+            )
+            if reasoning_floor_ms > 0:
+                cap_ms = max(cap_ms, reasoning_floor_ms)
+                cap_ms = min(_FUSION_CANDIDATE_TIMEOUT_MAX_MS, cap_ms)
+                receipt["fusion_candidate_timeout_reasoning_effort"] = (
+                    requested_effort
+                )
+                receipt["fusion_candidate_timeout_reasoning_floor_ms"] = (
+                    reasoning_floor_ms
+                )
+                receipt["fusion_candidate_timeout_reasoning_floor_applied"] = (
+                    cap_ms >= reasoning_floor_ms
+                )
             bounded_timeout = min(ordinary_timeout, cap_ms / 1000.0)
             receipt.update(
                 {
