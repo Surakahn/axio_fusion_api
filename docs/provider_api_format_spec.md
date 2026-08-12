@@ -16,6 +16,34 @@
 - **API Keys**: 5 keys (<REDACTED>)
 - **API Format**: `v1/chat/completions` only
 
+### 3. TokenAPIs (Anthropic Messages)
+- **Base URL**: `https://tokenapis.com/v1`; native Claude requests use
+  `POST /v1/messages`
+- **API Key**: `<REDACTED>`
+- **API Format**: Anthropic Messages
+- **Supported Claude models**:
+  `claude-fable-5`, `claude-opus-4-5-20251101`, `claude-opus-5`,
+  `claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-6`,
+  `claude-sonnet-5`, `claude-sonnet-4`, `claude-sonnet-4-5`,
+  `claude-sonnet-4-5-20250929`, `claude-sonnet-4-6`,
+  `claude-haiku-4-5-20251001`
+
+## Claude / GPT Capability Tier Contract
+
+These are operator-defined ranking anchors used as routing priors until
+independent benchmark calibration overrides them:
+
+- `claude-fable-5` is in the same tier as `gpt-5.6-sol`
+- `claude-opus-5` is slightly stronger than `gpt-5.6-terra`
+- `claude-sonnet-5` is stronger than `gpt-5.6-luna`
+
+The current text Fusion route keeps this hierarchy observable:
+
+- `axio-fast` prefers the `claude-sonnet-5` band
+- `axio-terra` prefers the `claude-opus-5` band
+- `axio-pro` uses `gpt-5.6-sol`/`claude-fable-5` for the strongest band,
+  with `claude-opus-5` and `gpt-5.6-terra` as supporting experts
+
 ## Reasoning Effort Specification
 
 ### Five Standard Levels
