@@ -356,3 +356,32 @@ the profile's verified transport accepts the effective level.
 This is a control-plane and serving-quality feature only. It does not use
 benchmark prompts, labels, or evaluation outcomes, and a successful wire
 parameter probe is not evidence of a model-quality improvement.
+
+## TokenAPIs Anthropic Verified Budgets
+
+The 2026-08-13 live `reasoning-probe` run verified native
+`anthropic_thinking` budgets for the TokenAPIs Claude channel through
+`POST /v1/messages`. The candidate contract maps the five public Axio levels
+to bounded native thinking budgets:
+
+| Axio effort | `thinking.budget_tokens` |
+| --- | --- |
+| `low` | 1024 |
+| `medium` | 4096 |
+| `high` | 8192 |
+| `xhigh` | 16384 |
+| `max` | 32768 |
+
+Profiles promoted to `verified` in the current private runtime registry:
+
+- `claude-fable-5`
+- `claude-opus-5`
+- `claude-sonnet-5`
+
+`claude-haiku-4-5-20251001` remains `candidate` because its control request was
+indeterminate in this cohort; no thinking field is forwarded for it until a
+new profile-bound probe completes. This is intentional: unverified candidate
+transport stays omit rather than guessing a budget.
+
+The probe evidence is private and hash-bound; no budget payload, provider
+response body, raw prompt, or secret is retained in public documentation.
