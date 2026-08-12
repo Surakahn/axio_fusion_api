@@ -38,6 +38,7 @@ from axio_fusion_api.registry import (
     provider_configuration_source_summary,
 )
 from axio_fusion_api.router import (
+    _apply_tier_capability_band,
     _assigned_profile_for_role,
     _best_judge,
     _best_synthesizer,
@@ -54,7 +55,7 @@ from axio_fusion_api.router import (
     analyze_request,
     build_route_plan,
 )
-from axio_fusion_api.schemas import CandidateResult, FusionRequest, FusionResponse, sha256_text
+from axio_fusion_api.schemas import CandidateResult, FusionRequest, FusionResponse, ModelProfile, sha256_text
 from axio_fusion_api.latency_policy import PROVIDER_MAX_RESPONSE_SECONDS
 from axio_fusion_api.trace_store import safe_execution_trace
 from axio_fusion_api import orchestrator as orchestrator_module
@@ -80,6 +81,56 @@ def _profile(index: int, *, critique: float = 0.8, structured: float = 0.84):
             "p50_latency_ms": 120,
         }
     )
+
+
+def _capability_band_profile(model: str, *, core_average: float) -> ModelProfile:
+    """Build a synthetic profile with one uniform core reasoning average."""
+
+    return normalize_profile(
+        {
+            "provider": "unit-band",
+            "model": model,
+            "api_format": "chat",
+            "capabilities": {
+                "science_knowledge": core_average,
+                "code": core_average,
+                "math": core_average,
+                "logic": core_average,
+                "structured_output": core_average,
+            },
+            "p50_latency_ms": 120,
+        }
+    )
+
+
+def test_tier_capability_band_keeps_each_public_tier_in_its_intended_band():
+    request = FusionRequest(model="axio-fast", prompt="x")
+    scored = [
+        (_capability_band_profile("strong", core_average=0.90), 1.0),
+        (_capability_band_profile("luna", core_average=0.86), 0.9),
+        (_capability_band_profile("weak", core_average=0.72), 0.8),
+    ]
+    filtered = _apply_tier_capability_band(request, scored)
+
+    assert [profile.model for profile, _ in filtered] == ["luna"]
+
+    terra_request = FusionRequest(model="axio-terra", prompt="x")
+    terra_scored = [
+        (_capability_band_profile("sol", core_average=0.90), 1.0),
+        (_capability_band_profile("opus", core_average=0.884), 0.9),
+        (_capability_band_profile("terra", core_average=0.88), 0.8),
+        (_capability_band_profile("sonnet", core_average=0.866), 0.7),
+    ]
+    terra_filtered = _apply_tier_capability_band(terra_request, terra_scored)
+
+    assert [profile.model for profile, _ in terra_filtered] == ["opus", "terra"]
+
+    only_strong = [
+        (_capability_band_profile("strong-only", core_average=0.90), 1.0),
+    ]
+    fallback = _apply_tier_capability_band(request, only_strong)
+
+    assert [profile.model for profile, _ in fallback] == ["strong-only"]
 
 
 def test_runtime_fusion_latency_budget_enforces_three_x_direct_p95_guard():

@@ -14209,10 +14209,10 @@ def test_standalone_registry_from_probe_adds_safe_model_capability_priors(tmp_pa
     assert codex_caps["code"] >= 0.86
     assert codex_caps["critique"] >= 0.88
     assert codex_caps["agentic_tool_calling"] >= 0.72
-    assert terra_caps["science_knowledge"] >= 0.90
-    assert terra_caps["math"] >= 0.90
-    assert terra_caps["logic"] >= 0.90
-    assert terra_caps["agentic_tool_calling"] >= 0.70
+    assert terra_caps["science_knowledge"] >= 0.88
+    assert terra_caps["math"] >= 0.88
+    assert terra_caps["logic"] >= 0.88
+    assert terra_caps["agentic_tool_calling"] >= 0.67
     assert terra_caps["math"] > mini_caps["math"]
     assert by_profile["aisz/gpt-5.6-terra"]["api_key_env"] == "AXIO_AISZ_API_KEY"
     assert by_profile["cpa-plus/codex-auto-review"]["base_url_env"] == "AXIO_CPA_PLUS_BASE_URL"

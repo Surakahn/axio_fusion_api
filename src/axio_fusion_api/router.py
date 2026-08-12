@@ -38,9 +38,13 @@ FAST_DIRECT_MAX_DEADLINE_MS = 90_000
 # above this band belong to Terra/Pro tiers and must not displace the
 # intended fast-cascade candidates merely because they also have low latency.
 FAST_DIRECT_CAPABILITY_CEILING = 0.875
+FAST_DIRECT_CAPABILITY_FLOOR = 0.850
 # Terra tier maps to gpt-5.6-terra (~0.88). Exclude sol-tier profiles (~0.90)
 # so the Terra direct route does not silently upgrade to the Pro baseline.
-TERRA_DIRECT_CAPABILITY_CEILING = 0.895
+# The floor excludes the Fast luna/sonnet tier, so Terra does not silently
+# downgrade to its faster sibling when an opus/terra profile is available.
+TERRA_DIRECT_CAPABILITY_CEILING = 0.890
+TERRA_DIRECT_CAPABILITY_FLOOR = 0.876
 TERRA_DEADLINE_MULTIPLIER = 6.0  # axio-terra gets more headroom for fragile panel fusion
 # A pre-Fusion role prior is allowed to open a bounded stage call when the
 # operational capability vector is still the explicit neutral/unknown value.
@@ -2288,22 +2292,27 @@ def _apply_tier_capability_band(
 ) -> list[tuple[ModelProfile, float]]:
     """Constrain Fast/Terra direct routes to their intended capability band.
 
-    ``axio-fast`` maps to the luna tier and ``axio-terra`` to the terra tier.
-    Profiles materially above that band belong to a higher public tier; using
-    them as a direct solver would silently collapse the three-tier product
-    into a single strongest-model path. The pro tier keeps the full pool.
+    ``axio-fast`` maps to the luna/sonnet tier and ``axio-terra`` to the
+    terra/opus tier. Profiles materially above a band belong to a higher
+    public tier; using them as a direct solver would silently collapse the
+    three-tier product into a single strongest-model path. The lower bound
+    prevents a fast route from degrading to a much weaker model when the
+    intended tier is present, while still allowing the normal pool fallback
+    when no profile lies inside the band. The pro tier keeps the full pool.
     """
 
     if request.public_model == "axio-fast":
         ceiling = FAST_DIRECT_CAPABILITY_CEILING
+        floor = FAST_DIRECT_CAPABILITY_FLOOR
     elif request.public_model == "axio-terra":
         ceiling = TERRA_DIRECT_CAPABILITY_CEILING
+        floor = TERRA_DIRECT_CAPABILITY_FLOOR
     else:
         return list(scored)
     band = [
         row
         for row in scored
-        if _profile_capability_average(row[0]) <= ceiling
+        if floor <= _profile_capability_average(row[0]) <= ceiling
     ]
     return band if band else list(scored)
 
