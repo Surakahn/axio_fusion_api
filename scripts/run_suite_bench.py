@@ -69,7 +69,7 @@ def load_medqa(n: int) -> list[dict]:
             q = d.get('question', '')
             opts = d.get('options', {})
             ans_text = d.get('answer', '')
-            ans_letter = ''
+            ans_letter = str(ans).strip().upper()
             for k, v in opts.items():
                 if v == ans_text:
                     ans_letter = k
@@ -97,6 +97,59 @@ def load_aime_recent(n: int) -> list[dict]:
         prompt = str(row["Problem"]) + "\n\nProvide the final integer answer."
         answer = str(row['Answer']).strip()
         rows.append({'prompt': prompt, 'answer': answer, 'id': str(row.get('ID', i))})
+    random.shuffle(rows)
+    return rows[:n]
+
+def load_policyllm(n: int) -> list[dict]:
+    """Load PolicyLLM policy benchmark (US English, mixed levels)."""
+    base = f'{BENCH_ROOT}/raw/policyllm'
+    rows = []
+    for level_fn in ['level_1_us_with_id.json', 'level_2_us_with_id.json', 'level_3_us_with_id.json']:
+        fp = os.path.join(base, level_fn)
+        if not os.path.exists(fp):
+            continue
+        with open(fp) as f:
+            data = json.load(f)
+        per_level = max(1, n // 3)
+        for item in data[:per_level]:
+            q = item.get('question', '')
+            choice_dict = item.get('choice', {})
+            ans = item.get('answer', '')
+            ans_letter = str(ans).strip().upper()
+            if isinstance(choice_dict, dict):
+                ans_letter = str(ans).strip().upper()
+                # Verify it is a valid choice key
+                if ans_letter not in choice_dict:
+                    for k, v in choice_dict.items():
+                        if v == str(ans).strip():
+                            ans_letter = k
+                            break
+            if not ans_letter:
+                continue
+            prompt = q + '\n'
+            if isinstance(choice_dict, dict):
+                for k, v in choice_dict.items():
+                    prompt += f'{k}) {v}\n'
+            prompt += '\nAnswer with only the letter.'
+            rows.append({'prompt': prompt, 'answer': ans_letter, 'id': item.get('id', q[:30])})
+    random.shuffle(rows)
+    return rows[:n]
+
+def load_financebench(n: int) -> list[dict]:
+    """Load FinanceBench open-source questions."""
+    fp = f'{BENCH_ROOT}/raw/financebench/data/financebench_open_source.jsonl'
+    if not os.path.exists(fp):
+        return []
+    rows = []
+    with open(fp) as f:
+        for line in f:
+            d = json.loads(line)
+            q = d.get('question', d.get('prompt', ''))
+            ans = d.get('answer', d.get('correct_answer', ''))
+            if not q or not ans:
+                continue
+            prompt = q + '\n\nAnswer concisely.'
+            rows.append({'prompt': prompt, 'answer': str(ans).strip(), 'id': q[:40]})
     random.shuffle(rows)
     return rows[:n]
 
@@ -163,6 +216,8 @@ LOADERS = {
     'global_mmlu_lite': load_global_mmlu,
     'bbh': load_bbh,
     'aime_recent': load_aime_recent,
+    'policyllm': load_policyllm,
+    'financebench': load_financebench,
 }
 
 # ── Scoring ──
