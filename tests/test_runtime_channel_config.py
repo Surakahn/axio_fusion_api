@@ -855,18 +855,26 @@ def test_current_channel_manifest_binds_the_three_supplied_channels_without_secr
     manifest_path = ROOT / "config" / "current_channels.example.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
-    assert [row["provider"] for row in manifest["providers"]] == ["nvidia", "cpa_plus"]
+    assert [row["provider"] for row in manifest["providers"]] == [
+        "nvidia",
+        "cpa_plus",
+        "anthropic",
+    ]
     assert [row["api_format"] for row in manifest["providers"]] == [
         "chat/completions",
         "responses",
+        "anthropic",
     ]
     assert all("base_url" not in row and "api_key" not in row for row in manifest["providers"])
     assert manifest["providers"][0]["reasoning_transport"] == {}
     assert manifest["providers"][1]["reasoning_transport"] == {}
+    assert manifest["providers"][2]["reasoning_transport"] == {}
     assert manifest["providers"][0]["models"] == []
     assert manifest["providers"][1]["models"] == []
+    assert manifest["providers"][2]["models"] == []
     assert manifest["providers"][0]["models_env"] == "AXIO_NVIDIA_MODELS"
     assert manifest["providers"][1]["models_env"] == "AXIO_CPA_PLUS_MODELS"
+    assert manifest["providers"][2]["models_env"] == "AXIO_ANTHROPIC_MODELS"
     env_example = (ROOT / "config" / "current_channels.env.example").read_text(encoding="utf-8")
     assert "https://integrate.api.nvidia.com/v1" in env_example
     assert "https://cpa.co6.click/v1" in env_example

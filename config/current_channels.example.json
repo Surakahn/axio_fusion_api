@@ -48,6 +48,24 @@
         "max_cooldown_ms": 60000
       },
       "reasoning_transport": {}
+    },
+    {
+      "provider": "anthropic",
+      "api_format": "anthropic",
+      "base_url_env": "AXIO_ANTHROPIC_BASE_URL",
+      "api_key_env": "AXIO_ANTHROPIC_API_KEY",
+      "models_env": "AXIO_ANTHROPIC_MODELS",
+      "models": [],
+      "traffic_control": {
+        "scope": "profile",
+        "max_in_flight": 0,
+        "min_request_interval_ms": 0,
+        "post_rate_limit_min_request_interval_ms": 1000,
+        "rate_limit_key_pool": "shared",
+        "fallback_cooldown_ms": 5000,
+        "max_cooldown_ms": 60000
+      },
+      "reasoning_transport": {}
     }
   ],
   "prefusion": {
