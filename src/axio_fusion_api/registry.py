@@ -4438,7 +4438,34 @@ def _normalize_screening_capability_axes(value: Any) -> dict[str, float]:
 def _apply_model_name_capability_priors(caps: dict[str, float], name: str) -> None:
     """Seed routing priors from model names until benchmark calibration overrides them."""
 
-    if "gpt-5.6" in name:
+    if "gpt-5.6-sol" in name:
+        # gpt-5.6-sol is the strongest GPT tier (user-defined).
+        _raise_caps(
+            caps,
+            0.90,
+            ("science_knowledge", "code", "math", "logic", "critique", "structured_output", "daily_work"),
+        )
+        _raise_caps(caps, 0.84, ("multilingual", "long_context"))
+        _raise_caps(caps, 0.68, ("agentic_tool_calling",))
+    elif "gpt-5.6-terra" in name:
+        # gpt-5.6-terra is the second GPT tier (user-defined).
+        _raise_caps(
+            caps,
+            0.88,
+            ("science_knowledge", "code", "math", "logic", "critique", "structured_output", "daily_work"),
+        )
+        _raise_caps(caps, 0.83, ("multilingual", "long_context"))
+        _raise_caps(caps, 0.67, ("agentic_tool_calling",))
+    elif "gpt-5.6-luna" in name:
+        # gpt-5.6-luna is the third GPT tier (user-defined, fastest).
+        _raise_caps(
+            caps,
+            0.86,
+            ("science_knowledge", "code", "math", "logic", "critique", "structured_output", "daily_work"),
+        )
+        _raise_caps(caps, 0.82, ("multilingual", "long_context"))
+        _raise_caps(caps, 0.66, ("agentic_tool_calling",))
+    elif "gpt-5.6" in name:
         _raise_caps(
             caps,
             0.88,
@@ -4464,31 +4491,31 @@ def _apply_model_name_capability_priors(caps: dict[str, float], name: str) -> No
         _raise_caps(caps, 0.78, ("multilingual",))
         _raise_caps(caps, 0.74, ("long_context",))
         _raise_caps(caps, 0.58, ("agentic_tool_calling",))
-    # ── Claude model family ──
-    # claude-fable-5  ≅ gpt-5.6-sol  (same tier)
-    # claude-opus-5   > gpt-5.6-terra (slightly stronger)
-    # claude-sonnet-5 > gpt-5.6-luna  (stronger)
+    # ── Claude model family (user-defined tier mapping) ──
+    # claude-fable-5  ≅ gpt-5.6-sol   (same tier, top)
+    # claude-opus-5   > gpt-5.6-terra (slightly stronger, second tier)
+    # claude-sonnet-5 > gpt-5.6-luna  (stronger, third tier)
     elif "claude-fable" in name:
         _raise_caps(caps, 0.90, ("code", "math", "logic"))
-        _raise_caps(caps, 0.86, ("science_knowledge", "critique", "structured_output"))
+        _raise_caps(caps, 0.88, ("science_knowledge", "critique", "structured_output"))
         _raise_caps(caps, 0.84, ("multilingual", "daily_work"))
-        _raise_caps(caps, 0.78, ("long_context",))
+        _raise_caps(caps, 0.80, ("long_context",))
         _raise_caps(caps, 0.68, ("agentic_tool_calling",))
     elif "claude-opus-5" in name:
-        _raise_caps(caps, 0.91, ("science_knowledge", "math", "logic", "daily_work"))
-        _raise_caps(caps, 0.89, ("structured_output", "critique"))
+        _raise_caps(caps, 0.89, ("science_knowledge", "math", "logic", "daily_work"))
+        _raise_caps(caps, 0.87, ("structured_output", "critique"))
         _raise_caps(caps, 0.85, ("code", "multilingual", "long_context"))
-        _raise_caps(caps, 0.71, ("agentic_tool_calling",))
+        _raise_caps(caps, 0.70, ("agentic_tool_calling",))
     elif "claude-opus-4" in name:
         _raise_caps(caps, 0.86, ("science_knowledge", "logic", "daily_work"))
         _raise_caps(caps, 0.84, ("structured_output", "critique"))
         _raise_caps(caps, 0.82, ("code", "math"))
         _raise_caps(caps, 0.66, ("agentic_tool_calling",))
     elif "claude-sonnet-5" in name:
-        _raise_caps(caps, 0.89, ("science_knowledge", "daily_work", "multilingual", "code"))
-        _raise_caps(caps, 0.87, ("structured_output", "long_context", "logic"))
-        _raise_caps(caps, 0.86, ("math", "critique"))
-        _raise_caps(caps, 0.68, ("agentic_tool_calling",))
+        _raise_caps(caps, 0.87, ("science_knowledge", "daily_work", "multilingual", "code"))
+        _raise_caps(caps, 0.86, ("structured_output", "long_context", "logic"))
+        _raise_caps(caps, 0.85, ("math", "critique"))
+        _raise_caps(caps, 0.67, ("agentic_tool_calling",))
     elif "claude-sonnet-4" in name:
         _raise_caps(caps, 0.84, ("daily_work", "science_knowledge"))
         _raise_caps(caps, 0.82, ("structured_output",))
@@ -4526,20 +4553,6 @@ def _apply_model_name_capability_priors(caps: dict[str, float], name: str) -> No
     if "review" in name or "critic" in name:
         _raise_caps(caps, 0.88, ("critique",))
         _raise_caps(caps, 0.82, ("structured_output",))
-    if "terra" in name:
-        _raise_caps(caps, 0.90, ("science_knowledge", "math", "logic", "daily_work"))
-        _raise_caps(caps, 0.88, ("structured_output", "critique"))
-        _raise_caps(caps, 0.84, ("code", "multilingual", "long_context"))
-        _raise_caps(caps, 0.70, ("agentic_tool_calling",))
-    if "sol" in name:
-        _raise_caps(caps, 0.90, ("code", "math", "logic"))
-        _raise_caps(caps, 0.86, ("science_knowledge", "critique", "structured_output"))
-        _raise_caps(caps, 0.78, ("long_context",))
-        _raise_caps(caps, 0.68, ("agentic_tool_calling",))
-    if "luna" in name:
-        _raise_caps(caps, 0.88, ("multilingual", "daily_work", "science_knowledge"))
-        _raise_caps(caps, 0.86, ("structured_output", "long_context"))
-        _raise_caps(caps, 0.82, ("logic", "critique"))
 
 
 def _raise_caps(caps: dict[str, float], value: float, axes: Sequence[str]) -> None:

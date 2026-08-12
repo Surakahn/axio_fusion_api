@@ -34,6 +34,13 @@ FAST_DIRECT_DEFAULT_DEADLINE_MS = 25000
 FAST_DIRECT_DEADLINE_MULTIPLIER = 3.5
 FAST_DIRECT_DEADLINE_MARGIN_MS = 500
 FAST_DIRECT_MAX_DEADLINE_MS = 90_000
+# The Fast tier maps to gpt-5.6-luna (~0.86 capability). Profiles materially
+# above this band belong to Terra/Pro tiers and must not displace the
+# intended fast-cascade candidates merely because they also have low latency.
+FAST_DIRECT_CAPABILITY_CEILING = 0.875
+# Terra tier maps to gpt-5.6-terra (~0.88). Exclude sol-tier profiles (~0.90)
+# so the Terra direct route does not silently upgrade to the Pro baseline.
+TERRA_DIRECT_CAPABILITY_CEILING = 0.895
 TERRA_DEADLINE_MULTIPLIER = 6.0  # axio-terra gets more headroom for fragile panel fusion
 # A pre-Fusion role prior is allowed to open a bounded stage call when the
 # operational capability vector is still the explicit neutral/unknown value.
@@ -197,6 +204,7 @@ def build_route_plan(
     role_blueprint = _role_blueprint(request, analysis, budget)
     eligible_profiles, privacy_policy = _apply_privacy_filter(request, profiles, analysis)
     scored = _rank_profiles(eligible_profiles, analysis)
+    scored = _apply_tier_capability_band(request, scored)
     role_blueprint = _augment_pro_role_blueprint_for_screened_specialist(
         request,
         analysis,
@@ -2272,6 +2280,34 @@ def _safe_local_consensus_execution(
         "secrets_persisted": False,
     }
 
+
+
+def _apply_tier_capability_band(
+    request: FusionRequest,
+    scored: Sequence[tuple[ModelProfile, float]],
+) -> list[tuple[ModelProfile, float]]:
+    """Constrain Fast/Terra direct routes to their intended capability band.
+
+    ``axio-fast`` maps to the luna tier and ``axio-terra`` to the terra tier.
+    Profiles materially above that band belong to a higher public tier; using
+    them as a direct solver would silently collapse the three-tier product
+    into a single strongest-model path. The pro tier keeps the full pool.
+    """
+
+    if request.public_model == "axio-fast":
+        ceiling = FAST_DIRECT_CAPABILITY_CEILING
+    elif request.public_model == "axio-terra":
+        ceiling = TERRA_DIRECT_CAPABILITY_CEILING
+    else:
+        return list(scored)
+    band = [
+        row
+        for row in scored
+        if _profile_capability_average(row[0]) <= ceiling
+    ]
+    return band if band else list(scored)
+
+
 def _rank_profiles(profiles: Sequence[ModelProfile], analysis: Mapping[str, Any]) -> list[tuple[ModelProfile, float]]:
     domains = list(analysis.get("domains") or ["daily_work"])
     scored = []
@@ -2442,6 +2478,15 @@ def _legacy_neutral_capability(profile: ModelProfile, axis: str) -> bool:
     )
 
 
+
+
+def _profile_capability_average(profile: ModelProfile) -> float:
+    """Return a compact capability average across core reasoning axes."""
+
+    axes = ("science_knowledge", "logic", "math", "code", "structured_output")
+    return sum(profile.capability(axis) for axis in axes) / max(1, len(axes))
+
+
 def _fast_direct_candidate_order(
     scored: Sequence[tuple[ModelProfile, float]],
     budget: Mapping[str, Any],
@@ -2461,6 +2506,19 @@ def _fast_direct_candidate_order(
     if not primary_allowed:
         return []
     scored = primary_allowed
+    # Restrict the Fast tier to its intended capability band. A profile that
+    # is materially stronger than the luna target belongs to Terra/Pro and
+    # would defeat the tier differentiation if it were used as a fast solver.
+    scored = [
+        row
+        for row in scored
+        if _profile_capability_average(row[0]) <= FAST_DIRECT_CAPABILITY_CEILING
+    ]
+    if not scored:
+        # If every candidate is above the Fast band (e.g. only top-tier models
+        # are available), fall back to the full primary-allowed pool so the
+        # route can still serve instead of failing closed.
+        scored = primary_allowed
     max_latency_ms = max(1, int(budget.get("max_latency_ms") or FAST_DIRECT_DEFAULT_DEADLINE_MS))
     feasible = [
         row

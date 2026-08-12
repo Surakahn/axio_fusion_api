@@ -1126,3 +1126,27 @@ def test_reasoning_transport_for_wrong_protocol_is_not_sendable():
 
     assert profile.reasoning_transport["api_format_compatible"] is False
     assert profile.resolve_reasoning_transport("high") == ("", "")
+
+
+def test_unverified_reasoning_transport_falls_back_to_passthrough():
+    """When transport is unverified, valid effort should still be passed upstream."""
+    profile = _profile(
+        api_format="chat",
+        reasoning_transport={
+            "status": "unknown",
+            "transport": "",
+            "supported_efforts": [],
+        },
+    )
+    request = FusionRequest(
+        model=profile.model,
+        prompt="hello",
+        reasoning_effort="high",
+    )
+    payload = provider_module._chat_payload(
+        profile,
+        request,
+        prompt="hello",
+        system="You are helpful.",
+    )
+    assert payload.get("reasoning_effort") == "high"

@@ -4480,6 +4480,24 @@ def _payload_text_digest(payloads: Mapping[str, Mapping[str, Any]]) -> str:
     return sha256_text(stable_json(sorted(text_hashes)))
 
 
+
+
+def _is_reasoning_transport_unverified(profile: ModelProfile) -> bool:
+    """Return True when reasoning transport has no known wire declaration.
+
+    ``unknown`` means no probe result exists at all. ``candidate`` means a
+    possible transport was found but not yet endpoint-verified; in that case
+    the route must still fail closed instead of passing an unverified field.
+    Only genuinely empty/unknown declarations are eligible for passthrough.
+    """
+
+    config = profile.reasoning_transport
+    if not isinstance(config, Mapping):
+        return True
+    status = str(config.get("status") or "").strip().casefold()
+    return status in {"", "unknown"}
+
+
 def _chat_payload(
     profile: ModelProfile,
     request: FusionRequest,
@@ -4517,6 +4535,9 @@ def _chat_payload(
     )
     if reasoning_transport == "chat_reasoning_effort":
         payload["reasoning_effort"] = effective_reasoning_effort
+    elif not reasoning_transport and request.reasoning_effort and _is_reasoning_transport_unverified(profile):
+        # Unverified transport: best-effort passthrough for GPT models
+        payload["reasoning_effort"] = request.reasoning_effort
     tools = provider_tool_declarations(request.tools, api_format="chat") if profile.tool_calling_eligible else []
     if tools:
         payload["tools"] = tools
@@ -6379,6 +6400,9 @@ def _responses_typed_payload(
         payload["reasoning"] = {"effort": effective_reasoning_effort}
     elif reasoning_transport == "responses_reasoning_effort":
         payload["reasoning_effort"] = effective_reasoning_effort
+    elif not reasoning_transport and request.reasoning_effort and _is_reasoning_transport_unverified(profile):
+        # Unverified transport: best-effort passthrough via responses reasoning struct
+        payload["reasoning"] = {"effort": request.reasoning_effort}
     tools = provider_tool_declarations(request.tools, api_format="responses") if profile.tool_calling_eligible else []
     if tools:
         payload["tools"] = tools
