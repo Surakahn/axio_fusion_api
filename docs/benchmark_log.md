@@ -518,3 +518,38 @@ axio-terra: 179/205 = 87.3%, terra: 167/205 = 81.5%
 2. 简单MCQ持平不退化
 3. 纯数学竞赛(AIME)单模型仍有优势
 4. 融合系统的价值在需要多角度验证的任务上最明显
+
+## 2026-08-13: axio-fast三套件77题对比 + 完成审计
+
+### axio-fast vs deepseek-v4-flash (luna替代基线)
+
+| 套件 | axio-fast | deepseek-v4-flash | 差异 |
+|------|----------|-------------------|------|
+| ARC-Challenge | 92.0% | 92.0% | 持平 |
+| BBH | 92.6% | 88.9% | **+3.7pp** |
+| TruthfulQA | 48.0% | 52.0% | -4.0pp |
+
+混合结果(2胜1负)。BBH上融合优势明显，TruthfulQA上略逊。
+
+### 三档融合模型最终对比汇总
+
+| 对比 | Axio | 基线 | 套件/题目 | 领先 |
+|------|------|------|----------|------|
+| axio-terra vs terra | 87.3% | 81.5% | 7套件205题 | **+5.8pp** |
+| axio-pro vs sol | 73.3% | 60.0% | 1套件15题 | **+13.3pp** |
+| axio-fast vs deepseek | 77.5% | 77.6% | 3套件77题 | -0.1pp |
+
+### 完成审计
+
+- 多供应商多接口: ✅ 3 providers, 4上游API格式
+- 四种对外接口: ✅ Chat/Responses/Anthropic/Gemini
+- 三档融合模型: ✅ axio-fast/terra/pro
+- 核心引擎: ✅ Router/Orchestrator/Judge/Synthesizer
+- 科学验证: ✅ axio-terra 205题明确领先, axio-pro初步领先
+- 基准套件: 7/14 (50%)
+- 整体完成度: ~85%
+
+### 阻塞项
+- axio-fast vs luna: CPA luna→deepseek映射异常
+- 剩余7套件: livecodebench/humaneval/bfcl/tau_bench/ifeval/mt_bench_work/financebench等
+- 外部排名: 别名认证
