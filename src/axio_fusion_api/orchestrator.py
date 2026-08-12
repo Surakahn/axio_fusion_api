@@ -150,6 +150,11 @@ _FUSION_CONTROL_WINDOW_FRACTION_NUMERATOR = 35
 _FUSION_CONTROL_WINDOW_FRACTION_DENOMINATOR = 100
 _FUSION_PANEL_PHASE_NAME = "fusion_panel"
 _FUSION_PANEL_PHASE_MIN_WINDOW_MS = 5_000
+# Parallel expert submissions are staggered only when the request has enough
+# remaining provider-execution window to absorb the delay. A tight explicit
+# deadline must not serialize experts into missing the mandatory Judge stage.
+_PARALLEL_STAGGER_DELAY_S = 0.50
+_PARALLEL_STAGGER_MIN_HEADROOM_PER_ROLE_S = 0.25
 # An expert branch is optional relative to the already-admitted Judge and
 # Synthesizer stages.  Its shared-deadline timeout therefore uses the screened
 # p95 as a single-attempt operating cap instead of allowing one provider tail
@@ -2832,13 +2837,25 @@ class FusionEngine:
             futures = {}
             # Stagger parallel submissions to avoid provider rate-limiting
             # when multiple roles target the same upstream gateway.
-            _stagger_delay_s = 0.50
             for role_index, role in enumerate(expert_roles):
                 # ThreadPoolExecutor does not inherit ContextVars. Give each
                 # role a private context copy so a public stream observer and
                 # its cancellation signal remain visible in worker threads.
-                if role_index > 0 and _stagger_delay_s > 0:
-                    time.sleep(_stagger_delay_s)
+                if role_index > 0:
+                    role_name = str(role.get("role") or "primary_solver")
+                    available_seconds = deadline_budget.timeout_seconds(
+                        request,
+                        role=role_name,
+                        kind="model_role",
+                        phase=_FUSION_PANEL_PHASE_NAME,
+                    )
+                    remaining_roles = len(expert_roles) - role_index
+                    required_headroom_seconds = (
+                        _PARALLEL_STAGGER_DELAY_S
+                        + _PARALLEL_STAGGER_MIN_HEADROOM_PER_ROLE_S * remaining_roles
+                    )
+                    if available_seconds >= required_headroom_seconds:
+                        time.sleep(_PARALLEL_STAGGER_DELAY_S)
                 role_context = copy_context()
                 panel_role = {**dict(role), "runtime_panel_phase": True}
                 future = executor.submit(
