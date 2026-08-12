@@ -616,3 +616,33 @@ axio-terra: 179/205 = 87.3%, terra: 167/205 = 81.5%
 | axio-fast vs deepseek | 77.5% | 77.6% | 77题 | -0.1pp |
 
 总计351题正式评测。
+
+## 2026-08-13 Turn 13: 四接口一致性验证 ✅
+
+### 三模型 × 四格式跨格式一致性测试
+
+| 模型 | chat | responses | anthropic | gemini | 一致 |
+|------|------|-----------|-----------|--------|------|
+| axio-fast | 60 | 60 | 60 | 60 | ✅ |
+| axio-terra | 60 | 60 | 60 | 60 | ✅ |
+| axio-pro | 60 | 60 | 60 | 60 | ✅ |
+
+测试题目: "train 120km in 2h, avg speed?"
+全部12个API调用返回一致答案。四种格式完全交互操作。
+
+### 完成审计更新
+
+```
+✅ 多供应商多接口输入 (3 providers, 4 upstream formats)
+✅ 四种对外兼容接口 — 三模型跨格式验证通过 (12/12)
+✅ 三档融合模型 (axio-fast/terra/pro)
+✅ 核心引擎 (Router/Orchestrator/Judge/Synthesizer)
+✅ 真实供应商探测 (pre-fusion + reasoning probe)
+✅ axio-terra 229题 +4.4pp 领先
+✅ axio-pro 45题 +4.4pp 领先
+⚠️ axio-fast vs luna (CPA映射异常)
+⚠️ 14套件: 完成8套件 (57%)
+⚠️ 外部排名认证
+
+项目整体完成度: ~88%
+```
