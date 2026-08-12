@@ -1,0 +1,245 @@
+{
+  "schema": "axio_fusion_api.external_ranking_alias_attestation.v1",
+  "generated_at": "2026-08-13",
+  "source_families": [
+    "chatbot_arena",
+    "livebench",
+    "simplebench"
+  ],
+  "pool_size": 32,
+  "mapped_canonical_count": 32,
+  "coverage_note": "27/32 fuzzy coverage in Arena, 20/32 in LiveBench. Exact identity matching blocked by: (1) anthropicclaude- prefix in Arena, (2) effort/thinking suffixes, (3) nvidia- vs nvidia/ namespace.",
+  "attestation_method": "channel-alias-to-canonical-identity via documented naming conventions",
+  "status": "preliminary_alias_mapping_only",
+  "blockers": [
+    "exact_identity_attestation_missing",
+    "provider_official_model_card_cross_reference_needed",
+    "reasoning_effort_suffix_disambiguation_required"
+  ],
+  "mappings": [
+    {
+      "canonical": "gpt-5.4",
+      "provider": "cpa-plus",
+      "arena_variant": "openaigpt-5.4-high",
+      "livebench_variant": "gpt-5.4-xhigh",
+      "source_evidence": "Mapped via standardized OpenAI naming convention"
+    },
+    {
+      "canonical": "gpt-5.5",
+      "provider": "cpa-plus",
+      "arena_variant": "openaigpt-5.5-high",
+      "livebench_variant": "gpt-5.5-xhigh",
+      "source_evidence": "Mapped via standardized OpenAI naming convention"
+    },
+    {
+      "canonical": "gpt-5.6-luna",
+      "provider": "cpa-plus",
+      "arena_variant": "openaigpt-5.6-luna-xhigh",
+      "livebench_variant": "gpt-5.6-luna-xhigh",
+      "source_evidence": "Arena leaderboard uses suffix convention for reasoning effort"
+    },
+    {
+      "canonical": "gpt-5.6-sol",
+      "provider": "cpa-plus",
+      "arena_variant": "openaigpt-5.6-sol-xhigh",
+      "livebench_variant": "gpt-5.6-sol-max",
+      "source_evidence": "Arena leaderboard uses suffix convention for reasoning effort"
+    },
+    {
+      "canonical": "gpt-5.6-terra",
+      "provider": "cpa-plus",
+      "arena_variant": "openaigpt-5.6-terra-xhigh",
+      "livebench_variant": "gpt-5.6-terra-max",
+      "source_evidence": "Arena leaderboard uses suffix convention for reasoning effort"
+    },
+    {
+      "canonical": "nvidia/nemotron-3-super-120b-a12b",
+      "provider": "nvidia",
+      "arena_variant": "nvidia-nemotron-3-super-120b-a12b",
+      "livebench_variant": "nemotron-3-super-120b-a12b",
+      "source_evidence": "NVIDIA models use hyphen instead of slash in external rankings"
+    },
+    {
+      "canonical": "z-ai/glm-5.2",
+      "provider": "nvidia",
+      "arena_variant": "glm-5.2",
+      "livebench_variant": "glm-5.2",
+      "source_evidence": "z-ai prefix stripped in external rankings"
+    },
+    {
+      "canonical": "nvidia/nemotron-mini-4b-instruct",
+      "provider": "nvidia",
+      "arena_variant": "nvidia-nemotron-mini-4b-instruct",
+      "livebench_variant": "nemotron-mini-4b-instruct",
+      "source_evidence": "NVIDIA models use hyphen instead of slash in external rankings"
+    },
+    {
+      "canonical": "nvidia/nemotron-3-nano-30b-a3b",
+      "provider": "nvidia",
+      "arena_variant": "nvidia-nemotron-3-nano-30b-a3b",
+      "livebench_variant": "nemotron-3-nano-30b-a3b",
+      "source_evidence": "NVIDIA models use hyphen instead of slash in external rankings"
+    },
+    {
+      "canonical": "nvidia/llama-3.1-nemotron-nano-vl-8b-v1",
+      "provider": "nvidia",
+      "arena_variant": "nvidia-llama-3.1-nemotron-nano-vl-8b-v1",
+      "livebench_variant": "llama-3.1-nemotron-nano-vl-8b-v1",
+      "source_evidence": "NVIDIA models use hyphen instead of slash in external rankings"
+    },
+    {
+      "canonical": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+      "provider": "nvidia",
+      "arena_variant": "nvidia-nemotron-3-nano-omni-30b-a3b-reasoning",
+      "livebench_variant": "nemotron-3-nano-omni-30b-a3b-reasoning",
+      "source_evidence": "NVIDIA models use hyphen instead of slash in external rankings"
+    },
+    {
+      "canonical": "claude-fable-5",
+      "provider": "anthropic-compatible",
+      "arena_variant": "anthropicclaude-fable-5",
+      "livebench_variant": "claude-fable-5-max-effort",
+      "source_evidence": "Anthropic Models are prefixed with anthropic in Arena"
+    },
+    {
+      "canonical": "claude-opus-4-1-20250805",
+      "provider": "anthropic-compatible",
+      "arena_variant": "anthropicclaude-opus-4-1-20250805",
+      "livebench_variant": "claude-opus-4-1-20250805-xhigh-effort",
+      "source_evidence": "Anthropic Models are prefixed with anthropic in Arena"
+    },
+    {
+      "canonical": "claude-opus-4-20250514",
+      "provider": "anthropic-compatible",
+      "arena_variant": "anthropicclaude-opus-4-20250514",
+      "livebench_variant": "claude-opus-4-20250514-xhigh-effort",
+      "source_evidence": "Anthropic Models are prefixed with anthropic in Arena"
+    },
+    {
+      "canonical": "claude-opus-4-5-20251101",
+      "provider": "anthropic-compatible",
+      "arena_variant": "anthropicclaude-opus-4-5-20251101",
+      "livebench_variant": "claude-opus-4-5-20251101-xhigh-effort",
+      "source_evidence": "Anthropic Models are prefixed with anthropic in Arena"
+    },
+    {
+      "canonical": "claude-sonnet-5",
+      "provider": "anthropic-compatible",
+      "arena_variant": "anthropicclaude-sonnet-5",
+      "livebench_variant": "claude-sonnet-5-xhigh-effort",
+      "source_evidence": "Anthropic Models are prefixed with anthropic in Arena"
+    },
+    {
+      "canonical": "claude-opus-5",
+      "provider": "anthropic-compatible",
+      "arena_variant": "anthropicclaude-opus-5",
+      "livebench_variant": "claude-opus-5-xhigh-effort",
+      "source_evidence": "Anthropic Models are prefixed with anthropic in Arena"
+    },
+    {
+      "canonical": "claude-haiku-4-5",
+      "provider": "anthropic-compatible",
+      "arena_variant": "anthropicclaude-haiku-4-5",
+      "livebench_variant": "claude-haiku-4-5-max-effort",
+      "source_evidence": "Anthropic Models are prefixed with anthropic in Arena"
+    },
+    {
+      "canonical": "claude-haiku-4-5-20251001",
+      "provider": "anthropic-compatible",
+      "arena_variant": "anthropicclaude-haiku-4-5-20251001",
+      "livebench_variant": "claude-haiku-4-5-20251001-max-effort",
+      "source_evidence": "Anthropic Models are prefixed with anthropic in Arena"
+    },
+    {
+      "canonical": "claude-sonnet-4-20250514",
+      "provider": "anthropic-compatible",
+      "arena_variant": "anthropicclaude-sonnet-4-20250514",
+      "livebench_variant": "claude-sonnet-4-20250514-xhigh-effort",
+      "source_evidence": "Anthropic Models are prefixed with anthropic in Arena"
+    },
+    {
+      "canonical": "claude-sonnet-4-5-20250929",
+      "provider": "anthropic-compatible",
+      "arena_variant": "anthropicclaude-sonnet-4-5-20250929",
+      "livebench_variant": "claude-sonnet-4-5-20250929-xhigh-effort",
+      "source_evidence": "Anthropic Models are prefixed with anthropic in Arena"
+    },
+    {
+      "canonical": "claude-sonnet-4-6",
+      "provider": "anthropic-compatible",
+      "arena_variant": "anthropicclaude-sonnet-4-6",
+      "livebench_variant": "claude-sonnet-4-6-xhigh-effort",
+      "source_evidence": "Anthropic Models are prefixed with anthropic in Arena"
+    },
+    {
+      "canonical": "claude-opus-4-6",
+      "provider": "anthropic-compatible",
+      "arena_variant": "anthropicclaude-opus-4-6",
+      "livebench_variant": "claude-opus-4-6-xhigh-effort",
+      "source_evidence": "Anthropic Models are prefixed with anthropic in Arena"
+    },
+    {
+      "canonical": "claude-opus-4-7",
+      "provider": "anthropic-compatible",
+      "arena_variant": "anthropicclaude-opus-4-7",
+      "livebench_variant": "claude-opus-4-7-xhigh-effort",
+      "source_evidence": "Anthropic Models are prefixed with anthropic in Arena"
+    },
+    {
+      "canonical": "claude-opus-4-8",
+      "provider": "anthropic-compatible",
+      "arena_variant": "anthropicclaude-opus-4-8",
+      "livebench_variant": "claude-opus-4-8-xhigh-effort",
+      "source_evidence": "Anthropic Models are prefixed with anthropic in Arena"
+    },
+    {
+      "canonical": "deepseek-v4-flash",
+      "provider": "cpa-plus",
+      "arena_variant": "deepseek-v4-flash",
+      "livebench_variant": "deepseek-v4-flash",
+      "source_evidence": "Chinese model names preserved as-is in external rankings"
+    },
+    {
+      "canonical": "deepseek-v4-flash-0731",
+      "provider": "cpa-plus",
+      "arena_variant": "deepseek-v4-flash-0731",
+      "livebench_variant": "deepseek-v4-flash-0731",
+      "source_evidence": "Chinese model names preserved as-is in external rankings"
+    },
+    {
+      "canonical": "glm-5.2",
+      "provider": "cpa-plus",
+      "arena_variant": "glm-5.2",
+      "livebench_variant": "glm-5.2",
+      "source_evidence": "Chinese model names preserved as-is in external rankings"
+    },
+    {
+      "canonical": "kimi-k2.6",
+      "provider": "cpa-plus",
+      "arena_variant": "kimi-k2.6",
+      "livebench_variant": "kimi-k2.6",
+      "source_evidence": "Chinese model names preserved as-is in external rankings"
+    },
+    {
+      "canonical": "kimi-k2.7-code",
+      "provider": "cpa-plus",
+      "arena_variant": "kimi-k2.7-code",
+      "livebench_variant": "kimi-k2.7-code",
+      "source_evidence": "Chinese model names preserved as-is in external rankings"
+    },
+    {
+      "canonical": "minimax-m2.7",
+      "provider": "cpa-plus",
+      "arena_variant": "minimax-m2.7",
+      "livebench_variant": "minimax-m2.7",
+      "source_evidence": "Chinese model names preserved as-is in external rankings"
+    },
+    {
+      "canonical": "qwen3.8-max",
+      "provider": "cpa-plus",
+      "arena_variant": "qwen3.8-max",
+      "livebench_variant": "qwen3.8-max",
+      "source_evidence": "Chinese model names preserved as-is in external rankings"
+    }
+  ]
+}

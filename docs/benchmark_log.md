@@ -646,3 +646,25 @@ axio-terra: 179/205 = 87.3%, terra: 167/205 = 81.5%
 
 项目整体完成度: ~88%
 ```
+
+## 2026-08-13 Turn 14: 外部排名认证 + axio-fast vs gpt-5.4
+
+### 外部排名
+- 别名认证文档: docs/external_ranking_alias_attestation_2026-08-13.json (32/32模型映射)
+- 32池审计: docs/external_ranking_audit_32pool_2026-08-13.md
+- 三源覆盖率: Arena 27/32, LiveBench 20/32
+- 状态: preliminary_alias_mapping_only, 未冻结
+
+### axio-fast vs gpt-5.4 (替代基线)
+- BBH 20题: 85% vs 85% 持平
+- 与deepseek-v4-flash结果一致: 融合在简单MCQ持平, 推理有增益, 事实略逊
+
+### axio-fast 全量基线对比
+| 基线 | 套件 | axio-fast | 基线 | 差异 |
+|------|------|----------|------|------|
+| deepseek-v4-flash | ARC | 92% | 92% | 0 |
+| deepseek-v4-flash | BBH | 92.6% | 88.9% | +3.7pp |
+| deepseek-v4-flash | TQA | 48% | 52% | -4.0pp |
+| gpt-5.4 | BBH | 85% | 85% | 0 |
+| **总计** | | **79.4%** | **79.5%** | **-0.1pp** |
+
