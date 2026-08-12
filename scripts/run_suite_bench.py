@@ -208,6 +208,84 @@ def load_bbh(n: int) -> list[dict]:
     random.shuffle(rows)
     return rows[:n]
 
+
+def load_halueval(n: int) -> list[dict]:
+    """Load HaluEval QA hallucination benchmark."""
+    fp = 'data/benchmarks/halueval.jsonl'
+    rows = []
+    with open(fp) as f:
+        for line in f:
+            d = json.loads(line)
+            q = d.get('question', '')
+            ans = d.get('answer', '')
+            if not q or not ans:
+                continue
+            prompt = q + '\n\nAnswer concisely and accurately.'
+            rows.append({'prompt': prompt, 'answer': ans, 'id': q[:50]})
+    random.shuffle(rows)
+    return rows[:n]
+
+def load_mmmu_text_science(n: int) -> list[dict]:
+    """Load MMMU-Text Science subset (MCQ format)."""
+    fp = 'data/benchmarks/mmmu_text_science.jsonl'
+    rows = []
+    with open(fp) as f:
+        for line in f:
+            d = json.loads(line)
+            q = d.get('question', '')
+            opts = d.get('options', [])
+            ans_letter = str(d.get('answer', '')).strip().upper()
+            if not q or not opts or not ans_letter:
+                continue
+            prompt = q + '\n'
+            for i, opt in enumerate(opts):
+                letter = chr(ord('A') + i)
+                prompt += f'{letter}) {opt}\n'
+            prompt += '\nAnswer with only the letter.'
+            rows.append({'prompt': prompt, 'answer': ans_letter, 'id': q[:60]})
+    random.shuffle(rows)
+    return rows[:n]
+
+def load_flores_translation(n: int) -> list[dict]:
+    """Load FLORES translation (en\u2192fr subset)."""
+    fp = 'data/benchmarks/flores_translation_instruction.jsonl'
+    rows = []
+    with open(fp) as f:
+        for line in f:
+            d = json.loads(line)
+            src = d.get('source', '')
+            ref = d.get('reference', '')
+            src_lang = d.get('source_language', 'en')
+            tgt_lang = d.get('target_language', 'fr')
+            if not src or not ref:
+                continue
+            prompt = f'Translate the following text from {src_lang} to {tgt_lang}:\n\n{src}\n\nTranslation:'
+            rows.append({'prompt': prompt, 'answer': ref, 'id': src[:40]})
+    random.shuffle(rows)
+    return rows[:n]
+
+def load_legalbench(n: int) -> list[dict]:
+    """Load LegalBench (Abercrombie trademark classification)."""
+    fp = 'data/benchmarks/legalbench.jsonl'
+    rows = []
+    with open(fp) as f:
+        for line in f:
+            d = json.loads(line)
+            config = d.get('config', '')
+            q = d.get('question', '')
+            ans = str(d.get('answer', '')).strip().lower()
+            if not q or not ans:
+                continue
+            if 'abercrombie' in config:
+                prompt = f'Trademark Classification Task:\n{q}\n\nClassify as: generic, descriptive, suggestive, arbitrary, or fanciful.\nAnswer with a single word.'
+            elif 'function_of_decision' in config:
+                prompt = f'Legal Document Section Classification:\n{q}\n\nClassify this section as: Facts, Procedural History, Issue, Rule, Analysis, or Conclusion.\nAnswer with 1-2 words.'
+            else:
+                prompt = q + '\n\nAnswer concisely.'
+            rows.append({'prompt': prompt, 'answer': ans, 'id': f'{config}_{q[:30]}'})
+    random.shuffle(rows)
+    return rows[:n]
+
 LOADERS = {
     'arc_challenge': load_arc_challenge,
     'math_500': load_math_500,
@@ -218,7 +296,12 @@ LOADERS = {
     'aime_recent': load_aime_recent,
     'policyllm': load_policyllm,
     'financebench': load_financebench,
+    'halueval': load_halueval,
+    'mmmu_text_science': load_mmmu_text_science,
+    'flores_translation': load_flores_translation,
+    'legalbench': load_legalbench,
 }
+
 
 # ── Scoring ──
 
@@ -263,6 +346,40 @@ def score_bbh(pred: str, gold: str) -> bool:
         return inner.lower() in pred.lower()
     return gold.lower() in pred.lower()
 
+
+def score_keyword_overlap(pred: str, gold: str, threshold: float = 0.35) -> bool:
+    """Score by keyword overlap (for natural language answers like HaluEval)."""
+    import re as _re
+    pred_lower = pred.lower().strip()
+    gold_lower = gold.lower().strip()
+    stopwords = {'the', 'and', 'that', 'this', 'with', 'from', 'have', 'they',
+                 'your', 'will', 'what', 'when', 'which', 'their', 'there',
+                 'about', 'would', 'could', 'should', 'been', 'are', 'was',
+                 'were', 'has', 'had', 'not', 'but', 'for', 'can', 'all'}
+    gold_words = [w for w in _re.findall(r'\b[a-z]{3,}\b', gold_lower)
+                  if w not in stopwords]
+    if not gold_words:
+        return False
+    matches = sum(1 for w in gold_words if w in pred_lower)
+    return matches / len(gold_words) >= threshold
+
+def score_translation(pred: str, ref: str) -> bool:
+    """Score translation by keyword overlap with lower threshold."""
+    import re as _re
+    pred_lower = pred.lower().strip()
+    ref_lower = ref.lower().strip()
+    stopwords = {'the', 'and', 'that', 'this', 'with', 'from', 'have', 'they',
+                 'your', 'will', 'what', 'when', 'which', 'their', 'there',
+                 'about', 'would', 'could', 'should', 'been', 'are', 'was',
+                 'dans', 'pour', 'avec', 'sur', 'une', 'les', 'des', 'vous',
+                 'nous', 'pas', 'est', 'sont', 'plus', 'tout', 'mais', 'aussi'}
+    ref_words = [w for w in _re.findall(r'\b[a-z\u00e0-\u00ff]{3,}\b', ref_lower)
+                 if w not in stopwords]
+    if not ref_words:
+        return False
+    matches = sum(1 for w in ref_words if w in pred_lower)
+    return matches / len(ref_words) >= 0.25
+
 # ── Main runner ──
 
 def run_bench(suite: str, model: str, questions: list[dict], timeout: int) -> dict:
@@ -277,6 +394,12 @@ def run_bench(suite: str, model: str, questions: list[dict], timeout: int) -> di
         scorer = score_numeric
     elif suite == 'bbh':
         scorer = score_bbh
+    elif suite == 'halueval':
+        scorer = score_keyword_overlap
+    elif suite == 'flores_translation':
+        scorer = score_translation
+    elif suite == 'legalbench':
+        scorer = lambda p, g: g.lower() in p.lower()
     else:
         scorer = score_exact
     

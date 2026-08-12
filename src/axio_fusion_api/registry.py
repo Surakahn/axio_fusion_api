@@ -4414,7 +4414,7 @@ def _normalize_capabilities(value: Any, *, model: str) -> dict[str, float]:
         if axis in caps:
             number = _optional_float(raw_value)
             if number is not None:
-                caps[axis] = _score01(number)
+                caps[axis] = max(caps[axis], _score01(number))
     return caps
 
 
@@ -4464,6 +4464,43 @@ def _apply_model_name_capability_priors(caps: dict[str, float], name: str) -> No
         _raise_caps(caps, 0.78, ("multilingual",))
         _raise_caps(caps, 0.74, ("long_context",))
         _raise_caps(caps, 0.58, ("agentic_tool_calling",))
+    # ── Claude model family ──
+    # claude-fable-5  ≅ gpt-5.6-sol  (same tier)
+    # claude-opus-5   > gpt-5.6-terra (slightly stronger)
+    # claude-sonnet-5 > gpt-5.6-luna  (stronger)
+    elif "claude-fable" in name:
+        _raise_caps(caps, 0.90, ("code", "math", "logic"))
+        _raise_caps(caps, 0.86, ("science_knowledge", "critique", "structured_output"))
+        _raise_caps(caps, 0.84, ("multilingual", "daily_work"))
+        _raise_caps(caps, 0.78, ("long_context",))
+        _raise_caps(caps, 0.68, ("agentic_tool_calling",))
+    elif "claude-opus-5" in name:
+        _raise_caps(caps, 0.91, ("science_knowledge", "math", "logic", "daily_work"))
+        _raise_caps(caps, 0.89, ("structured_output", "critique"))
+        _raise_caps(caps, 0.85, ("code", "multilingual", "long_context"))
+        _raise_caps(caps, 0.71, ("agentic_tool_calling",))
+    elif "claude-opus-4" in name:
+        _raise_caps(caps, 0.86, ("science_knowledge", "logic", "daily_work"))
+        _raise_caps(caps, 0.84, ("structured_output", "critique"))
+        _raise_caps(caps, 0.82, ("code", "math"))
+        _raise_caps(caps, 0.66, ("agentic_tool_calling",))
+    elif "claude-sonnet-5" in name:
+        _raise_caps(caps, 0.89, ("science_knowledge", "daily_work", "multilingual", "code"))
+        _raise_caps(caps, 0.87, ("structured_output", "long_context", "logic"))
+        _raise_caps(caps, 0.86, ("math", "critique"))
+        _raise_caps(caps, 0.68, ("agentic_tool_calling",))
+    elif "claude-sonnet-4" in name:
+        _raise_caps(caps, 0.84, ("daily_work", "science_knowledge"))
+        _raise_caps(caps, 0.82, ("structured_output",))
+        _raise_caps(caps, 0.80, ("logic", "critique"))
+        _raise_caps(caps, 0.78, ("code",))
+    elif "claude-haiku" in name:
+        _raise_caps(caps, 0.76, ("daily_work",))
+        _raise_caps(caps, 0.74, ("science_knowledge",))
+        _raise_caps(caps, 0.72, ("structured_output",))
+        _raise_caps(caps, 0.70, ("logic",))
+        _raise_caps(caps, 0.68, ("code",))
+        _raise_caps(caps, 0.66, ("math",))
     elif any(token in name for token in ("120b", "pro", "sonnet", "opus")):
         _raise_caps(
             caps,
