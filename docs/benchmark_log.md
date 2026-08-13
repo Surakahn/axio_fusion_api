@@ -688,11 +688,16 @@ axio-terra: 179/205 = 87.3%, terra: 167/205 = 81.5%
 | claude-opus-5 / LiveBench | failed | 97 | 0.8095 | 11 | 10.19% |
 | gpt-5.6-sol / MMLU-Pro | completed | 112 | 0.8750 | 0 | 0.00% |
 | claude-fable-5 / LiveBench | failed | 104 | 0.8833 | 4 | 3.70% |
+| gpt-5.6-terra / MMLU-Pro | failed | 101 | 0.8416 | 11 | 9.82% |
+| claude-sonnet-5 / LiveBench | running | 60/108 | - | 16 | - |
 
 - 当前失败原因全部为 90 秒 provider timeout，无 5xx、无流式格式错误。
 - 超过 2% 预注册门禁的 unit 正确标记为 failed，不进入最终排名证据。
-- 当前正在运行 `gpt-5.6-terra / MMLU-Pro`。
-- campaign 总进度：3/12 units 已终态，其余按 checkpoint 继续。
+- 当前正在运行 `claude-sonnet-5 / LiveBench`，16:05 checkpoint 为
+  60/108 scored、16 timeout；当前失败仍全部为 90 秒 provider timeout。
+- campaign 总进度：4/12 units 已终态，1/12 运行中，其余按 checkpoint 继续。
+- `--retry-failed` 语义已核查：只重试 transport failed case，保留已完成
+  score；历史失败仍按最终 case status 和完整预期分母参与门禁。
 
 ### 下一步
 
