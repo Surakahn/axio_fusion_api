@@ -1,0 +1,111 @@
+{
+  "schema": "axio_fusion_api.prefusion_focus_manifest.v1",
+  "selection_basis": "operator_formal_core_candidate_set",
+  "ranking_prior_forbidden": true,
+  "candidate_policy": {
+    "schema": "axio_fusion_api.prefusion_candidate_policy.v1",
+    "default_allow_unlisted": false,
+    "provider_rules": [
+      {
+        "provider": "cpa_plus",
+        "allow_models": [
+          "gpt-5.6-luna",
+          "gpt-5.6-terra",
+          "gpt-5.6-sol"
+        ],
+        "allow_unlisted": false,
+        "excluded_unlisted_class": "auxiliary"
+      },
+      {
+        "provider": "anthropic-compatible",
+        "allow_models": [
+          "claude-sonnet-5",
+          "claude-opus-5",
+          "claude-fable-5"
+        ],
+        "allow_unlisted": false,
+        "excluded_unlisted_class": "auxiliary"
+      }
+    ]
+  },
+  "candidates": [
+    {
+      "provider": "cpa_plus",
+      "model": "gpt-5.6-sol",
+      "canonical_model_id": "gpt-5.6-sol",
+      "api_format": "responses",
+      "focus_reason": "正式通用文本模型；公开官方模型页和独立能力来源共同核验身份。",
+      "source_locators": [
+        {"url": "https://developers.openai.com/api/docs/models/gpt-5.6-sol", "title": "OpenAI official model page"},
+        {"url": "https://artificialanalysis.ai/models/gpt-5-6-sol", "title": "Artificial Analysis model page"}
+      ],
+      "allowed_roles": ["primary_solver", "independent_solver", "critic", "domain_specialist", "judge", "synthesizer", "structured_extraction", "short_verification"],
+      "ranking_prior_forbidden": true
+    },
+    {
+      "provider": "cpa_plus",
+      "model": "gpt-5.6-terra",
+      "canonical_model_id": "gpt-5.6-terra",
+      "api_format": "responses",
+      "focus_reason": "正式通用文本模型；公开官方模型页和独立能力来源共同核验身份。",
+      "source_locators": [
+        {"url": "https://developers.openai.com/api/docs/models/gpt-5.6-terra", "title": "OpenAI official model page"},
+        {"url": "https://artificialanalysis.ai/models/gpt-5-6-terra", "title": "Artificial Analysis model page"}
+      ],
+      "allowed_roles": ["primary_solver", "independent_solver", "critic", "domain_specialist", "judge", "synthesizer", "structured_extraction", "short_verification"],
+      "ranking_prior_forbidden": true
+    },
+    {
+      "provider": "cpa_plus",
+      "model": "gpt-5.6-luna",
+      "canonical_model_id": "gpt-5.6-luna",
+      "api_format": "responses",
+      "focus_reason": "正式通用文本模型；公开官方模型页和独立能力来源共同核验身份。",
+      "source_locators": [
+        {"url": "https://developers.openai.com/api/docs/models/gpt-5.6-luna", "title": "OpenAI official model page"},
+        {"url": "https://artificialanalysis.ai/models/gpt-5-6-luna", "title": "Artificial Analysis model page"}
+      ],
+      "allowed_roles": ["primary_solver", "independent_solver", "critic", "domain_specialist", "judge", "synthesizer", "structured_extraction", "short_verification"],
+      "ranking_prior_forbidden": true
+    },
+    {
+      "provider": "anthropic-compatible",
+      "model": "claude-fable-5",
+      "canonical_model_id": "claude-fable-5",
+      "api_format": "anthropic",
+      "focus_reason": "正式通用文本模型；公开官方模型页和独立能力来源共同核验身份。",
+      "source_locators": [
+        {"url": "https://platform.claude.com/docs/en/about-claude/models/overview", "title": "Anthropic official model overview"},
+        {"url": "https://artificialanalysis.ai/models/claude-fable-5", "title": "Artificial Analysis model page"}
+      ],
+      "allowed_roles": ["primary_solver", "independent_solver", "critic", "domain_specialist", "judge", "synthesizer", "structured_extraction", "short_verification"],
+      "ranking_prior_forbidden": true
+    },
+    {
+      "provider": "anthropic-compatible",
+      "model": "claude-opus-5",
+      "canonical_model_id": "claude-opus-5",
+      "api_format": "anthropic",
+      "focus_reason": "正式通用文本模型；公开官方模型页和独立能力来源共同核验身份。",
+      "source_locators": [
+        {"url": "https://platform.claude.com/docs/en/about-claude/models/overview", "title": "Anthropic official model overview"},
+        {"url": "https://artificialanalysis.ai/models/claude-opus-5", "title": "Artificial Analysis model page"}
+      ],
+      "allowed_roles": ["primary_solver", "independent_solver", "critic", "domain_specialist", "judge", "synthesizer", "structured_extraction", "short_verification"],
+      "ranking_prior_forbidden": true
+    },
+    {
+      "provider": "anthropic-compatible",
+      "model": "claude-sonnet-5",
+      "canonical_model_id": "claude-sonnet-5",
+      "api_format": "anthropic",
+      "focus_reason": "正式通用文本模型；公开官方模型页和独立能力来源共同核验身份。",
+      "source_locators": [
+        {"url": "https://platform.claude.com/docs/en/about-claude/models/overview", "title": "Anthropic official model overview"},
+        {"url": "https://artificialanalysis.ai/models/claude-sonnet-5", "title": "Artificial Analysis model page"}
+      ],
+      "allowed_roles": ["primary_solver", "independent_solver", "critic", "domain_specialist", "judge", "synthesizer", "structured_extraction", "short_verification"],
+      "ranking_prior_forbidden": true
+    }
+  ]
+}

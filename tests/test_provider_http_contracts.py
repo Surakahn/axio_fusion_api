@@ -1814,3 +1814,41 @@ def test_optional_system_proxy_uses_10808_without_leaking_proxy_value(monkeypatc
     assert isinstance(proxy_handler, provider_module.urllib.request.ProxyHandler)
     assert "127.0.0.1:10808" not in json.dumps(readiness, ensure_ascii=False)
     assert "127.0.0.1:10808" not in serialized
+
+
+def test_ordinary_json_response_body_is_bounded_by_watchdog(monkeypatch):
+    """A proxy wrapper that hides its socket must not hang a body read forever."""
+
+    class BlockingResponse:
+        def __init__(self):
+            self.release = threading.Event()
+            self.closed = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def close(self):
+            self.closed = True
+            self.release.set()
+
+        def read(self):
+            self.release.wait()
+            return b'{"ok": true}'
+
+    monkeypatch.setattr(
+        provider_module,
+        "_open_provider_url",
+        lambda _request, *, timeout: BlockingResponse(),
+    )
+    started = time.monotonic()
+    with pytest.raises(provider_module.ProviderExecutionError) as exc_info:
+        provider_module._open_json_request(
+            provider_module.urllib.request.Request("https://provider.invalid/v1/health"),
+            timeout=0.03,
+        )
+
+    assert exc_info.value.error_code == "provider_request_timeout"
+    assert time.monotonic() - started < 1.0

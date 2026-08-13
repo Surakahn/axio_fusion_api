@@ -1,0 +1,38 @@
+{
+  "schema": "axio_fusion_api.prefusion_source_manifest.v1",
+  "sources": [
+    {
+      "source_slot": "openai_official_model_pages",
+      "url": "https://developers.openai.com/api/docs/models",
+      "title": "OpenAI official models documentation",
+      "models": [
+        "gpt-5.6-luna",
+        "gpt-5.6-terra",
+        "gpt-5.6-sol"
+      ]
+    },
+    {
+      "source_slot": "anthropic_official_model_overview",
+      "url": "https://platform.claude.com/docs/en/about-claude/models/overview",
+      "title": "Anthropic official model overview",
+      "models": [
+        "claude-fable-5",
+        "claude-opus-5",
+        "claude-sonnet-5"
+      ]
+    },
+    {
+      "source_slot": "artificial_analysis_model_pages",
+      "url": "https://artificialanalysis.ai/leaderboards/models",
+      "title": "Independent model comparison source",
+      "models": [
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "claude-fable-5",
+        "claude-opus-5",
+        "claude-sonnet-5"
+      ]
+    }
+  ]
+}

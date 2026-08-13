@@ -7273,13 +7273,42 @@ def _open_json_request(
     timeout: float,
     fusion_deadline_bound: bool = False,
 ) -> Mapping[str, Any]:
+    budget = _provider_timeout_budget(timeout)
+    deadline_at = time.monotonic() + budget
+    timeout_error_code = _timeout_error_code(
+        budget=budget,
+        fusion_deadline_bound=fusion_deadline_bound,
+    )
+    deadline_expired = threading.Event()
     try:
-        with _open_provider_url(request, timeout=timeout) as response:
-            _set_response_read_timeout(
-                response,
-                _provider_timeout_budget(timeout),
+        with _open_provider_url(request, timeout=budget) as response:
+            # Some proxy/TLS wrapper chains do not expose their nested socket
+            # to the timeout propagation helper. A daemon watchdog closes the
+            # response transport at the same deadline so ordinary JSON body
+            # reads cannot remain blocked indefinitely.
+            def expire_response() -> None:
+                deadline_expired.set()
+                _close_response_transport(response)
+
+            response_watchdog = threading.Timer(
+                max(0.001, deadline_at - time.monotonic()),
+                expire_response,
             )
-            raw = response.read().decode("utf-8")
+            response_watchdog.daemon = True
+            response_watchdog.start()
+            try:
+                _set_response_read_timeout(
+                    response,
+                    max(0.001, deadline_at - time.monotonic()),
+                )
+                raw = response.read().decode("utf-8")
+            finally:
+                response_watchdog.cancel()
+            if deadline_expired.is_set():
+                raise ProviderExecutionError(
+                    _safe_provider_error_message(timeout_error_code),
+                    error_code=timeout_error_code,
+                )
     except urllib.error.HTTPError as exc:
         retry_after_seconds = _retry_after_seconds_from_headers(
             getattr(exc, "headers", None)
@@ -7292,13 +7321,25 @@ def _open_json_request(
             retry_after_seconds=retry_after_seconds,
         ) from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        error_code = _timeout_error_code(
-            budget=timeout,
-            fusion_deadline_bound=fusion_deadline_bound,
-        ) if isinstance(exc, (TimeoutError, socket.timeout)) else type(exc).__name__
+        error_code = (
+            timeout_error_code
+            if (
+                isinstance(exc, (TimeoutError, socket.timeout))
+                or deadline_expired.is_set()
+                or _deadline_exhausted(deadline_at)
+            )
+            else type(exc).__name__
+        )
         raise ProviderExecutionError(
             _safe_provider_error_message(error_code),
             error_code=error_code,
+        ) from exc
+    except ValueError as exc:
+        # Closing an HTTPResponse from the watchdog can surface as a bare
+        # ValueError from http.client during a blocked body read.
+        raise ProviderExecutionError(
+            _safe_provider_error_message(timeout_error_code),
+            error_code=timeout_error_code,
         ) from exc
     try:
         result = json.loads(raw)
