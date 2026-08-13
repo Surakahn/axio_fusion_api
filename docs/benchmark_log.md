@@ -690,14 +690,18 @@ axio-terra: 179/205 = 87.3%, terra: 167/205 = 81.5%
 | claude-fable-5 / LiveBench | failed | 104 | 0.8833 | 4 | 3.70% |
 | gpt-5.6-terra / MMLU-Pro | failed | 101 | 0.8416 | 11 | 9.82% |
 | claude-sonnet-5 / LiveBench | failed | 79 | - | 29 | 26.85% |
-| gpt-5.6-luna / MMLU-Pro | running | 2/112 | - | - | - |
+| gpt-5.6-luna / MMLU-Pro | failed | 101 | - | 11 | 9.82% |
+| gpt-5.6-luna / LiveBench | failed | 67 | - | 41 | 37.96% |
+| claude-sonnet-5 / MMLU-Pro | completed | 110 | - | 2 | 1.79% |
+| gpt-5.6-terra / LiveBench | running | 17/108 | - | 0 | - |
 
-- 当前失败原因全部为 90 秒 provider timeout，无 5xx、无流式格式错误。
+- 当前失败原因主要是 90 秒 provider timeout；`gpt-5.6-luna / MMLU-Pro`
+  还记录到 4 次上游 HTTP 503。
 - 超过 2% 预注册门禁的 unit 正确标记为 failed，不进入最终排名证据。
-- `claude-sonnet-5 / LiveBench` 终态：79 scored、29 timeout、26.85%，
-  failed。
-- 当前正在运行 `gpt-5.6-luna / MMLU-Pro`。
-- campaign 总进度：5/12 units 已终态，1/12 运行中，其余按 checkpoint 继续。
+- `claude-sonnet-5 / MMLU-Pro` 成为第二个 completed unit，110 scored、
+  2 timeout、1.79%。
+- 当前正在运行 `gpt-5.6-terra / LiveBench`，前 17 个 case 全部成功。
+- campaign 总进度：8/12 units 已终态，1/12 运行中，其余按 checkpoint 继续。
 - `--retry-failed` 语义已核查：只重试 transport failed case，保留已完成
   score；历史失败仍按最终 case status 和完整预期分母参与门禁。
 
