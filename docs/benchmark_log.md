@@ -668,3 +668,37 @@ axio-terra: 179/205 = 87.3%, terra: 167/205 = 81.5%
 | gpt-5.4 | BBH | 85% | 85% | 0 |
 | **总计** | | **79.4%** | **79.5%** | **-0.1pp** |
 
+## 2026-08-13 Core Cohort: 六模型非目标 screening（进行中）
+
+### 本轮运行
+
+- 目的：为六模型正式核心池建立独立非目标排名证据，输入为 MMLU-Pro
+  `112 cases` 和 LiveBench `108 cases`，串行 `max_workers=1`，每请求硬上限
+  90 秒，运输失败门禁 2%。
+- 计划规模：12 units，预估 1320 次 provider calls。
+- 首轮 live run 在普通 JSON watchdog 修复后启动；进程由 checkpoint 恢复，
+  已保留所有完成结果和失败分母。
+- 已修复并提交普通 JSON provider 响应 deadline watchdog；六模型正式候选
+  配置同步进入仓库。
+
+### 已终态 units
+
+| model/source | status | scored | mean | transport failures | rate |
+|---|---|---|---|---|---|
+| claude-opus-5 / LiveBench | failed | 97 | 0.8095 | 11 | 10.19% |
+| gpt-5.6-sol / MMLU-Pro | completed | 112 | 0.8750 | 0 | 0.00% |
+| claude-fable-5 / LiveBench | failed | 104 | 0.8833 | 4 | 3.70% |
+
+- 当前失败原因全部为 90 秒 provider timeout，无 5xx、无流式格式错误。
+- 超过 2% 预注册门禁的 unit 正确标记为 failed，不进入最终排名证据。
+- 当前正在运行 `gpt-5.6-terra / MMLU-Pro`。
+- campaign 总进度：3/12 units 已终态，其余按 checkpoint 继续。
+
+### 下一步
+
+- 继续按 15 分钟低频探针等待完整 12 units。
+- 全部 12 units 首轮终态后用 `--retry-failed` 仅重试失败 case；完成结果保持不可变。
+- 对 90 秒 timeout 高发 profile 做 endpoint 延迟审计，不能放宽硬门禁，
+  也不把未通过运输门禁的 unit 用作最终 ranking。
+- terminal campaign 后再执行 screening-to-ranking 和 provider baseline
+  freeze；当前没有最终排名或 superiority claim。
