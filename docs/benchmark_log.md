@@ -713,3 +713,42 @@ axio-terra: 179/205 = 87.3%, terra: 167/205 = 81.5%
   也不把未通过运输门禁的 unit 用作最终 ranking。
 - terminal campaign 后再执行 screening-to-ranking 和 provider baseline
   freeze；当前没有最终排名或 superiority claim。
+
+## 2026-08-13 Turn 35: 首轮 10/12 终态，等待 sol/opus 收尾
+
+### 当前状态
+
+- 进程 PID `2498355` 继续存活，仍使用 `127.0.0.1:10808` 系统代理，
+  `max_workers=1`，首轮 12 units 尚未结束，冻结 plan 未做任何改动。
+- 已终态 10/12：3 completed，7 failed。
+- 当前运行 `gpt-5.6-sol / LiveBench`，checkpoint 为 48/108 completed、
+  0 transport failure。
+- 排队中 `claude-opus-5 / MMLU-Pro`。
+
+| model/source | status | scored | timeout | rate |
+|---|---|---|---|---|
+| claude-fable-5 / MMLU-Pro | completed | 112 | 0 | 0.00% |
+| claude-sonnet-5 / MMLU-Pro | completed | 110 | 2 | 1.79% |
+| gpt-5.6-sol / MMLU-Pro | completed | 112 | 0 | 0.00% |
+| claude-opus-5 / LiveBench | failed | 97 | 11 | 10.19% |
+| claude-fable-5 / LiveBench | failed | 104 | 4 | 3.70% |
+| claude-sonnet-5 / LiveBench | failed | 79 | 29 | 26.85% |
+| gpt-5.6-terra / MMLU-Pro | failed | 101 | 11 | 9.82% |
+| gpt-5.6-luna / MMLU-Pro | failed | 101 | 11 | 9.82% |
+| gpt-5.6-terra / LiveBench | failed | 105 | 3 | 2.78% |
+| gpt-5.6-luna / LiveBench | failed | 67 | 41 | 37.96% |
+
+### 本轮确认
+
+- 模型能力层级已固化为测试约束：`claude-fable-5 ≈ gpt-5.6-sol`、
+  `claude-opus-5 > gpt-5.6-terra`、`claude-sonnet-5 > gpt-5.6-luna`。
+- LiveBench 仍是 90 秒 ceiling 下最不稳定来源；失败主要来自 provider
+  90 秒 timeout，少量来自上游 HTTP 503，不改变门禁或冻结 plan。
+
+### 下一步
+
+- 继续 15 分钟低频探针，直到 sol/LiveBench 与 opus/MMLU-Pro 首轮终态。
+- 全部终态后执行 `--retry-failed`，复用同一 state；已完成 score 不变。
+- retry 后优先复核 `gpt-5.6-terra / LiveBench`（当前 3/108，2.78%）和
+  `claude-fable-5 / LiveBench`（当前 4/108，3.70%）是否进入 2% 门禁。
+- 不生成 ranking，不做 superiority claim，直到 terminal campaign 完成。
