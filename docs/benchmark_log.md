@@ -752,3 +752,35 @@ axio-terra: 179/205 = 87.3%, terra: 167/205 = 81.5%
 - retry 后优先复核 `gpt-5.6-terra / LiveBench`（当前 3/108，2.78%）和
   `claude-fable-5 / LiveBench`（当前 4/108，3.70%）是否进入 2% 门禁。
 - 不生成 ranking，不做 superiority claim，直到 terminal campaign 完成。
+
+## 2026-08-14 Turn 36: 定位 LiveBench 文本兼容问题，启用新预注册切片
+
+### 旧 cohort 终态
+
+- 原 `2026-08-13-core-cohort` 三轮 retry 后达到 9/12 completed，仍有 3
+  个 LiveBench unit 超 2% 门禁，因此 `ready_for_ranking=false`。
+- 失败 case 已按 source question_id 映射：
+  - `claude-fable-5`：4/108，全部 `plot_unscrambling`，上游 503。
+  - `claude-sonnet-5`：5/108，`zebra_puzzle` 4 + `spatial` 1，空输出/超时。
+  - `gpt-5.6-luna`：3/108，`tablejoin` 2 + `plot_unscrambling` 1，90 秒超时。
+- `plot_unscrambling` 是图像题，而六个正式候选 registry 中均为 text
+  profile；`zebra_puzzle`、`spatial`、`tablejoin` 在 90 秒文本通路上
+  对弱候选不稳定。继续盲 retry 不会收敛，因此不修改旧冻结 plan。
+
+### 新 cohort 契约
+
+- 新目录 `private/runs/2026-08-14-core-cohort-text-compatible/`。
+- LiveBench 仍为官方独立 source family，但预注册文本兼容切片：
+  `web_of_lies_v2`, `cta`, `tablereformat`, `connections`, `typos`。
+- 排除 `zebra_puzzle`, `spatial`, `tablejoin`, `plot_unscrambling`，
+  5 tasks × 20 cases = 100，满足最低 100 题和两个独立 source family。
+- 新 plan 离线校验 `ready=true`：12 tasks、1272 次预估调用、MMLU-Pro 112
+  题 + LiveBench 100 题，90 秒 cap 仍生效。
+- 新 cohort live 首轮运行中，首个 MMLU-Pro unit checkpoint 55/112。
+
+### 下一步
+
+- 继续 20 分钟低频探针，等待 text-compatible cohort 全部 12 units 首轮
+  终态，必要时只跑 `--retry-failed`。
+- 通过后执行 `baseline-screening-to-ranking`，不再使用旧 partial cohort
+  或 survivor subset。
