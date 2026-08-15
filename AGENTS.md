@@ -411,6 +411,35 @@ printf 'PID=%s\n' "$!"
 - 每次启动后必须确认 `ps -p <pid>` 有进程，且日志没有 `ModuleNotFoundError`、参数解析错误或认证配置错误。
 - 如果启动失败，保留失败日志并重命名为 `.bad-<reason>.log`，再用修正命令重启；不要覆盖失败证据。
 
+### 10.5 实际配置状态与故障复盘
+
+- 本机 Codex 模型目录是 `~/.codex/codex-model-catalog-gpt56-272k.json`，不是
+  `config.toml` 单独决定工具形态。当前已验证：
+  - `gpt-5.6-sol` 保持 `tool_mode=code_mode_only`，适合 Code Mode/custom tool 路径。
+  - `gpt-5.6-terra` 和 `gpt-5.6-luna` 的 `tool_mode` 必须保持 `null`，不能设置成
+    `code_mode_only`，否则它们会尝试生成旧式普通 function_call，参数仍是
+    `{"command": ..., "timeout": ...}`，当前运行时不会启动 shell。
+  - `~/.codex/config.toml` 的 `[features]` 中不能开启 `code_mode_only`。
+- 曾发生的故障：`gpt-5.6-luna` 在上下文压缩后连续 26 次把 exec 发成旧格式普通
+  function_call，因此没有对应的 `function_call_output`，也从未启动任何 shell。
+  切到 `gpt-5.6-sol` 后第一条调用即为正确形态并成功执行。根因不是网络、权限或
+  命令本身，而是模型工具形态与运行时 schema 不匹配。
+- 当前项目最稳定的路径是结构化 `functions.exec_command`，字段以当前回合暴露的
+  schema 为准，典型参数为 `cmd`、`workdir`、`yield_time_ms`、`max_output_tokens`。
+  只有运行在 Code Mode 且运行时明确暴露 custom tool 时，才使用自由格式
+  `custom_tool_call`。
+
+### 10.6 工具通道排查清单
+
+1. 先跑最小自检：`date && pwd && python3.11 --version`，必须看到真实 stdout。
+2. 核对当前回合工具 schema，不沿用旧会话的 `exec`/`command`/`timeout` 形态。
+3. 验证模型目录：
+   `python3.11 -c "import json; d=json.load(open('/home/he/.codex/codex-model-catalog-gpt56-272k.json')); [print(m['slug'], m.get('tool_mode')) for m in d['models']]"`
+   确认 `gpt-5.6-luna`/`gpt-5.6-terra` 不是 `code_mode_only`。
+4. 检查 `~/.codex/config.toml` 未启用 `code_mode_only`。
+5. 长任务启动后检查进程存在、日志非空、状态文件开始增长；三者都无变化时先怀疑
+   工具形态或启动参数，不重复启动业务命令。
+
 ---
 
-*最后更新：2026-08-15 — 记录 Codex 工具调用故障、正确 schema 与 Luna/Terra 配置规避规则*
+*最后更新：2026-08-15 — 记录 Codex 工具调用故障、正确 schema、实际配置验证与 Luna/Terra 配置规避规则*
