@@ -443,3 +443,139 @@ printf 'PID=%s\n' "$!"
 ---
 
 *最后更新：2026-08-15 — 记录 Codex 工具调用故障、正确 schema、实际配置验证与 Luna/Terra 配置规避规则*
+
+### 10.7 Luna 与 Terra 工具调用规范 — 明确指导
+
+当前 Codex 环境中 `gpt-5.6-luna` 和 `gpt-5.6-terra` 的工具调用能力取决于 `tool_mode` 配置。
+
+#### 正确配置与症状
+
+| 模型 | 正确 tool_mode | 工具调用方式 | 症状 | 故障恢复 |
+|------|---|---|---|---|
+| `gpt-5.6-luna` | **`null`**（关闭 code_mode_only） | 结构化 `functions.exec_command`，字段：`cmd`, `workdir`, `yield_time_ms`, `max_output_tokens` | 若为 `code_mode_only`：生成旧式 `{"command": ..., "timeout": ...}` 格式，当前运行时不识别，无进程启动 | 关闭 `code_mode_only`，重置 tool_mode 为 `null` |
+| `gpt-5.6-terra` | **`null`**（关闭 code_mode_only） | 结构化 `functions.exec_command` | 同上 | 同上 |
+| `gpt-5.6-sol` | `code_mode_only`（保持） | 自由格式 custom tool call 或结构化 exec | 能稳定生成当前运行时接受的格式 | 保持现有配置 |
+
+#### 配置位置与验证
+
+模型的 `tool_mode` 在 `~/.codex/codex-model-catalog-gpt56-272k.json` 中定义，不由 `config.toml` 单独决定。
+
+验证命令：
+```bash
+python3.11 -c "
+import json
+d = json.load(open('/home/he/.codex/codex-model-catalog-gpt56-272k.json'))
+for m in d.get('models', []):
+    if m['slug'] in ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol']:
+        print(f\"{m['slug']}: tool_mode={m.get('tool_mode', 'NOT_SET')}\")
+"
+```
+
+预期输出：
+```
+gpt-5.6-luna: tool_mode=None
+gpt-5.6-terra: tool_mode=None
+gpt-5.6-sol: tool_mode=code_mode_only
+```
+
+#### 真实故障案例：Luna 26 次连续失败
+
+**事件**：2026-08-14，`gpt-5.6-luna` 在上下文压缩后连续 26 次生成工具调用失败。
+
+**根因**：Luna 的 `tool_mode` 被误设为 `code_mode_only`，导致：
+- 预期：结构化 `functions.exec_command` → 运行时识别并启动 shell
+- 实际：旧式普通 function_call，参数为 `{"command": "...", "timeout": ...}` → 运行时不识别，无 `function_call_output`，shell 从未启动
+
+**26 次调用的现象**：
+1. 调用 1-26：生成格式 `{type: 'function_call', name: 'exec_command', parameters: {'command': '...', 'timeout': 30}}`
+2. 运行时收到调用但参数不匹配 → 不启动 shell
+3. 返回给模型：无进程 PID，无输出，无错误信息（或返回参数错误）
+4. 模型重试：重复步骤 1-3
+
+**切换到 Sol 后**：
+- 调用 27（第一次使用 Sol）：生成格式 `{type: 'tool_call', format: 'custom', name: '...', args_json: '...'}`
+- 运行时立刻识别并成功启动 shell → 立刻返回正确结果
+
+**修复方式**：
+```bash
+# 关闭 Luna 和 Terra 的 code_mode_only
+python3.11 << 'PYEOF'
+import json
+
+catalog_path = '/home/he/.codex/codex-model-catalog-gpt56-272k.json'
+with open(catalog_path) as f:
+    d = json.load(f)
+
+for m in d.get('models', []):
+    if m['slug'] in ['gpt-5.6-luna', 'gpt-5.6-terra']:
+        if m.get('tool_mode') == 'code_mode_only':
+            del m['tool_mode']  # 恢复为 null
+            print(f"重置 {m['slug']} tool_mode 为 null")
+
+with open(catalog_path, 'w') as f:
+    json.dump(d, f, indent=2)
+    print(f"已保存至 {catalog_path}")
+PYEOF
+```
+
+验证修复后重新启动 Codex 会话。
+
+#### 结构化 exec_command 的正确参数格式
+
+当前运行时接受的 `functions.exec_command` 参数：
+```python
+{
+  "cmd": "date",                    # 必需：shell 命令
+  "workdir": "/home/he/axio_fusion_api",  # 可选：工作目录
+  "yield_time_ms": 10000,           # 可选：等待输出时间（毫秒）
+  "max_output_tokens": 10000,       # 可选：输出 token 数上限
+  "shell": "/bin/bash",             # 可选：shell 二进制
+  "login": True,                    # 可选：是否使用 -l/-i 语义
+  "tty": False                      # 可选：是否分配 PTY
+}
+```
+
+**禁止使用旧格式**（Luna/Terra 在 `code_mode_only` 时会生成这种格式）：
+```python
+# 错误格式 — 运行时不识别
+{
+  "command": "date",
+  "timeout": 30
+}
+```
+
+#### 工具调用最小自检流程
+
+每次进行工具调用之前执行：
+```bash
+# 1. 验证当前模型是否为预期模型
+codex info --model  # 或查看 Codex 初始化日志
+
+# 2. 执行最小自检命令
+# （由模型在调用真实任务前执行）
+date && pwd && python3.11 --version
+
+# 3. 验证命令返回真实 stdout
+# 若无输出或无 PID 信息，停止业务命令，先诊断工具形态
+
+# 4. 核对当前回合工具 schema
+# （确认参数名是 cmd/workdir，不是 command/timeout）
+
+# 5. 启动业务命令
+# set -a; source private/current_channels.env; set +a
+# setsid nohup env PYTHONPATH=src python3.11 -m axio_fusion_api.cli ...
+```
+
+#### 何时调用 Sol vs Luna/Terra
+
+| 任务类型 | 推荐模型 | 原因 |
+|---|---|---|
+| 执行良好定义的命令（benchmark run、CLI task） | `gpt-5.6-luna` | 快速、成本低、工具调用稳定 |
+| 复杂思考、计划、架构设计 | `gpt-5.6-terra` / `gpt-5.6-sol` | 推理能力强，设计质量高 |
+| 调查 API 文档、研究模型参数、复杂工程决策 | `gpt-5.6-sol` + `max` reasoning | 深度思考、探索性研究 |
+| Codex 工具调用中工具形态诊断 | `gpt-5.6-sol` | 若 Luna/Terra 工具无响应，临时切 Sol 完成诊断 |
+
+---
+
+*最后更新：2026-08-15 — 补充 Luna/Terra 工具调用规范、故障案例与修复流程*
+
