@@ -365,3 +365,52 @@ L1: 语法 → L2: 导入 → L3a: 单元测试 → L3b: Dry-run → L3c: 连通
 ---
 
 *最后更新：2026-08-09 — 四种API格式全部验证通过，融合系统在多套件上展示有效性*
+
+---
+
+## 十、Codex 工具调用与故障规避规范
+
+### 10.1 正确调用原则
+
+- **必须使用运行时实际暴露的工具 schema**：先看当前回合可用工具名称和参数；当前项目常用 shell 工具是 `functions.exec_command`，参数是 `cmd`、`workdir`、`yield_time_ms`、`max_output_tokens` 等，不是旧版 `command`/`timeout`。
+- **工具调用必须是真实 tool call**：不要把 `<tool_calls>`、`<invoke>`、DSML/XML 片段或伪 JSON 写进普通回复文本；这些只会变成用户可见文本，不会启动 shell。
+- **最小自检优先**：怀疑工具通道异常时，先执行 `date && pwd && python3.11 --version`，必须看到真实输出后再启动筛选、benchmark、server 或写文件任务。
+- **并行读取用 `multi_tool_use.parallel`**：只并行无依赖的读操作；文件修改、进程启动、git commit/push 不并行。
+- **长任务必须后台化并记录 PID/日志**：使用 `setsid nohup env PYTHONPATH=src python3.11 -m axio_fusion_api.cli ... > <log> 2>&1 &`，启动后立刻用 `ps -p <pid>` 和日志头尾确认没有参数级错误。
+- **低频探针**：长时 screening/benchmark 运行中按 10-20 分钟低频检查进程、state summary 和日志尾部；探针期间不要频繁请求，避免无谓 token 和 provider 消耗。
+
+### 10.2 已知失败模式与根因
+
+- **错误模式 A：普通文本伪工具调用**。如果模型在回复中输出类似 `<｜DSML｜tool_calls>` 或 `<invoke name="exec_command">` 的文本，实际不会触发工具；后续看不到 `function_call_output`/真实 stdout，也不会启动任何 shell 进程。
+- **错误模式 B：旧 schema 调用**。压缩上下文后，部分模型曾把 exec 发送成旧格式 `{"command": "...", "timeout": ...}`；当前 Codex 工具接受的是运行时列出的 schema，例如 `functions.exec_command` 的 `{"cmd": "...", "workdir": "..."}`。字段不匹配会导致调用不被执行或直接失败。
+- **错误模式 C：Code Mode/custom exec 与结构化 exec 混淆**。某些 Code Mode 环境要求 custom tool call 自由格式 JavaScript；而本项目当前对后续模型最稳定的路径是结构化 `functions.exec_command`。必须以当前回合工具列表为准，不要沿用旧会话的工具形态。
+- **错误模式 D：漏 `PYTHONPATH=src`**。后台运行 `python3.11 -m axio_fusion_api.cli` 时如未设置 `PYTHONPATH=src`，会报 `ModuleNotFoundError: No module named 'axio_fusion_api'`，任务没有进入筛选逻辑。修复方式是在命令前加 `env PYTHONPATH=src` 或先导出 `PYTHONPATH=src`。
+
+### 10.3 Luna/Terra/Sol 子代理配置要求
+
+- `gpt-5.6-luna` 和 `gpt-5.6-terra` 在 Codex 环境中不要强制 `code_mode_only`；关闭 `code_mode_only`，让它们继续使用自己更稳定生成的结构化 `exec_command` 工具调用。
+- `gpt-5.6-sol` 可保持现有 Code Mode，只要它能稳定生成当前运行时接受的真实 custom/tool call。
+- 模型名和推理强度是两个独立字段：`gpt-5.6-luna`、`gpt-5.6-terra`、`gpt-5.6-sol` 是模型名；`max` 是 reasoning effort。不要把 `max` 拼进模型名。
+- 遇到工具无输出、无进程、无日志变化时，先判断是否为工具调用形态错误，不要重复启动业务命令；先做 10.1 的最小自检。
+
+### 10.4 本项目 CLI 调用模板
+
+```bash
+set -a
+source private/current_channels.env
+set +a
+setsid nohup env PYTHONPATH=src python3.11 -m axio_fusion_api.cli \
+  --registry <registry.json> \
+  <subcommand> \
+  <subcommand args> \
+  > <run_dir>/<task>.console.log 2>&1 &
+printf 'PID=%s\n' "$!"
+```
+
+- 全局参数如 `--registry` 必须放在子命令名前；子命令参数按 `PYTHONPATH=src python3.11 -m axio_fusion_api.cli <subcommand> --help` 的输出为准。
+- 每次启动后必须确认 `ps -p <pid>` 有进程，且日志没有 `ModuleNotFoundError`、参数解析错误或认证配置错误。
+- 如果启动失败，保留失败日志并重命名为 `.bad-<reason>.log`，再用修正命令重启；不要覆盖失败证据。
+
+---
+
+*最后更新：2026-08-15 — 记录 Codex 工具调用故障、正确 schema 与 Luna/Terra 配置规避规则*

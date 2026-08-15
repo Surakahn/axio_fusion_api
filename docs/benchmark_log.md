@@ -784,3 +784,24 @@ axio-terra: 179/205 = 87.3%, terra: 167/205 = 81.5%
   终态，必要时只跑 `--retry-failed`。
 - 通过后执行 `baseline-screening-to-ranking`，不再使用旧 partial cohort
   或 survivor subset。
+
+## 2026-08-15 Turn 37: final cohort retry1 与 Codex 工具调用修复记录
+
+### 跑了什么
+
+- 运行对象：`private/runs/2026-08-14-core-cohort-final/` 的 pre-Fusion screening retry1。
+- 命令类型：`baseline-screening-run --live --max-workers 1 --retry-failed`。
+- 正确启动：PID `122257`，后台命令使用 `setsid nohup env PYTHONPATH=src python3.11 -m axio_fusion_api.cli ...`。
+- 失败启动记录：一次漏 `PYTHONPATH=src` 的尝试只产生 `ModuleNotFoundError`，已保存为 `screening_retry1.console.bad-pypath.log`，未进入筛选逻辑。
+
+### 当前结果
+
+- retry1 仍在运行；最近观测 `status=running`、`ready_for_ranking=false`。
+- 当前已完成 retry 单元至少 `6 completed / 0 failed`；进程仍在继续写后续 checkpoint。
+- 根目录 `AGENTS.md` 已记录 Codex 工具正确调用方式、旧 schema/伪工具失败原因，以及 Luna/Terra 关闭 `code_mode_only` 的规则。
+
+### 下一轮要干嘛
+
+- 低频探针等待 PID `122257` 退出。
+- 若 state 变为 `completed` 且 `ready_for_ranking=true`，执行 `baseline-screening-to-ranking`。
+- 若仍 partial，只重试 transport failures，不改冻结 plan，不做 superiority claim。
