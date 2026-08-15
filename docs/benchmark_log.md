@@ -805,3 +805,24 @@ axio-terra: 179/205 = 87.3%, terra: 167/205 = 81.5%
 - 低频探针等待 PID `122257` 退出。
 - 若 state 变为 `completed` 且 `ready_for_ranking=true`，执行 `baseline-screening-to-ranking`。
 - 若仍 partial，只重试 transport failures，不改冻结 plan，不做 superiority claim。
+## 2026-08-15 Turn 38: transport-only 5 模型 cohort
+
+### 跑了什么
+
+- 原 final cohort retry1/retry2/retry3：最终 11/12 completed，claude-fable-5/MMLU-Pro
+  稳定 3 个 90s timeout，transport failure rate 2.68% > 2%。
+- 直连诊断：claude-fable-5 对同一 case 约 85s 返回，说明是边缘慢响应而非瞬时 5xx。
+- 运行 `baseline-screening-transport-admission`：transport-only ready，5/6 模型通过。
+- 生成新 5 模型 transport cohort plan：ready=true，10 tasks，1070 calls。
+- 启动 5 模型 live screening，PID 478163。
+
+### 当前结果
+
+- 5 模型 live screening 运行中，首个 MMLU-Pro checkpoint 已写入。
+- 尚未进入 ranking，不做 superiority claim。
+
+### 下一轮要干嘛
+
+- 低频探针等待 5 模型 cohort 全部 10 units 终态。
+- 通过后执行 screening-to-ranking 和 provider baseline freeze。
+- 继续七类十四套正式 campaign。
