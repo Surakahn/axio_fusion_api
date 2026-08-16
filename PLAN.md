@@ -23,6 +23,13 @@ audit 的单向链路。已有旧 Harness template 只能作为结构参考；co
 official/audited runner commit。具体 contract 与恢复规则记录在
 `docs/architecture/axio_fusion_benchmark_harness_convergence_2026-08-16.md`。
 
+本阶段已修复多 probe 文件合并时重复 profile 被按 raw row 重复计入 API format
+binding 的控制面缺陷。审计现在按唯一 profile hash 统计 available API format，并
+对同一 profile 出现多个 API format fail-closed；现有 composite probe evidence audit
+已重新生成并为 `ready=true`、0 blocker。Python 3.11 全量回归为 `1037 passed,
+7 skipped`。这些是工程门禁里程碑，不等同于 screening、provider freeze 或
+superiority claim 完成。
+
 离线 scaffolding 已生成：六套 pin 全 ready，execution plan 为 108 个 task 且
 结构门禁全通过；acquisition status 仍缺 108 个 official import，所以暂不执行
 target provider calls，也不把该 plan 当作 final claim evidence。

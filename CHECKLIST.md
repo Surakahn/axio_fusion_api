@@ -26,6 +26,10 @@
   import template、execution plan 和 official bridge 校验。
 - [x] tau-bench configured preflight ready：public gateway、独立 provider user
   simulator、retail/airline 两环境和 Python 3.11 均通过；仍待最终 freeze 绑定。
+- [x] 修复多 probe 文件重复 profile 导致的 API format 审计假 blocker；唯一
+  profile 计数与 registry source counts 已重新绑定，composite audit 为
+  `ready=true`、0 blocker，并对跨 format 同 profile 保持 fail-closed。
+- [x] 代码与 Harness 回归通过：`1037 passed, 7 skipped`（Python 3.11）。
 - [ ] 在 freeze 后修复 MT-Bench 的跨 provider comparison/judge 绑定；旧 blocked
   reason code 保留，不使用先验或临时 profile。
 - [ ] 补齐 108 个 official/audited import，并在 provider freeze digest 绑定后
