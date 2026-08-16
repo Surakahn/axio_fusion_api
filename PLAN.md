@@ -23,6 +23,10 @@ audit 的单向链路。已有旧 Harness template 只能作为结构参考；co
 official/audited runner commit。具体 contract 与恢复规则记录在
 `docs/architecture/axio_fusion_benchmark_harness_convergence_2026-08-16.md`。
 
+离线 scaffolding 已生成：六套 pin 全 ready，execution plan 为 108 个 task 且
+结构门禁全通过；acquisition status 仍缺 108 个 official import，所以暂不执行
+target provider calls，也不把该 plan 当作 final claim evidence。
+
 ## 当前 r5 基线推进记录（2026-08-16）
 
 本轮继续执行 provider baseline 的独立 NVIDIA candidate cohort，不修改

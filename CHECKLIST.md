@@ -17,6 +17,11 @@
 - [x] 完成 Harness 分层设计：pin manifest、execution plan、zero-network
   preflight/import、cohort-bound campaign/final audit；设计记录见
   `docs/architecture/axio_fusion_benchmark_harness_convergence_2026-08-16.md`。
+- [x] 生成 composite r1 的六套 Harness pin、acquisition checklist 和 108-task
+  execution plan；所有 task 的 pin/template contract 通过，safe artifact 不含
+  原始路径、数据、prompt、label 或 secret。
+- [ ] 补齐 108 个 official/audited import，并在 provider freeze digest 绑定后
+  重新生成 cohort-bound execution/import receipts。
 - [ ] freeze 后重新生成六套 official/audited Harness 的 cohort-bound pin、
   execution/import receipts；旧 `official_harness_execution_plan.current.safe.json`
   仅作模板，不得直接用于 final claim。

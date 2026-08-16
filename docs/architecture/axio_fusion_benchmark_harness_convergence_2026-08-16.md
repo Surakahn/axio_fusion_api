@@ -42,6 +42,15 @@ Harness 由四个独立 contract 组成：
 
 当前仓库已经实现上述控制面（`official_harness.py`、`evaluation.py` 以及对应 CLI），但 `private/official_harness_execution_plan.current.safe.json` 属于通用旧模板，不能直接冒充 composite freeze 的 Harness。composite freeze 完成后必须重新生成 cohort-bound pin、execution plan 和 import receipts。
 
+composite r1 已完成离线 Harness scaffolding：六套 pin 均 ready，execution plan
+包含 108 个结构化 task，所有 task 的 pin/template contract 均通过；当前
+acquisition status 仍缺少 108 个 official import，因此该 plan 只证明 Harness
+结构可执行，不证明任何模型结果。对应产物为：
+
+- `private/runs/2026-08-16-composite-cohort-r1/harness_pin_manifest.composite.safe.json`
+- `private/runs/2026-08-16-composite-cohort-r1/benchmark_acquisition_checklist.composite.safe.json`
+- `private/runs/2026-08-16-composite-cohort-r1/official_harness_execution_plan.composite.safe.json`
+
 ## Cohort r1 执行契约
 
 - registry：`registry.composite.from-probe.private.json`
