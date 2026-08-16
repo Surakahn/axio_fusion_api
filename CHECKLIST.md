@@ -37,6 +37,8 @@
 - [x] 为长 screening 增加低频 hash-only `screening_progress` 事件；事件只记录
   terminal 计数、target-suite 禁止标志和 state digest，不增加 provider 调用。
 - [x] 进度事件版本完成最终全量回归：`1042 passed, 7 skipped`。
+- [x] 加固监督器 PID 身份校验，必须同时匹配 `baseline-screening-run` 子命令与
+  frozen plan 片段；专项 Harness 回归为 36 passed。
 - [x] 推送监督器 commit 后重新执行完整回归：`1042 passed, 7 skipped`；当前
   screening 仍由同一 frozen plan 单 worker 运行，监督器只等待 terminal state。
 - [x] 用当前 composite registry 完成三档 L3b dry-run route plan；strategy、角色

@@ -38,6 +38,8 @@ state，只在 `target_suite_calls_performed=false` 且 transport admission read
 等待期间每个低频轮询周期还输出 hash-only `screening_progress` 事件，记录
 terminal 计数和 target-suite 禁止标志，便于长任务恢复时判断进度而不读取答案。
 进度事件改动后的最终 Python 3.11 全量回归仍为 `1042 passed, 7 skipped`。
+监督器还要求 observed PID 同时包含 `baseline-screening-run` 和 frozen plan 片段，
+避免携带同名 plan 的无关进程通过身份校验；该门禁已由专项测试覆盖。
 
 监督器已通过 `setsid` 后台接管当前 composite r1 screening；推送后的 Python 3.11
 完整回归为 `1042 passed, 7 skipped`。此结果仍是工程与 Harness 证据，不等于
