@@ -22,6 +22,8 @@
   原始路径、数据、prompt、label 或 secret。
 - [x] 完成六套 source/pin preflight 且 provider call 数为 0；LiveCodeBench、
   HumanEval、BFCL、IFEval ready。
+- [x] Harness contract 专项回归通过：`16 passed, 370 deselected`，覆盖 pin、
+  import template、execution plan 和 official bridge 校验。
 - [ ] 修复 MT-Bench 的跨 provider comparison/judge 绑定，以及 tau-bench 的
   public gateway/frozen user simulator 配置；保留当前 blocked reason code。
 - [ ] 补齐 108 个 official/audited import，并在 provider freeze digest 绑定后
