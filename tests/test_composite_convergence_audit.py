@@ -83,7 +83,22 @@ def test_all_gates_ready_allows_target_calls(tmp_path: Path) -> None:
     args.ranking = tmp_path / "ranking.json"
     _write(args.ranking, {"screening_conversion_ready": True})
     args.provider_baseline_freeze = tmp_path / "freeze.json"
-    _write(args.provider_baseline_freeze, {"final_claim_freeze_ready": True})
+    _write(
+        args.provider_baseline_freeze,
+        {
+            "schema": "axio_fusion_api.provider_baseline_freeze_manifest.v1",
+            "final_claim_freeze_ready": True,
+            "provider_baseline_selection": "externally_ranked_top_three_pre_registered",
+            "selected_all_available_provider_baselines": False,
+            "selected_provider_baseline_count": 3,
+            "required_provider_baseline_count": 3,
+            "external_ranking_receipt": {"ready": True, "pre_registered_before_campaign": True},
+            "provider_registry_receipt": {"registry_file_sha256": audit._sha256_file(args.registry)},
+            "raw_provider_outputs_persisted": False,
+            "raw_provider_urls_persisted": False,
+            "secrets_persisted": False,
+        },
+    )
     args.harness_pin = tmp_path / "pin.json"
     _write(
         args.harness_pin,
@@ -92,8 +107,12 @@ def test_all_gates_ready_allows_target_calls(tmp_path: Path) -> None:
             "ready_suite_count": 1,
             "blocked_suite_count": 0,
             "raw_local_paths_persisted": False,
+            "all_paths_hashed_only": True,
+            "raw_dataset_content_persisted": False,
             "raw_prompts_persisted": False,
             "raw_labels_persisted": False,
+            "raw_provider_outputs_persisted": False,
+            "secrets_persisted": False,
         },
     )
     args.execution_plan = tmp_path / "execution.json"
@@ -103,6 +122,7 @@ def test_all_gates_ready_allows_target_calls(tmp_path: Path) -> None:
             "status": "ready_to_execute",
             "all_tasks_ready_to_execute": True,
             "all_required_outputs_are_hash_only_import_sources": True,
+            "secrets_persisted": False,
         },
     )
     args.acquisition_status = tmp_path / "acquisition.json"
@@ -113,6 +133,8 @@ def test_all_gates_ready_allows_target_calls(tmp_path: Path) -> None:
             "official_import_missing_count": 0,
             "ready_suite_count": 1,
             "required_suite_count": 1,
+            "secrets_persisted": False,
+            "raw_provider_outputs_persisted": False,
         },
     )
     args.official_import_audit = tmp_path / "import.json"
@@ -123,6 +145,8 @@ def test_all_gates_ready_allows_target_calls(tmp_path: Path) -> None:
             "blocked_official_suite_count": 0,
             "ready_official_suite_count": 1,
             "official_suite_count": 1,
+            "secrets_persisted": False,
+            "raw_provider_outputs_persisted": False,
         },
     )
     args.target_campaign = tmp_path / "campaign.json"
@@ -145,15 +169,30 @@ def test_pre_target_gates_authorize_campaign_but_not_final_claim(tmp_path: Path)
     args.ranking = tmp_path / "ranking.json"
     _write(args.ranking, {"screening_conversion_ready": True})
     args.provider_baseline_freeze = tmp_path / "freeze.json"
-    _write(args.provider_baseline_freeze, {"final_claim_freeze_ready": True})
+    _write(
+        args.provider_baseline_freeze,
+        {
+            "schema": "axio_fusion_api.provider_baseline_freeze_manifest.v1",
+            "final_claim_freeze_ready": True,
+            "provider_baseline_selection": "externally_ranked_top_three_pre_registered",
+            "selected_all_available_provider_baselines": False,
+            "selected_provider_baseline_count": 3,
+            "required_provider_baseline_count": 3,
+            "external_ranking_receipt": {"ready": True, "pre_registered_before_campaign": True},
+            "provider_registry_receipt": {"registry_file_sha256": audit._sha256_file(args.registry)},
+            "raw_provider_outputs_persisted": False,
+            "raw_provider_urls_persisted": False,
+            "secrets_persisted": False,
+        },
+    )
     args.harness_pin = tmp_path / "pin.json"
-    _write(args.harness_pin, {"suite_count": 1, "ready_suite_count": 1, "blocked_suite_count": 0, "raw_local_paths_persisted": False, "raw_prompts_persisted": False, "raw_labels_persisted": False})
+    _write(args.harness_pin, {"suite_count": 1, "ready_suite_count": 1, "blocked_suite_count": 0, "raw_local_paths_persisted": False, "all_paths_hashed_only": True, "raw_dataset_content_persisted": False, "raw_prompts_persisted": False, "raw_labels_persisted": False, "raw_provider_outputs_persisted": False, "secrets_persisted": False})
     args.execution_plan = tmp_path / "execution.json"
-    _write(args.execution_plan, {"status": "ready_to_execute", "all_tasks_ready_to_execute": True, "all_required_outputs_are_hash_only_import_sources": True})
+    _write(args.execution_plan, {"status": "ready_to_execute", "all_tasks_ready_to_execute": True, "all_required_outputs_are_hash_only_import_sources": True, "secrets_persisted": False})
     args.acquisition_status = tmp_path / "acquisition.json"
-    _write(args.acquisition_status, {"ready_to_assemble_manifest": True, "official_import_missing_count": 0, "ready_suite_count": 1, "required_suite_count": 1})
+    _write(args.acquisition_status, {"ready_to_assemble_manifest": True, "official_import_missing_count": 0, "ready_suite_count": 1, "required_suite_count": 1, "secrets_persisted": False, "raw_provider_outputs_persisted": False})
     args.official_import_audit = tmp_path / "import.json"
-    _write(args.official_import_audit, {"ready_for_campaign_import_stage": True, "blocked_official_suite_count": 0, "ready_official_suite_count": 1, "official_suite_count": 1})
+    _write(args.official_import_audit, {"ready_for_campaign_import_stage": True, "blocked_official_suite_count": 0, "ready_official_suite_count": 1, "official_suite_count": 1, "secrets_persisted": False, "raw_provider_outputs_persisted": False})
     result = audit.audit_cohort(args)
     assert result["status"] == "ready_for_target_campaign"
     assert result["next_gate"] == "target_campaign"

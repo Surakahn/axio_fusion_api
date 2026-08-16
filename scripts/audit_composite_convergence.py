@@ -165,14 +165,48 @@ def _ranking_stage(path: Path | None) -> dict[str, Any]:
     return _artifact_stage("ranking", path, ready=ready)
 
 
+def _provider_freeze_stage(path: Path | None, registry_path: Path) -> dict[str, Any]:
+    value = _read_object(path)
+    reasons: list[str] = []
+    if value:
+        if value.get("schema") != "axio_fusion_api.provider_baseline_freeze_manifest.v1":
+            reasons.append("provider_baseline_freeze_schema_invalid")
+        if value.get("final_claim_freeze_ready") is not True:
+            reasons.append("provider_baseline_freeze_not_ready")
+        if value.get("provider_baseline_selection") != "externally_ranked_top_three_pre_registered":
+            reasons.append("provider_baseline_freeze_selection_invalid")
+        if value.get("selected_all_available_provider_baselines") is not False:
+            reasons.append("provider_baseline_freeze_exhaustive_selection")
+        if value.get("selected_provider_baseline_count") != 3:
+            reasons.append("provider_baseline_freeze_selected_count_invalid")
+        if value.get("required_provider_baseline_count") != 3:
+            reasons.append("provider_baseline_freeze_required_count_invalid")
+        external = value.get("external_ranking_receipt")
+        if not isinstance(external, Mapping) or external.get("ready") is not True:
+            reasons.append("provider_baseline_freeze_external_ranking_not_ready")
+        elif external.get("pre_registered_before_campaign") is not True:
+            reasons.append("provider_baseline_freeze_external_ranking_not_preregistered")
+        registry = value.get("provider_registry_receipt")
+        if not isinstance(registry, Mapping) or registry.get("registry_file_sha256") != _sha256_file(registry_path):
+            reasons.append("provider_baseline_freeze_registry_mismatch")
+        for key in ("raw_provider_outputs_persisted", "raw_provider_urls_persisted", "secrets_persisted"):
+            if value.get(key) is not False:
+                reasons.append(f"provider_baseline_freeze_{key}")
+    return _artifact_stage("provider_baseline_freeze", path, ready=not reasons and bool(value), reasons=reasons)
+
+
 def _harness_pin_stage(path: Path | None) -> dict[str, Any]:
     value = _read_object(path)
     ready = bool(value) and (
         value.get("suite_count", 0) == value.get("ready_suite_count", -1)
         and value.get("blocked_suite_count", 1) == 0
         and value.get("raw_local_paths_persisted") is False
+        and value.get("all_paths_hashed_only") is True
+        and value.get("raw_dataset_content_persisted") is False
         and value.get("raw_prompts_persisted") is False
         and value.get("raw_labels_persisted") is False
+        and value.get("raw_provider_outputs_persisted") is False
+        and value.get("secrets_persisted") is False
     )
     return _artifact_stage("harness_pin", path, ready=ready)
 
@@ -183,6 +217,7 @@ def _execution_plan_stage(path: Path | None) -> dict[str, Any]:
         value.get("status") == "ready_to_execute"
         and value.get("all_tasks_ready_to_execute") is True
         and value.get("all_required_outputs_are_hash_only_import_sources") is True
+        and value.get("secrets_persisted") is False
     )
     return _artifact_stage("execution_plan", path, ready=ready)
 
@@ -193,6 +228,8 @@ def _acquisition_stage(path: Path | None) -> dict[str, Any]:
         value.get("ready_to_assemble_manifest") is True
         and value.get("official_import_missing_count") == 0
         and value.get("ready_suite_count") == value.get("required_suite_count")
+        and value.get("secrets_persisted") is False
+        and value.get("raw_provider_outputs_persisted") is False
     )
     return _artifact_stage("benchmark_acquisition", path, ready=ready)
 
@@ -203,6 +240,8 @@ def _official_import_stage(path: Path | None) -> dict[str, Any]:
         value.get("ready_for_campaign_import_stage") is True
         and value.get("blocked_official_suite_count") == 0
         and value.get("ready_official_suite_count") == value.get("official_suite_count")
+        and value.get("secrets_persisted") is False
+        and value.get("raw_provider_outputs_persisted") is False
     )
     return _artifact_stage("official_import", path, ready=ready)
 
@@ -212,7 +251,7 @@ def _stage_statuses(args: argparse.Namespace) -> list[dict[str, Any]]:
         _screening_stage(state_path=args.state, plan_path=args.plan, registry_path=args.registry),
         _transport_stage(args.transport_admission),
         _ranking_stage(args.ranking),
-        _boolean_stage("provider_baseline_freeze", args.provider_baseline_freeze, ("final_claim_freeze_ready",)),
+        _provider_freeze_stage(args.provider_baseline_freeze, args.registry),
         _harness_pin_stage(args.harness_pin),
         _execution_plan_stage(args.execution_plan),
         _acquisition_stage(args.acquisition_status),
