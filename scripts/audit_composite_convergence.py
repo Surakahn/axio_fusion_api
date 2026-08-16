@@ -264,14 +264,18 @@ def _stage_statuses(args: argparse.Namespace) -> list[dict[str, Any]]:
 def audit_cohort(args: argparse.Namespace) -> dict[str, Any]:
     stages = _stage_statuses(args)
     first_pending = next((stage for stage in stages if stage["status"] != "ready"), None)
-    all_ready = first_pending is None
     pre_target_ready = all(stage["status"] == "ready" for stage in stages[:8])
     any_running = any(stage["status"] == "running" for stage in stages)
-    reason_codes = sorted({reason for stage in stages for reason in stage["reason_codes"]})
     state = _read_object(args.state) or {}
+    target_calls_present = state.get("target_suite_calls_performed") is not False
+    reason_codes = {reason for stage in stages for reason in stage["reason_codes"]}
+    if target_calls_present:
+        reason_codes.add("screening_target_suite_calls_present")
+    all_ready = first_pending is None and not target_calls_present
+    target_calls_allowed = pre_target_ready and not target_calls_present
     if all_ready:
         overall_status = "ready"
-    elif pre_target_ready:
+    elif target_calls_allowed:
         overall_status = "ready_for_target_campaign"
     else:
         overall_status = "running" if any_running else "blocked"
@@ -279,7 +283,7 @@ def audit_cohort(args: argparse.Namespace) -> dict[str, Any]:
         "schema": "axio_fusion_api.composite_convergence_audit.v1",
         "status": overall_status,
         "next_gate": first_pending["stage"] if first_pending else "complete",
-        "reason_codes": reason_codes,
+        "reason_codes": sorted(reason_codes),
         "stage_statuses": stages,
         "input_bindings": {
             "registry_file_sha256": _sha256_file(args.registry),
@@ -288,7 +292,7 @@ def audit_cohort(args: argparse.Namespace) -> dict[str, Any]:
             "screening_plan_digest_sha256": str(state.get("plan_digest_sha256") or ""),
             "screening_campaign_digest_sha256": str(state.get("campaign_digest_sha256") or ""),
         },
-        "target_suite_calls_allowed": pre_target_ready,
+        "target_suite_calls_allowed": target_calls_allowed,
         "final_claim_allowed": all_ready,
         "plan_mutated": False,
         "raw_provider_outputs_persisted": False,

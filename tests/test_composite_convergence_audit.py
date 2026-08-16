@@ -76,6 +76,7 @@ def test_all_gates_ready_allows_target_calls(tmp_path: Path) -> None:
             "status": "completed",
             "ready_for_ranking": True,
             "plan_digest_sha256": "plan-digest",
+            "target_suite_calls_performed": False,
         },
     )
     args.transport_admission = tmp_path / "transport.json"
@@ -163,7 +164,7 @@ def test_all_gates_ready_allows_target_calls(tmp_path: Path) -> None:
 def test_pre_target_gates_authorize_campaign_but_not_final_claim(tmp_path: Path) -> None:
     args = _args(tmp_path)
     _write(args.plan, {"ready": True, "plan_digest_sha256": "plan-digest"})
-    _write(args.state, {"status": "completed", "ready_for_ranking": True, "plan_digest_sha256": "plan-digest"})
+    _write(args.state, {"status": "completed", "ready_for_ranking": True, "plan_digest_sha256": "plan-digest", "target_suite_calls_performed": False})
     args.transport_admission = tmp_path / "transport.json"
     _write(args.transport_admission, {"status": "ready"})
     args.ranking = tmp_path / "ranking.json"
@@ -198,3 +199,22 @@ def test_pre_target_gates_authorize_campaign_but_not_final_claim(tmp_path: Path)
     assert result["next_gate"] == "target_campaign"
     assert result["target_suite_calls_allowed"] is True
     assert result["final_claim_allowed"] is False
+
+
+def test_prior_target_calls_close_every_claim_gate(tmp_path: Path) -> None:
+    args = _args(tmp_path)
+    _write(args.plan, {"ready": True, "plan_digest_sha256": "plan-digest"})
+    _write(
+        args.state,
+        {
+            "status": "completed",
+            "ready_for_ranking": True,
+            "plan_digest_sha256": "plan-digest",
+            "target_suite_calls_performed": True,
+        },
+    )
+    result = audit.audit_cohort(args)
+    assert result["status"] == "blocked"
+    assert result["target_suite_calls_allowed"] is False
+    assert result["final_claim_allowed"] is False
+    assert "screening_target_suite_calls_present" in result["reason_codes"]
