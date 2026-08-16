@@ -40,6 +40,17 @@ Harness 由四个独立 contract 组成：
 3. **Preflight/import**：验证 dataset、runner、输出格式和 freeze digest；失败时 provider call count 必须为零。官方 runner 原始 JSONL 只能在 private import root，safe import 只保存 per-run hash/score/count。
 4. **Campaign/claim audit**：执行固定 task，生成 scorecard、paired statistical/latency/contamination audit、API-surface parity 和 final completion audit。claim audit 只能读取已绑定的 run/scorecard/freeze receipt。
 
+在上述 pre-target 阶段之间还有一个不可跳过的 lineage gate：
+`scripts/build_composite_harness_binding.py` 读取同一 cohort 的 registry、screening
+state、transport admission、ranking、provider freeze、Harness pin、execution plan、
+acquisition status 和 official import audit，验证内容 hash、声明 digest、敏感字段和
+target-call 禁止标志，然后生成 `composite_harness_cohort_binding.v1`。该 receipt
+不保存路径或原始内容，只保存 stage content/path hash、声明 digest 和
+`cohort_binding_digest_sha256`。`scripts/audit_composite_convergence.py` 将其作为
+target campaign 前的必需 gate；缺失或异 cohort binding 时即使各个下游 artifact
+单独显示 ready，也不会开放 target calls。这样 generic Harness template 不能被
+误当成当前 composite freeze 的正式证据。
+
 当前仓库已经实现上述控制面（`official_harness.py`、`evaluation.py` 以及对应 CLI），但 `private/official_harness_execution_plan.current.safe.json` 属于通用旧模板，不能直接冒充 composite freeze 的 Harness。composite freeze 完成后必须重新生成 cohort-bound pin、execution plan 和 import receipts。
 
 composite r1 已完成离线 Harness scaffolding：六套 pin 均 ready，execution plan
@@ -55,6 +66,10 @@ acquisition status 仍缺少 108 个 official import，因此该 plan 只证明 
 BFCL、IFEval 为 ready；MT-Bench 明确阻断于 comparison/judge 的跨 provider 绑定，
 tau-bench 明确阻断于 public gateway 和 frozen user simulator。两个 blocked receipt
 保留原 reason code，不用空配置伪造通过。
+
+当前 lineage binding 尚未生成 ready receipt，因为 r1 screening 尚未 terminal，
+transport/ranking/provider freeze/official import 也尚未齐备；运行绑定器只会产生
+blocked hash-only receipt，不会启动 provider 或 target benchmark。
 
 随后用本地 gateway、独立 provider user simulator、retail/airline 两环境和 Python
 3.11 生成 tau-bench configured preflight，已变为 ready（仍未绑定最终 provider

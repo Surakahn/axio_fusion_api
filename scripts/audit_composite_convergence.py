@@ -36,6 +36,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--execution-plan", type=Path)
     parser.add_argument("--acquisition-status", type=Path)
     parser.add_argument("--official-import-audit", type=Path)
+    parser.add_argument("--cohort-binding", type=Path)
     parser.add_argument("--target-campaign", type=Path)
     parser.add_argument("--final-audit", type=Path)
     parser.add_argument("--output", required=True, type=Path)
@@ -51,6 +52,14 @@ def _sha256_file(path: Path) -> str:
         return digest.hexdigest()
     except OSError:
         return ""
+
+
+def _sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _stable_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
 
 
 def _read_object(path: Path | None) -> dict[str, Any] | None:
@@ -246,6 +255,88 @@ def _official_import_stage(path: Path | None) -> dict[str, Any]:
     return _artifact_stage("official_import", path, ready=ready)
 
 
+def _cohort_binding_stage(
+    path: Path | None,
+    *,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    """验证所有前置证据是否绑定到同一个 immutable cohort。"""
+
+    payload = _read_object(path)
+    reasons: list[str] = []
+    if payload is None:
+        return _artifact_stage("cohort_binding", path, ready=False, reasons=("artifact_missing",))
+    if payload.get("schema") != "axio_fusion_api.composite_harness_cohort_binding.v1":
+        reasons.append("cohort_binding_schema_invalid")
+    if payload.get("status") != "ready":
+        reasons.append("cohort_binding_not_ready")
+    declared_digest = str(payload.get("cohort_binding_digest_sha256") or "")
+    if payload.get("cohort_id_sha256") != declared_digest:
+        reasons.append("cohort_binding_cohort_id_mismatch")
+    if payload.get("target_suite_calls_allowed") is not True:
+        reasons.append("cohort_binding_target_calls_not_allowed")
+    if payload.get("target_suite_calls_performed") is not False:
+        reasons.append("cohort_binding_target_suite_calls_present")
+    bindings = payload.get("stage_bindings")
+    if not isinstance(bindings, Mapping):
+        reasons.append("cohort_binding_stage_bindings_missing")
+        bindings = {}
+    required = {
+        "registry": args.registry,
+        "plan": args.plan,
+        "state": args.state,
+        "transport_admission": args.transport_admission,
+        "ranking": args.ranking,
+        "provider_baseline_freeze": args.provider_baseline_freeze,
+        "harness_pin": args.harness_pin,
+        "execution_plan": args.execution_plan,
+        "acquisition_status": args.acquisition_status,
+        "official_import_audit": args.official_import_audit,
+    }
+    for name, artifact_path in required.items():
+        row = bindings.get(name)
+        if artifact_path is None or not isinstance(row, Mapping):
+            reasons.append(f"cohort_binding_{name}_missing")
+            continue
+        if str(row.get("content_sha256") or "") != _sha256_file(artifact_path):
+            reasons.append(f"cohort_binding_{name}_content_mismatch")
+        if str(row.get("path_sha256") or "") != _sha256_text(str(artifact_path)):
+            reasons.append(f"cohort_binding_{name}_path_mismatch")
+    declarations = payload.get("declarations")
+    if not isinstance(declarations, Mapping):
+        reasons.append("cohort_binding_declarations_missing")
+        declarations = {}
+    state = _read_object(args.state)
+    plan = _read_object(args.plan)
+    freeze = _read_object(args.provider_baseline_freeze)
+    execution = _read_object(args.execution_plan)
+    import_audit = _read_object(args.official_import_audit)
+    expected_declarations = {
+        "screening_plan_digest_sha256": str(plan.get("plan_digest_sha256") or ""),
+        "screening_campaign_digest_sha256": str(state.get("campaign_digest_sha256") or ""),
+        "provider_baseline_freeze_digest_sha256": str(freeze.get("freeze_digest_sha256") or ""),
+        "execution_plan_digest_sha256": str(execution.get("execution_plan_digest_sha256") or ""),
+        "official_import_audit_digest_sha256": str(import_audit.get("audit_digest_sha256") or ""),
+        "target_suite_calls_performed": False,
+    }
+    for name, expected in expected_declarations.items():
+        if declarations.get(name) != expected:
+            reasons.append(f"cohort_binding_{name}_mismatch")
+    digest_input = payload.get("binding_digest_input")
+    if not isinstance(digest_input, Mapping) or not _sha256_text(_stable_json(digest_input)) == declared_digest:
+        reasons.append("cohort_binding_digest_invalid")
+    for field in (
+        "raw_provider_outputs_persisted",
+        "raw_prompts_persisted",
+        "raw_labels_persisted",
+        "raw_provider_urls_persisted",
+        "secrets_persisted",
+    ):
+        if payload.get(field) is not False:
+            reasons.append(f"cohort_binding_{field}")
+    return _artifact_stage("cohort_binding", path, ready=not reasons, reasons=reasons)
+
+
 def _stage_statuses(args: argparse.Namespace) -> list[dict[str, Any]]:
     return [
         _screening_stage(state_path=args.state, plan_path=args.plan, registry_path=args.registry),
@@ -256,6 +347,7 @@ def _stage_statuses(args: argparse.Namespace) -> list[dict[str, Any]]:
         _execution_plan_stage(args.execution_plan),
         _acquisition_stage(args.acquisition_status),
         _official_import_stage(args.official_import_audit),
+        _cohort_binding_stage(args.cohort_binding, args=args),
         _boolean_stage("target_campaign", args.target_campaign, ("final_claims_allowed", "status_complete")),
         _boolean_stage("final_audit", args.final_audit, ("final_claims_allowed", "completion_ready", "ready")),
     ]
@@ -264,7 +356,7 @@ def _stage_statuses(args: argparse.Namespace) -> list[dict[str, Any]]:
 def audit_cohort(args: argparse.Namespace) -> dict[str, Any]:
     stages = _stage_statuses(args)
     first_pending = next((stage for stage in stages if stage["status"] != "ready"), None)
-    pre_target_ready = all(stage["status"] == "ready" for stage in stages[:8])
+    pre_target_ready = all(stage["status"] == "ready" for stage in stages[:9])
     any_running = any(stage["status"] == "running" for stage in stages)
     state = _read_object(args.state) or {}
     target_calls_present = state.get("target_suite_calls_performed") is not False

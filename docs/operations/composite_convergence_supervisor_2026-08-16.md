@@ -77,8 +77,36 @@ env PYTHONPATH=src python3.11 scripts/audit_composite_convergence.py \
 
 该审计是观测与门禁工具，不会替代 provider baseline freeze，也不会自动启动
 target benchmark。screening 到 official import 的前置阶段全部 `ready` 时，
-`status` 会变为 `ready_for_target_campaign` 并允许 target Harness 进入下一步；
-只有 target campaign 与 final audit 也完成后，`final_claim_allowed` 才会为 `true`。
+还必须先用同一组 artifact 运行 `build_composite_harness_binding.py` 生成
+`composite_harness_cohort_binding.v1`。绑定 receipt 会校验所有输入的内容 hash、
+路径 hash、声明 digest 和敏感字段；`audit_composite_convergence.py` 缺少它时保持
+blocked。绑定通过后，`status` 才会变为 `ready_for_target_campaign` 并允许 target
+Harness 进入下一步；只有 target campaign 与 final audit 也完成后，
+`final_claim_allowed` 才会为 `true`。
+
+绑定命令（仅离线读取，必须使用同一 cohort 的 artifact）：
+
+```bash
+env PYTHONPATH=src:scripts python3.11 \
+  scripts/build_composite_harness_binding.py \
+  --registry <REGISTRY> \
+  --plan <SCREENING_PLAN> \
+  --state <SCREENING_STATE> \
+  --transport-admission <TRANSPORT_ADMISSION> \
+  --ranking <RANKING> \
+  --provider-baseline-freeze <PROVIDER_FREEZE> \
+  --harness-pin <HARNESS_PIN> \
+  --execution-plan <EXECUTION_PLAN> \
+  --acquisition-status <ACQUISITION_STATUS> \
+  --official-import-audit <OFFICIAL_IMPORT_AUDIT> \
+  --output <COHORT_BINDING_SAFE_JSON>
+```
+
+生成 binding 后，审计命令增加：
+
+```bash
+  --cohort-binding <COHORT_BINDING_SAFE_JSON>
+```
 
 ## 终态判定
 

@@ -17,11 +17,17 @@ r5/transport5 的 ranking 或 freeze。两个严格 streaming probe artifact 已
 root 中运行。screening 终态前不得生成 ranking、freeze 或调用 target suite。
 
 Harness 收敛采用 pin manifest → execution plan → zero-network preflight/import →
-cohort-bound live campaign → statistical/latency/contamination/API-parity/final
+cohort lineage binding → cohort-bound live campaign → statistical/latency/contamination/API-parity/final
 audit 的单向链路。已有旧 Harness template 只能作为结构参考；composite freeze
 完成后必须重新绑定 registry、provider freeze digest、source/case hash 和每个
 official/audited runner commit。具体 contract 与恢复规则记录在
 `docs/architecture/axio_fusion_benchmark_harness_convergence_2026-08-16.md`。
+
+新增的 `scripts/build_composite_harness_binding.py` 是 target 前的离线 lineage gate：
+它将 registry、screening、transport、ranking、provider freeze、Harness pin、execution、
+acquisition 和 official import audit 绑定为 hash-only `composite_harness_cohort_binding.v1`。
+缺少或漂移时 `audit_composite_convergence.py` 不开放 target calls；当前 r1 尚未满足
+这些前置条件，绑定器只能输出 blocked receipt。
 
 本阶段已修复多 probe 文件合并时重复 profile 被按 raw row 重复计入 API format
 binding 的控制面缺陷。审计现在按唯一 profile hash 统计 available API format，并
