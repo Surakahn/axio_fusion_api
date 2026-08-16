@@ -25,6 +25,7 @@ def _args(tmp_path: Path) -> SimpleNamespace:
         plan=plan,
         source_manifest=source,
         private_probe_file=[str(probe_one), str(probe_two)],
+        operational_admission_file=None,
         private_root=tmp_path / "private",
         state=tmp_path / "state.json",
         screening_output=tmp_path / "screening.json",
@@ -82,6 +83,15 @@ def test_ranking_arguments_bind_every_probe_and_transport_receipt(tmp_path):
     assert command.count("--private-probe-file") == 2
     assert str(args.transport_admission_output) in command
     assert "--transport-availability-file" in command
+
+
+def test_ranking_arguments_bind_operational_admission_receipt(tmp_path):
+    args = _args(tmp_path)
+    args.operational_admission_file = tmp_path / "operational.json"
+    args.operational_admission_file.write_text("{}", encoding="utf-8")
+    command = supervisor._ranking_arguments(args)
+    assert "--operational-admission-file" in command
+    assert str(args.operational_admission_file) in command
 
 
 def test_blocked_transport_skips_ranking(tmp_path, monkeypatch):

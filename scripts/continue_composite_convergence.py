@@ -41,6 +41,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--plan", required=True, type=Path)
     parser.add_argument("--source-manifest", required=True, type=Path)
     parser.add_argument("--private-probe-file", action="append", required=True)
+    parser.add_argument("--operational-admission-file", type=Path)
     parser.add_argument("--private-root", required=True, type=Path)
     parser.add_argument("--state", required=True, type=Path)
     parser.add_argument("--screening-output", required=True, type=Path)
@@ -236,6 +237,10 @@ def _ranking_arguments(args: argparse.Namespace) -> list[str]:
     ]
     for probe_file in args.private_probe_file:
         command.extend(("--private-probe-file", str(probe_file)))
+    if args.operational_admission_file is not None:
+        command.extend(
+            ("--operational-admission-file", str(args.operational_admission_file))
+        )
     return command
 
 
