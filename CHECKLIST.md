@@ -39,6 +39,12 @@
 - [x] 进度事件版本完成最终全量回归：`1042 passed, 7 skipped`。
 - [x] 加固监督器 PID 身份校验，必须同时匹配 `baseline-screening-run` 子命令与
   frozen plan 片段；专项 Harness 回归为 36 passed。
+- [x] 新增纯离线 `scripts/audit_composite_convergence.py` 收敛审计 Harness；
+  同 cohort 的每一层 gate 都输出 hash-only 状态，区分 `running`、
+  `ready_for_target_campaign` 与最终 `ready`，且不会启动 provider/target 请求。
+- [x] 收敛审计 Harness 专项与完整回归通过：`10 passed`，`1047 passed, 7 skipped`。
+- [x] 当前真实 r1 audit receipt 为 `running`、`next_gate=screening`、
+  `target_suite_calls_allowed=false`；screening 仍由原 frozen plan 单 worker 推进。
 - [x] 推送监督器 commit 后重新执行完整回归：`1042 passed, 7 skipped`；当前
   screening 仍由同一 frozen plan 单 worker 运行，监督器只等待 terminal state。
 - [x] 用当前 composite registry 完成三档 L3b dry-run route plan；strategy、角色

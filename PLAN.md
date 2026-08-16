@@ -41,6 +41,14 @@ terminal 计数和 target-suite 禁止标志，便于长任务恢复时判断进
 监督器还要求 observed PID 同时包含 `baseline-screening-run` 和 frozen plan 片段，
 避免携带同名 plan 的无关进程通过身份校验；该门禁已由专项测试覆盖。
 
+新增 `scripts/audit_composite_convergence.py` 离线收敛审计 Harness：它按
+screening → transport admission → ranking → provider freeze → Harness pin/import
+→ target campaign → final audit 顺序读取同 cohort artifact，只输出 hash、schema、
+计数和安全 reason code。`ready_for_target_campaign` 与最终 `ready` 分离，避免
+target gate 自锁；当前 r1 实际审计为 `status=running`、`next_gate=screening`、
+`target_suite_calls_allowed=false`，没有产生新的 provider 或 target-suite 请求。
+新增 Harness 专项覆盖后，Python 3.11 全量回归为 `1047 passed, 7 skipped`。
+
 监督器已通过 `setsid` 后台接管当前 composite r1 screening；推送后的 Python 3.11
 完整回归为 `1042 passed, 7 skipped`。此结果仍是工程与 Harness 证据，不等于
 screening terminal、provider baseline freeze 或 superiority claim。
