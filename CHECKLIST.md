@@ -30,6 +30,10 @@
   profile 计数与 registry source counts 已重新绑定，composite audit 为
   `ready=true`、0 blocker，并对跨 format 同 profile 保持 fail-closed。
 - [x] 代码与 Harness 回归通过：`1037 passed, 7 skipped`（Python 3.11）。
+- [x] 为 composite r1 增加 fail-closed 终态监督器
+  `scripts/continue_composite_convergence.py`；PID、frozen plan、target-suite
+  禁止标志、transport admission 和 ranking conversion 均有专项测试，操作手册
+  见 `docs/operations/composite_convergence_supervisor_2026-08-16.md`。
 - [ ] 在 freeze 后修复 MT-Bench 的跨 provider comparison/judge 绑定；旧 blocked
   reason code 保留，不使用先验或临时 profile。
 - [ ] 补齐 108 个 official/audited import，并在 provider freeze digest 绑定后

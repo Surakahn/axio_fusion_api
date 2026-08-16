@@ -30,6 +30,12 @@ binding 的控制面缺陷。审计现在按唯一 profile hash 统计 available
 7 skipped`。这些是工程门禁里程碑，不等同于 screening、provider freeze 或
 superiority claim 完成。
 
+为当前 composite r1 增加了独立的 `scripts/continue_composite_convergence.py`
+终态监督器与操作手册。它校验 screening PID 与 frozen plan 身份，等待 terminal
+state，只在 `target_suite_calls_performed=false` 且 transport admission ready 时
+执行一次 ranking conversion；监督器不会恢复进程、修改 plan、启动 target suite
+或伪造 ranking。receipt 只保留 hash、digest、状态和 reason code。
+
 离线 scaffolding 已生成：六套 pin 全 ready，execution plan 为 108 个 task 且
 结构门禁全通过；acquisition status 仍缺 108 个 official import，所以暂不执行
 target provider calls，也不把该 plan 当作 final claim evidence。
