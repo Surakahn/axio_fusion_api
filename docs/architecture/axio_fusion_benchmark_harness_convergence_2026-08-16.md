@@ -51,6 +51,11 @@ acquisition status 仍缺少 108 个 official import，因此该 plan 只证明 
 - `private/runs/2026-08-16-composite-cohort-r1/benchmark_acquisition_checklist.composite.safe.json`
 - `private/runs/2026-08-16-composite-cohort-r1/official_harness_execution_plan.composite.safe.json`
 
+六套 source/pin preflight 也已完成且没有 provider call：LiveCodeBench、HumanEval、
+BFCL、IFEval 为 ready；MT-Bench 明确阻断于 comparison/judge 的跨 provider 绑定，
+tau-bench 明确阻断于 public gateway 和 frozen user simulator。两个 blocked receipt
+保留原 reason code，不用空配置伪造通过。
+
 ## Cohort r1 执行契约
 
 - registry：`registry.composite.from-probe.private.json`

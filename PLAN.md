@@ -27,6 +27,11 @@ official/audited runner commit。具体 contract 与恢复规则记录在
 结构门禁全通过；acquisition status 仍缺 108 个 official import，所以暂不执行
 target provider calls，也不把该 plan 当作 final claim evidence。
 
+六套 source/pin preflight 已完成：LiveCodeBench、HumanEval、BFCL、IFEval ready；
+MT-Bench 因 comparison/judge 尚未跨 provider 绑定、tau-bench 因 public gateway
+与 frozen user simulator 缺失而 blocked。两类 blocker 均为安全的 hash-only receipt，
+待 provider freeze 后补齐配置，不降低 Harness 门槛。
+
 ## 当前 r5 基线推进记录（2026-08-16）
 
 本轮继续执行 provider baseline 的独立 NVIDIA candidate cohort，不修改
