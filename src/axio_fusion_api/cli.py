@@ -925,6 +925,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Private live admission receipt; only formally eligible profiles and replicas may enter the frozen baseline pool.",
     )
+    baseline_freeze.add_argument(
+        "--transport-availability-file",
+        default=None,
+        help="仅按 transport failure rate 选择的私有 screening receipt；可将 probe-bound registry 绑定到其源 registry。",
+    )
     baseline_freeze.add_argument("--output", default=None)
     baseline_freeze.set_defaults(func=cmd_benchmark_provider_baseline_freeze)
 
@@ -2497,6 +2502,7 @@ def cmd_benchmark_provider_baseline_freeze(args: argparse.Namespace) -> int:
         provider_probe_evidence_audit_path=args.provider_probe_evidence_audit,
         external_ranking_manifest_path=args.external_ranking_manifest,
         operational_admission_path=args.operational_admission_file,
+        transport_availability_path=args.transport_availability_file,
     )
     _emit_json(payload, output=args.output)
     return 0

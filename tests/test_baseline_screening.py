@@ -25,6 +25,7 @@ from axio_fusion_api.baseline_screening import (
     _persist_screening_private_checkpoint,
     _screening_adapter_runtime_preflight,
     _screening_checkpoint_path,
+    _screening_registry_binding_sha256,
     _screening_unit_set_digest,
     _screening_unit_path,
     build_external_ranking_manifest_from_screening,
@@ -527,6 +528,117 @@ def test_provider_baseline_freeze_uses_formal_admission_pool_but_binds_full_regi
         sha256_text(profile.profile_id) for profile in context["provider_profiles"]
     }
     assert "provider_baseline_freeze_external_profile_not_formally_admitted" not in context["blockers"]
+
+
+def test_provider_baseline_freeze_filters_probe_bound_transport_pool(tmp_path):
+    registry_path, _, _ = _screening_fixture(tmp_path)
+    source_registry_sha256 = _file_sha256(registry_path)
+    profiles = load_registry(registry_path)
+    eligible_profiles = [
+        profile for profile in profiles if not profile.provider.endswith("SLOW_REPLICA")
+    ]
+    transport_path = _write_json(
+        tmp_path / "transport_admission.private.json",
+        {
+            "schema": SCREENING_TRANSPORT_ADMISSION_SCHEMA,
+            "status": "ready",
+            "blockers": [],
+            "registry_file_sha256": source_registry_sha256,
+            "eligible_canonical_model_count": len(
+                {profile.canonical_identity_sha256 for profile in eligible_profiles}
+            ),
+            "eligible_canonical_identity_sha256s": sorted(
+                {profile.canonical_identity_sha256 for profile in eligible_profiles}
+            ),
+            "eligible_profile_id_sha256s": sorted(
+                sha256_text(profile.profile_id) for profile in eligible_profiles
+            ),
+            "selection_basis": "transport_failure_rate_only",
+            "quality_fields_used_for_selection": [],
+            "no_cheat_contract": {
+                "uses_benchmark_labels": False,
+                "uses_benchmark_answers": False,
+                "uses_benchmark_scores": False,
+                "uses_provider_output_content": False,
+                "uses_transport_failure_evidence_only": True,
+            },
+        },
+    )
+    bound_payload = json.loads(registry_path.read_text(encoding="utf-8"))
+    bound_payload.update(
+        {
+            "generated_from_probe": True,
+            "probe_evidence_binding": {
+                "status": "ready",
+                "registry_input_file_sha256": source_registry_sha256,
+                "profile_set_matches": True,
+                "blockers": [],
+            },
+            "readiness": {
+                "generated_from_probe": True,
+                "live_probe_proven": True,
+                "final_claim_registry_ready": True,
+            },
+        }
+    )
+    bound_registry_path = _write_json(
+        tmp_path / "registry.probe-bound.private.json", bound_payload
+    )
+
+    freeze = build_provider_baseline_freeze_manifest(
+        registry_path=bound_registry_path,
+        max_provider_baselines=None,
+        transport_availability_path=transport_path,
+    )
+
+    assert freeze["transport_availability_receipt"]["status"] == "ready"
+    assert freeze["transport_availability_receipt"]["registry_binding_mode"] == "probe_bound_registry"
+    assert freeze["transport_availability_receipt"]["source_registry_file_sha256"] == source_registry_sha256
+    assert freeze["available_provider_replica_profile_count"] == len(eligible_profiles)
+    assert freeze["available_provider_baseline_count"] == 3
+
+
+def test_provider_baseline_freeze_rejects_transport_quality_selection(tmp_path):
+    registry_path, _, _ = _screening_fixture(tmp_path)
+    profiles = load_registry(registry_path)
+    transport_path = _write_json(
+        tmp_path / "transport_admission.private.json",
+        {
+            "schema": SCREENING_TRANSPORT_ADMISSION_SCHEMA,
+            "status": "ready",
+            "blockers": [],
+            "registry_file_sha256": _file_sha256(registry_path),
+            "eligible_canonical_model_count": len(
+                {profile.canonical_identity_sha256 for profile in profiles}
+            ),
+            "eligible_canonical_identity_sha256s": sorted(
+                {profile.canonical_identity_sha256 for profile in profiles}
+            ),
+            "eligible_profile_id_sha256s": sorted(
+                sha256_text(profile.profile_id) for profile in profiles
+            ),
+            "selection_basis": "capability_score",
+            "quality_fields_used_for_selection": ["mean_score"],
+            "no_cheat_contract": {
+                "uses_benchmark_labels": True,
+                "uses_benchmark_answers": False,
+                "uses_benchmark_scores": True,
+                "uses_provider_output_content": False,
+                "uses_transport_failure_evidence_only": False,
+            },
+        },
+    )
+
+    freeze = build_provider_baseline_freeze_manifest(
+        registry_path=registry_path,
+        max_provider_baselines=None,
+        transport_availability_path=transport_path,
+    )
+
+    assert freeze["available_provider_baseline_count"] == 0
+    assert freeze["transport_availability_receipt"]["status"] == "blocked"
+    assert "screening_transport_admission_selection_basis_invalid" in freeze["blockers"]
+    assert "screening_transport_admission_quality_selection_present" in freeze["blockers"]
 
 
 def test_admission_bound_campaign_and_ranking_keep_filtered_candidate_pool(tmp_path):
@@ -3094,6 +3206,102 @@ def test_completed_campaign_converts_to_existing_strict_ranking_contract(tmp_pat
     assert receipt["replica_profile_count"] == 4
     assert receipt["identity_binding_count"] == 4
     assert receipt["common_independent_source_family_count"] == 2
+
+
+def test_ranking_conversion_accepts_only_probe_bound_registry_derivative(tmp_path):
+    registry_path, probe_path, manifest_path = _screening_fixture(tmp_path)
+    plan = build_non_target_screening_plan(
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        min_cases_per_source=4,
+        max_workers=3,
+    )
+    plan_path = _write_json(tmp_path / "screening_plan.safe.json", plan)
+    state_path = tmp_path / "campaign_state.safe.json"
+    private_root = tmp_path / "private_units"
+    campaign = run_non_target_screening_campaign(
+        plan_path=plan_path,
+        registry_path=registry_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        private_root=private_root,
+        state_path=state_path,
+        live=True,
+        max_workers=3,
+        client=_RankedFixtureClient(),
+    )
+    assert campaign["ready_for_ranking"] is True, campaign["reason_codes"]
+
+    source_payload = json.loads(registry_path.read_text(encoding="utf-8"))
+    source_hash = _file_sha256(registry_path)
+    profile_hashes = sorted(
+        sha256_text(profile.profile_id)
+        for profile in load_registry(registry_path)
+    )
+    binding_core = {
+        "schema": "axio_fusion_api.registry_probe_binding.v1",
+        "status": "ready",
+        "registry_input_path_sha256": sha256_text(str(registry_path)),
+        "registry_input_file_sha256": source_hash,
+        "probe_file_path_hashes": [sha256_text(str(probe_path))],
+        "probe_profile_set_sha256": sha256_text(stable_json(profile_hashes)),
+        "registry_profile_set_sha256": sha256_text(stable_json(profile_hashes)),
+        "profile_set_matches": True,
+        "probe_model_count": len(profile_hashes),
+        "registry_model_count": len(profile_hashes),
+        "min_available_models": 3,
+        "live_probe_proven": True,
+        "probe_registry_final_claim_ready": True,
+        "raw_probe_paths_persisted": False,
+        "raw_provider_outputs_persisted": False,
+        "secrets_persisted": False,
+    }
+    bound_payload = {
+        **source_payload,
+        "binding_status": "ready",
+        "generated_from_probe": True,
+        "probe_evidence_binding": {
+            **binding_core,
+            "blockers": [],
+            "binding_digest_sha256": sha256_text(stable_json(binding_core)),
+        },
+        "readiness": {
+            "ready": True,
+            "status": "ready",
+            "blockers": [],
+            "generated_from_probe": True,
+            "live_probe_proven": True,
+            "final_claim_registry_ready": True,
+        },
+    }
+    bound_path = _write_json(tmp_path / "registry.probe-bound.private.json", bound_payload)
+
+    assert _screening_registry_binding_sha256(bound_path, source_hash) == source_hash
+    ranking = build_external_ranking_manifest_from_screening(
+        plan_path=plan_path,
+        campaign_state_path=state_path,
+        registry_path=bound_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        private_root=private_root,
+    )
+    assert ranking["screening_conversion_ready"] is True, ranking.get("blockers")
+    assert ranking["registry_file_sha256"] == _file_sha256(bound_path)
+    assert ranking["candidate_inventory_count"] == 3
+
+    bound_payload["probe_evidence_binding"]["registry_input_file_sha256"] = sha256_text("wrong")
+    _write_json(bound_path, bound_payload)
+    rejected = build_external_ranking_manifest_from_screening(
+        plan_path=plan_path,
+        campaign_state_path=state_path,
+        registry_path=bound_path,
+        source_manifest_path=manifest_path,
+        private_probe_files=[probe_path],
+        private_root=private_root,
+    )
+    assert rejected["screening_conversion_ready"] is False
+    assert "screening_ranking_registry_binding_mismatch" in rejected["blockers"]
 
 
 def test_ranking_conversion_fails_closed_for_empty_partial_evidence(tmp_path):

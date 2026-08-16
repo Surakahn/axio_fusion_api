@@ -977,10 +977,11 @@ def build_probe_bound_registry(
 
     selected_registry_path = Path(registry_path)
     blockers: list[str] = []
+    registry_input_file_sha256 = ""
     try:
-        registry_payload = json.loads(
-            selected_registry_path.read_text(encoding="utf-8")
-        )
+        registry_text = selected_registry_path.read_text(encoding="utf-8")
+        registry_input_file_sha256 = sha256_text(registry_text)
+        registry_payload = json.loads(registry_text)
     except (OSError, json.JSONDecodeError):
         registry_payload = {}
         blockers.append("probe_bound_registry_input_unreadable")
@@ -1046,6 +1047,7 @@ def build_probe_bound_registry(
         "schema": "axio_fusion_api.registry_probe_binding.v1",
         "status": "ready" if not blockers else "blocked",
         "registry_input_path_sha256": sha256_text(str(selected_registry_path)),
+        "registry_input_file_sha256": registry_input_file_sha256,
         "probe_file_path_hashes": list(
             source_artifacts.get("probe_file_path_hashes") or []
         ),

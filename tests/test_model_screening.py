@@ -4474,6 +4474,9 @@ def test_probe_bound_registry_preserves_prefusion_runtime_metadata_and_provenanc
     assert bound["readiness"]["final_claim_registry_ready"] is True
     assert bound["source_artifacts"]["probe_file_count"] == 1
     assert bound["probe_evidence_binding"]["profile_set_matches"] is True
+    assert bound["probe_evidence_binding"]["registry_input_file_sha256"] == sha256_text(
+        registry_path.read_text(encoding="utf-8")
+    )
     assert bound["probe_evidence_binding"]["blockers"] == []
     assert build_registry_from_probe_artifacts(
         probe_paths=[probe_path],

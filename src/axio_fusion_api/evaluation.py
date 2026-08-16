@@ -224,6 +224,9 @@ EXTERNAL_PROVIDER_RANKING_INPUT_SCHEMA = "axio_fusion_api.external_provider_rank
 EXTERNAL_PROVIDER_RANKING_RECEIPT_SCHEMA = "axio_fusion_api.external_provider_ranking_receipt.v3"
 EXTERNAL_PROVIDER_RANKING_SELECTION_MODE = "externally_ranked_top_three_pre_registered"
 EXTERNAL_PROVIDER_RANKING_REQUIRED_RANKS = (1, 2, 3)
+SCREENING_TRANSPORT_ADMISSION_SCHEMA = (
+    "axio_fusion_api.non_target_screening_transport_admission.v1"
+)
 EXTERNAL_PROVIDER_RANKING_AGGREGATION = (
     "mean_common_source_normalized_rank_percentile_then_candidate_id_sha256"
 )
@@ -23154,18 +23157,13 @@ def _provider_baseline_profiles(profiles: Sequence[ModelProfile]) -> list[ModelP
     )
 
 
-def _provider_formal_admission_pool(
+def _provider_operational_admission_pool(
     profiles: Sequence[ModelProfile],
     *,
     operational_admission_path: str | Path | None,
-) -> tuple[list[ModelProfile], dict[str, Any]]:
-    """Resolve the profile pool allowed to support formal provider claims.
 
-    The registry remains the complete identity universe.  This helper only
-    narrows the candidate/replica pool when an operational admission receipt
-    is supplied, so a slow or contract-failing profile cannot re-enter a
-    baseline merely because it is still present in the registry.
-    """
+) -> tuple[list[ModelProfile], dict[str, Any]]:
+    """根据 long-request admission receipt 过滤正式候选池。"""
 
     if operational_admission_path is None or not str(operational_admission_path).strip():
         return list(profiles), {
@@ -23217,6 +23215,321 @@ def _provider_formal_admission_pool(
         "eligible_profile_hashes_authoritative": True,
         "raw_provider_names_persisted": False,
         "raw_provider_model_ids_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _transport_admission_registry_binding(
+    registry_path: str | Path | None,
+    *,
+    source_registry_file_sha256: str,
+) -> dict[str, Any]:
+    """验证 transport receipt 是当前 registry 或其 probe-bound 派生物的证据。"""
+
+    artifact = _load_json_artifact(Path(registry_path) if registry_path else None)
+    current_registry_sha256 = str(artifact.get("content_sha256") or "").lower()
+    source_sha256 = str(source_registry_file_sha256 or "").lower()
+    reason_codes: list[str] = []
+    binding_mode = ""
+    payload = artifact.get("payload") if isinstance(artifact.get("payload"), Mapping) else {}
+    if artifact.get("exists") is not True or artifact.get("valid_json_object") is not True:
+        reason_codes.append("screening_transport_admission_registry_file_unreadable")
+    elif not _looks_like_sha256(source_sha256):
+        reason_codes.append("screening_transport_admission_registry_hash_invalid")
+    elif current_registry_sha256 == source_sha256:
+        binding_mode = "direct_registry"
+    else:
+        probe_binding = payload.get("probe_evidence_binding")
+        readiness = payload.get("readiness")
+        if not isinstance(probe_binding, Mapping) or not isinstance(readiness, Mapping):
+            reason_codes.append("screening_transport_admission_registry_binding_mismatch")
+        elif (
+            payload.get("generated_from_probe") is not True
+            or probe_binding.get("status") != "ready"
+            or probe_binding.get("registry_input_file_sha256") != source_sha256
+            or probe_binding.get("profile_set_matches") is not True
+            or probe_binding.get("blockers") not in (None, [])
+            or readiness.get("generated_from_probe") is not True
+            or readiness.get("live_probe_proven") is not True
+            or readiness.get("final_claim_registry_ready") is not True
+        ):
+            reason_codes.append("screening_transport_admission_registry_binding_not_ready")
+        else:
+            binding_mode = "probe_bound_registry"
+    return {
+        "valid": not reason_codes,
+        "binding_mode": binding_mode,
+        "source_registry_file_sha256": source_sha256,
+        "current_registry_file_sha256": current_registry_sha256,
+        "reason_codes": sorted(set(reason_codes)),
+    }
+
+
+def _validate_transport_admission_handoff(
+    admission_path: str | Path,
+    profiles: Sequence[ModelProfile],
+    *,
+    registry_path: str | Path | None,
+) -> dict[str, Any]:
+    """验证只由 transport failure rate 产生的 screening successor receipt。"""
+
+    artifact = _load_json_artifact(Path(admission_path))
+    payload = artifact.get("payload") if isinstance(artifact.get("payload"), Mapping) else {}
+    reason_codes: list[str] = []
+    if artifact.get("exists") is not True or artifact.get("valid_json_object") is not True:
+        reason_codes.append("screening_transport_admission_artifact_unreadable")
+    if payload.get("schema") != SCREENING_TRANSPORT_ADMISSION_SCHEMA:
+        reason_codes.append("screening_transport_admission_schema_invalid")
+    if payload.get("status") != "ready":
+        reason_codes.append("screening_transport_admission_not_ready")
+    if payload.get("blockers") != []:
+        reason_codes.append("screening_transport_admission_blockers_present")
+    if payload.get("selection_basis") != "transport_failure_rate_only":
+        reason_codes.append("screening_transport_admission_selection_basis_invalid")
+    if payload.get("quality_fields_used_for_selection") != []:
+        reason_codes.append("screening_transport_admission_quality_selection_present")
+
+    no_cheat_contract = payload.get("no_cheat_contract")
+    if not isinstance(no_cheat_contract, Mapping):
+        reason_codes.append("screening_transport_admission_no_cheat_contract_invalid")
+    else:
+        for key in (
+            "uses_benchmark_labels",
+            "uses_benchmark_answers",
+            "uses_benchmark_scores",
+            "uses_provider_output_content",
+        ):
+            if no_cheat_contract.get(key) is not False:
+                reason_codes.append(f"screening_transport_admission_{key}_present")
+        if no_cheat_contract.get("uses_transport_failure_evidence_only") is not True:
+            reason_codes.append("screening_transport_admission_transport_only_contract_invalid")
+
+    source_registry_sha256 = str(payload.get("registry_file_sha256") or "").lower()
+    registry_binding = _transport_admission_registry_binding(
+        registry_path,
+        source_registry_file_sha256=source_registry_sha256,
+    )
+    reason_codes.extend(registry_binding.get("reason_codes", []))
+
+    raw_profile_hashes = payload.get("eligible_profile_id_sha256s")
+    raw_canonical_hashes = payload.get("eligible_canonical_identity_sha256s")
+    profile_hashes = {
+        str(value).lower() for value in raw_profile_hashes or [] if _looks_like_sha256(value)
+    }
+    canonical_hashes = {
+        str(value).lower() for value in raw_canonical_hashes or [] if _looks_like_sha256(value)
+    }
+    if not isinstance(raw_profile_hashes, list) or not profile_hashes:
+        reason_codes.append("screening_transport_admission_profile_set_missing")
+    if not isinstance(raw_canonical_hashes, list) or not canonical_hashes:
+        reason_codes.append("screening_transport_admission_candidate_set_missing")
+    if isinstance(raw_profile_hashes, list) and raw_profile_hashes != sorted(profile_hashes):
+        reason_codes.append("screening_transport_admission_profile_hash_set_invalid")
+    if isinstance(raw_canonical_hashes, list) and raw_canonical_hashes != sorted(canonical_hashes):
+        reason_codes.append("screening_transport_admission_canonical_hash_set_invalid")
+    if payload.get("eligible_canonical_model_count") != len(canonical_hashes):
+        reason_codes.append("screening_transport_admission_canonical_count_mismatch")
+
+    filtered = [
+        profile
+        for profile in profiles
+        if sha256_text(profile.profile_id).lower() in profile_hashes
+    ]
+    filtered_profile_hashes = {
+        sha256_text(profile.profile_id).lower() for profile in filtered
+    }
+    filtered_canonical_hashes = {
+        str(profile.canonical_identity_sha256).lower() for profile in filtered
+    }
+    if filtered_profile_hashes != profile_hashes:
+        reason_codes.append("screening_transport_admission_profile_set_not_in_registry")
+    if filtered_canonical_hashes != canonical_hashes:
+        reason_codes.append("screening_transport_admission_canonical_set_not_in_registry")
+    if not filtered:
+        reason_codes.append("screening_transport_admission_left_no_baseline_profiles")
+
+    valid = not reason_codes
+    return {
+        "valid": valid,
+        "status": "ready" if valid else "blocked",
+        "content_sha256": str(artifact.get("content_sha256") or ""),
+        "source_registry_file_sha256": source_registry_sha256,
+        "current_registry_file_sha256": str(
+            registry_binding.get("current_registry_file_sha256") or ""
+        ),
+        "registry_binding_mode": str(registry_binding.get("binding_mode") or ""),
+        "candidate_profile_count": len(profiles),
+        "filtered_profile_count": len(filtered) if valid else 0,
+        "formal_baseline_eligible_count": len(filtered) if valid else 0,
+        "eligible_canonical_identity_sha256s": sorted(canonical_hashes),
+        "eligible_profile_id_sha256s": sorted(profile_hashes),
+        "selection_basis": "transport_failure_rate_only",
+        "reason_codes": sorted(set(str(reason) for reason in reason_codes if str(reason))),
+        "eligible_profile_hashes_authoritative": True,
+        "raw_provider_names_persisted": False,
+        "raw_provider_model_ids_persisted": False,
+        "raw_provider_outputs_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _provider_transport_admission_pool(
+    profiles: Sequence[ModelProfile],
+    *,
+    transport_availability_path: str | Path | None,
+    registry_path: str | Path | None,
+) -> tuple[list[ModelProfile], dict[str, Any]]:
+    """根据 transport-only receipt 过滤正式候选池。"""
+
+    if transport_availability_path is None or not str(transport_availability_path).strip():
+        return list(profiles), {
+            "required": False,
+            "status": "not_required",
+            "content_sha256": "",
+            "source_registry_file_sha256": "",
+            "current_registry_file_sha256": "",
+            "registry_binding_mode": "",
+            "candidate_profile_count": len(profiles),
+            "filtered_profile_count": len(profiles),
+            "formal_baseline_eligible_count": None,
+            "eligible_canonical_identity_sha256s": [],
+            "eligible_profile_id_sha256s": [],
+            "selection_basis": "none",
+            "reason_codes": [],
+            "eligible_profile_hashes_authoritative": False,
+            "raw_provider_names_persisted": False,
+            "raw_provider_model_ids_persisted": False,
+            "raw_provider_outputs_persisted": False,
+            "secrets_persisted": False,
+        }
+
+    validation = _validate_transport_admission_handoff(
+        transport_availability_path,
+        profiles,
+        registry_path=registry_path,
+    )
+    filtered = [
+        profile
+        for profile in profiles
+        if sha256_text(profile.profile_id).lower()
+        in set(validation.get("eligible_profile_id_sha256s", []))
+    ]
+    if validation.get("valid") is not True:
+        filtered = []
+    return filtered, {
+        "required": True,
+        "status": str(validation.get("status") or "blocked"),
+        "content_sha256": str(validation.get("content_sha256") or ""),
+        "source_registry_file_sha256": str(
+            validation.get("source_registry_file_sha256") or ""
+        ),
+        "current_registry_file_sha256": str(
+            validation.get("current_registry_file_sha256") or ""
+        ),
+        "registry_binding_mode": str(validation.get("registry_binding_mode") or ""),
+        "candidate_profile_count": len(profiles),
+        "filtered_profile_count": len(filtered),
+        "formal_baseline_eligible_count": int(
+            validation.get("formal_baseline_eligible_count") or 0
+        ),
+        "eligible_canonical_identity_sha256s": sorted(
+            str(value)
+            for value in validation.get("eligible_canonical_identity_sha256s", [])
+            if str(value)
+        ),
+        "eligible_profile_id_sha256s": sorted(
+            str(value)
+            for value in validation.get("eligible_profile_id_sha256s", [])
+            if str(value)
+        ),
+        "selection_basis": str(validation.get("selection_basis") or ""),
+        "reason_codes": sorted(
+            str(reason)
+            for reason in validation.get("reason_codes", [])
+            if str(reason)
+        ),
+        "eligible_profile_hashes_authoritative": True,
+        "raw_provider_names_persisted": False,
+        "raw_provider_model_ids_persisted": False,
+        "raw_provider_outputs_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _provider_formal_admission_pool(
+    profiles: Sequence[ModelProfile],
+    *,
+    operational_admission_path: str | Path | None,
+    transport_availability_path: str | Path | None = None,
+    registry_path: str | Path | None = None,
+) -> tuple[list[ModelProfile], dict[str, Any]]:
+    """求 operational 与 transport admission 的交集，形成正式候选池。"""
+
+    full_profiles = list(profiles)
+    operational_profiles, operational_receipt = _provider_operational_admission_pool(
+        full_profiles,
+        operational_admission_path=operational_admission_path,
+    )
+    transport_profiles, transport_receipt = _provider_transport_admission_pool(
+        full_profiles,
+        transport_availability_path=transport_availability_path,
+        registry_path=registry_path,
+    )
+    allowed_hashes = {sha256_text(profile.profile_id) for profile in full_profiles}
+    if operational_receipt.get("required") is True:
+        allowed_hashes.intersection_update(
+            sha256_text(profile.profile_id) for profile in operational_profiles
+        )
+    if transport_receipt.get("required") is True:
+        allowed_hashes.intersection_update(
+            sha256_text(profile.profile_id) for profile in transport_profiles
+        )
+    filtered = [
+        profile
+        for profile in full_profiles
+        if sha256_text(profile.profile_id) in allowed_hashes
+    ]
+    required = operational_receipt.get("required") is True or transport_receipt.get("required") is True
+    reason_codes = sorted(
+        {
+            str(reason)
+            for receipt in (operational_receipt, transport_receipt)
+            for reason in receipt.get("reason_codes", [])
+            if str(reason)
+        }
+    )
+    status = (
+        "ready"
+        if not required
+        or all(
+            receipt.get("status") == "ready"
+            for receipt in (operational_receipt, transport_receipt)
+            if receipt.get("required") is True
+        )
+        else "blocked"
+    )
+    if required and not filtered:
+        reason_codes.append("provider_formal_admission_left_no_profiles")
+        status = "blocked"
+    return filtered, {
+        "required": required,
+        "status": status,
+        "content_sha256": str(
+            operational_receipt.get("content_sha256")
+            or transport_receipt.get("content_sha256")
+            or ""
+        ),
+        "candidate_profile_count": len(full_profiles),
+        "filtered_profile_count": len(filtered),
+        "formal_baseline_eligible_count": len(filtered) if required else None,
+        "eligible_profile_id_sha256s": sorted(allowed_hashes) if required else [],
+        "reason_codes": sorted(set(reason_codes)),
+        "eligible_profile_hashes_authoritative": required,
+        "operational_admission_receipt": operational_receipt,
+        "transport_availability_receipt": transport_receipt,
+        "raw_provider_names_persisted": False,
+        "raw_provider_model_ids_persisted": False,
+        "raw_provider_outputs_persisted": False,
         "secrets_persisted": False,
     }
 
@@ -25383,6 +25696,7 @@ def _provider_baseline_selection_context(
     provider_baseline_freeze_path: str | Path | None = None,
     registry_path: str | Path | None = None,
     operational_admission_path: str | Path | None = None,
+    transport_availability_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Resolve provider candidates for either legacy exploration or fixed claims."""
 
@@ -25390,6 +25704,18 @@ def _provider_baseline_selection_context(
     provider_profiles, admission_receipt = _provider_formal_admission_pool(
         full_profiles,
         operational_admission_path=operational_admission_path,
+        transport_availability_path=transport_availability_path,
+        registry_path=registry_path,
+    )
+    operational_receipt = (
+        admission_receipt.get("operational_admission_receipt")
+        if isinstance(admission_receipt.get("operational_admission_receipt"), Mapping)
+        else {}
+    )
+    transport_receipt = (
+        admission_receipt.get("transport_availability_receipt")
+        if isinstance(admission_receipt.get("transport_availability_receipt"), Mapping)
+        else {}
     )
     admission_blockers = list(admission_receipt.get("reason_codes", []))
     if admission_receipt.get("required") is True and admission_receipt.get("status") != "ready":
@@ -25403,7 +25729,8 @@ def _provider_baseline_selection_context(
             "selected_all_available_provider_baselines": False,
             "external_ranking_pre_registered": False,
             "external_ranking_receipt": {},
-            "operational_admission_receipt": admission_receipt,
+            "operational_admission_receipt": operational_receipt,
+            "transport_availability_receipt": transport_receipt,
             "blockers": sorted(set(["provider_baselines_disabled", *admission_blockers])),
         }
     if provider_baseline_freeze_path is None:
@@ -25417,7 +25744,8 @@ def _provider_baseline_selection_context(
             "selected_all_available_provider_baselines": max_provider_baselines is None,
             "external_ranking_pre_registered": False,
             "external_ranking_receipt": {},
-            "operational_admission_receipt": admission_receipt,
+            "operational_admission_receipt": operational_receipt,
+            "transport_availability_receipt": transport_receipt,
             "blockers": sorted(set(admission_blockers)),
         }
 
@@ -25429,22 +25757,53 @@ def _provider_baseline_selection_context(
         if isinstance(manifest.get("operational_admission_receipt"), Mapping)
         else {}
     )
+    frozen_transport_receipt = (
+        manifest.get("transport_availability_receipt")
+        if isinstance(manifest.get("transport_availability_receipt"), Mapping)
+        else {}
+    )
     if operational_admission_path is None and frozen_admission_receipt.get("required") is True:
         provider_profiles, frozen_pool_blockers = _provider_pool_from_admission_receipt(
             full_profiles,
             frozen_admission_receipt,
         )
-        admission_receipt = dict(frozen_admission_receipt)
+        operational_receipt = dict(frozen_admission_receipt)
         admission_blockers.extend(frozen_pool_blockers)
     elif frozen_admission_receipt.get("required") is True:
         if str(frozen_admission_receipt.get("content_sha256") or "") != str(
-            admission_receipt.get("content_sha256") or ""
+            operational_receipt.get("content_sha256") or ""
         ):
             admission_blockers.append("provider_admission_freeze_receipt_content_mismatch")
         if sorted(
             str(value) for value in frozen_admission_receipt.get("eligible_profile_id_sha256s", [])
-        ) != sorted(str(value) for value in admission_receipt.get("eligible_profile_id_sha256s", [])):
+        ) != sorted(str(value) for value in operational_receipt.get("eligible_profile_id_sha256s", [])):
             admission_blockers.append("provider_admission_freeze_receipt_profile_set_mismatch")
+    if transport_availability_path is None and frozen_transport_receipt.get("required") is True:
+        frozen_transport_profiles, frozen_pool_blockers = _provider_pool_from_admission_receipt(
+            full_profiles,
+            frozen_transport_receipt,
+        )
+        frozen_transport_hashes = {
+            sha256_text(profile.profile_id) for profile in frozen_transport_profiles
+        }
+        provider_profiles = [
+            profile
+            for profile in provider_profiles
+            if sha256_text(profile.profile_id) in frozen_transport_hashes
+        ]
+        transport_receipt = dict(frozen_transport_receipt)
+        admission_blockers.extend(frozen_pool_blockers)
+    elif frozen_transport_receipt.get("required") is True:
+        if str(frozen_transport_receipt.get("content_sha256") or "") != str(
+            transport_receipt.get("content_sha256") or ""
+        ):
+            admission_blockers.append("provider_transport_freeze_receipt_content_mismatch")
+        if sorted(
+            str(value) for value in frozen_transport_receipt.get("eligible_profile_id_sha256s", [])
+        ) != sorted(
+            str(value) for value in transport_receipt.get("eligible_profile_id_sha256s", [])
+        ):
+            admission_blockers.append("provider_transport_freeze_receipt_profile_set_mismatch")
     available = _provider_baseline_profiles(provider_profiles)
     external_receipt = (
         manifest.get("external_ranking_receipt")
@@ -25525,7 +25884,8 @@ def _provider_baseline_selection_context(
         "freeze_receipt": freeze_receipt,
         "registry_receipt": registry_receipt,
         "provider_profiles": provider_profiles,
-        "operational_admission_receipt": admission_receipt,
+        "operational_admission_receipt": operational_receipt,
+        "transport_availability_receipt": transport_receipt,
         "blockers": sorted(set(blockers)),
         "available_provider_baseline_count": len(available),
     }
@@ -25864,6 +26224,7 @@ def build_provider_baseline_freeze_manifest(
     provider_probe_evidence_audit_path: str | Path | None = None,
     external_ranking_manifest_path: str | Path | None = None,
     operational_admission_path: str | Path | None = None,
+    transport_availability_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Freeze the single-provider baseline candidate universe before a campaign.
 
@@ -25880,9 +26241,21 @@ def build_provider_baseline_freeze_manifest(
 
     profiles = load_registry(registry_path)
     registry_receipt = _provider_registry_receipt(profiles, registry_path=registry_path)
-    formal_profiles, operational_admission_receipt = _provider_formal_admission_pool(
+    formal_profiles, formal_admission_receipt = _provider_formal_admission_pool(
         profiles,
         operational_admission_path=operational_admission_path,
+        transport_availability_path=transport_availability_path,
+        registry_path=registry_path,
+    )
+    operational_admission_receipt = (
+        formal_admission_receipt.get("operational_admission_receipt")
+        if isinstance(formal_admission_receipt.get("operational_admission_receipt"), Mapping)
+        else {}
+    )
+    transport_availability_receipt = (
+        formal_admission_receipt.get("transport_availability_receipt")
+        if isinstance(formal_admission_receipt.get("transport_availability_receipt"), Mapping)
+        else {}
     )
     provider_portfolio_summary = _provider_baseline_freeze_portfolio_summary(
         formal_profiles,
@@ -25968,10 +26341,10 @@ def build_provider_baseline_freeze_manifest(
     blockers: list[str] = []
     blockers.extend(
         str(reason)
-        for reason in operational_admission_receipt.get("reason_codes", [])
+        for reason in formal_admission_receipt.get("reason_codes", [])
         if str(reason)
     )
-    if operational_admission_receipt.get("required") is True and operational_admission_receipt.get("status") != "ready":
+    if formal_admission_receipt.get("required") is True and formal_admission_receipt.get("status") != "ready":
         blockers.append("provider_admission_not_ready_for_baseline_freeze")
     if include_provider_baselines is not True:
         blockers.append("provider_baselines_disabled")
@@ -26053,6 +26426,7 @@ def build_provider_baseline_freeze_manifest(
         "provider_portfolio_summary": provider_portfolio_summary,
         "provider_probe_evidence_audit_receipt": probe_evidence_receipt,
         "operational_admission_receipt": operational_admission_receipt,
+        "transport_availability_receipt": transport_availability_receipt,
         "baseline_strength_policy": {
             "candidate_universe_frozen_before_campaign": True,
             "external_ranking_pre_registered_before_campaign": external_ranking_manifest_path is not None,
@@ -26274,6 +26648,11 @@ def _provider_baseline_freeze_digest_input(manifest: Mapping[str, Any]) -> dict[
         if isinstance(manifest.get("operational_admission_receipt"), Mapping)
         else {}
     )
+    transport_availability = (
+        manifest.get("transport_availability_receipt")
+        if isinstance(manifest.get("transport_availability_receipt"), Mapping)
+        else {}
+    )
     digest = {
         "schema": "axio_fusion_api.provider_baseline_freeze_digest_input.v1",
         "freeze_stage": str(manifest.get("freeze_stage") or ""),
@@ -26332,6 +26711,54 @@ def _provider_baseline_freeze_digest_input(manifest: Mapping[str, Any]) -> dict[
                 if str(reason)
             ),
             "eligible_profile_hashes_authoritative": operational_admission.get(
+                "eligible_profile_hashes_authoritative"
+            ) is True,
+        },
+        "transport_availability": {
+            "required": transport_availability.get("required") is True,
+            "status": str(transport_availability.get("status") or ""),
+            "content_sha256": str(transport_availability.get("content_sha256") or ""),
+            "source_registry_file_sha256": str(
+                transport_availability.get("source_registry_file_sha256") or ""
+            ),
+            "current_registry_file_sha256": str(
+                transport_availability.get("current_registry_file_sha256") or ""
+            ),
+            "registry_binding_mode": str(
+                transport_availability.get("registry_binding_mode") or ""
+            ),
+            "candidate_profile_count": _optional_int(
+                transport_availability.get("candidate_profile_count")
+            ) or 0,
+            "filtered_profile_count": _optional_int(
+                transport_availability.get("filtered_profile_count")
+            ) or 0,
+            "formal_baseline_eligible_count": _optional_int(
+                transport_availability.get("formal_baseline_eligible_count")
+            ),
+            "eligible_canonical_identity_sha256s": sorted(
+                str(value)
+                for value in transport_availability.get(
+                    "eligible_canonical_identity_sha256s", []
+                )
+                if value
+            ),
+            "eligible_profile_id_sha256s": sorted(
+                str(value)
+                for value in transport_availability.get(
+                    "eligible_profile_id_sha256s", []
+                )
+                if value
+            ),
+            "selection_basis": str(
+                transport_availability.get("selection_basis") or ""
+            ),
+            "reason_codes": sorted(
+                str(reason)
+                for reason in transport_availability.get("reason_codes", [])
+                if str(reason)
+            ),
+            "eligible_profile_hashes_authoritative": transport_availability.get(
                 "eligible_profile_hashes_authoritative"
             ) is True,
         },
@@ -26551,6 +26978,14 @@ def _provider_baseline_freeze_receipt(manifest: Mapping[str, Any]) -> dict[str, 
             "operational_admission_content_sha256": "",
             "operational_admission_eligible_profile_count": 0,
             "operational_admission_eligible_profile_set_sha256": sha256_text(stable_json([])),
+            "transport_availability_bound": False,
+            "transport_availability_status": "",
+            "transport_availability_content_sha256": "",
+            "transport_availability_source_registry_file_sha256": "",
+            "transport_availability_current_registry_file_sha256": "",
+            "transport_availability_registry_binding_mode": "",
+            "transport_availability_eligible_profile_count": 0,
+            "transport_availability_eligible_profile_set_sha256": sha256_text(stable_json([])),
             "external_ranking_identity_binding_ready": False,
             "external_ranking_identity_binding_count": 0,
             "raw_provider_model_ids_persisted": False,
@@ -26586,6 +27021,11 @@ def _provider_baseline_freeze_receipt(manifest: Mapping[str, Any]) -> dict[str, 
     operational_admission = (
         manifest.get("operational_admission_receipt")
         if isinstance(manifest.get("operational_admission_receipt"), Mapping)
+        else {}
+    )
+    transport_availability = (
+        manifest.get("transport_availability_receipt")
+        if isinstance(manifest.get("transport_availability_receipt"), Mapping)
         else {}
     )
     external_ranking_validation_errors = (
@@ -26683,6 +27123,34 @@ def _provider_baseline_freeze_receipt(manifest: Mapping[str, Any]) -> dict[str, 
                 sorted(
                     str(value)
                     for value in operational_admission.get("eligible_profile_id_sha256s", [])
+                    if value
+                )
+            )
+        ),
+        "transport_availability_bound": transport_availability.get("required") is True,
+        "transport_availability_status": str(transport_availability.get("status") or ""),
+        "transport_availability_content_sha256": str(
+            transport_availability.get("content_sha256") or ""
+        ),
+        "transport_availability_source_registry_file_sha256": str(
+            transport_availability.get("source_registry_file_sha256") or ""
+        ),
+        "transport_availability_current_registry_file_sha256": str(
+            transport_availability.get("current_registry_file_sha256") or ""
+        ),
+        "transport_availability_registry_binding_mode": str(
+            transport_availability.get("registry_binding_mode") or ""
+        ),
+        "transport_availability_eligible_profile_count": _optional_int(
+            transport_availability.get("filtered_profile_count")
+        ) or 0,
+        "transport_availability_eligible_profile_set_sha256": sha256_text(
+            stable_json(
+                sorted(
+                    str(value)
+                    for value in transport_availability.get(
+                        "eligible_profile_id_sha256s", []
+                    )
                     if value
                 )
             )

@@ -1185,3 +1185,10 @@ Latency superiority is also claim-gated on two distribution points: both p50 and
   616 tests passed in 208.64 seconds; compilation passed. The independent
   external evaluator regression passed 18 tests separately. These are code and
   protocol readiness results only, not benchmark scores or superiority claims.
+- 2026-08-16：完成 transport5 非目标筛选 cohort，并为 provider baseline
+  freeze 增加严格的 transport-only admission 路径。该路径将 receipt 绑定到
+  原始 registry hash 或显式 probe-bound 派生物，拒绝 benchmark/质量选择字段，
+  并按精确的 profile/canonical hash 集合过滤正式 provider pool。重新生成的
+  freeze 已具备 ready 的 external top-three ranking 和匹配 digest，但仍因真实
+  的 missing-fast-candidate portfolio 缺口阻塞。全量回归为 1036 passed、7
+  skipped；未执行 target benchmark calls，也未做 superiority claim。

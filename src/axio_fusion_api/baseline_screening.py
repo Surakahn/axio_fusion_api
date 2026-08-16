@@ -194,6 +194,7 @@ def build_non_target_screening_plan(
     fail_fast_transport_failure_gate: bool = False,
     operational_admission_path: str | Path | None = None,
     transport_availability_path: str | Path | None = None,
+    registry_content_sha256_override: str | None = None,
 ) -> dict[str, Any]:
     """Pre-register a complete-pool, non-target provider screening matrix.
 
@@ -219,7 +220,12 @@ def build_non_target_screening_plan(
         reason_prefix="screening_source_manifest",
         blockers=blockers,
     )
-    registry_sha256 = _file_sha256(registry_file)
+    registry_sha256 = str(registry_content_sha256_override or "").strip()
+    if registry_sha256 and not _looks_like_sha256(registry_sha256):
+        blockers.append("screening_registry_content_digest_invalid")
+        registry_sha256 = ""
+    if not registry_sha256:
+        registry_sha256 = _file_sha256(registry_file)
     if not registry_sha256:
         blockers.append("screening_registry_content_digest_missing")
     if source_manifest.get("schema") != SCREENING_SOURCE_MANIFEST_SCHEMA:
@@ -904,6 +910,43 @@ def _load_private_json(
         blockers.append(f"{reason_prefix}_not_object")
         return {}, sha256_text(raw)
     return dict(value), sha256_text(raw)
+
+
+def _screening_registry_binding_sha256(
+    registry_file: Path,
+    expected_registry_sha256: str,
+) -> str:
+    """Accept the frozen registry or its explicitly probe-bound derivative."""
+
+    expected = str(expected_registry_sha256 or "").strip().lower()
+    current = _file_sha256(registry_file).lower()
+    if current and current == expected:
+        return current
+    if not expected or not registry_file.is_file():
+        return ""
+    try:
+        payload = json.loads(registry_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    if not isinstance(payload, Mapping):
+        return ""
+    binding = payload.get("probe_evidence_binding")
+    readiness = payload.get("readiness")
+    if not isinstance(binding, Mapping) or not isinstance(readiness, Mapping):
+        return ""
+    if (
+        payload.get("generated_from_probe") is not True
+        or binding.get("status") != "ready"
+        or binding.get("registry_input_file_sha256") != expected
+        or binding.get("profile_set_matches") is not True
+        or binding.get("probe_registry_final_claim_ready") is not True
+        or readiness.get("generated_from_probe") is not True
+        or readiness.get("live_probe_proven") is not True
+        or readiness.get("final_claim_registry_ready") is not True
+        or binding.get("blockers") not in (None, [])
+    ):
+        return ""
+    return expected
 
 
 def build_transport_availability_admission(
@@ -3353,7 +3396,13 @@ def build_external_ranking_manifest_from_screening(
         reason_prefix="screening_ranking_source_manifest",
         blockers=blockers,
     )
-    profiles = _load_registry_for_screening(Path(registry_path), blockers)
+    registry_file = Path(registry_path)
+    declared_registry_sha256 = str(state.get("registry_file_sha256") or "")
+    registry_binding_sha256 = _screening_registry_binding_sha256(
+        registry_file,
+        declared_registry_sha256,
+    )
+    profiles = _load_registry_for_screening(registry_file, blockers)
     profiles, operational_admission = _apply_operational_admission_filter(
         profiles,
         operational_admission_path=operational_admission_path,
@@ -3362,7 +3411,8 @@ def build_external_ranking_manifest_from_screening(
     profiles, transport_availability = _apply_transport_availability_filter(
         profiles,
         transport_availability_path=transport_availability_path,
-        registry_content_sha256=_file_sha256(Path(registry_path)),
+        registry_content_sha256=registry_binding_sha256
+        or _file_sha256(registry_file),
         source_manifest_content_sha256=source_manifest_sha256,
         blockers=blockers,
     )
@@ -3401,9 +3451,7 @@ def build_external_ranking_manifest_from_screening(
         blockers.append("screening_ranking_plan_max_workers_invalid")
     elif state.get("max_workers") != planned_max_workers:
         blockers.append("screening_ranking_max_workers_binding_mismatch")
-    if str(state.get("registry_file_sha256") or "") != _file_sha256(
-        Path(registry_path)
-    ):
+    if not registry_binding_sha256:
         blockers.append("screening_ranking_registry_binding_mismatch")
     if str(state.get("source_manifest_content_sha256") or "") != source_manifest_sha256:
         blockers.append("screening_ranking_source_binding_mismatch")
@@ -3439,6 +3487,9 @@ def build_external_ranking_manifest_from_screening(
         ),
         operational_admission_path=operational_admission_path,
         transport_availability_path=transport_availability_path,
+        registry_content_sha256_override=(
+            registry_binding_sha256 or None
+        ),
     )
     if current_plan.get("ready") is not True:
         blockers.extend(
