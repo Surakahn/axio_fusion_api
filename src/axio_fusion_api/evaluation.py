@@ -9831,6 +9831,8 @@ def _provider_probe_group_summary(payloads: Sequence[Mapping[str, Any]], *, reda
     mode_counts: dict[str, int] = {}
     api_format_counts: dict[str, int] = {}
     available_api_format_counts: dict[str, int] = {}
+    profile_api_formats: dict[str, set[str]] = {}
+    available_profile_api_formats: dict[str, set[str]] = {}
     profile_hashes = []
     provider_hashes = []
     model_hashes = []
@@ -9848,6 +9850,7 @@ def _provider_probe_group_summary(payloads: Sequence[Mapping[str, Any]], *, reda
         model_hash = _provider_probe_hash_from_row(row, raw_key="model", hash_key="model_sha256")
         if profile_hash:
             profile_hashes.append(profile_hash)
+            profile_api_formats.setdefault(profile_hash, set()).add(api_format)
         if provider_hash:
             provider_hashes.append(provider_hash)
         if model_hash:
@@ -9855,12 +9858,20 @@ def _provider_probe_group_summary(payloads: Sequence[Mapping[str, Any]], *, reda
         if status == "available":
             _increment_count(available_api_format_counts, api_format)
             if profile_hash:
+                available_profile_api_formats.setdefault(profile_hash, set()).add(api_format)
                 available_profile_hashes.append(profile_hash)
                 if _provider_probe_row_is_live(row):
                     live_available_profile_hashes.append(profile_hash)
     profile_hash_set = sorted(set(profile_hashes))
     available_profile_hash_set = sorted(set(available_profile_hashes))
     live_available_profile_hash_set = sorted(set(live_available_profile_hashes))
+    profile_api_format_conflicts = _provider_probe_api_format_conflicts(profile_api_formats)
+    available_profile_api_format_conflicts = _provider_probe_api_format_conflicts(
+        available_profile_api_formats
+    )
+    available_unique_api_format_counts = _provider_probe_unique_api_format_counts(
+        available_profile_api_formats
+    )
     return {
         "schema": "axio_fusion_api.provider_probe_group_summary.v1",
         "redacted_input": bool(redacted),
@@ -9874,6 +9885,9 @@ def _provider_probe_group_summary(payloads: Sequence[Mapping[str, Any]], *, reda
         "mode_counts": dict(sorted(mode_counts.items())),
         "api_format_counts": dict(sorted(api_format_counts.items())),
         "available_api_format_counts": dict(sorted(available_api_format_counts.items())),
+        "available_unique_api_format_counts": available_unique_api_format_counts,
+        "profile_api_format_conflicts": profile_api_format_conflicts,
+        "available_profile_api_format_conflicts": available_profile_api_format_conflicts,
         "profile_hash_count": len(profile_hash_set),
         "profile_set_sha256": sha256_text(stable_json(profile_hash_set)),
         "available_profile_hashes": available_profile_hash_set,
@@ -9930,6 +9944,29 @@ def _provider_probe_hash_from_row(row: Mapping[str, Any], *, raw_key: str, hash_
         if provider or model:
             return sha256_text(f"{provider}/{model}")
     return ""
+
+
+def _provider_probe_api_format_conflicts(
+    profile_api_formats: Mapping[str, set[str]],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "profile_id_sha256": str(profile_hash),
+            "api_formats": sorted(str(api_format) for api_format in api_formats),
+        }
+        for profile_hash, api_formats in sorted(profile_api_formats.items())
+        if len(api_formats) > 1
+    ]
+
+
+def _provider_probe_unique_api_format_counts(
+    profile_api_formats: Mapping[str, set[str]],
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for api_formats in profile_api_formats.values():
+        for api_format in api_formats:
+            _increment_count(counts, str(api_format))
+    return dict(sorted(counts.items()))
 
 
 def _provider_probe_row_is_live(row: Mapping[str, Any]) -> bool:
@@ -10044,6 +10081,12 @@ def _provider_probe_evidence_binding_summary(
     redacted_probe_available_set = str(redacted_probe_summary.get("available_profile_set_sha256") or "")
     private_registry_set = str(private_registry_summary.get("profile_set_sha256") or "")
     redacted_registry_set = str(redacted_registry_summary.get("profile_set_sha256") or "")
+    private_probe_unique_api_format_counts = dict(
+        private_probe_summary.get("available_unique_api_format_counts") or {}
+    )
+    redacted_probe_unique_api_format_counts = dict(
+        redacted_probe_summary.get("available_unique_api_format_counts") or {}
+    )
     binding = {
         "private_registry_source_path_hashes_match_private_probe_files": bool(private_probe_paths) and registry_path_hashes == private_probe_paths,
         "redacted_registry_source_path_hashes_match_private_probe_files": bool(private_probe_paths) and evidence_path_hashes == private_probe_paths,
@@ -10052,7 +10095,11 @@ def _provider_probe_evidence_binding_summary(
         "redacted_registry_profile_set_matches_private_registry": bool(redacted_registry_set) and redacted_registry_set == private_registry_set,
         "private_registry_source_status_counts_match_private_probe": dict(registry_source.get("status_counts") or {}) == dict(private_probe_summary.get("status_counts") or {}),
         "private_registry_source_mode_counts_match_private_probe": dict(registry_source.get("mode_counts") or {}) == dict(private_probe_summary.get("mode_counts") or {}),
-        "private_registry_source_api_format_counts_match_private_probe_available": dict(registry_source.get("api_format_counts") or {}) == dict(private_probe_summary.get("available_api_format_counts") or {}),
+        "private_registry_source_api_format_counts_match_private_probe_available": dict(registry_source.get("api_format_counts") or {}) == private_probe_unique_api_format_counts,
+        "private_probe_profile_api_formats_unambiguous": not private_probe_summary.get("profile_api_format_conflicts"),
+        "private_probe_available_profile_api_formats_unambiguous": not private_probe_summary.get("available_profile_api_format_conflicts"),
+        "redacted_probe_profile_api_formats_unambiguous": not redacted_probe_summary.get("profile_api_format_conflicts"),
+        "redacted_probe_available_profile_api_formats_unambiguous": not redacted_probe_summary.get("available_profile_api_format_conflicts"),
         "redacted_registry_source_counts_match_private_registry": (
             dict(evidence_source.get("status_counts") or {}) == dict(registry_source.get("status_counts") or {})
             and dict(evidence_source.get("mode_counts") or {}) == dict(registry_source.get("mode_counts") or {})
@@ -10061,7 +10108,7 @@ def _provider_probe_evidence_binding_summary(
         "redacted_probe_counts_match_private_probe": (
             dict(redacted_probe_summary.get("status_counts") or {}) == dict(private_probe_summary.get("status_counts") or {})
             and dict(redacted_probe_summary.get("mode_counts") or {}) == dict(private_probe_summary.get("mode_counts") or {})
-            and dict(redacted_probe_summary.get("available_api_format_counts") or {}) == dict(private_probe_summary.get("available_api_format_counts") or {})
+            and redacted_probe_unique_api_format_counts == private_probe_unique_api_format_counts
         ),
         "raw_probe_paths_persisted": False,
         "raw_registry_paths_persisted": False,
@@ -10069,7 +10116,21 @@ def _provider_probe_evidence_binding_summary(
         "raw_provider_model_ids_persisted": False,
         "secrets_persisted": False,
     }
-    binding["all_bindings_ready"] = all(value is True for key, value in binding.items() if key.endswith(("match_private_probe_files", "matches_private_registry", "matches_private_probe", "match_private_probe", "match_private_probe_available", "match_private_registry")))
+    binding["all_bindings_ready"] = all(
+        value is True
+        for key, value in binding.items()
+        if key.endswith(
+            (
+                "match_private_probe_files",
+                "matches_private_registry",
+                "matches_private_probe",
+                "match_private_probe",
+                "match_private_probe_available",
+                "match_private_registry",
+                "_unambiguous",
+            )
+        )
+    )
     return binding
 
 

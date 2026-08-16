@@ -13753,6 +13753,84 @@ def test_standalone_provider_probe_evidence_audit_binds_private_and_redacted_art
     assert '"raw_provider_model_ids_persisted": true' not in serialized
 
 
+def test_standalone_provider_probe_evidence_audit_deduplicates_profiles_across_probe_files(tmp_path):
+    fixture = _write_provider_probe_evidence_audit_fixture(tmp_path)
+    private_probe = json.loads(fixture["private_probe_path"].read_text(encoding="utf-8"))
+    duplicate_row = copy.deepcopy(private_probe["probe_report"]["probes"][0])
+
+    def run_audit(api_format: str, suffix: str):
+        second_probe_path = tmp_path / f"duplicate_{suffix}.json"
+        second_probe = copy.deepcopy(private_probe)
+        second_probe["provider_reports"] = [second_probe["provider_reports"][0]]
+        second_probe["probe_report"]["probes"] = [copy.deepcopy(duplicate_row)]
+        second_probe["probe_report"]["probes"][0]["api_format"] = api_format
+        second_probe_path.write_text(json.dumps(second_probe), encoding="utf-8")
+
+        private_registry = build_registry_from_probe_artifacts(
+            probe_paths=[fixture["private_probe_path"], second_probe_path],
+            min_available_models=3,
+        )
+        private_registry_path = tmp_path / f"generated_registry_{suffix}.json"
+        private_registry_path.write_text(json.dumps(private_registry), encoding="utf-8")
+
+        merged_probe = copy.deepcopy(private_probe)
+        merged_probe["probe_report"]["probes"].append(copy.deepcopy(duplicate_row))
+        merged_probe["probe_report"]["probes"][-1]["api_format"] = api_format
+        redacted_probe_path = tmp_path / f"provider_probe_{suffix}.safe.json"
+        redacted_probe_path.write_text(
+            json.dumps(provider_module.redact_provider_probe_artifact(merged_probe)),
+            encoding="utf-8",
+        )
+        redacted_registry = build_registry_from_probe_artifacts(
+            probe_paths=[fixture["private_probe_path"], second_probe_path],
+            min_available_models=3,
+            redact_provider_identifiers=True,
+        )
+        redacted_registry_path = tmp_path / f"generated_registry_{suffix}.evidence.json"
+        redacted_registry_path.write_text(json.dumps(redacted_registry), encoding="utf-8")
+        return build_provider_probe_evidence_audit(
+            private_probe_files=[fixture["private_probe_path"], second_probe_path],
+            private_registry_file=private_registry_path,
+            redacted_probe_file=redacted_probe_path,
+            redacted_registry_evidence_file=redacted_registry_path,
+            min_available_models=3,
+        )
+
+    duplicate_audit = run_audit("responses", "same_format")
+    duplicate_summary = duplicate_audit["artifact_summaries"]["private_probe"]
+    assert duplicate_audit["ready"] is True
+    assert duplicate_summary["available_count"] == 4
+    assert duplicate_summary["profile_hash_count"] == 3
+    assert duplicate_summary["available_api_format_counts"] == {
+        "anthropic": 1,
+        "chat": 1,
+        "responses": 2,
+    }
+    assert duplicate_summary["available_unique_api_format_counts"] == {
+        "anthropic": 1,
+        "chat": 1,
+        "responses": 1,
+    }
+    assert duplicate_summary["available_profile_api_format_conflicts"] == []
+    assert duplicate_audit["cross_artifact_binding"][
+        "private_registry_source_api_format_counts_match_private_probe_available"
+    ] is True
+
+    conflict_audit = run_audit("chat", "different_format")
+    conflict_summary = conflict_audit["artifact_summaries"]["private_probe"]
+    conflict_kinds = {row["kind"] for row in conflict_audit["blockers"]}
+    assert conflict_audit["ready"] is False
+    assert conflict_summary["available_profile_api_format_conflicts"]
+    assert (
+        "provider_probe_evidence_private_probe_available_profile_api_formats_unambiguous_failed"
+        in conflict_kinds
+    )
+    assert (
+        "provider_probe_evidence_redacted_probe_available_profile_api_formats_unambiguous_failed"
+        in conflict_kinds
+    )
+
+
 def test_standalone_provider_probe_evidence_audit_rejects_mismatched_or_leaky_safe_artifacts(tmp_path):
     fixture = _write_provider_probe_evidence_audit_fixture(tmp_path)
     redacted_registry = json.loads(fixture["redacted_registry_evidence_path"].read_text(encoding="utf-8"))
