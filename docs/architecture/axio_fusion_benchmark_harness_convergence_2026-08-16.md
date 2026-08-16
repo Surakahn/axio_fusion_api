@@ -51,6 +51,16 @@ target campaign 前的必需 gate；缺失或异 cohort binding 时即使各个�
 单独显示 ready，也不会开放 target calls。这样 generic Harness template 不能被
 误当成当前 composite freeze 的正式证据。
 
+为减少 screening 终态后的人工串接，现增加
+`scripts/prepare_composite_harness.py` 作为离线 stage materializer。它在一个
+successor 目录中幂等生成 acquisition checklist、official import template、
+acquisition status、execution plan 和 import audit，然后原子重建 cohort binding
+与 convergence audit。该工具只读控制面文件，不发 provider/target 请求；缺少
+pinned Harness root、official import 或 provider freeze 时只生成安全的 blocked
+receipt，`target_suite_calls_allowed` 永远保持 `false`。它是控制面准备器，不是
+target authorization；最终授权仍只来自同 cohort binding 与 convergence audit 的
+`ready_for_target_campaign` 状态。
+
 当前仓库已经实现上述控制面（`official_harness.py`、`evaluation.py` 以及对应 CLI），但 `private/official_harness_execution_plan.current.safe.json` 属于通用旧模板，不能直接冒充 composite freeze 的 Harness。composite freeze 完成后必须重新生成 cohort-bound pin、execution plan 和 import receipts。
 
 composite r1 已完成离线 Harness scaffolding：六套 pin 均 ready，execution plan
