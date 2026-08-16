@@ -102,6 +102,20 @@ def _emit(event: str, **fields: Any) -> None:
     print(json.dumps(payload, ensure_ascii=True, sort_keys=True), flush=True)
 
 
+def _emit_screening_progress(state_path: Path, state: Mapping[str, Any]) -> None:
+    """输出低频 hash-only 进度事件，不暴露私有 case 内容。"""
+
+    _emit(
+        "screening_progress",
+        status=str(state.get("status") or ""),
+        completed_unit_count=state.get("completed_unit_count"),
+        failed_or_blocked_unit_count=state.get("failed_or_blocked_unit_count"),
+        planned_task_count=state.get("planned_task_count"),
+        target_suite_calls_performed=state.get("target_suite_calls_performed"),
+        state_file_sha256=_sha256_file(state_path),
+    )
+
+
 def _atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
@@ -124,6 +138,7 @@ def _wait_for_terminal_state(
 
     state = _read_json(state_path)
     if state.get("status") in TERMINAL_STATUSES:
+        _emit_screening_progress(state_path, state)
         _emit("screening_already_terminal", status=state.get("status"))
         return state
 
@@ -136,12 +151,14 @@ def _wait_for_terminal_state(
     while True:
         state = _read_json(state_path)
         if state.get("status") in TERMINAL_STATUSES:
+            _emit_screening_progress(state_path, state)
             return state
         command = _proc_cmdline(pid)
         if not command:
             raise RuntimeError("screening_process_exited_before_terminal_state")
         if expected_fragment not in command:
             raise RuntimeError("screening_pid_reused_or_command_changed")
+        _emit_screening_progress(state_path, state)
         time.sleep(interval)
 
 

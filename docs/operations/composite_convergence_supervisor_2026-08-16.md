@@ -47,6 +47,9 @@ printf 'PID=%s\n' "$!"
 `--retry-failed` 恢复同一个 frozen plan。应先保存现有私有 checkpoint，再创建
 新的 successor plan 并重新走 zero-network preflight。
 
+运行期间监督器每个轮询周期输出一个 `screening_progress` 事件，仅包含 terminal
+计数、target-suite 禁止标志和 state 文件 hash；事件不会读取或输出 case 内容。
+
 ## 终态判定
 
 - `transport_admission.status=ready`：才允许执行一次
