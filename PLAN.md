@@ -36,6 +36,10 @@ state，只在 `target_suite_calls_performed=false` 且 transport admission read
 执行一次 ranking conversion；监督器不会恢复进程、修改 plan、启动 target suite
 或伪造 ranking。receipt 只保留 hash、digest、状态和 reason code。
 
+监督器已通过 `setsid` 后台接管当前 composite r1 screening；推送后的 Python 3.11
+完整回归为 `1042 passed, 7 skipped`。此结果仍是工程与 Harness 证据，不等于
+screening terminal、provider baseline freeze 或 superiority claim。
+
 离线 scaffolding 已生成：六套 pin 全 ready，execution plan 为 108 个 task 且
 结构门禁全通过；acquisition status 仍缺 108 个 official import，所以暂不执行
 target provider calls，也不把该 plan 当作 final claim evidence。

@@ -34,6 +34,8 @@
   `scripts/continue_composite_convergence.py`；PID、frozen plan、target-suite
   禁止标志、transport admission 和 ranking conversion 均有专项测试，操作手册
   见 `docs/operations/composite_convergence_supervisor_2026-08-16.md`。
+- [x] 推送监督器 commit 后重新执行完整回归：`1042 passed, 7 skipped`；当前
+  screening 仍由同一 frozen plan 单 worker 运行，监督器只等待 terminal state。
 - [ ] 在 freeze 后修复 MT-Bench 的跨 provider comparison/judge 绑定；旧 blocked
   reason code 保留，不使用先验或临时 profile。
 - [ ] 补齐 108 个 official/audited import，并在 provider freeze digest 绑定后
