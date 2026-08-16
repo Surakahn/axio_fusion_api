@@ -42,10 +42,12 @@
 - [x] 新增纯离线 `scripts/audit_composite_convergence.py` 收敛审计 Harness；
   同 cohort 的每一层 gate 都输出 hash-only 状态，区分 `running`、
   `ready_for_target_campaign` 与最终 `ready`，且不会启动 provider/target 请求。
-- [x] 收敛审计 Harness 专项与完整回归通过：`10 passed`，`1047 passed, 7 skipped`。
+- [x] 收敛审计 Harness 专项与完整回归通过：`11 passed`，`1048 passed, 7 skipped`。
 - [x] 收敛审计的 provider freeze gate 已 fail-closed 绑定 schema、外部预注册
   top-three、registry hash、数量和敏感字段；仅设置 ready flag 的伪造 artifact
   不得开放 target calls。
+- [x] 若 screening state 已记录 target 调用，审计强制关闭 target 与 final claim
+  gate，禁止用事后 artifact 覆盖顺序违规。
 - [x] 当前真实 r1 audit receipt 为 `running`、`next_gate=screening`、
   `target_suite_calls_allowed=false`；screening 仍由原 frozen plan 单 worker 推进。
 - [x] 推送监督器 commit 后重新执行完整回归：`1042 passed, 7 skipped`；当前

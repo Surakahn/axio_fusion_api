@@ -49,8 +49,9 @@ target gate 自锁；当前 r1 实际审计为 `status=running`、`next_gate=scr
 `target_suite_calls_allowed=false`，没有产生新的 provider 或 target-suite 请求。
 provider freeze gate 还要求固定 schema、预注册外部 top-three、3 个 baseline、
 当前 registry hash 和所有敏感字段显式为 false，伪造的 `final_claim_freeze_ready`
-不能打开 target gate。新增 Harness 专项覆盖后，Python 3.11 全量回归为
-`1047 passed, 7 skipped`。
+不能打开 target gate；若 state 已记录 `target_suite_calls_performed=true`，即使
+下游 artifact 看似 ready 也必须整体 blocked。新增 Harness 专项覆盖后，Python
+3.11 全量回归为 `1048 passed, 7 skipped`。
 
 监督器已通过 `setsid` 后台接管当前 composite r1 screening；推送后的 Python 3.11
 完整回归为 `1042 passed, 7 skipped`。此结果仍是工程与 Harness 证据，不等于
