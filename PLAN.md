@@ -59,6 +59,12 @@ provider freeze gate 还要求固定 schema、预注册外部 top-three、3 个 
 下游 artifact 看似 ready 也必须整体 blocked。新增 Harness 专项覆盖后，Python
 3.11 全量回归为 `1048 passed, 7 skipped`。
 
+新增 `scripts/watch_composite_convergence.py` 作为离线 watcher：每个低频周期先
+原子重建 `composite_harness_cohort_binding.v1`，再运行同一组输入的收敛审计，避免
+screening state 变化后 binding receipt 过期或 watcher 忘记传入 cohort binding。
+它只输出状态、next gate、digest 和安全 reason code；screening 终态后默认退出，
+不会自动恢复 frozen plan、创建 successor、调用 provider 或启动 target Harness。
+
 监督器已通过 `setsid` 后台接管当前 composite r1 screening；推送后的 Python 3.11
 完整回归为 `1042 passed, 7 skipped`。此结果仍是工程与 Harness 证据，不等于
 screening terminal、provider baseline freeze 或 superiority claim。

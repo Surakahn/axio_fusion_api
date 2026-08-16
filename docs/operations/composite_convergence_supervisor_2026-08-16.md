@@ -50,6 +50,40 @@ printf 'PID=%s\n' "$!"
 运行期间监督器每个轮询周期输出一个 `screening_progress` 事件，仅包含 terminal
 计数、target-suite 禁止标志和 state 文件 hash；事件不会读取或输出 case 内容。
 
+## Binding Watcher
+
+为避免手工审计命令漏传 cohort binding，可使用
+`scripts/watch_composite_convergence.py` 做纯离线轮询。它每轮先原子重建 binding，
+再调用收敛审计；输入 artifact 即使暂缺也会生成 blocked receipt，不会把缺失误判为
+ready。screening 尚未终态时 watcher 校验 PID 与 frozen plan 身份；进入终态后输出
+最后一轮快照并退出，后续 successor、provider freeze 或 target campaign 仍必须由
+对应门禁明确推进。
+
+示例（provider freeze/import 尚未生成时也可运行，路径会保持 hash-only blocked）：
+
+```bash
+setsid nohup env PYTHONPATH=src:scripts python3.11 \
+  scripts/watch_composite_convergence.py \
+  --screening-pid <SCREENING_PID> \
+  --screening-command-fragment baseline_screening_plan.composite.private.json \
+  --registry <REGISTRY> \
+  --plan <SCREENING_PLAN> \
+  --state <SCREENING_STATE> \
+  --transport-admission <TRANSPORT_ADMISSION> \
+  --ranking <RANKING> \
+  --provider-baseline-freeze <PROVIDER_FREEZE> \
+  --harness-pin <HARNESS_PIN> \
+  --execution-plan <EXECUTION_PLAN> \
+  --acquisition-status <ACQUISITION_STATUS> \
+  --official-import-audit <OFFICIAL_IMPORT_AUDIT> \
+  --cohort-binding <COHORT_BINDING_SAFE_JSON> \
+  --audit-output <CONVERGENCE_AUDIT_SAFE_JSON> \
+  > <PRIVATE_ROOT>/convergence_watcher.console.log 2>&1 &
+```
+
+watcher 的 stdout 事件不包含本地路径、prompt、label、provider 输出或凭据；需要
+查看内容时只读取 safe audit 的状态、schema、hash 和 reason code。
+
 ## 离线收敛审计 Harness
 
 长任务期间或 screening 进入终态后，可以运行
