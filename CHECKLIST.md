@@ -24,8 +24,10 @@
   HumanEval、BFCL、IFEval ready。
 - [x] Harness contract 专项回归通过：`16 passed, 370 deselected`，覆盖 pin、
   import template、execution plan 和 official bridge 校验。
-- [ ] 修复 MT-Bench 的跨 provider comparison/judge 绑定，以及 tau-bench 的
-  public gateway/frozen user simulator 配置；保留当前 blocked reason code。
+- [x] tau-bench configured preflight ready：public gateway、独立 provider user
+  simulator、retail/airline 两环境和 Python 3.11 均通过；仍待最终 freeze 绑定。
+- [ ] 在 freeze 后修复 MT-Bench 的跨 provider comparison/judge 绑定；旧 blocked
+  reason code 保留，不使用先验或临时 profile。
 - [ ] 补齐 108 个 official/audited import，并在 provider freeze digest 绑定后
   重新生成 cohort-bound execution/import receipts。
 - [ ] freeze 后重新生成六套 official/audited Harness 的 cohort-bound pin、

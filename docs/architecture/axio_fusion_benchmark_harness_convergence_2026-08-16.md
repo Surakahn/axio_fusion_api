@@ -56,6 +56,11 @@ BFCL、IFEval 为 ready；MT-Bench 明确阻断于 comparison/judge 的跨 provi
 tau-bench 明确阻断于 public gateway 和 frozen user simulator。两个 blocked receipt
 保留原 reason code，不用空配置伪造通过。
 
+随后用本地 gateway、独立 provider user simulator、retail/airline 两环境和 Python
+3.11 生成 tau-bench configured preflight，已变为 ready（仍未绑定最终 provider
+freeze）。MT-Bench 的 comparison/judge candidate 必须等 freeze 后从不同 provider
+的 frozen profiles 中解析，不能用先验模型名或临时替代品。
+
 ## Cohort r1 执行契约
 
 - registry：`registry.composite.from-probe.private.json`

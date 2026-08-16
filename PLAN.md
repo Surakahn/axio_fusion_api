@@ -32,6 +32,10 @@ MT-Bench 因 comparison/judge 尚未跨 provider 绑定、tau-bench 因 public g
 与 frozen user simulator 缺失而 blocked。两类 blocker 均为安全的 hash-only receipt，
 待 provider freeze 后补齐配置，不降低 Harness 门槛。
 
+tau-bench 的独立 simulator、gateway、两环境和 Python 3.11 configured preflight
+现已 ready（尚未绑定最终 freeze）；MT-Bench 仍等待 freeze 后的跨 provider
+comparison/judge profile 解析。
+
 ## 当前 r5 基线推进记录（2026-08-16）
 
 本轮继续执行 provider baseline 的独立 NVIDIA candidate cohort，不修改
