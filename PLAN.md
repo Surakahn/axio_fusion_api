@@ -1,5 +1,27 @@
 # Axio Fusion API Plan
 
+## 当前 r5 基线推进记录（2026-08-16）
+
+本轮继续执行 provider baseline 的独立 NVIDIA candidate cohort，不修改
+2026-08-15 transport5 freeze、正式 serving registry 或 CPA Plus formal 服务。
+当前路线是对 r5 进行 repair：保留旧的失败 screening plan，使用两份 live
+`/models` catalog probe 重新建立 identity-attested plan。
+
+- NVIDIA catalog：`private/runs/2026-08-16-nvidia-candidate-cohort-r2/provider_probe.private.json`
+- CPA catalog：`private/runs/2026-08-16-nvidia-candidate-cohort-r5/cpa-catalog-enrollment/provider_probe.private.json`
+- 当前候选 registry：`private/runs/2026-08-16-nvidia-candidate-cohort-r5/registry.probe-bound.private.json`
+- 旧失败 plan：`private/runs/2026-08-16-nvidia-candidate-cohort-r5/baseline_screening_plan.private.json`
+- 新 plan：`private/runs/2026-08-16-nvidia-candidate-cohort-r5/baseline_screening_plan.identity-attested.private.json`
+
+新 plan 必须通过 exact catalog identity attestation、保留 `max_workers=1`、
+保留 fail-fast transport gate，并在任何 target benchmark 之前完成 non-target
+screening。只有 screening terminal、ranking evidence 完整且 operator-owned
+external ranking manifest 可验证后，才允许生成 provider baseline freeze。
+
+本路线的主要风险是 catalog identity 不完整、transport failure gate、外部排名
+证据不足和 secret/raw provider data 泄露；所有失败均保留在独立 r5 artifact 中，
+不复用历史 cohort 的答案、分数、延迟或 survivor subset。
+
 ## Objective
 
 Build `axio_fusion_api` as a standalone, ASciFS-decoupled Fusion API service that exposes `axio-fast`, `axio-terra`, and `axio-pro` through Chat Completions, Responses, Anthropic Messages, and Gemini-compatible surfaces.

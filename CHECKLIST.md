@@ -1,5 +1,31 @@
 # Axio Fusion API Checklist
 
+## 当前 r5 Baseline Repair Gate（2026-08-16）
+
+- [x] 完成独立 NVIDIA candidate cohort 的 strict streaming、role probe 和
+  probe-bound registry；7 个物理 profile、2 个 provider、3 个 operational
+  role coverage 均已通过。
+- [x] 完成 CPA `/models` catalog enrollment，并保留 hash-only receipt；
+  provider probe 未持久化 secrets、raw URL、raw prompt 或 raw output。
+- [x] 保留第一次因 identity attestation 不完整而失败的
+  `baseline_screening_plan.private.json`，不覆盖其诊断证据。
+- [x] 用 NVIDIA r2 catalog 与 CPA r5 catalog 共同生成
+  `baseline_screening_plan.identity-attested.private.json`。
+- [x] 验证新 plan 的 exact identity attestation、完整 profile set、2 个
+  source families、`max_workers=1` 和零网络 preflight。
+- [x] 审计 screening checkpoint 的隐私边界；operator-owned private root 可
+  暂存原始答案用于恢复，但 safe state/公开 evidence 不包含原文；第一次
+  中断尝试单独保留在 `screening.identity-attested`，不并入正式结果。
+- [ ] 仅在新 plan ready 后启动 non-target `baseline-screening-run`；运行时
+  必须传入与 plan 完全相同的两份 private catalog probe，并使用 `setsid
+  nohup`、单 worker。
+- [ ] 完成 terminal screening、transport admission 和 screening-to-ranking；
+  partial 或 transport-blocked 结果不得用于 ranking。
+- [ ] 完成 operator-owned external ranking manifest；不得用模板或内部
+  screening 分数伪造外部排名。
+- [ ] 仅在 `final_claim_freeze_ready=true` 后运行 provider baseline freeze，
+  并继续 official/audited harness import 与正式 benchmark campaign。
+
 ## Current r44 Screening Gate (2026-08-09)
 
 - [x] Preserve the r43 probe-bound registry as immutable input and register a
