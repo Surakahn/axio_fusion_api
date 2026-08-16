@@ -1,5 +1,28 @@
 # Axio Fusion API Checklist
 
+## Composite cohort r1 与 Harness Gate（2026-08-16）
+
+- [x] 从两份已完成 strict streaming/role probe 的 live artifact 离线合并新的
+  composite registry；精确 identity 去重后为 10 profiles、3 providers。
+- [x] 生成并验证 composite non-target plan：10 canonical groups、2 source
+  families、20 serial units、`max_workers=1`、fail-fast transport gate、plan
+  digest 已冻结。
+- [x] 首次未加载 `private/current_channels.env` 的启动在网络调用前 blocked，
+  失败 state 单独保留；不得把它当作 screening 结果。
+- [ ] retry1 screening 完整 terminal，所有 source-unit 通过 transport gate。
+- [ ] 从 retry1 生成 transport admission、完整 pool ranking 和新的 external
+  evidence；不得拼接 r5/transport5 ranking。
+- [ ] 生成并验证 `final_claim_freeze_ready=true` 的 composite provider freeze，
+  同时满足跨 provider verifier 与 fast-candidate 门禁。
+- [x] 完成 Harness 分层设计：pin manifest、execution plan、zero-network
+  preflight/import、cohort-bound campaign/final audit；设计记录见
+  `docs/architecture/axio_fusion_benchmark_harness_convergence_2026-08-16.md`。
+- [ ] freeze 后重新生成六套 official/audited Harness 的 cohort-bound pin、
+  execution/import receipts；旧 `official_harness_execution_plan.current.safe.json`
+  仅作模板，不得直接用于 final claim。
+- [ ] 完成 21-suite target campaign、paired statistical/latency/contamination
+  audit、四种 API surface parity 和 final completion audit。
+
 ## 当前 r5 Baseline Repair Gate（2026-08-16）
 
 - [x] 完成独立 NVIDIA candidate cohort 的 strict streaming、role probe 和

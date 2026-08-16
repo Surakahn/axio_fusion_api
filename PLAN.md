@@ -1,5 +1,28 @@
 # Axio Fusion API Plan
 
+## Composite cohort r1 与 Harness 收敛设计（2026-08-16）
+
+本轮在已有 live probe 证据上建立新的 composite cohort，不复用旧
+r5/transport5 的 ranking 或 freeze。两个严格 streaming probe artifact 已通过
+离线多文件 registry 合并，得到 10 个去重 physical profiles、3 个 provider 和
+3 个 fast candidates；新的 non-target plan 已 ready：
+
+- registry：`private/runs/2026-08-16-composite-cohort-r1/registry.composite.from-probe.private.json`
+- plan：`private/runs/2026-08-16-composite-cohort-r1/baseline_screening_plan.composite.private.json`
+- plan digest：`b53c8196c688220a99e2b3b6091cb35333dcfe5ecc13795d842f380a9c2e3e99`
+- 10 个 canonical groups、20 个 serial source-units、预计 2140 次 provider calls
+
+首个未加载私有环境变量的启动在网络调用前按设计 blocked，并单独保留；retry1
+使用相同冻结 plan、`max_workers=1` 和 fail-fast transport gate，在独立 private
+root 中运行。screening 终态前不得生成 ranking、freeze 或调用 target suite。
+
+Harness 收敛采用 pin manifest → execution plan → zero-network preflight/import →
+cohort-bound live campaign → statistical/latency/contamination/API-parity/final
+audit 的单向链路。已有旧 Harness template 只能作为结构参考；composite freeze
+完成后必须重新绑定 registry、provider freeze digest、source/case hash 和每个
+official/audited runner commit。具体 contract 与恢复规则记录在
+`docs/architecture/axio_fusion_benchmark_harness_convergence_2026-08-16.md`。
+
 ## 当前 r5 基线推进记录（2026-08-16）
 
 本轮继续执行 provider baseline 的独立 NVIDIA candidate cohort，不修改
