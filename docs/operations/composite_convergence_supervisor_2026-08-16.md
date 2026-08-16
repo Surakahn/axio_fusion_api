@@ -50,6 +50,36 @@ printf 'PID=%s\n' "$!"
 运行期间监督器每个轮询周期输出一个 `screening_progress` 事件，仅包含 terminal
 计数、target-suite 禁止标志和 state 文件 hash；事件不会读取或输出 case 内容。
 
+## 离线收敛审计 Harness
+
+长任务期间或 screening 进入终态后，可以运行
+`scripts/audit_composite_convergence.py` 生成 cohort-bound 的
+`composite_convergence_audit.v1`。该命令只读取控制面 artifact，按
+screening、transport admission、ranking、provider freeze、Harness pin、import、
+target campaign 和 final audit 顺序给出 `next_gate`；输出只包含文件 hash、计数、
+schema 和 reason code，不包含本地路径、答案、标签、prompt、provider 输出或
+凭据。缺少下游 artifact 会被标为 `pending`，不会被解释为通过。
+
+示例（所有可选输入都必须来自同一 cohort）：
+
+```bash
+env PYTHONPATH=src python3.11 scripts/audit_composite_convergence.py \
+  --registry private/runs/2026-08-16-composite-cohort-r1/registry.composite.from-probe.private.json \
+  --plan private/runs/2026-08-16-composite-cohort-r1/baseline_screening_plan.composite.private.json \
+  --state private/runs/2026-08-16-composite-cohort-r1/screening_state.composite.retry1.live.private.json \
+  --transport-admission private/runs/2026-08-16-composite-cohort-r1/transport_admission.composite.retry1.private.json \
+  --ranking private/runs/2026-08-16-composite-cohort-r1/external_ranking.composite.retry1.private.json \
+  --harness-pin private/runs/2026-08-16-composite-cohort-r1/harness_pin_manifest.composite.safe.json \
+  --execution-plan private/runs/2026-08-16-composite-cohort-r1/official_harness_execution_plan.composite.safe.json \
+  --acquisition-status private/runs/2026-08-16-composite-cohort-r1/benchmark_acquisition_status.composite.current.safe.json \
+  --output private/runs/2026-08-16-composite-cohort-r1/composite_convergence_audit.safe.json
+```
+
+该审计是观测与门禁工具，不会替代 provider baseline freeze，也不会自动启动
+target benchmark。screening 到 official import 的前置阶段全部 `ready` 时，
+`status` 会变为 `ready_for_target_campaign` 并允许 target Harness 进入下一步；
+只有 target campaign 与 final audit 也完成后，`final_claim_allowed` 才会为 `true`。
+
 ## 终态判定
 
 - `transport_admission.status=ready`：才允许执行一次
