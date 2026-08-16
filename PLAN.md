@@ -47,7 +47,10 @@ screening → transport admission → ranking → provider freeze → Harness pi
 计数和安全 reason code。`ready_for_target_campaign` 与最终 `ready` 分离，避免
 target gate 自锁；当前 r1 实际审计为 `status=running`、`next_gate=screening`、
 `target_suite_calls_allowed=false`，没有产生新的 provider 或 target-suite 请求。
-新增 Harness 专项覆盖后，Python 3.11 全量回归为 `1047 passed, 7 skipped`。
+provider freeze gate 还要求固定 schema、预注册外部 top-three、3 个 baseline、
+当前 registry hash 和所有敏感字段显式为 false，伪造的 `final_claim_freeze_ready`
+不能打开 target gate。新增 Harness 专项覆盖后，Python 3.11 全量回归为
+`1047 passed, 7 skipped`。
 
 监督器已通过 `setsid` 后台接管当前 composite r1 screening；推送后的 Python 3.11
 完整回归为 `1042 passed, 7 skipped`。此结果仍是工程与 Harness 证据，不等于
