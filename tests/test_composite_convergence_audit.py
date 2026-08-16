@@ -108,6 +108,26 @@ def test_running_screening_is_visible_without_claim_admission(tmp_path: Path) ->
     assert str(args.registry) not in encoded
 
 
+def test_missing_binding_inputs_fail_closed_without_exception(tmp_path: Path) -> None:
+    args = _args(tmp_path)
+    _write(args.plan, {"ready": True, "plan_digest_sha256": "plan-digest"})
+    _write(
+        args.state,
+        {
+            "status": "completed",
+            "ready_for_ranking": False,
+            "plan_digest_sha256": "plan-digest",
+            "campaign_digest_sha256": "campaign-digest",
+            "target_suite_calls_performed": False,
+        },
+    )
+    args.cohort_binding = tmp_path / "cohort-binding.json"
+    _write(args.cohort_binding, {"status": "blocked"})
+    result = audit.audit_cohort(args)
+    assert result["status"] == "blocked"
+    assert "cohort_binding_not_ready" in result["reason_codes"]
+
+
 def test_binding_drift_blocks_even_when_state_is_terminal(tmp_path: Path) -> None:
     args = _args(tmp_path)
     _write(args.plan, {"ready": True, "plan_digest_sha256": "expected"})

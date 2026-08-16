@@ -306,11 +306,11 @@ def _cohort_binding_stage(
     if not isinstance(declarations, Mapping):
         reasons.append("cohort_binding_declarations_missing")
         declarations = {}
-    state = _read_object(args.state)
-    plan = _read_object(args.plan)
-    freeze = _read_object(args.provider_baseline_freeze)
-    execution = _read_object(args.execution_plan)
-    import_audit = _read_object(args.official_import_audit)
+    state = _read_object(args.state) or {}
+    plan = _read_object(args.plan) or {}
+    freeze = _read_object(args.provider_baseline_freeze) or {}
+    execution = _read_object(args.execution_plan) or {}
+    import_audit = _read_object(args.official_import_audit) or {}
     expected_declarations = {
         "screening_plan_digest_sha256": str(plan.get("plan_digest_sha256") or ""),
         "screening_campaign_digest_sha256": str(state.get("campaign_digest_sha256") or ""),
