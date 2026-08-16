@@ -11,6 +11,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import prepare_composite_harness as scaffold
+from axio_fusion_api.evaluation import BENCHMARK_SUITES, _official_import_harness_pin_summary
 
 
 def _write(path: Path, payload: dict) -> None:
@@ -170,3 +171,26 @@ def test_missing_harness_roots_produce_safe_blocked_pin(tmp_path, monkeypatch) -
     assert pin["status"] == "blocked"
     assert "harness_root_and_raw_root_required" in pin["reason_codes"]
     assert pin["secrets_persisted"] is False
+
+
+def test_blocked_pin_manifest_is_audited_fail_closed(tmp_path: Path) -> None:
+    pin_path = tmp_path / "blocked_pin.json"
+    _write(
+        pin_path,
+        {
+            "schema": scaffold.PIN_SCHEMA,
+            "status": "blocked",
+            "reason_codes": ["harness_root_and_raw_root_required"],
+            "raw_provider_outputs_persisted": False,
+            "secrets_persisted": False,
+        },
+    )
+
+    result = _official_import_harness_pin_summary(
+        harness_pin_manifest_path=pin_path,
+        source_manifest_path=None,
+        official_suites=[BENCHMARK_SUITES[0]],
+    )
+
+    assert result["ready_official_suite_count"] == 0
+    assert "harness_pin_suite_missing" in result["suite_rows"][0]["reason_codes"]

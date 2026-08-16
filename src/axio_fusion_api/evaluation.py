@@ -22017,7 +22017,8 @@ def _official_import_harness_pin_summary(
     official_suites: Sequence[BenchmarkSuite],
 ) -> dict[str, Any]:
     receipt = _load_json_artifact(Path(harness_pin_manifest_path) if harness_pin_manifest_path else None)
-    pin_rows = receipt.get("payload", {}).get("suites") if isinstance(receipt.get("payload"), Mapping) else []
+    pin_payload = receipt.get("payload") if isinstance(receipt.get("payload"), Mapping) else {}
+    pin_rows = pin_payload.get("suites") if isinstance(pin_payload.get("suites"), list) else []
     pin_by_suite = {
         str(row.get("suite_id") or ""): row
         for row in pin_rows
