@@ -31,6 +31,7 @@ TERMINAL_STATUSES = frozenset({"completed", "partial", "blocked", "failed"})
 DEFAULT_INTERVAL_SECONDS = 300.0
 DEFAULT_MAX_TRANSPORT_FAILURE_RATE = 0.02
 DEFAULT_MIN_CANONICAL_MODELS = 3
+SCREENING_PROCESS_MARKER = "baseline-screening-run"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -97,6 +98,14 @@ def _proc_cmdline(pid: int) -> str:
     return raw.replace(b"\0", b" ").decode("utf-8", errors="replace").strip()
 
 
+def _process_matches(command: str, expected_fragment: str) -> bool:
+    return bool(
+        command
+        and SCREENING_PROCESS_MARKER in command
+        and expected_fragment in command
+    )
+
+
 def _emit(event: str, **fields: Any) -> None:
     payload = {"event": event, **fields}
     print(json.dumps(payload, ensure_ascii=True, sort_keys=True), flush=True)
@@ -143,7 +152,7 @@ def _wait_for_terminal_state(
         return state
 
     command = _proc_cmdline(pid)
-    if not command or expected_fragment not in command:
+    if not _process_matches(command, expected_fragment):
         raise RuntimeError("screening_pid_identity_check_failed")
     _emit("screening_wait_started", pid=pid, command_fragment_sha256=_sha256_text(expected_fragment))
 
@@ -156,7 +165,7 @@ def _wait_for_terminal_state(
         command = _proc_cmdline(pid)
         if not command:
             raise RuntimeError("screening_process_exited_before_terminal_state")
-        if expected_fragment not in command:
+        if not _process_matches(command, expected_fragment):
             raise RuntimeError("screening_pid_reused_or_command_changed")
         _emit_screening_progress(state_path, state)
         time.sleep(interval)

@@ -55,6 +55,16 @@ def test_wait_rejects_unrelated_process(monkeypatch, tmp_path):
         raise AssertionError("unrelated process must be rejected")
 
 
+def test_process_identity_requires_screening_subcommand(tmp_path):
+    args = _args(tmp_path)
+    assert supervisor._process_matches(
+        "python --plan plan.json", args.command_fragment
+    ) is False
+    assert supervisor._process_matches(
+        "python baseline-screening-run --plan plan.json", args.command_fragment
+    ) is True
+
+
 def test_terminal_state_does_not_require_live_pid(tmp_path):
     args = _args(tmp_path)
     args.state.write_text(json.dumps({"status": "completed"}), encoding="utf-8")
