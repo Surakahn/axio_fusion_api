@@ -150,6 +150,27 @@ r7 source manifest successor 已注册，保持 r6 source contract 但使用新�
 不包含 target 结果，也不改变 r6 冻结证据。admission 未达到至少 3 个 formal eligible
 canonical models 前，screening plan 与 Harness target gate 继续关闭。
 
+### r7 admission 与 immutable screening preflight 终态（2026-08-17）
+
+r7 operational admission 已自然终态：21 个 candidate profiles 中 15 个 production
+admitted、9 个 formal baseline eligible，`status=ready`，固定 90 秒 non-target workload
+合同通过，敏感字段均为 `false`。private receipt content digest 为
+`bf6db0c659b728a6d4c0a8e5d99c1fb9b66e1f70ec96977de048fd393c77af12`；safe receipt 不含
+provider 原始输出、prompt、URL、model id 或 credential。
+
+达到三模型最低门槛后，已用新的 r7 source manifest、probe-bound registry 和 admission
+receipt 创建 immutable screening plan：8 个 canonical groups、9 个 physical profiles、
+2 个独立 source family、16 个 serial units、预计 1712 calls，plan digest 为
+`1ba163ddacacd2ab1c77549789532f930d5cd595e84ed07251bf46a50d586444`。首次漏传 admission
+的 preflight 以 `screening_plan_current_inputs_mismatch` blocked receipt 保留；补齐同一
+admission input 后 zero-network preflight 已 `preflight_ready`，16/16 task materialize，
+`target_suite_calls_performed=false`。
+
+当前只允许启动该 r7 frozen plan 的 live screening；screening terminal、transport gate、
+external ranking、provider freeze 和同 cohort Harness lineage 完成前，target calls 与
+superiority claim 继续关闭。操作记录见
+`docs/operations/composite_r7_admission_terminal_2026-08-17.md`。
+
 ## Composite cohort r1 与 Harness 收敛设计（2026-08-16）
 
 本轮在已有 live probe 证据上建立新的 composite cohort，不复用旧
