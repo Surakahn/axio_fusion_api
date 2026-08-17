@@ -1,5 +1,23 @@
 # Axio Fusion API Checklist
 
+## Composite successor intake（2026-08-17）
+
+- [x] 读取当前 handoff、计划、Git、服务健康和 r2 screening state；确认工作树与
+  `origin/main` 一致，CPA Plus 保持运行。
+- [x] r2 screening 终态完整保留 10-unit 分母：4 completed、6 transport failure，
+  `ready_for_ranking=false`；未使用 survivor subset。
+- [x] r2 supervisor 完成 transport-only conversion；由于 canonical eligible
+  少于固定 3 个，ranking conversion 被跳过，target calls 保持关闭。
+- [x] 生成 hash-only intake audit，明确 trusted、reference-only、blocked 和
+  successor 分支，记录于
+  `docs/operations/composite_baseline_intake_audit_2026-08-17.md`。
+- [x] 完成单 profile operational-admission smoke；5/5 synthetic workloads 返回
+  404，profile 被标记为 ineligible，未修改 r2 plan。
+- [ ] 完成同一 probe-bound registry 的全量 operational-admission，并据此决定
+  是否创建新的 immutable r3 screening plan。
+- [ ] r3 通过 screening、transport、ranking、provider freeze 后，重新绑定真实
+  Harness pin/import/execution plan；在 convergence audit 放行前不得 target calls。
+
 ## Composite cohort r1 与 Harness Gate（2026-08-16）
 
 - [x] 从两份已完成 strict streaming/role probe 的 live artifact 离线合并新的

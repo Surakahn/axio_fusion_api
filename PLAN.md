@@ -1,5 +1,17 @@
 # Axio Fusion API Plan
 
+## Composite successor intake（2026-08-17）
+
+当前 r2 frozen screening 已终态但 transport admission blocked（4/10 units
+completed、6/10 transport failure，只有 1/5 canonical groups 满足严格门禁），因此
+不得生成 ranking、provider freeze 或 target campaign。完整 intake 记录见
+`docs/operations/composite_baseline_intake_audit_2026-08-17.md`。
+
+当前唯一允许的 successor 路线是对同一 probe-bound registry 做独立
+`operational-admission`，然后在满足至少 3 个 formal baseline eligible canonical
+groups 后创建新的 immutable screening plan；r2 plan、completed subset 和历史
+ranking/freeze 均不可修改或复用。
+
 ## Composite cohort r1 与 Harness 收敛设计（2026-08-16）
 
 本轮在已有 live probe 证据上建立新的 composite cohort，不复用旧
