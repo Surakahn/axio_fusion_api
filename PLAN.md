@@ -72,6 +72,19 @@ subset 当作 survivor、能力排名或 superiority evidence。下一步必须�
 immutable successor，重新建立至少 3 个 formal transport-eligible canonical models，
 并保留 r4 全部证据。
 
+### r5 successor operational admission 终态（2026-08-17）
+
+r5 intake 对同一 probe-bound registry 执行了独立、非 benchmark 的 live
+`operational-admission`，10 个候选中只有 2 个 production admitted、1 个 formal
+baseline eligible；固定最低要求为 3 个。receipt 虽为 `status=ready`，但候选分母
+不足以创建 screening plan，因此没有启动新的 screening、ranking、provider freeze
+或 target Harness。完整 hash-only 记录见
+`docs/operations/composite_r5_admission_terminal_2026-08-17.md`。
+
+该结果是当前供应商 transport 可用性证据，不是质量排名。下一步必须扩展或刷新
+候选分母并重新执行独立 admission；不得降低 3-model gate、复用 r4/r5 completed
+subset、复用历史 ranking/freeze，或在 gate 前发起 target calls。
+
 ## Composite cohort r1 与 Harness 收敛设计（2026-08-16）
 
 本轮在已有 live probe 证据上建立新的 composite cohort，不复用旧
