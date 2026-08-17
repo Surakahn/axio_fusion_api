@@ -44,6 +44,12 @@ ready 只表示离线 runner/data 控制面可验证。
    provider baseline freeze、official import 和 lineage audit。
 5. 在 `ready_for_target_campaign` 之前，所有 target calls 必须保持关闭。
 
+successor source manifest 使用
+`scripts/create_screening_successor_manifest.py` 生成。该工具只替换
+`pre_registration.registered_on` 与 `pre_registration.selection_seed`，拒绝原地覆盖
+和复用旧 seed，并为新私有文件生成 hash-only receipt；随后再用新的 source manifest
+调用 `baseline-screening-plan`，形成不同 digest 的 immutable r4 plan。
+
 ## 验证
 
 离线 Harness 控制面专项回归：`31 passed`。本终态只读检查确认 screening、supervisor
