@@ -12,6 +12,13 @@ completed、6/10 transport failure，只有 1/5 canonical groups 满足严格门
 groups 后创建新的 immutable screening plan；r2 plan、completed subset 和历史
 ranking/freeze 均不可修改或复用。
 
+该路线已完成 admission 与 preflight：10 profiles 中 7 个 production admitted、4 个
+formal baseline eligible（跨 2 providers），r3 plan digest 为
+`a8400e203ca37a4eb5ddd8a0d3758dd16c4e992ffcd1ad8dc05449eb1b17e706`，包含 4 个
+canonical groups、8 个 serial units、预计 856 calls。r3 live screening 已通过
+zero-network preflight 启动，supervisor/watcher 绑定同一 plan；screening terminal
+前不生成 ranking、freeze 或 target 请求。
+
 ## Composite cohort r1 与 Harness 收敛设计（2026-08-16）
 
 本轮在已有 live probe 证据上建立新的 composite cohort，不复用旧

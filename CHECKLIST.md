@@ -13,8 +13,14 @@
   `docs/operations/composite_baseline_intake_audit_2026-08-17.md`。
 - [x] 完成单 profile operational-admission smoke；5/5 synthetic workloads 返回
   404，profile 被标记为 ineligible，未修改 r2 plan。
-- [ ] 完成同一 probe-bound registry 的全量 operational-admission，并据此决定
-  是否创建新的 immutable r3 screening plan。
+- [x] 完成同一 probe-bound registry 的全量 operational-admission：10 profiles 中
+  7 个 production admitted、4 个 formal baseline eligible，跨 2 providers，且
+  `raw_prompts_persisted`、`raw_provider_outputs_persisted`、`secrets_persisted` 均为
+  `false`；safe/private receipt 分层保留。
+- [x] 创建 immutable r3 screening plan：4 canonical groups、8 serial units、2
+  source families、预计 856 calls；zero-network preflight 为 `preflight_ready`。
+- [x] 启动 r3 live screening，并绑定 fail-closed convergence supervisor/watcher；
+  screening terminal 前 target calls 保持关闭。
 - [ ] r3 通过 screening、transport、ranking、provider freeze 后，重新绑定真实
   Harness pin/import/execution plan；在 convergence audit 放行前不得 target calls。
 

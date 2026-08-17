@@ -17,6 +17,9 @@ provider output、prompt、label、API key 或原始 provider URL。
 | r2 Harness scaffold/binding/audit | trusted-but-blocked | 只生成控制面，不授权 target calls |
 | 历史 r1/r5 ranking/freeze | reference-only | 不与 r2 混 cohort，不作为 successor 输入 |
 | r3 smoke admission | trusted diagnostic | 单 profile 5/5 workload 返回上游 404，profile 被标记为 ineligible |
+| r3 full operational admission | trusted | 10 profiles、7 production admitted、4 formal baseline eligible，2 providers，敏感字段均为 `false` |
+| r3 screening plan | trusted | 4 canonical groups、4 profiles、2 source families、8 serial units、856 calls，digest `a8400e203ca37a4eb5ddd8a0d3758dd16c4e992ffcd1ad8dc05449eb1b17e706` |
+| r3 live screening/supervisor | running | zero-network preflight 已通过；live PID、supervisor、watcher 已绑定同一 plan，target calls 关闭 |
 
 ## 不可接受的捷径
 
@@ -28,18 +31,18 @@ provider output、prompt、label、API key 或原始 provider URL。
 
 ## 当前 successor 路线
 
-正在对同一 probe-bound registry 执行一次独立的、非 benchmark 的完整
-`operational-admission`。它使用固定 synthetic workload、90 秒 response ceiling、
-3 workers、10 profiles，并仅输出 hash-only admission receipt。
+同一 probe-bound registry 的独立、非 benchmark `operational-admission` 已完成。它使用
+固定 synthetic workload、90 秒 response ceiling、3 workers、10 profiles；safe receipt
+只保留 hash-only 诊断，private receipt 仅供严格 profile 绑定，不进入 Git。
 
 ### admission ready 分支
 
-1. 校验 `formal_baseline_eligible_count >= 3`、敏感字段均为 `false`，并记录新的
+1. 已校验 `formal_baseline_eligible_count=4`、敏感字段均为 `false`，并记录新的
    admission digest。
-2. 用该 receipt 创建新的 immutable r3 screening plan；r2 plan 不变。
-3. 按 screening → transport admission → external ranking → provider baseline
+2. 已用该 receipt 创建新的 immutable r3 screening plan；r2 plan 不变。
+3. 当前按 screening → transport admission → external ranking → provider baseline
    freeze 顺序推进，所有 receipt 绑定 r3 registry/plan/state digest。
-4. 重新运行 composite Harness scaffold，补齐真实 pinned Harness root、raw root、
+4. r3 composite Harness scaffold 已重新生成；待 screening terminal 后补齐真实 pinned Harness root、raw root、
    official import 和同 cohort execution plan；convergence audit 未返回
    `ready_for_target_campaign` 前保持禁止 target calls。
 
@@ -56,4 +59,3 @@ provider output、prompt、label、API key 或原始 provider URL。
 本审计只证明控制面路线和当前门禁状态，不证明任何模型质量优越性。最终 goal 仍需
 完成同一 cohort 的 21-suite target campaign、三档单模型 baseline、paired statistics、
 latency、contamination、四种 API parity、failure analysis 与 final audit。
-
