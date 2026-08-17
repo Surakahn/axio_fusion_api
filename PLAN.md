@@ -171,6 +171,16 @@ external ranking、provider freeze 和同 cohort Harness lineage 完成前，tar
 superiority claim 继续关闭。操作记录见
 `docs/operations/composite_r7_admission_terminal_2026-08-17.md`。
 
+### r7 live screening 启动（2026-08-17）
+
+r7 live screening 已以 `setsid` 后台启动，固定 `max_workers=1`、fail-fast transport gate，
+并绑定同一 registry、source manifest、private probe 与 operational admission。第一次
+启动因复用 preflight state 的 mode/readiness digest 不匹配而在 provider 调用前
+fail-closed；该 receipt 独立保留。随后从全新 live state 启动成功，当前只允许低频检查
+PID、state、完整分母和 safe flags。screening terminal 前继续关闭 ranking、provider
+freeze、Harness target calls 和 superiority claim。详细记录见
+`docs/operations/composite_r7_screening_live_2026-08-17.md`。
+
 ## Composite cohort r1 与 Harness 收敛设计（2026-08-16）
 
 本轮在已有 live probe 证据上建立新的 composite cohort，不复用旧
