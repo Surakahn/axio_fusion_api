@@ -54,6 +54,24 @@ transport gate；Harness pin、目标 case-hash 和 replacement 槽位可以继�
 控制面输入，但在 successor 的 transport/ranking/freeze 未 ready 前仍禁止 target
 calls。
 
+### r4 screening 终态与 transport 门禁（2026-08-17）
+
+r4 successor 已完整终态：8 个 serial units 中 3 个 completed、5 个
+failed/blocked，state 为 `partial`，`ready_for_ranking=false`，且
+`target_suite_calls_performed=false`。transport-only admission 绑定同一 campaign、
+plan、registry、source manifest 和 state digest，4 个候选 canonical models 中只有
+1 个通过严格 failure-rate 门禁，低于固定最低 3 个，因此 receipt 为
+`status=blocked`、reason 为 `transport_admission_fewer_than_minimum_models`。
+
+supervisor 没有执行 ranking conversion；external ranking、provider baseline freeze
+和 target campaign 均未开启。watcher 最终 audit 为 `status=blocked`、
+`target_suite_calls_allowed=false`、`final_claim_allowed=false`。r4 的完整分母、
+失败分类、digest 和 hash-only receipts 记录于
+`docs/operations/composite_r4_screening_terminal_2026-08-17.md`；不得将 completed
+subset 当作 survivor、能力排名或 superiority evidence。下一步必须创建新的
+immutable successor，重新建立至少 3 个 formal transport-eligible canonical models，
+并保留 r4 全部证据。
+
 ## Composite cohort r1 与 Harness 收敛设计（2026-08-16）
 
 本轮在已有 live probe 证据上建立新的 composite cohort，不复用旧
