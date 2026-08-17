@@ -218,7 +218,10 @@ _RESEARCH_AGENT_PROFILE_KEYS = frozenset(
         "discover_models",
     }
 )
+# 普通配置保持较小上限；完整 pre-Fusion receipt 可能包含多源证据和多 profile
+# strict-stream rows，因此使用独立的更大上限，避免合法离线 projection 被截断。
 _MAX_CONFIG_BYTES = 2 * 1024 * 1024
+_MAX_PREFUSION_ARTIFACT_BYTES = 16 * 1024 * 1024
 _MAX_SOURCE_COUNT = 64
 _MAX_SOURCE_BYTES = 1_000_000
 _MAX_SOURCE_EXCERPT_CHARS = 12_000
@@ -1232,7 +1235,9 @@ def build_prefusion_probe_artifact(
     payload = (
         dict(screening)
         if isinstance(screening, Mapping)
-        else _load_optional_mapping(screening)
+        else _load_optional_mapping(
+            screening, max_bytes=_MAX_PREFUSION_ARTIFACT_BYTES
+        )
     )
     if str(payload.get("schema") or "") != PREFUSION_SCREENING_SCHEMA:
         raise ModelScreeningError("prefusion_probe_export_screening_schema_invalid")
@@ -1328,7 +1333,9 @@ def build_prefusion_generation_probe_artifact(
     payload = (
         dict(generation)
         if isinstance(generation, Mapping)
-        else _load_optional_mapping(generation)
+        else _load_optional_mapping(
+            generation, max_bytes=_MAX_PREFUSION_ARTIFACT_BYTES
+        )
     )
     registry = _generation_probe_registry(payload)
     screening = registry["prefusion_screening"]
@@ -8517,13 +8524,17 @@ def _successful_source_evidence(source_pack: Mapping[str, Any]) -> dict[str, str
     }
 
 
-def _load_optional_mapping(value: Mapping[str, Any] | str | Path | None) -> dict[str, Any]:
+def _load_optional_mapping(
+    value: Mapping[str, Any] | str | Path | None,
+    *,
+    max_bytes: int = _MAX_CONFIG_BYTES,
+) -> dict[str, Any]:
     if value is None:
         return {}
     if isinstance(value, Mapping):
         return dict(value)
     path = Path(value)
-    if not path.is_file() or path.stat().st_size > _MAX_CONFIG_BYTES:
+    if not path.is_file() or path.stat().st_size > max_bytes:
         raise ModelScreeningError("prefusion_json_config_unavailable")
     try:
         parsed = json.loads(path.read_text(encoding="utf-8"))

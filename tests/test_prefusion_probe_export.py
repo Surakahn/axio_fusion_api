@@ -225,6 +225,20 @@ def test_prefusion_probe_export_redaction_and_cli_round_trip(tmp_path):
     assert payload["secrets_persisted"] is False
 
 
+def test_prefusion_probe_export_accepts_large_ready_screening_artifact(tmp_path):
+    screening_path = tmp_path / "large-screening.private.json"
+    payload = _screening_payload()
+    payload["offline_audit_note"] = "x" * (2 * 1024 * 1024 + 4096)
+    screening_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    projected = build_prefusion_probe_artifact(screening_path)
+
+    assert projected["schema"] == "axio_fusion_api.provider_probe.v1"
+    assert projected["generated_from_prefusion_screening"] is True
+    assert projected["available_count"] == 2
+    assert projected["secrets_persisted"] is False
+
+
 @pytest.mark.parametrize(
     "payload, error_code",
     [
