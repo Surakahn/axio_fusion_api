@@ -19266,11 +19266,7 @@ def _materialization_status_row(
     min_cases_per_suite: int,
 ) -> dict[str, Any]:
     adapter_id = _materialization_adapter_id(suite.suite_id)
-    effective_min_cases = _effective_min_cases_for_spec(
-        suite.suite_id,
-        min_cases_per_suite,
-        row,
-    )
+    effective_min_cases = _effective_min_cases_for_suite(suite.suite_id, min_cases_per_suite)
     output_path = output_dir / f"{suite.suite_id}.jsonl"
     output_count = _safe_count_jsonl_rows(output_path) if output_path.exists() else 0
     validation = {}
@@ -19345,11 +19341,7 @@ def _materialization_status_row(
         "materialized_case_count": output_count,
         "min_cases_per_suite": int(min_cases_per_suite),
         "effective_min_cases": effective_min_cases,
-        "suite_min_case_policy": _suite_min_case_policy(
-            suite.suite_id,
-            min_cases_per_suite,
-            row,
-        ),
+        "suite_min_case_policy": _suite_min_case_policy(suite.suite_id, min_cases_per_suite),
         "validation": _safe_materialization_validation_summary(validation),
         "requires_official_harness": _suite_requires_official_harness(suite.suite_id, suite.task_format),
         "raw_dataset_paths_persisted": False,
