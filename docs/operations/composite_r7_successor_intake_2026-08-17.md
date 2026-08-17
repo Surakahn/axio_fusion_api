@@ -130,3 +130,24 @@ blocked 输出当作 screening 证据。
 superiority evidence。下一步仍必须以新的 source-manifest selection seed 运行固定
 90 秒 non-target operational admission；admission 未达到至少 3 个 formal eligible
 canonical models 前，不创建 screening plan 或 target Harness。
+
+## r7 Source Manifest 注册
+
+已基于 r6 source contract 生成新的 immutable r7 manifest；工具只改变
+`pre_registration.registered_on` 与 `pre_registration.selection_seed`，没有复制或修改
+case/label/prompt/source contract：
+
+- source manifest SHA-256：
+  `5071a6896505450ab4b3aa580099be6de240aba424119b382af27d147ca9d3c3`；
+- successor receipt SHA-256：
+  `89b98541bc8f32070fd026220f48b6e7b3ff87d4470993f1e8ccf071af2d39fe`；
+- source manifest predecessor digest：
+  `cb52811b4b6cab984d435d5904920b4e9e6a94a7be51416f16b88acd4c388958`；
+- selection seed digest：
+  `10d3496b447b39495807120a7d10a9e2134fe2b0534a9420d4f1c9433e234407`；
+- `target_benchmark_results_used=false`、`target_suite_results_used=false`、
+  `secrets_persisted=false`。
+
+该 manifest 只绑定后续 r7 screening 的 source identity，不表示 admission 或质量就绪。
+它将与 probe-bound registry、operational receipt、screening plan/state 和 Harness
+lineage 一起形成新的 cohort digest；r6 state/checkpoint 不会进入该链路。

@@ -145,6 +145,11 @@ strict-stream available、15 logical models role coverage ready，probe-bound re
 只打开 r7 operational admission，不打开 ranking/freeze/target gate；下一步必须以新
 source seed 执行固定 90 秒 admission 并重新绑定所有后续 digest。
 
+r7 source manifest successor 已注册，保持 r6 source contract 但使用新的 selection seed
+并绑定新的 predecessor digest；该文件只打开 r7 admission/screening 的 source identity，
+不包含 target 结果，也不改变 r6 冻结证据。admission 未达到至少 3 个 formal eligible
+canonical models 前，screening plan 与 Harness target gate 继续关闭。
+
 ## Composite cohort r1 与 Harness 收敛设计（2026-08-16）
 
 本轮在已有 live probe 证据上建立新的 composite cohort，不复用旧
