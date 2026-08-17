@@ -67,3 +67,23 @@ coverage 和 probe binding 不完整；另有 `weak_or_missing_fast_candidate` w
 因此该 registry 不能直接成为 r7 screening 输入。该 blocked 结果保留为新鲜 enrollment
 的完整证据，下一步必须补齐 NVIDIA focus 候选并重新做 probe-bound merge，不能绕过
 pre-Fusion handoff。
+
+## Pre-Fusion 首次尝试与修复
+
+首次 `pre-fusion-screen` 使用了当前 shell 中的 `AXIO_FUSION_REGISTRY_PATH`，导致
+命令把生产环境 registry 当作 inventory 输入，`provider_discovery_performed=false`、
+`candidate_inventory_complete=false`，在研究 prerequisite 阶段 fail-closed：
+
+- 输出 schema：`axio_fusion_api.pre_fusion_model_screening.v1`；
+- 输出 SHA-256：
+  `1cb770d2824063cabb74e214ec3a43be1bdb932412f1b361198d8de1276078a`；
+- status：`blocked`；
+- blockers：`prefusion_complete_inventory_required`、
+  `prefusion_research_prerequisite_failed`；
+- streaming/reasoning probe：均未执行 provider calls；
+- target-suite calls：未执行。
+
+该结果确认了环境 registry 与候选 enrollment 必须显式解耦。修复只限于新的进程环境：
+取消 `AXIO_FUSION_REGISTRY_PATH`，保留同一 non-secret provider manifest、focus/source
+manifest、研究契约和 90 秒/三样本门禁；不修改生产环境变量、不修改正式服务、不把该
+blocked 输出当作 screening 证据。

@@ -130,6 +130,11 @@ profile 均来自 Anthropic 协议投影，缺少 fast candidate 和完整 catal
 因此不作为 screening 输入。下一步只允许用 focus manifest 刷新 NVIDIA 候选并重新绑定
 probe evidence；不能把该首轮 candidate registry 当作 ready 或降低 fast/3-model 门槛。
 
+首次 pre-Fusion 尝试还发现进程环境中的 `AXIO_FUSION_REGISTRY_PATH` 会让 discovery
+被跳过，产生 `prefusion_complete_inventory_required` 阻断；该输出不包含 provider
+stream/reasoning screening 结果。后续 retry 必须在显式取消该环境 registry 的独立进程
+中运行完整 discovery/research/strict-stream chain，正式服务环境保持不变。
+
 ## Composite cohort r1 与 Harness 收敛设计（2026-08-16）
 
 本轮在已有 live probe 证据上建立新的 composite cohort，不复用旧
