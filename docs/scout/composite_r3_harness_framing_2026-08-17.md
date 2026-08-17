@@ -18,9 +18,9 @@ raw dataset 快照。保留的证据入口如下：
 - 六个 pinned suite：LiveCodeBench、HumanEval、BFCL V3、tau-bench、IFEval、MT-Bench。
 - BFCL 使用独立 V3 checkout 绑定，并通过 `VERSION_PREFIX = "BFCL_v3"` 兼容性门禁；不能将 BFCL V3 数据交给 V4 evaluator。
 - 离线 case-hash 预备已完成：六个官方 suite 的 stable-case-id 解析全部通过；显式
-  MMLU-Pro replacement 资产通过既有 disjointness contract，source manifest validation
-  当前为 17/21 ready。其余 GPQA 槽位和三个本地数据 suite 仍保留 blocked，不以历史结果
-  或手工 alias 补齐。
+  MMLU-Pro replacement 已从 r3 实际 screening source digest 重新构建并通过 disjointness
+  contract，当前 target case-hash 与 source manifest validation 均为 21/21 ready。GPQA
+  原始槽位仍明确标记为 MMLU-Pro STEM replacement，不以历史结果或手工 alias 冒充 GPQA。
 
 本轮没有进行 provider 请求、target-suite 请求、官方输出导入或结果排名；screening 进程由
 原有 supervisor/watcher 继续管理。

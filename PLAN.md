@@ -29,10 +29,11 @@ admission/ranking/provider freeze/official import 均未 ready，convergence aud
 `docs/scout/composite_r3_harness_framing_2026-08-17.md`。
 
 离线数据控制面随后完成一次 materialization：六个官方 suite 的 stable case hash 均已
-解析，显式 MMLU-Pro replacement 后 source manifest validation 为 17/21 ready；官方
-import audit 已确认 case-hash binding 6/6，但 imported runs 为 0，仍等待 provider
-baseline freeze 后的正式 Harness 执行。GPQA 原始槽位与三个数据质量/来源 blocker 保持
-fail-closed，不用历史分数或 completed subset 填充。
+解析，且从 r3 实际 screening source digest 重建的显式 MMLU-Pro replacement 使 target
+case-hash/source manifest validation 达到 21/21 ready。官方 import audit 已确认
+case-hash binding 6/6，但 imported runs 为 0，仍等待 provider baseline freeze 后的正式
+Harness 执行。GPQA 原始槽位仍明确标记为 replacement，不用历史分数或 completed subset
+填充。
 
 ## Composite cohort r1 与 Harness 收敛设计（2026-08-16）
 
