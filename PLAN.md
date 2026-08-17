@@ -19,6 +19,15 @@ canonical groups、8 个 serial units、预计 856 calls。r3 live screening 已
 zero-network preflight 启动，supervisor/watcher 绑定同一 plan；screening terminal
 前不生成 ranking、freeze 或 target 请求。
 
+### r3 Harness 调研里程碑（2026-08-17）
+
+已确认六个真实 Harness checkout 与 raw dataset snapshot 均可本地验证，并用同一 r3
+control-plane 重新生成 pin：6 suites、6 ready、0 blocked，BFCL 独立绑定 V3 evaluator
+且版本 marker 通过。该结果只证明 Harness pin readiness；screening 尚未终态，transport
+admission/ranking/provider freeze/official import 均未 ready，convergence audit 仍为
+`status=running`、`next_gate=screening`，target calls 必须保持关闭。调研与评估契约见
+`docs/scout/composite_r3_harness_framing_2026-08-17.md`。
+
 ## Composite cohort r1 与 Harness 收敛设计（2026-08-16）
 
 本轮在已有 live probe 证据上建立新的 composite cohort，不复用旧
