@@ -125,6 +125,11 @@ pin、execution、acquisition/import、cohort binding 和 convergence receipt �
 registry/plan/state digest；audit 明确返回 `ready_for_target_campaign` 前不得发起
 target calls 或 superiority claim。
 
+r7 fresh enrollment 首轮已完成但未通过正式 pre-Fusion diagnostic：6 个严格流式可用
+profile 均来自 Anthropic 协议投影，缺少 fast candidate 和完整 catalog/role binding，
+因此不作为 screening 输入。下一步只允许用 focus manifest 刷新 NVIDIA 候选并重新绑定
+probe evidence；不能把该首轮 candidate registry 当作 ready 或降低 fast/3-model 门槛。
+
 ## Composite cohort r1 与 Harness 收敛设计（2026-08-16）
 
 本轮在已有 live probe 证据上建立新的 composite cohort，不复用旧

@@ -47,3 +47,23 @@ operator-owned private checkpoint；公共文档和 safe receipt 只允许 schem
 enrollment 未完成前不创建 screening plan，不运行 target Harness；失败则保留完整 receipt
 并继续扩展/刷新候选分母，而不是降低固定门禁。
 
+## Fresh enrollment 首轮结果
+
+首轮 enrollment 已自然终态，receipt 为 `status=ready`：
+
+- 运行约 64 秒，`max_workers=1`、90 秒单请求上限；
+- discovery/text probe ready，12 个 selected profiles 中 6 个严格流式可用；
+- candidate registry：6 个 profile、2 个协议 provider 投影，`generated_from_probe=true`；
+- candidate registry SHA-256：
+  `c4e590d6bb191147ebab840eb1d0dca03071ffdfd6df03c113d84f65b597dffe`；
+- enrollment receipt SHA-256：
+  `0f314b27701915dc3ddb9becc872a2ed5a21c88e1d38a8a08961f4e0a30e3286`；
+- tool/reasoning/vision calibration：按本轮 admission 设计跳过；
+- `secrets_persisted=false`、raw provider output/url 未进入 safe receipt。
+
+对 candidate registry 执行 `registry-diagnostic --require-prefusion` 后，安全结果为
+`blocked`，reason 包括 generation marker、catalog/physical projection、role
+coverage 和 probe binding 不完整；另有 `weak_or_missing_fast_candidate` warning。
+因此该 registry 不能直接成为 r7 screening 输入。该 blocked 结果保留为新鲜 enrollment
+的完整证据，下一步必须补齐 NVIDIA focus 候选并重新做 probe-bound merge，不能绕过
+pre-Fusion handoff。
