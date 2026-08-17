@@ -564,18 +564,58 @@ def _effective_min_cases_for_suite(suite_id: str, min_cases_per_suite: int) -> i
     return max(1, min(requested, int(override)))
 
 
-def _suite_min_case_policy(suite_id: str, min_cases_per_suite: int) -> dict[str, Any]:
+def _effective_min_cases_for_spec(
+    suite_id: str,
+    min_cases_per_suite: int,
+    suite_spec: Mapping[str, Any] | None = None,
+) -> int:
+    """仅对显式 replacement 应用其声明的完整固定切片大小。
+
+    replacement 必须携带不可变的 ``min_cases`` 声明，只有明确标记为
+    replacement 时才能降低全局门槛；普通 GPQA spec 仍受 100 条门禁约束。
+    """
+
+    effective = _effective_min_cases_for_suite(suite_id, min_cases_per_suite)
+    if not isinstance(suite_spec, Mapping) or suite_spec.get("replacement_active") is not True:
+        return effective
+    declared = _optional_int(suite_spec.get("min_cases"))
+    if declared is None or declared < 1:
+        return effective
+    return min(effective, declared)
+
+
+def _suite_min_case_policy(
+    suite_id: str,
+    min_cases_per_suite: int,
+    suite_spec: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     requested = max(1, int(min_cases_per_suite))
-    effective = _effective_min_cases_for_suite(suite_id, requested)
+    effective = _effective_min_cases_for_spec(suite_id, requested, suite_spec)
     override = SUITE_MIN_CASE_OVERRIDES.get(str(suite_id or ""))
+    replacement_override = (
+        _optional_int(suite_spec.get("min_cases"))
+        if isinstance(suite_spec, Mapping) and suite_spec.get("replacement_active") is True
+        else None
+    )
+    applied_override = (
+        replacement_override
+        if replacement_override is not None and replacement_override < requested
+        else override
+    )
     return {
         "schema": "axio_fusion_api.suite_min_case_policy.v1",
         "suite_id": str(suite_id or ""),
         "requested_min_cases_per_suite": requested,
         "effective_min_cases": effective,
-        "suite_override_applied": override is not None and effective != requested,
-        "suite_override_value": int(override) if override is not None else None,
-        "policy": "use full fixed-size benchmark slice when it is smaller than the global default minimum",
+        "suite_override_applied": applied_override is not None and effective != requested,
+        "suite_override_value": int(applied_override) if applied_override is not None else None,
+        "policy": (
+            "use the explicit replacement's complete fixed-size slice when it is "
+            "smaller than the global default minimum"
+            if replacement_override is not None and replacement_override < requested
+            else "use full fixed-size benchmark slice when it is smaller than "
+            "the global default minimum"
+        ),
         "raw_dataset_content_persisted": False,
     }
 
@@ -832,7 +872,11 @@ def build_benchmark_source_manifest_template(
         )
         requires_official_harness = _suite_requires_official_harness(suite.suite_id, suite.task_format)
         input_mode = "official_or_audited_import" if requires_official_harness else "local_jsonl"
-        effective_min_cases = _effective_min_cases_for_suite(suite.suite_id, min_cases_per_suite)
+        effective_min_cases = _effective_min_cases_for_spec(
+            suite.suite_id,
+            min_cases_per_suite,
+            replacement,
+        )
         suites.append(
             {
                 "suite_id": suite.suite_id,
@@ -856,7 +900,11 @@ def build_benchmark_source_manifest_template(
                 "snapshot_policy": str(methodology.get("snapshot_policy") or ""),
                 "case_selection": str(methodology.get("case_selection") or ""),
                 "min_cases": effective_min_cases,
-                "suite_min_case_policy": _suite_min_case_policy(suite.suite_id, min_cases_per_suite),
+                "suite_min_case_policy": _suite_min_case_policy(
+                    suite.suite_id,
+                    min_cases_per_suite,
+                    replacement,
+                ),
                 "official_harness_required": requires_official_harness,
                 "position_balanced_import_required": suite.task_format == "external_pairwise_judge",
                 "source_record": {
@@ -882,6 +930,7 @@ def build_benchmark_source_manifest_template(
                     base_dir=base_dir,
                     import_dir=import_dir,
                     min_cases_per_suite=min_cases_per_suite,
+                    suite_spec=replacement,
                 ),
                 "final_claim_eligible_only_after_source_validation": True,
                 "raw_dataset_path_persisted": False,
@@ -1049,6 +1098,7 @@ def build_benchmark_case_hash_manifest(
                         source_path,
                         suite=suite,
                         min_cases_per_suite=min_cases_per_suite,
+                        suite_spec=spec,
                     )
                 )
             else:
@@ -1151,7 +1201,11 @@ def bind_benchmark_source_manifest_case_hashes(
     for suite in BENCHMARK_SUITES:
         source_row = source_by_suite.get(suite.suite_id)
         case_row = case_by_suite.get(suite.suite_id)
-        effective_min_cases = _effective_min_cases_for_suite(suite.suite_id, min_cases_per_suite)
+        effective_min_cases = _effective_min_cases_for_spec(
+            suite.suite_id,
+            min_cases_per_suite,
+            source_row,
+        )
         reasons = []
         if not isinstance(source_row, Mapping):
             reasons.append("source_suite_missing")
@@ -1183,7 +1237,11 @@ def bind_benchmark_source_manifest_case_hashes(
                 "digest_changed": bool(not reasons and existing and existing != digest),
                 "case_hash_count": case_count or 0,
                 "effective_min_cases": effective_min_cases,
-                "suite_min_case_policy": _suite_min_case_policy(suite.suite_id, min_cases_per_suite),
+                "suite_min_case_policy": _suite_min_case_policy(
+                    suite.suite_id,
+                    min_cases_per_suite,
+                    source_row,
+                ),
                 "reason_codes": sorted(set(reasons)),
                 "raw_case_hashes_persisted": False,
                 "raw_dataset_content_persisted": False,
@@ -1535,7 +1593,11 @@ def build_benchmark_acquisition_checklist(
         suite_spec = _template_suite_spec(template, suite.suite_id)
         plan = suite_spec.get("acquisition_plan") if isinstance(suite_spec.get("acquisition_plan"), Mapping) else {}
         requires_official_harness = _suite_requires_official_harness(suite.suite_id, suite.task_format)
-        effective_min_cases = _effective_min_cases_for_suite(suite.suite_id, min_cases_per_suite)
+        effective_min_cases = _effective_min_cases_for_spec(
+            suite.suite_id,
+            min_cases_per_suite,
+            suite_spec,
+        )
         if requires_official_harness:
             suite_requirements = [
                 _official_import_requirement(
@@ -1552,6 +1614,7 @@ def build_benchmark_acquisition_checklist(
                     suite=suite,
                     base_dir=base_dir,
                     min_cases_per_suite=min_cases_per_suite,
+                    suite_spec=suite_spec,
                 )
             ]
             local_dataset_requirements.extend(suite_requirements)
@@ -1563,7 +1626,11 @@ def build_benchmark_acquisition_checklist(
                 "input_mode": "official_or_audited_import" if requires_official_harness else "local_jsonl",
                 "required_action": str(plan.get("required_action") or ""),
                 "min_cases": effective_min_cases,
-                "suite_min_case_policy": _suite_min_case_policy(suite.suite_id, min_cases_per_suite),
+                "suite_min_case_policy": _suite_min_case_policy(
+                    suite.suite_id,
+                    min_cases_per_suite,
+                    suite_spec,
+                ),
                 "candidate_count": len(candidate_receipts) if requires_official_harness else 0,
                 "local_dataset_requirement_count": 0 if requires_official_harness else 1,
                 "official_import_requirement_count": len(candidate_receipts) if requires_official_harness else 0,
@@ -2653,7 +2720,11 @@ def prepare_benchmark_source_manifest(
         source_url_sha = str(row.get("source_url_sha256") or sha256_text(str(row.get("source_url") or suite.reference)))
         case_digest = str(case_row.get("materialized_case_hash_manifest_sha256") or "")
         case_count = _optional_int(case_row.get("case_hash_count")) or 0
-        effective_min_cases = _effective_min_cases_for_suite(suite_id, min_cases_per_suite)
+        effective_min_cases = _effective_min_cases_for_spec(
+            suite_id,
+            min_cases_per_suite,
+            row,
+        )
         source_record["dataset_snapshot_sha256"] = _prepared_dataset_snapshot_hash(
             suite_id=suite_id,
             source_url_sha256=source_url_sha,
@@ -8830,7 +8901,11 @@ def audit_benchmark_campaign_readiness(
         spec = by_suite.get(suite_id, {})
         task_format = str(spec.get("task_format") or suite.task_format)
         requires_official_harness = _suite_requires_official_harness(suite_id, task_format)
-        effective_min_cases = _effective_min_cases_for_suite(suite_id, min_cases_per_suite)
+        effective_min_cases = _effective_min_cases_for_spec(
+            suite_id,
+            min_cases_per_suite,
+            spec,
+        )
         dataset_path = _suite_dataset_path(spec)
         imported_count = _imported_run_count(spec, import_candidate_keys)
         dataset_exists = bool(dataset_path and Path(dataset_path).exists())
@@ -8928,7 +9003,11 @@ def audit_benchmark_campaign_readiness(
                 "dataset_exists": dataset_exists,
                 "case_count": case_count,
                 "effective_min_cases": effective_min_cases,
-                "suite_min_case_policy": _suite_min_case_policy(suite_id, min_cases_per_suite),
+                "suite_min_case_policy": _suite_min_case_policy(
+                    suite_id,
+                    min_cases_per_suite,
+                    spec,
+                ),
                 "valid_case_count": validation.get("valid_case_count") if validation else None,
                 "invalid_case_count": validation.get("invalid_case_count") if validation else None,
                 "duplicate_case_hash_count": validation.get("duplicate_case_hash_count") if validation else None,
@@ -19143,7 +19222,11 @@ def _materialization_status_row(
     min_cases_per_suite: int,
 ) -> dict[str, Any]:
     adapter_id = _materialization_adapter_id(suite.suite_id)
-    effective_min_cases = _effective_min_cases_for_suite(suite.suite_id, min_cases_per_suite)
+    effective_min_cases = _effective_min_cases_for_spec(
+        suite.suite_id,
+        min_cases_per_suite,
+        row,
+    )
     output_path = output_dir / f"{suite.suite_id}.jsonl"
     output_count = _safe_count_jsonl_rows(output_path) if output_path.exists() else 0
     validation = {}
@@ -19218,7 +19301,11 @@ def _materialization_status_row(
         "materialized_case_count": output_count,
         "min_cases_per_suite": int(min_cases_per_suite),
         "effective_min_cases": effective_min_cases,
-        "suite_min_case_policy": _suite_min_case_policy(suite.suite_id, min_cases_per_suite),
+        "suite_min_case_policy": _suite_min_case_policy(
+            suite.suite_id,
+            min_cases_per_suite,
+            row,
+        ),
         "validation": _safe_materialization_validation_summary(validation),
         "requires_official_harness": _suite_requires_official_harness(suite.suite_id, suite.task_format),
         "raw_dataset_paths_persisted": False,
@@ -19927,9 +20014,14 @@ def _source_materialization_template(
     base_dir: str,
     import_dir: str,
     min_cases_per_suite: int,
+    suite_spec: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     requires_official_harness = _suite_requires_official_harness(suite.suite_id, suite.task_format)
-    effective_min_cases = _effective_min_cases_for_suite(suite.suite_id, min_cases_per_suite)
+    effective_min_cases = _effective_min_cases_for_spec(
+        suite.suite_id,
+        min_cases_per_suite,
+        suite_spec,
+    )
     if requires_official_harness:
         command = (
             "axio-fusion-api-standalone benchmark-import-official-batch "
@@ -19951,7 +20043,11 @@ def _source_materialization_template(
     return {
         "input_mode": "official_or_audited_import" if requires_official_harness else "local_jsonl",
         "min_cases": effective_min_cases,
-        "suite_min_case_policy": _suite_min_case_policy(suite.suite_id, min_cases_per_suite),
+        "suite_min_case_policy": _suite_min_case_policy(
+            suite.suite_id,
+            min_cases_per_suite,
+            suite_spec,
+        ),
         "local_dataset_path_sha256": sha256_text(f"{base_dir.rstrip('/')}/{suite.suite_id}.jsonl")
         if not requires_official_harness
         else "",
@@ -19978,7 +20074,11 @@ def _validate_source_manifest_suite(
     source_record = row.get("source_record") if isinstance(row.get("source_record"), Mapping) else {}
     materialization = row.get("materialization") if isinstance(row.get("materialization"), Mapping) else {}
     requires_official_harness = _suite_requires_official_harness(suite.suite_id, suite.task_format)
-    effective_min_cases = _effective_min_cases_for_suite(suite.suite_id, min_cases_per_suite)
+    effective_min_cases = _effective_min_cases_for_spec(
+        suite.suite_id,
+        min_cases_per_suite,
+        row,
+    )
     if str(row.get("task_format") or "") != suite.task_format:
         reasons.append("task_format_mismatch")
     if str(row.get("category") or "") != suite.category:
@@ -20006,7 +20106,11 @@ def _validate_source_manifest_suite(
         "input_mode": str(row.get("input_mode") or ""),
         "official_harness_required": requires_official_harness,
         "effective_min_cases": effective_min_cases,
-        "suite_min_case_policy": _suite_min_case_policy(suite.suite_id, min_cases_per_suite),
+        "suite_min_case_policy": _suite_min_case_policy(
+            suite.suite_id,
+            min_cases_per_suite,
+            row,
+        ),
         "ready": not reasons,
         "reason_codes": reasons,
         "required_hash_field_count": len(_source_manifest_required_sha_fields(requires_official_harness)),
@@ -20074,7 +20178,11 @@ def _case_hash_manifest_local_suite_row(
     min_cases_per_suite: int,
 ) -> dict[str, Any]:
     dataset_path = _suite_dataset_path(spec)
-    effective_min_cases = _effective_min_cases_for_suite(suite.suite_id, min_cases_per_suite)
+    effective_min_cases = _effective_min_cases_for_spec(
+        suite.suite_id,
+        min_cases_per_suite,
+        spec,
+    )
     reasons = []
     hashes: list[str] = []
     invalid_json_count = 0
@@ -20124,7 +20232,11 @@ def _case_hash_manifest_local_suite_row(
         "reason_codes": sorted(set(reasons)),
         "case_hash_count": len(unique_hashes),
         "effective_min_cases": effective_min_cases,
-        "suite_min_case_policy": _suite_min_case_policy(suite.suite_id, min_cases_per_suite),
+        "suite_min_case_policy": _suite_min_case_policy(
+            suite.suite_id,
+            min_cases_per_suite,
+            spec,
+        ),
         "duplicate_case_hash_count": duplicate_count,
         "invalid_jsonl_row_count": invalid_json_count,
         "valid_case_count": _optional_int(validation.get("valid_case_count")) if validation else None,
@@ -20159,6 +20271,7 @@ def _case_hash_manifest_official_source_suite_row(
     *,
     suite: BenchmarkSuite,
     min_cases_per_suite: int,
+    suite_spec: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a pre-generation case-set receipt from an official source file.
 
@@ -20167,7 +20280,11 @@ def _case_hash_manifest_official_source_suite_row(
     in this safe manifest.
     """
 
-    effective_min_cases = _effective_min_cases_for_suite(suite.suite_id, min_cases_per_suite)
+    effective_min_cases = _effective_min_cases_for_spec(
+        suite.suite_id,
+        min_cases_per_suite,
+        suite_spec,
+    )
     path = Path(source_path)
     reasons: list[str] = []
     hashes: list[str] = []
@@ -20205,7 +20322,11 @@ def _case_hash_manifest_official_source_suite_row(
         "reason_codes": sorted(set(reasons)),
         "case_hash_count": len(unique_hashes),
         "effective_min_cases": effective_min_cases,
-        "suite_min_case_policy": _suite_min_case_policy(suite.suite_id, min_cases_per_suite),
+        "suite_min_case_policy": _suite_min_case_policy(
+            suite.suite_id,
+            min_cases_per_suite,
+            suite_spec,
+        ),
         "duplicate_case_hash_count": duplicate_count,
         "invalid_source_row_count": invalid_row_count,
         "materialized_case_hash_manifest_sha256": digest,
@@ -20446,7 +20567,11 @@ def _case_hash_manifest_imported_suite_row(
     candidate_ids: Sequence[str],
     min_cases_per_suite: int,
 ) -> dict[str, Any]:
-    effective_min_cases = _effective_min_cases_for_suite(suite.suite_id, min_cases_per_suite)
+    effective_min_cases = _effective_min_cases_for_spec(
+        suite.suite_id,
+        min_cases_per_suite,
+        spec,
+    )
     imported = spec.get("imported_runs") if isinstance(spec.get("imported_runs"), Mapping) else {}
     candidates = [str(candidate).strip() for candidate in candidate_ids if str(candidate).strip()]
     if not candidates:
@@ -20492,7 +20617,11 @@ def _case_hash_manifest_imported_suite_row(
         "case_hash_sets_identical": bool(alignment.get("case_hash_sets_identical")),
         "case_hash_count": len(case_hashes),
         "effective_min_cases": effective_min_cases,
-        "suite_min_case_policy": _suite_min_case_policy(suite.suite_id, min_cases_per_suite),
+        "suite_min_case_policy": _suite_min_case_policy(
+            suite.suite_id,
+            min_cases_per_suite,
+            spec,
+        ),
         "duplicate_case_hash_count": 0,
         "materialized_case_hash_manifest_sha256": digest,
         "raw_candidate_ids_persisted": False,
@@ -20554,15 +20683,24 @@ def _local_dataset_requirement(
     suite: BenchmarkSuite,
     base_dir: str,
     min_cases_per_suite: int,
+    suite_spec: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     dataset_path = f"{base_dir.rstrip('/')}/{suite.suite_id}.jsonl"
-    effective_min_cases = _effective_min_cases_for_suite(suite.suite_id, min_cases_per_suite)
+    effective_min_cases = _effective_min_cases_for_spec(
+        suite.suite_id,
+        min_cases_per_suite,
+        suite_spec,
+    )
     return {
         "suite_id": suite.suite_id,
         "category": suite.category,
         "task_format": suite.task_format,
         "min_cases": effective_min_cases,
-        "suite_min_case_policy": _suite_min_case_policy(suite.suite_id, min_cases_per_suite),
+        "suite_min_case_policy": _suite_min_case_policy(
+            suite.suite_id,
+            min_cases_per_suite,
+            suite_spec,
+        ),
         "dataset_path_sha256": sha256_text(dataset_path),
         "dataset_placeholder": f"<PINNED_DATASET_DIR>/{suite.suite_id}.jsonl",
         "required_jsonl_fields": _dataset_schema_for_format(suite.task_format)["required_fields"],

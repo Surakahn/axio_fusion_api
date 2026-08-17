@@ -16,7 +16,9 @@ from axio_fusion_api.benchmark_replacements import (
 from axio_fusion_api.evaluation import (
     _campaign_suite_specs,
     audit_benchmark_campaign_readiness,
+    build_benchmark_case_hash_manifest,
     build_benchmark_dataset_manifest_template,
+    build_benchmark_source_manifest_template,
     validate_benchmark_dataset,
 )
 
@@ -221,6 +223,39 @@ def test_mmlu_pro_screening_disjoint_replacement_is_normalized_and_receipt_bound
     assert gpqa_slot["replacement_active"] is True
     assert gpqa_slot["benchmark_dataset_id"] == "mmlu_pro_stem"
     assert gpqa_slot["replacement_receipt"]["screening_case_disjointness"]["selected_overlap_count"] == 0
+
+
+def test_explicit_replacement_full_slice_lowers_only_its_case_gate(tmp_path: Path) -> None:
+    _receipt, dataset, replacement_manifest, _exclusion_safe = _build_disjoint_replacement(
+        tmp_path,
+        stem="fixed-slice-gate",
+    )
+
+    case_manifest = build_benchmark_case_hash_manifest(
+        dataset_manifest_path=replacement_manifest,
+        min_cases_per_suite=100,
+    )
+    gpqa_row = next(row for row in case_manifest["suite_rows"] if row["suite_id"] == "gpqa_diamond")
+    replacement_spec = next(
+        row for row in _campaign_suite_specs(json.loads(replacement_manifest.read_text(encoding="utf-8")))
+        if row["suite_id"] == "gpqa_diamond"
+    )
+    declared_min_cases = replacement_spec["min_cases"]
+    assert gpqa_row["case_hash_count"] == 12
+    assert gpqa_row["ready"] is True
+    assert gpqa_row["effective_min_cases"] == declared_min_cases
+    assert gpqa_row["suite_min_case_policy"]["suite_override_applied"] is True
+    assert gpqa_row["suite_min_case_policy"]["suite_override_value"] == declared_min_cases
+
+    source_template = build_benchmark_source_manifest_template(
+        base_dir=str(tmp_path / "datasets"),
+        dataset_manifest_path=replacement_manifest,
+        min_cases_per_suite=100,
+    )
+    gpqa_source = next(row for row in source_template["suites"] if row["suite_id"] == "gpqa_diamond")
+    assert gpqa_source["replacement_active"] is True
+    assert gpqa_source["min_cases"] == declared_min_cases
+    assert gpqa_source["suite_min_case_policy"]["effective_min_cases"] == declared_min_cases
 
 
 def test_mmlu_pro_screening_disjoint_dataset_hash_tampering_blocks_readiness(
