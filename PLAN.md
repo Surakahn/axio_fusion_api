@@ -139,6 +139,12 @@ stream/reasoning screening 结果。后续 retry 必须在显式取消该环境 
 physical 候选而 fail-closed。第三次 retry 必须覆盖完整 discovery 分母后才允许研究与
 stream probe；不得通过降低候选、复用 partial pool 或跳过 candidate inventory gate。
 
+第三次 retry 已完成正式 Pre-Fusion handoff：27 logical/35 physical 完整发现、21 个
+strict-stream available、15 logical models role coverage ready，probe-bound registry
+为 21 models/4 providers/5 fast candidates，provider evidence audit ready。该 registry
+只打开 r7 operational admission，不打开 ranking/freeze/target gate；下一步必须以新
+source seed 执行固定 90 秒 admission 并重新绑定所有后续 digest。
+
 ## Composite cohort r1 与 Harness 收敛设计（2026-08-16）
 
 本轮在已有 live probe 证据上建立新的 composite cohort，不复用旧

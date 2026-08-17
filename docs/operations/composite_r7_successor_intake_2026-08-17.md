@@ -102,3 +102,31 @@ blocked 输出当作 screening 证据。
 该结果说明完整分母 gate 正确阻止了 partial pool。第三次 retry 将把
 `max_models`/每 provider 上限提升到覆盖完整 discovery（不降低任何质量或 transport
 门槛），再由研究 agent 完成全池排序，随后才进入 strict-stream probe。
+
+## 正式 Pre-Fusion 终态
+
+第三次 retry 覆盖完整 discovery 分母后自然终态并 ready：
+
+- pre-Fusion screening 输出 SHA-256：
+  `20ffcc4958ea6aa8028381dfc3db9a9f59f3a30ccd7d4966dd293b6489efd490`；
+- 完整发现池：27 logical candidates、35 physical profiles；
+- research ranking：`status=ready`，未将 ranking prior 当作最终质量证据；
+- strict streaming：35 个 profile 中 21 个 available；
+- role coverage：15 个 logical models、21 个 physical profiles，required roles 完整；
+- fusion handoff：`status=ready`、registry artifact 已生成；
+- pre-Fusion runtime registry SHA-256：
+  `53c411c436360c936b1975b564479b70b28e8504bb64c9a726571640e31f340b`；
+- provider probe projection SHA-256：
+  `8ced126da11fe4f9508debd8c4112bae2d3e04e7e98960358791fa0bf5a07d45`；
+- probe-bound runtime registry SHA-256：
+  `7d0a9b78a06ea7445c43b7c03e15d6bbedb3112ecf8fb7d1ad041301678c1ad8`；
+- probe evidence audit SHA-256：
+  `62dda93d403701b9f6f06b0082a90300f80d63d23be51fce7e0cddd7ae1ef35b`，
+  `status=ready`、无 blocker；
+- bound registry readiness：21 models、4 providers、5 fast candidates、17 judge
+  candidates、18 structured candidates，`binding_status=ready`。
+
+该 registry 现在只具备 operational admission 资格，不等于 baseline ranking 或
+superiority evidence。下一步仍必须以新的 source-manifest selection seed 运行固定
+90 秒 non-target operational admission；admission 未达到至少 3 个 formal eligible
+canonical models 前，不创建 screening plan 或 target Harness。
