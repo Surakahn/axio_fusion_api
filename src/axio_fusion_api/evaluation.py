@@ -3110,6 +3110,7 @@ def build_benchmark_acquisition_status(
     *,
     registry_path: str | Path | None = None,
     dataset_dir: str | Path = "data/benchmarks",
+    dataset_manifest_path: str | Path | None = None,
     import_dirs: Sequence[str | Path] = (),
     candidate_ids: Sequence[str] = (),
     include_provider_baselines: bool = True,
@@ -3119,6 +3120,17 @@ def build_benchmark_acquisition_status(
 ) -> dict[str, Any]:
     """Reconcile local benchmark datasets and safe official-import receipts."""
 
+    dataset_manifest = (
+        _load_dataset_manifest(dataset_manifest_path)
+        if dataset_manifest_path is not None
+        else {}
+    )
+    suite_specs = _campaign_suite_specs(dataset_manifest) if dataset_manifest else []
+    specs_by_suite = {
+        str(spec.get("suite_id") or ""): spec
+        for spec in suite_specs
+        if isinstance(spec, Mapping)
+    }
     profiles = load_registry(registry_path)
     matrix = build_benchmark_run_matrix(
         registry_path=registry_path,
@@ -3157,25 +3169,32 @@ def build_benchmark_acquisition_status(
     official_rows = []
     suite_rows = []
     for suite in BENCHMARK_SUITES:
-        requires_official_harness = _suite_requires_official_harness(suite.suite_id, suite.task_format)
-        effective_min_cases = _effective_min_cases_for_suite(suite.suite_id, min_cases_per_suite)
+        manifest_spec = specs_by_suite.get(suite.suite_id, {})
+        task_format = str(manifest_spec.get("task_format") or suite.task_format)
+        requires_official_harness = _suite_requires_official_harness(suite.suite_id, task_format)
         if requires_official_harness:
             spec = {
+                **dict(manifest_spec),
                 "suite_id": suite.suite_id,
-                "task_format": suite.task_format,
+                "task_format": task_format,
                 "imported_runs": discovered_imports.get(suite.suite_id, {}),
             }
+            effective_min_cases = _effective_min_cases_for_spec(
+                suite.suite_id,
+                min_cases_per_suite,
+                spec,
+            )
             validation = _validate_imported_runs(
                 spec,
                 import_candidate_keys,
                 suite_id=suite.suite_id,
-                task_format=suite.task_format,
+                task_format=task_format,
             )
             alignment = _imported_case_alignment(
                 spec,
                 import_candidate_keys,
                 suite_id=suite.suite_id,
-                task_format=suite.task_format,
+                task_format=task_format,
             )
             min_case_count = _optional_int(alignment.get("common_case_hash_count")) or 0
             reasons = []
@@ -3191,7 +3210,7 @@ def build_benchmark_acquisition_status(
             row = {
                 "suite_id": suite.suite_id,
                 "category": suite.category,
-                "task_format": suite.task_format,
+                "task_format": task_format,
                 "input_mode": "official_or_audited_import",
                 "ready": ready,
                 "reason_codes": reasons,
@@ -3204,8 +3223,12 @@ def build_benchmark_acquisition_status(
                 "invalid_import_count": validation["invalid_import_count"],
                 "min_imported_case_count": min_case_count,
                 "effective_min_cases": effective_min_cases,
-                "suite_min_case_policy": _suite_min_case_policy(suite.suite_id, min_cases_per_suite),
-                "position_balanced_required": suite.task_format == "external_pairwise_judge",
+                "suite_min_case_policy": _suite_min_case_policy(
+                    suite.suite_id,
+                    min_cases_per_suite,
+                    spec,
+                ),
+                "position_balanced_required": task_format == "external_pairwise_judge",
                 "imported_run_validation": validation,
                 "imported_case_alignment": alignment,
                 "raw_candidate_ids_persisted": False,
@@ -3215,11 +3238,18 @@ def build_benchmark_acquisition_status(
             official_rows.append(row)
             suite_rows.append(row)
             continue
-        dataset_path = Path(dataset_dir) / f"{suite.suite_id}.jsonl"
+        spec = dict(manifest_spec)
+        dataset_value = _suite_dataset_path(spec)
+        dataset_path = Path(dataset_value) if dataset_value else Path(dataset_dir) / f"{suite.suite_id}.jsonl"
+        effective_min_cases = _effective_min_cases_for_spec(
+            suite.suite_id,
+            min_cases_per_suite,
+            spec,
+        )
         validation = validate_benchmark_dataset(
             suite_id=suite.suite_id,
             dataset_path=dataset_path,
-            task_format=suite.task_format,
+            task_format=task_format,
         )
         reasons = []
         if validation.get("dataset_exists") is not True:
@@ -3238,7 +3268,7 @@ def build_benchmark_acquisition_status(
         row = {
             "suite_id": suite.suite_id,
             "category": suite.category,
-            "task_format": suite.task_format,
+            "task_format": task_format,
             "input_mode": "local_jsonl",
             "ready": not reasons,
             "reason_codes": sorted(set(reasons)),
@@ -3247,7 +3277,11 @@ def build_benchmark_acquisition_status(
             "row_count": _optional_int(validation.get("row_count")) or 0,
             "valid_case_count": _optional_int(validation.get("valid_case_count")) or 0,
             "effective_min_cases": effective_min_cases,
-            "suite_min_case_policy": _suite_min_case_policy(suite.suite_id, min_cases_per_suite),
+            "suite_min_case_policy": _suite_min_case_policy(
+                suite.suite_id,
+                min_cases_per_suite,
+                spec,
+            ),
             "invalid_case_count": _optional_int(validation.get("invalid_case_count")) or 0,
             "duplicate_case_hash_count": _optional_int(validation.get("duplicate_case_hash_count")) or 0,
             "label_leakage_suspected_count": _optional_int(validation.get("label_leakage_suspected_count")) or 0,
@@ -3296,6 +3330,16 @@ def build_benchmark_acquisition_status(
         "input_receipts": {
             "registry": _evidence_path_receipt(registry_path, kind="registry"),
             "dataset_dir_sha256": sha256_text(str(dataset_dir)),
+            "dataset_manifest_path_sha256": (
+                sha256_text(str(dataset_manifest_path))
+                if dataset_manifest_path is not None
+                else ""
+            ),
+            "dataset_manifest_sha256": (
+                sha256_text(Path(dataset_manifest_path).read_text(encoding="utf-8"))
+                if dataset_manifest_path is not None
+                else ""
+            ),
             "import_dir_path_hashes": [sha256_text(str(path)) for path in import_dirs],
             "raw_paths_persisted": False,
             "secrets_persisted": False,

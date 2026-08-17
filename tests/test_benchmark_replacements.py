@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import axio_fusion_api.evaluation as evaluation_module
 from axio_fusion_api.benchmark_replacements import (
     MMLU_PRO_CATEGORY_ORDER,
     MMLU_PRO_SCREENING_DISJOINT_VERSION,
@@ -256,6 +257,53 @@ def test_explicit_replacement_full_slice_lowers_only_its_case_gate(tmp_path: Pat
     assert gpqa_source["replacement_active"] is True
     assert gpqa_source["min_cases"] == declared_min_cases
     assert gpqa_source["suite_min_case_policy"]["effective_min_cases"] == declared_min_cases
+
+
+def test_acquisition_status_uses_replacement_manifest_dataset_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _receipt, dataset, replacement_manifest, _exclusion_safe = _build_disjoint_replacement(
+        tmp_path,
+        stem="acquisition-manifest-aware",
+    )
+
+    monkeypatch.setattr(evaluation_module, "load_registry", lambda _path: [])
+    monkeypatch.setattr(
+        evaluation_module,
+        "build_benchmark_run_matrix",
+        lambda **_kwargs: {
+            "candidates": [],
+            "provider_baseline_selection": "none",
+            "available_provider_baseline_count": 0,
+        },
+    )
+    monkeypatch.setattr(
+        evaluation_module,
+        "validate_benchmark_dataset",
+        lambda **kwargs: {
+            "dataset_exists": True,
+            "valid_case_count": 12 if Path(kwargs["dataset_path"]) == dataset else 100,
+            "row_count": 12 if Path(kwargs["dataset_path"]) == dataset else 100,
+            "ready_for_scoring": True,
+            "invalid_case_count": 0,
+            "duplicate_case_hash_count": 0,
+            "label_leakage_suspected_count": 0,
+            "prompt_contract_violation_count": 0,
+        },
+    )
+
+    status = evaluation_module.build_benchmark_acquisition_status(
+        dataset_dir=tmp_path / "legacy-dataset-dir-must-not-be-used",
+        dataset_manifest_path=replacement_manifest,
+        include_provider_baselines=False,
+        min_cases_per_suite=100,
+    )
+    gpqa_row = next(row for row in status["suite_rows"] if row["suite_id"] == "gpqa_diamond")
+    assert gpqa_row["ready"] is True
+    assert gpqa_row["effective_min_cases"] == 4
+    assert gpqa_row["dataset_exists"] is True
+    assert status["ready_local_dataset_suite_count"] == status["local_dataset_suite_count"]
 
 
 def test_mmlu_pro_screening_disjoint_dataset_hash_tampering_blocks_readiness(

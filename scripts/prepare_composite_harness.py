@@ -312,6 +312,7 @@ def _build_stage_payloads(args: argparse.Namespace, paths: Mapping[str, Path]) -
         lambda: build_benchmark_acquisition_status(
             registry_path=args.registry,
             dataset_dir=args.dataset_dir,
+            dataset_manifest_path=_optional_path(args.dataset_manifest),
             import_dirs=(args.safe_import_dir,),
             include_provider_baselines=True,
             max_provider_baselines=3,

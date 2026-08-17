@@ -1150,6 +1150,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     acquisition_status = sub.add_parser("benchmark-acquisition-status")
     acquisition_status.add_argument("--dataset-dir", default="data/benchmarks")
+    acquisition_status.add_argument("--dataset-manifest", default=None)
     acquisition_status.add_argument("--import-dir", action="append", default=[])
     acquisition_status.add_argument("--candidate-id", action="append", default=[])
     acquisition_status.add_argument("--max-provider-baselines", type=int, default=3)
@@ -2802,6 +2803,7 @@ def cmd_benchmark_acquisition_status(args: argparse.Namespace) -> int:
     payload = build_benchmark_acquisition_status(
         registry_path=args.registry,
         dataset_dir=args.dataset_dir,
+        dataset_manifest_path=args.dataset_manifest,
         import_dirs=args.import_dir,
         candidate_ids=args.candidate_id,
         include_provider_baselines=not bool(args.no_provider_baselines),
