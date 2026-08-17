@@ -85,6 +85,30 @@ baseline eligible；固定最低要求为 3 个。receipt 虽为 `status=ready`�
 候选分母并重新执行独立 admission；不得降低 3-model gate、复用 r4/r5 completed
 subset、复用历史 ranking/freeze，或在 gate 前发起 target calls。
 
+### r6 screening 终态与 Harness 收敛（2026-08-17）
+
+r6 使用独立 operational admission 生成的完整候选分母已自然终态：8 个 serial
+units 全部 terminal，3 个 completed、5 个 failed/blocked，state 为 `partial`。
+transport-only admission 只留下 1 个 eligible canonical model（候选 4 个，固定最低
+3 个），因此 receipt 为 `status=blocked`、reason 为
+`transport_admission_fewer_than_minimum_models`。r6 的完整分母、digest、supervisor
+和 Harness audit 记录见
+`docs/operations/composite_r6_screening_terminal_2026-08-17.md`。
+
+supervisor 没有执行 ranking conversion，watcher 已完成最终原子 binding/audit 后
+退出；`target_suite_calls_performed=false`、`target_suite_calls_allowed=false`、
+`final_claim_allowed=false`。Harness 离线 pin/execution plan readiness 不得被解释
+为 target readiness，也不能用 operational admission 或 completed subset 补齐
+transport gate。
+
+下一步只允许基于新的 bounded transport health check 和新的 probe-bound candidate
+registry 创建 immutable r7 successor。r6 plan、checkpoint、completed subset、ranking
+和 freeze 全部只读；新的 r7 必须重新保留完整 source/candidate 分母、使用新的
+selection seed，并继续使用 `max_workers=1`、fail-fast transport gate 和固定至少 3
+个 formal transport-eligible canonical models 的门槛。在 successor 的 transport、
+external ranking、provider baseline freeze、official Harness import 和 lineage
+convergence 全部 ready 前，target calls 与 superiority claim 保持关闭。
+
 ## Composite cohort r1 与 Harness 收敛设计（2026-08-16）
 
 本轮在已有 live probe 证据上建立新的 composite cohort，不复用旧
