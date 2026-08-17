@@ -109,6 +109,22 @@ selection seed，并继续使用 `max_workers=1`、fail-fast transport gate 和�
 external ranking、provider baseline freeze、official Harness import 和 lineage
 convergence 全部 ready 前，target calls 与 superiority claim 保持关闭。
 
+### r7 successor intake 架构（2026-08-17）
+
+r7 不直接重跑 r6，而是采用 fresh enrollment → operational admission → immutable
+screening successor → Harness lineage 的四段单向控制面。fresh enrollment 重新验证当前
+provider `/models`、协议和严格流式 transport，operational admission 使用固定 90 秒
+non-target workloads 确认当前可用性；只有至少 3 个 formal baseline eligible canonical
+models 才能注册新的 source manifest、screening plan 和 zero-network preflight。
+具体设计与失败边界见
+`docs/operations/composite_r7_successor_intake_2026-08-17.md`。
+
+r7 仍禁止复用 r6 plan、checkpoint、completed subset、ranking/freeze 或 target 输出，
+继续固定 `max_workers=1`、fail-fast transport gate 和至少 3-model minimum。所有 Harness
+pin、execution、acquisition/import、cohort binding 和 convergence receipt 必须绑定 r7
+registry/plan/state digest；audit 明确返回 `ready_for_target_campaign` 前不得发起
+target calls 或 superiority claim。
+
 ## Composite cohort r1 与 Harness 收敛设计（2026-08-16）
 
 本轮在已有 live probe 证据上建立新的 composite cohort，不复用旧
