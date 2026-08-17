@@ -87,3 +87,18 @@ pre-Fusion handoff。
 取消 `AXIO_FUSION_REGISTRY_PATH`，保留同一 non-secret provider manifest、focus/source
 manifest、研究契约和 90 秒/三样本门禁；不修改生产环境变量、不修改正式服务、不把该
 blocked 输出当作 screening 证据。
+
+第二次 retry 已完成 provider discovery，但候选上限仍不足以覆盖完整分母：
+
+- output SHA-256：
+  `bc0f7d084e4c1bb416d4979d916d2c87a45be732bba1c37cdd39a5f94f56a86a`；
+- discovery：`status=ready`、`provider_discovery_performed=true`；
+- discovered logical candidates：27；physical profiles：35；
+- `candidate_limit_requested=16`、`candidate_inventory_complete=false`；
+- blockers：`prefusion_complete_inventory_required`、
+  `prefusion_research_prerequisite_failed`；
+- streaming/reasoning provider probe：未执行；target-suite calls：未执行。
+
+该结果说明完整分母 gate 正确阻止了 partial pool。第三次 retry 将把
+`max_models`/每 provider 上限提升到覆盖完整 discovery（不降低任何质量或 transport
+门槛），再由研究 agent 完成全池排序，随后才进入 strict-stream probe。

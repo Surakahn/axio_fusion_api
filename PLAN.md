@@ -135,6 +135,10 @@ probe evidence；不能把该首轮 candidate registry 当作 ready 或降低 fa
 stream/reasoning screening 结果。后续 retry 必须在显式取消该环境 registry 的独立进程
 中运行完整 discovery/research/strict-stream chain，正式服务环境保持不变。
 
+第二次 retry 虽已完成 discovery，仍因 `max_models=16` 截断了 27 个 logical/35 个
+physical 候选而 fail-closed。第三次 retry 必须覆盖完整 discovery 分母后才允许研究与
+stream probe；不得通过降低候选、复用 partial pool 或跳过 candidate inventory gate。
+
 ## Composite cohort r1 与 Harness 收敛设计（2026-08-16）
 
 本轮在已有 live probe 证据上建立新的 composite cohort，不复用旧
