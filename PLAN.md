@@ -35,6 +35,25 @@ case-hash binding 6/6，但 imported runs 为 0，仍等待 provider baseline fr
 Harness 执行。GPQA 原始槽位仍明确标记为 replacement，不用历史分数或 completed subset
 填充。
 
+### r3 screening 终态与 transport 门禁（2026-08-17）
+
+r3 frozen plan 已完整执行并自然终态：8 个 serial units 中 1 个 completed、7 个
+transport-blocked，state 为 `partial`，`ready_for_ranking=false`，
+`target_suite_calls_performed=false`。同 cohort supervisor 随后运行 transport-only
+admission，安全 receipt 为 `status=blocked`，reason 为固定最低 canonical model 数不足。
+因此没有生成 external ranking、provider baseline freeze 或任何 target-suite 请求；
+convergence audit 仍保持 `target_suite_calls_allowed=false`。完整分母、失败分类、
+plan/campaign digest 和 hash-only receipts 保留在 r3 private root，不将 completed
+subset 选为 survivor，也不把该结果写成能力排名或 superiority evidence。终态记录见
+`docs/operations/composite_r3_screening_terminal_2026-08-17.md`。
+
+下一步只允许创建新的 successor cohort：保留 r3 只读证据，重新生成 immutable
+screening plan，并重新跑完整 source/candidate 分母。不得修改 r3 plan、恢复 r3
+checkpoint、复用 r3 completed subset、复用历史 ranking/freeze，或降低 3-model
+transport gate；Harness pin、目标 case-hash 和 replacement 槽位可以继续作为离线
+控制面输入，但在 successor 的 transport/ranking/freeze 未 ready 前仍禁止 target
+calls。
+
 ## Composite cohort r1 与 Harness 收敛设计（2026-08-16）
 
 本轮在已有 live probe 证据上建立新的 composite cohort，不复用旧
