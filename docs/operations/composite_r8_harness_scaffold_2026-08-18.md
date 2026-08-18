@@ -32,6 +32,15 @@
 `status=ready`、`ready=true`。该 receipt 只验证 probe/registry 的 hash-bound 证据和
 敏感字段隔离，不能替代外部排名、transport admission 或 provider baseline freeze。
 
+同时按 r8 registry 生成了 external ranking template：15 个 canonical groups、21 个
+physical replicas，文件为
+`private/runs/2026-08-18-composite-cohort-r8/external_ranking_template.r8.private.json`，
+内容 hash 为
+`c8591011ee6fc10e51038c91af17b1a2f39342dc1ea11200f869f291369f2f99`。
+该模板保持 `template_only=true`、`ranking_assignment_present=false`，只固定完整
+candidate inventory 与 rank 1/2/3 的外部证据 contract；没有 operator-owned source
+evidence 时不得生成 ready ranking，也不得进入 provider baseline freeze。
+
 ## 绑定规则
 
 该 scaffold 只属于 r8 successor，输入绑定 r8 plan digest
