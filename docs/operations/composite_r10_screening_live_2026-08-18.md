@@ -62,6 +62,12 @@ watcher 已加载 `4d1abd6` 的审计修复；在 state 尚未物化的早期窗
 
 活动 checkpoint 已推进至 `100/112`，100 个已完成 case 均为 completed，当前 checkpoint 未出现 transport failure。campaign state 仍为 `running`、`completed_unit_count=2/16`、`failed_or_blocked_unit_count=1`、`ready_for_ranking=false`，`target_suite_calls_performed=false`；transport admission、ranking 和 supervisor terminal receipt 仍未生成。
 
+## 2026-08-19 00:39（CST）serial unit 完成里程碑
+
+原活动 `mmlu-pro` serial unit 已完整终态：`112/112`、`scored_case_count=112`、`transport_failure_count=0`、`status=completed`。campaign state 已更新为 `completed_unit_count=3/16`、`failed_or_blocked_unit_count=1`，仍为 `running`、`ready_for_ranking=false`、`target_suite_calls_performed=false`。
+
+运行器已按 frozen schedule 进入下一 serial unit `livebench_official_final_text_slice_2026_08_14`，其活动 checkpoint 当前为 `3/102`；因此完整 screening 尚未 terminal，transport admission、ranking、provider freeze 和 target 继续关闭。
+
 ## 后续顺序
 
 保持低频监控，等待 screening 自然终态；随后按固定顺序执行：
