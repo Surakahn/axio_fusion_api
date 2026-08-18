@@ -1,6 +1,6 @@
 # Axio Fusion API Checklist
 
-## Composite cohort r9 Harness successor（2026-08-18）
+## Composite cohort r9 terminal / r10 successor（2026-08-18）
 
 - [x] 保留 r8 全部只读终态证据；不恢复 r8 plan、checkpoint、completed subset、
   ranking 或 Harness binding。
@@ -27,10 +27,17 @@
   serving 切换（PID `1950874`）；切换前后只读 health、四格式 route-plan 和三个
   公开模型 dry-run 均通过，18900 加载 21 profiles/4 providers，标准
   `private/serving_registry.json` 已原子指向同一 r7 artifact，未停止 CPA Plus。
-- [ ] 等待 screening 自然终态；终态前不得生成 ranking、provider freeze 或 target
-  请求。
-- [ ] transport admission 至少通过 3 个 canonical models 后，才执行完整-pool
-  ranking；不满足则保留 r9 终态并创建 r10 successor。
+- [x] 等待 screening 自然终态；r9 已完成 16/16 units，3 completed、13 failed，
+  `partial`，`ready_for_ranking=false`，完整失败分母和 target=false 均已核对。
+- [x] 运行同 cohort transport-only admission：8 个 canonical candidates 中 1 个
+  跨两 source family 通过，低于固定 3-model gate；receipt 为 `blocked`，未执行
+  ranking、provider freeze 或 target 请求。
+- [x] 完成 r9 supervisor receipt 与 lineage watcher 最终 hash-only audit；
+  `target_suite_calls_allowed=false`、`final_claim_allowed=false`。
+- [ ] 创建新的 r10 source successor，仅改变 selection seed/registration date；不恢复
+  r9、不拼接 completed subset。
+- [ ] r10 transport admission 至少通过 3 个 canonical models 后，才执行完整-pool
+  ranking；否则封存 r10 并继续 successor 路径。
 - [ ] ranking ready 后生成当前 registry 绑定的 provider baseline freeze，并完成
   21-suite official/audited import receipts。
 - [ ] convergence audit 返回 `ready_for_target_campaign` 后，才运行正式 target

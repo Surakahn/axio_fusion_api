@@ -1,36 +1,38 @@
 # Axio Fusion API Plan
 
-## Composite cohort r9 当前主线（2026-08-18）
+## Composite cohort r10 当前主线（2026-08-18）
 
 ### 已冻结的 route
 
-r8 已经是 `partial`，其 16 个 unit 中 7 个失败，不能进入 ranking；r8 的所有
-plan、checkpoint、completed subset、ranking 和 Harness binding 仅作只读证据。当前
-唯一主线是 r9 immutable successor：
+r8 与 r9 均已封存为只读证据，不能进入 ranking；r9 的 16 个 unit 已全部 terminal，
+3 个 completed、13 个 failed，transport admission 仅保留 1 个 canonical model，低于
+固定 3-model gate。r9 的 plan、checkpoint、completed subset、transport、ranking 槽位
+和 Harness binding 均不得复用。当前唯一主线是新的 r10 immutable successor：
 
 ```text
-r9 source successor -> frozen screening plan -> zero-network preflight
+r10 source successor -> frozen screening plan -> zero-network preflight
 -> live non-target screening -> transport admission -> complete-pool ranking
 -> provider baseline freeze -> official Harness import -> convergence audit
 -> target campaign
 ```
 
-r9 source manifest、probe-bound registry、r7 operational admission 和 selection seed
-各自保存内容 hash；r9 plan 为 8 canonical groups、9 physical profiles、2 source
-families、16 serial units、`max_workers=1`，预计 1712 次 provider calls。preflight 已
-验证 `network_calls_performed=false` 与 `target_suite_calls_performed=false`。
+r10 必须重新绑定当前 probe-bound registry、r7 operational admission 和新的 selection
+seed，保留两套独立 source family、`max_workers=1`、fail-fast transport gate 和完整
+失败分母。r9 的 plan digest 为
+`9ad83ca335d1e3eaf15f28d1c8c842a5249a5e6a996b3d68156411af905a1399`，不能作为 r10
+输入；r9 终态与 successor 决策见
+`docs/operations/composite_r9_screening_terminal_2026-08-18.md`。
 
 ### 当前执行与 Harness gate
 
-live screening 使用 `setsid` 单 worker 自然运行（PID `1772237`）；convergence
-supervisor（PID `1877375`）仅在 terminal 后依次做 transport admission 和 ranking，
-lineage watcher（PID `1891818`）每 600 秒重建 hash-only binding/audit。三者都不会
-恢复进程、修改 frozen plan 或启动 target。
+r9 live screening（PID `1772237`）已自然退出；同 cohort supervisor 和 lineage watcher
+已完成 terminal transport/audit 后退出。r10 启动前不恢复 r9 进程、不修改 r9 frozen
+plan、不启动 target。
 
 r9 独立 Harness 控制面已物化：6/6 pin ready、BFCL V3 marker 通过、official
-execution plan ready；acquisition/import 因 provider freeze 和 operator-owned
-official receipts 缺失而保持 blocked。当前 convergence audit 为
-`status=running`、`next_gate=screening`，`target_suite_calls_allowed=false`。
+execution plan ready；最终 convergence audit 为 `status=blocked`、`next_gate=screening`，
+`target_suite_calls_allowed=false`。r10 必须重新生成同 cohort 的 Harness binding，不能
+跨 cohort 复用 r9 binding。
 
 正式 18900 serving 已从历史 noprefusion 进程切换为显式 r7 probe-bound pre-Fusion
 registry：当前 `scripts/run_server.py` PID 为 `1950874`，health 200/ready，21
@@ -51,10 +53,10 @@ target score 填充。只有 convergence audit 明确返回 `ready_for_target_ca
 
 ### 接续决策
 
-- screening 若终态 blocked/partial：保留完整失败分母，生成 r10 source successor，
-  不恢复 r9 或拼接 completed subset；
-- ranking ready 但 freeze/import 不完整：继续 r9 同 cohort 离线修复 binding，仍不
-  发送 target 请求；
+- r9 已终态 blocked/partial：保留完整失败分母，生成 r10 source successor，不恢复 r9
+  或拼接 completed subset；
+- ranking ready 但 freeze/import 不完整：继续当前 successor cohort 离线修复 binding，
+  仍不发送 target 请求；
 - convergence audit ready：才进入正式 target campaign、四种 API parity、paired
   statistical/latency/contamination audit 和最终 completion audit。
 
