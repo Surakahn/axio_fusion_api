@@ -54,6 +54,10 @@ watcher 已加载 `4d1abd6` 的审计修复；在 state 尚未物化的早期窗
 
 活动 checkpoint 已自然推进至 `84/112`，其中 84 个 case 均为 completed，当前 checkpoint 未出现 transport failure。campaign state 仍为 `running`、`completed_unit_count=2/16`、`failed_or_blocked_unit_count=1`、`ready_for_ranking=false`，`target_suite_calls_performed=false`；transport admission、ranking、provider freeze 和 screening receipt 仍未生成。
 
+## 2026-08-19 00:29（CST）低频进度快照
+
+活动 checkpoint 已推进至 `94/112`，94 个已完成 case 均为 completed，当前 checkpoint 未出现 transport failure。campaign state 仍为 `running`、`completed_unit_count=2/16`、`failed_or_blocked_unit_count=1`、`ready_for_ranking=false`，`target_suite_calls_performed=false`；supervisor 仍只等待 terminal，所有后置转换保持关闭。
+
 ## 后续顺序
 
 保持低频监控，等待 screening 自然终态；随后按固定顺序执行：
