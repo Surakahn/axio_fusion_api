@@ -258,6 +258,21 @@ campaign state 已更新为 `status=running`、`completed_unit_count=9/16`、
 screening、supervisor、lineage watcher 与正式 Fusion 服务均保持存活，transport
 admission、ranking、provider freeze、official import 和 target campaign 继续关闭。
 
+## 2026-08-19 04:44（CST）终态转换契约审计
+
+已对 `baseline_screening.py`、`continue_composite_convergence.py` 及对应回归测试做
+离线契约核对：任一 unit 为 `failed/blocked` 时，campaign 必须以 `partial` 终态封存；
+transport admission 仍可在完整 terminal 分母上只做失败率筛选，但 ranking conversion
+严格要求 `status=completed`、所有 source/candidate unit 完整且双 source family 覆盖。
+因此 r10 现有两个 failed unit 不会被 completed subset 掩盖，terminal 后若进入
+`partial`，supervisor 产生的 transport/ranking receipt 只能作为封存证据，不能进入
+provider freeze 或 Harness target。
+
+后续 successor 路线已明确：保留 r10 的 state、checkpoint、transport/ranking receipt
+和 digest 作为 reference-only；不恢复或拼接 r10 subset，使用新的 selection seed 创建
+immutable successor source manifest，重新执行 admission、完整 screening 和同 cohort
+Harness binding。三模型 transport gate 与 final-claim gate均不降低。
+
 ## 后续顺序
 
 保持低频监控，等待 screening 自然终态；随后按固定顺序执行：
