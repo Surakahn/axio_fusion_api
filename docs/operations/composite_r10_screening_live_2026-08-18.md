@@ -195,6 +195,21 @@ campaign state 更新为 `status=running`、`completed_unit_count=6/16`、
 screening、supervisor、lineage watcher 与正式 Fusion 服务均保持存活；transport
 admission、ranking、provider freeze、official import 和 target campaign 仍关闭。
 
+## 2026-08-19 03:26（CST）第九 serial unit 完成里程碑
+
+`livebench_official_final_text_slice_2026_08_14` 已自然终态：完整分母 `102/102`，
+`scored_case_count=102`、`transport_failure_count=0`、failure rate `0.0`，unit
+状态为 `completed`，mean score `0.813725490196`。该 unit 的完整分母和 safe
+content digest 已写入 r10 state，仍只可在 campaign terminal 后参与完整候选池转换，
+不能单独触发 ranking 或 superiority claim。
+
+campaign state 更新为 `status=running`、`completed_unit_count=7/16`、
+`failed_or_blocked_unit_count=2`、`ready_for_ranking=false`、
+`target_suite_calls_performed=false`。运行器已进入下一个
+`mmlu_pro_official_test_2026_07_20` serial unit，活动 checkpoint 当前为 `3/112`。
+screening、supervisor、lineage watcher 与正式 Fusion 服务均保持存活；transport
+admission、ranking、provider freeze、official import 和 target campaign 仍关闭。
+
 ## 后续顺序
 
 保持低频监控，等待 screening 自然终态；随后按固定顺序执行：
