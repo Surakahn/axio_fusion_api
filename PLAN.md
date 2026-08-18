@@ -33,10 +33,11 @@ manifest 作为不可变基础输入，但不复用任何 r9 binding 或质量�
 
 r10 live screening 已由 `setsid` 启动：screening PID `2281133`，supervisor PID
 `2283494`，lineage watcher 当前 PID `2365523`（旧 watcher 在审计修复后退出）。三者均
-绑定 r10 plan；已有两个 serial unit 完成（112/112 且 0 transport failure；102/102
-且 1 transport failure），campaign state 当前为 `running`、
-`completed_unit_count=2/16`；第三个 unit 已进入 2/102，当前两次请求均为 transport
-failure，尚未计入 terminal unit 统计。当前仍处于
+绑定 r10 plan；已有三个 serial unit 终态（112/112 且 0 transport failure；102/102
+且 1 transport failure并完成；102/102 且 102 transport failure并失败，reason 为
+`screening_unit_no_scores` 与 `screening_unit_transport_failure_rate_exceeded`）。
+campaign state 当前为 `running`、`completed_unit_count=2/16`、
+`failed_or_blocked_unit_count=1`；第四个 unit 已进入 4/112。当前仍处于
 screening gate，不能转换 transport/ranking/freeze/import 或 target。启动与监控记录见
 `docs/operations/composite_r10_screening_live_2026-08-18.md`。
 

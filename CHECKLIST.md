@@ -47,10 +47,12 @@
   supervisor（PID `2283494`）与 lineage watcher（当前 PID `2365523`；旧 PID
   `2284301` 在审计修复后退出）；命令行、日志和
   首个私有 checkpoint 已核对，保持单 worker 与 fail-fast transport gate。
-- [x] r10 已有两个 serial unit 完整终态：一个 112/112 且 0 个 transport failure，
-  一个 102/102 且 1 个 transport failure；完整失败分母已保留，campaign state 为
-  `running`、`completed_unit_count=2/16`。第三个 unit 当前 2/102，已有 2 个
-  transport failure 但尚未 terminal；`ready_for_ranking=false`、
+- [x] r10 已有三个 serial unit 完整终态：一个 112/112 且 0 个 transport failure，
+  一个 102/102 且 1 个 transport failure 并完成，另一个 102/102 且 102 个
+  transport failure 并失败（`screening_unit_no_scores`、
+  `screening_unit_transport_failure_rate_exceeded`）；完整失败分母已保留，campaign
+  state 为 `running`、`completed_unit_count=2/16`、`failed_or_blocked_unit_count=1`。
+  第四个 unit 当前 4/112；`ready_for_ranking=false`、
   `target_suite_calls_performed=false`。
 - [ ] 等待 r10 screening 自然 terminal；完整失败分母、target=false 和 state digest
   必须在 terminal 后核对，期间不得恢复 checkpoint 或启动 ranking。
