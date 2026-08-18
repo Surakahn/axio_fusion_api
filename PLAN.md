@@ -32,7 +32,8 @@ manifest 作为不可变基础输入，但不复用任何 r9 binding 或质量�
 `docs/operations/composite_r10_harness_successor_2026-08-18.md`。
 
 r10 live screening 已由 `setsid` 启动：screening PID `2281133`，supervisor PID
-`2283494`，lineage watcher PID `2284301`。三者均绑定 r10 plan；首个 serial unit 已
+`2283494`，lineage watcher 当前 PID `2365523`（旧 watcher 在审计修复后退出）。三者均
+绑定 r10 plan；首个 serial unit 已
 完成 102/102 case（101 completed、1 transport failure），campaign state 当前为
 `running`、`completed_unit_count=1/16`，第二个 unit 已进入 1/112。当前仍处于
 screening gate，不能转换 transport/ranking/freeze/import 或 target。启动与监控记录见

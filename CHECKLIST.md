@@ -44,7 +44,8 @@
 - [x] 对 r10 Harness 控制面执行 L1/L2 与专项回归；safe artifacts 不持久化 raw
   prompt、label、provider output、凭据或原始本地路径。
 - [x] 以 `setsid` 启动 r10 live non-target screening（PID `2281133`），并立即绑定
-  supervisor（PID `2283494`）与 lineage watcher（PID `2284301`）；命令行、日志和
+  supervisor（PID `2283494`）与 lineage watcher（当前 PID `2365523`；旧 PID
+  `2284301` 在审计修复后退出）；命令行、日志和
   首个私有 checkpoint 已核对，保持单 worker 与 fail-fast transport gate。
 - [x] r10 首个 serial unit 已完整终态：102/102 case，101 completed、1 个
   transport failure；完整失败分母已保留，campaign state 为 `running`、

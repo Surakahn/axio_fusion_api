@@ -7,7 +7,8 @@ live non-target screening。启动使用全新 r10 live state/private root：
 
 - screening PID：`2281133`，命令行持续包含 `baseline_screening_plan.r10.private.json`；
 - supervisor PID：`2283494`，仅等待 terminal 后执行 transport admission/ranking；
-- lineage watcher PID：`2284301`，只重建同 cohort hash-only binding/audit；
+- lineage watcher 当前 PID：`2365523`，只重建同 cohort hash-only binding/audit；旧 PID
+  `2284301` 已在 audit 修复后退出，screening 与 supervisor 未重启；
 - registry：当前 r7 probe-bound registry，文件 hash
   `7d0a9b78a06ea7445c43b7c03e15d6bbedb3112ecf8fb7d1ad041301678c1ad8`；
 - plan：r10 plan digest
@@ -34,6 +35,9 @@ supervisor 当前事件为 `screening_wait_started`，watcher 当前为
 `next_gate=screening`、`target_suite_calls_allowed=false`、
 `target_suite_calls_performed=false`。screening 期间禁止 ranking、provider freeze、
 official import 和 target campaign。
+
+watcher 已加载 `4d1abd6` 的审计修复；在 state 尚未物化的早期窗口，后续快照不再把
+`artifact_missing` 误报为 `screening_target_suite_calls_present`。
 
 ## 后续顺序
 
