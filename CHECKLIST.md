@@ -43,8 +43,11 @@
   6/6 pin ready，BFCL V3 marker 通过；控制面保持 `target_suite_calls_allowed=false`。
 - [x] 对 r10 Harness 控制面执行 L1/L2 与专项回归；safe artifacts 不持久化 raw
   prompt、label、provider output、凭据或原始本地路径。
-- [ ] 以 `setsid` 启动 r10 live non-target screening；启动后立即核对 PID、日志和
-  state 增长，保持单 worker 与 fail-fast transport gate。
+- [x] 以 `setsid` 启动 r10 live non-target screening（PID `2281133`），并立即绑定
+  supervisor（PID `2283494`）与 lineage watcher（PID `2284301`）；命令行、日志和
+  首个私有 checkpoint 已核对，保持单 worker 与 fail-fast transport gate。
+- [ ] 等待 r10 screening 自然 terminal；完整失败分母、target=false 和 state digest
+  必须在 terminal 后核对，期间不得恢复 checkpoint 或启动 ranking。
 - [ ] r10 transport admission 至少通过 3 个 canonical models 后，才执行完整-pool
   ranking；否则封存 r10 并继续 successor 路径。
 - [ ] ranking ready 后生成当前 registry 绑定的 provider baseline freeze，并完成

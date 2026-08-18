@@ -31,6 +31,12 @@ audit 仍按 screening/freeze/import 门禁保持 blocked，scaffold 的
 manifest 作为不可变基础输入，但不复用任何 r9 binding 或质量结果。详细证据见
 `docs/operations/composite_r10_harness_successor_2026-08-18.md`。
 
+r10 live screening 已由 `setsid` 启动：screening PID `2281133`，supervisor PID
+`2283494`，lineage watcher PID `2284301`。三者均绑定 r10 plan；首个私有 checkpoint
+已完成 9/102 case，尚未产生 terminal unit，当前仍处于 screening gate，不能转换
+transport/ranking/freeze/import 或 target。启动与监控记录见
+`docs/operations/composite_r10_screening_live_2026-08-18.md`。
+
 ### 当前执行与 Harness gate
 
 r9 live screening（PID `1772237`）已自然退出；同 cohort supervisor 和 lineage watcher
