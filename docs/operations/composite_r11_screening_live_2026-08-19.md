@@ -58,6 +58,12 @@ campaign state 当前为 `status=running`、`completed_unit_count=1/16`、
 `5eceb3f65cf1b432488a38da95295395c209cc5bf26a5861811eb525d758a236`。运行器已进入第三个
 112-case serial unit，screening/supervisor/watcher 均仍存活，target gate 不变。
 
+## 2026-08-19 06:57（CST）代码回归门禁
+
+针对本阶段 Harness scaffold 受控 pin 复用入口执行完整本地回归：`1066 passed, 7
+skipped`，耗时 289.73 秒；py_compile、导入检查和 composite 控制面专项测试此前均已
+通过。该回归不发起 provider 或 target 请求，也不修改 r11 screening state/checkpoint。
+
 ## 固定后续顺序
 
 ```text
