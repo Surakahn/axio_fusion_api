@@ -136,6 +136,34 @@ screening terminal
 在 screening terminal 之前不做 target 请求、不修改 frozen plan、不复用旧 cohort，
 也不对当前 partial evidence 作 superiority claim。
 
+## 2026-08-19 01:22（CST）terminal 后 freeze handoff 契约审计
+
+已复核 `scripts/continue_composite_convergence.py` 与 CLI 契约：supervisor 在
+screening terminal 后只自动执行 transport-only admission 和
+`baseline-screening-to-ranking`，不会自动生成 provider baseline freeze，也不会
+读取历史 ranking。ranking 输出必须是同一 r10 的完整候选池、两个 source family、
+固定 tie-break 和 identity binding 生成的 strict ranking v3 manifest；若任一 unit
+不是完整 `completed`，转换必须保持 blocked。
+
+terminal 后唯一允许的 freeze handoff 为：
+
+```text
+benchmark-provider-baseline-freeze
+  --registry <r10 probe-bound registry>
+  --transport-availability-file <r10 transport_admission>
+  --operational-admission-file <r7 operational_admission>
+  --provider-probe-evidence-audit <r7 provider_probe_evidence_audit>
+  --external-ranking-manifest <r10 ranking>
+  --max-provider-baselines 3
+```
+
+freeze 只有在 `final_claim_freeze_ready=true`、恰好 3 个非穷举 provider baseline、
+external top-three 预注册与 r10 registry/transport/ranking digest 全部一致时才可
+写入同 cohort 控制面；否则保留 blocked safe receipt，不降低门槛、不切换旧
+`external_provider_ranking.current.private.json`。freeze 成功后才重新运行
+`scripts/prepare_composite_harness.py`，再由同 cohort binding/convergence audit
+决定是否开放 target calls。
+
 ## 后续顺序
 
 保持低频监控，等待 screening 自然终态；随后按固定顺序执行：
