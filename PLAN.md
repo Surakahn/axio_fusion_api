@@ -17,6 +17,9 @@ transport admission、ranking 或 target 证据；本次只追加进度记录，
 00:29（CST）复核时活动 checkpoint 已推进至 `94/112`，仍未发现 transport failure；
 screening 尚未 terminal，后置转换继续由既有 supervisor 门禁控制。
 
+00:32（CST）复核时活动 checkpoint 已推进至 `100/112`，仍为 screening gate，未生成
+transport admission、ranking 或 target 证据。
+
 ### 已冻结的 route
 
 r8 与 r9 均已封存为只读证据，不能进入 ranking；r9 的 16 个 unit 已全部 terminal，
