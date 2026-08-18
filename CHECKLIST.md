@@ -15,6 +15,8 @@
   import audit 和 cohort binding；6/6 pin ready，BFCL V3 marker 通过。
 - [x] 启动 r9 lineage watcher（PID `1891818`），只写 hash-only binding/audit，
   `target_suite_calls_allowed=false`、`target_suite_calls_performed=false`。
+- [x] 对 r9 Harness 控制面执行 L1/L2 和专项回归：五个脚本通过 `py_compile` 与
+  导入检查，Harness/绑定/审计/监督器测试 `21 passed`。
 - [ ] 等待 screening 自然终态；终态前不得生成 ranking、provider freeze 或 target
   请求。
 - [ ] transport admission 至少通过 3 个 canonical models 后，才执行完整-pool
