@@ -34,9 +34,10 @@ official receipts 缺失而保持 blocked。当前 convergence audit 为
 
 正式 18900 serving 已从历史 noprefusion 进程切换为显式 r7 probe-bound pre-Fusion
 registry：当前 `scripts/run_server.py` PID 为 `1950874`，health 200/ready，21
-profiles、4 providers，network `auto`/`proxy`；四种 API route-plan dry-run 与三档
-模型角色分配已复核。该切换只影响本地 Fusion 网关，不停止 CPA Plus 正式服务，也
-不改变 r9 screening 的 registry/plan 输入。
+profiles、4 providers，network `auto`/`proxy`；标准入口
+`private/serving_registry.json` 也已原子指向同一 r7 artifact，四种 API route-plan
+dry-run 与三档模型角色分配已复核。该切换只影响本地 Fusion 网关，不停止 CPA Plus
+正式服务，也不改变 r9 screening 的 registry/plan 输入。
 
 ### 路由与验证规则
 

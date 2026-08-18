@@ -25,7 +25,8 @@
   一次超时 live smoke 仅保留诊断日志，不计入 benchmark/API 成功证据。
 - [x] 使用显式当前 pre-Fusion registry 通过 `scripts/run_server.py` 完成正式
   serving 切换（PID `1950874`）；切换前后只读 health、四格式 route-plan 和三个
-  公开模型 dry-run 均通过，18900 加载 21 profiles/4 providers，未停止 CPA Plus。
+  公开模型 dry-run 均通过，18900 加载 21 profiles/4 providers，标准
+  `private/serving_registry.json` 已原子指向同一 r7 artifact，未停止 CPA Plus。
 - [ ] 等待 screening 自然终态；终态前不得生成 ranking、provider freeze 或 target
   请求。
 - [ ] transport admission 至少通过 3 个 canonical models 后，才执行完整-pool

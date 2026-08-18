@@ -110,7 +110,9 @@ smoke 因 10 秒超时而断开，服务日志仅留下 BrokenPipe，不能当�
 
 正式切换已完成：保留旧 registry 文件及其 hash 作为回滚参照，优雅停止历史
 `run_server_noprefusion.py`，以 `setsid` 和显式 `AXIO_FUSION_REGISTRY_PATH` 启动
-`scripts/run_server.py`（当前 PID `1950874`）。切换后 health 为 HTTP 200/`ready`，
+`scripts/run_server.py`（当前 PID `1950874`）；同时原子更新标准入口
+`private/serving_registry.json` 指向同一 r7 artifact，后续标准启动不会回退到历史
+symlink。切换后 health 为 HTTP 200/`ready`，
 加载 21 profiles、4 providers，network 为 `auto`/`proxy`；`/v1/models` 仍只暴露
 `axio-fast`、`axio-terra`、`axio-pro`。Chat/Completions、Responses、Anthropic、
 Gemini 四种入口的 route-plan dry-run 均通过，三个公开模型的 strategy/role plan
