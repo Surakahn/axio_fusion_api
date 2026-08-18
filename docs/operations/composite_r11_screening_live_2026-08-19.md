@@ -64,6 +64,26 @@ campaign state 当前为 `status=running`、`completed_unit_count=1/16`、
 skipped`，耗时 289.73 秒；py_compile、导入检查和 composite 控制面专项测试此前均已
 通过。该回归不发起 provider 或 target 请求，也不修改 r11 screening state/checkpoint。
 
+## 2026-08-19 07:54（CST）连续 unit 里程碑
+
+r11 继续沿冻结 plan 串行推进，新增两个完整 unit 终态：
+
+- 第三个 unit：`102/102`，transport failure `0`，failure rate `0.0`，状态为
+  `completed`；
+- 第四个 unit：`112/112`，transport failure `112`，failure rate `1.0`，状态为
+  `failed`；完整失败分母和 fail-fast 未尝试 case 均保留在 operator-owned private
+  root，不恢复、不重试、不拼接。
+
+campaign state 当前为 `status=running`、`completed_unit_count=2/16`、
+`failed_or_blocked_unit_count=2`、`ready_for_ranking=false`、
+`target_suite_calls_performed=false`；本次 state 文件 SHA-256 为
+`516f2ad2f2e612f0b2f23086735dacf7a4eef999416e2ca68ab6397a6eac1d50`，campaign digest
+更新为 `68ffc3291b371660786b4ffc9c397a688c583a8e60627a472d9f825a2f2765f3`。
+
+运行器已进入第五个 serial unit；最新私有 checkpoint 仅完成 `16` 个 case，仍为
+partial，不能作为完整 unit 或 ranking 输入。transport admission、ranking、provider
+baseline freeze、official import 与 target 请求继续不存在。
+
 ## 固定后续顺序
 
 ```text
