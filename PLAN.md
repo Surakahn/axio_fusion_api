@@ -11,6 +11,9 @@ checkpoint 已推进至 `71/112`，当前已完成 case 未出现 transport fail
 进程仍存活且命令行绑定 frozen r10 plan。该快照只记录进度，不改变 plan、checkpoint、
 失败分母或任何后置 artifact。
 
+00:23（CST）复核时活动 checkpoint 已推进至 `84/112`，仍为 screening gate，未生成
+transport admission、ranking 或 target 证据；本次只追加进度记录，不改变任何冻结输入。
+
 ### 已冻结的 route
 
 r8 与 r9 均已封存为只读证据，不能进入 ranking；r9 的 16 个 unit 已全部 terminal，

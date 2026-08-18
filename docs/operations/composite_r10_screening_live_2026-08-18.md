@@ -50,6 +50,10 @@ watcher 已加载 `4d1abd6` 的审计修复；在 state 尚未物化的早期窗
 - 已完成 unit 的失败分母不变：`112/112` 且 0 失败、`102/102` 且 1 失败；失败 unit `102/102` 且 102 失败，完整失败证据继续只读保留。
 - supervisor 仍只等待 terminal；watcher 的当前 gate 仍为 `screening`，target、ranking、provider freeze 和 official import 均未启动。
 
+## 2026-08-19 00:23（CST）低频进度快照
+
+活动 checkpoint 已自然推进至 `84/112`，其中 84 个 case 均为 completed，当前 checkpoint 未出现 transport failure。campaign state 仍为 `running`、`completed_unit_count=2/16`、`failed_or_blocked_unit_count=1`、`ready_for_ranking=false`，`target_suite_calls_performed=false`；transport admission、ranking、provider freeze 和 screening receipt 仍未生成。
+
 ## 后续顺序
 
 保持低频监控，等待 screening 自然终态；随后按固定顺序执行：
