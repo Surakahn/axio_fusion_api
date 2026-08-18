@@ -2,6 +2,15 @@
 
 ## Composite cohort r10 当前主线（2026-08-18）
 
+### 2026-08-19 00:16 现场快照
+
+r10 live screening 仍在唯一主线的 screening gate：`status=running`、
+`completed_unit_count=2/16`、`failed_or_blocked_unit_count=1`、
+`ready_for_ranking=false`、`target_suite_calls_performed=false`。活动 unit 的
+checkpoint 已推进至 `71/112`，当前已完成 case 未出现 transport failure；三个后台
+进程仍存活且命令行绑定 frozen r10 plan。该快照只记录进度，不改变 plan、checkpoint、
+失败分母或任何后置 artifact。
+
 ### 已冻结的 route
 
 r8 与 r9 均已封存为只读证据，不能进入 ranking；r9 的 16 个 unit 已全部 terminal，

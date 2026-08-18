@@ -42,6 +42,14 @@ official import 和 target campaign。
 watcher 已加载 `4d1abd6` 的审计修复；在 state 尚未物化的早期窗口，后续快照不再把
 `artifact_missing` 误报为 `screening_target_suite_calls_present`。
 
+## 2026-08-19 00:16（CST）低频进度快照
+
+- 三个后台 PID 仍存活，screening 命令仍绑定 `baseline_screening_plan.r10.private.json`；18900 服务只读健康检查仍为 `ready`。
+- campaign state 仍为 `running`、`completed_unit_count=2/16`、`failed_or_blocked_unit_count=1`、`ready_for_ranking=false`，`target_suite_calls_performed=false`。
+- 当前活动 checkpoint 为 `0af6bdbc99f0dde29090bf1b0373393cc6f0a8fa488fdffb1e8495db9921aeac`，`expected_case_count=112`，已完成 `71/112`，已完成 case 的 transport failure 为 0；checkpoint 文件 mtime 在本快照前持续更新。
+- 已完成 unit 的失败分母不变：`112/112` 且 0 失败、`102/102` 且 1 失败；失败 unit `102/102` 且 102 失败，完整失败证据继续只读保留。
+- supervisor 仍只等待 terminal；watcher 的当前 gate 仍为 `screening`，target、ranking、provider freeze 和 official import 均未启动。
+
 ## 后续顺序
 
 保持低频监控，等待 screening 自然终态；随后按固定顺序执行：
