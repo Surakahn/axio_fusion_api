@@ -81,6 +81,20 @@ campaign state 更新为 `completed_unit_count=4/16`、`failed_or_blocked_unit_c
 watcher 和正式 Fusion 服务均保持存活，transport admission、ranking、provider freeze、
 official import 与 target campaign 继续关闭。
 
+## 2026-08-19 01:01（CST）第六个 serial unit transport 阻断里程碑
+
+第六个 serial unit 已自然终态但未通过 transport gate：完整分母为 `112/112`，其中
+`scored_case_count=6`、`transport_failure_count=106`，unit 状态为 `failed`，唯一
+reason 为 `screening_unit_transport_failure_rate_exceeded`。该失败 unit 的全部
+unattempted/failed 分母和分类遥测永久保留在 operator-owned private root；不恢复
+checkpoint、不传 `--retry-failed`、不把 6 个 scored case 作为可排名结果。
+
+campaign state 更新为 `completed_unit_count=4/16`、`failed_or_blocked_unit_count=2`，
+仍为 `running`、`ready_for_ranking=false`、`target_suite_calls_performed=false`。
+运行器已按 frozen schedule 进入下一个 serial unit；supervisor 仍只等待 campaign
+terminal，transport admission、ranking、provider freeze、official import 与 target
+campaign 继续关闭。
+
 ## 后续顺序
 
 保持低频监控，等待 screening 自然终态；随后按固定顺序执行：
