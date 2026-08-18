@@ -68,6 +68,19 @@ watcher 已加载 `4d1abd6` 的审计修复；在 state 尚未物化的早期窗
 
 运行器已按 frozen schedule 进入下一 serial unit `livebench_official_final_text_slice_2026_08_14`，其活动 checkpoint 当前为 `3/102`；因此完整 screening 尚未 terminal，transport admission、ranking、provider freeze 和 target 继续关闭。
 
+## 2026-08-19 00:53（CST）第五个 serial unit 完成里程碑
+
+第五个 serial unit 已自然终态：`102/102`，`scored_case_count=101`，
+`transport_failure_count=1`，failure rate 为 `0.009803921569`，低于预注册的
+`0.02` transport gate，unit 状态为 `completed`。完整 102-case 分母和失败遥测继续保留
+在 operator-owned private root，safe receipt 不包含原始 provider 输出。
+
+campaign state 更新为 `completed_unit_count=4/16`、`failed_or_blocked_unit_count=1`，
+仍为 `running`、`ready_for_ranking=false`、`target_suite_calls_performed=false`。
+运行器已按 frozen schedule 进入第六个 serial unit（`1/112`）；supervisor、lineage
+watcher 和正式 Fusion 服务均保持存活，transport admission、ranking、provider freeze、
+official import 与 target campaign 继续关闭。
+
 ## 后续顺序
 
 保持低频监控，等待 screening 自然终态；随后按固定顺序执行：
