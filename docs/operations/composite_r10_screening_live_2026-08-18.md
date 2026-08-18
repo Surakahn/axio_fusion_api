@@ -322,6 +322,24 @@ campaign state 已更新为 `status=running`、`completed_unit_count=11/16`、
 screening、supervisor、lineage watcher 与正式 Fusion 服务均保持存活，transport
 admission、ranking、provider freeze、official import 和 target campaign 继续关闭。
 
+## 2026-08-19 05:32（CST）新增 transport-blocked unit 里程碑
+
+随后一个 `mmlu_pro_official_test_2026_07_20` serial unit 已完整终态但未通过
+transport gate：完整分母 `112/112`，`scored_case_count=0`、
+`transport_failure_count=112`、failure rate `1.0`，其中 fail-fast 已在 3 次上游
+HTTP 500 后触发，剩余 `109` 个 case 保留为未尝试 transport failure；unit 状态为
+`failed`，reason 为 `screening_unit_no_scores` 与
+`screening_unit_transport_failure_rate_exceeded`。完整失败分母、HTTP 状态分类和
+private checkpoint 均保留，不能恢复、重试、拼接 scored subset 或把该 unit 当作质量
+排名证据。
+
+campaign state 当前为 `status=running`、`completed_unit_count=11/16`、
+`failed_or_blocked_unit_count=3`、`ready_for_ranking=false`、
+`target_suite_calls_performed=false`。运行器已按 frozen schedule 进入新的
+`livebench_official_final_text_slice_2026_08_14` serial unit，当前 checkpoint 为
+`18/102` 且暂无 transport failure；screening 尚未 terminal，后置 transport admission、
+ranking、provider freeze、official import 和 target campaign 继续关闭。
+
 ## 后续顺序
 
 保持低频监控，等待 screening 自然终态；随后按固定顺序执行：
