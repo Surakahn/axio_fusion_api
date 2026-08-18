@@ -34,8 +34,17 @@
   ranking、provider freeze 或 target 请求。
 - [x] 完成 r9 supervisor receipt 与 lineage watcher 最终 hash-only audit；
   `target_suite_calls_allowed=false`、`final_claim_allowed=false`。
-- [ ] 创建新的 r10 source successor，仅改变 selection seed/registration date；不恢复
+- [x] 创建新的 r10 source successor，仅改变 selection seed/registration date；不恢复
   r9、不拼接 completed subset。
+- [x] 完成 r10 zero-network preflight：8 canonical groups、2 source families、16
+  serial units、`max_workers=1`，provider/target calls 均为 0。
+- [x] 还原并验证真实 pinned Harness/raw/BFCL V3 roots；独立物化 r10 pin、acquisition
+  checklist、execution plan、import audit、cohort binding 和 convergence audit。
+  6/6 pin ready，BFCL V3 marker 通过；控制面保持 `target_suite_calls_allowed=false`。
+- [x] 对 r10 Harness 控制面执行 L1/L2 与专项回归；safe artifacts 不持久化 raw
+  prompt、label、provider output、凭据或原始本地路径。
+- [ ] 以 `setsid` 启动 r10 live non-target screening；启动后立即核对 PID、日志和
+  state 增长，保持单 worker 与 fail-fast transport gate。
 - [ ] r10 transport admission 至少通过 3 个 canonical models 后，才执行完整-pool
   ranking；否则封存 r10 并继续 successor 路径。
 - [ ] ranking ready 后生成当前 registry 绑定的 provider baseline freeze，并完成

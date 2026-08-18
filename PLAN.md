@@ -23,6 +23,14 @@ seed，保留两套独立 source family、`max_workers=1`、fail-fast transport 
 输入；r9 终态与 successor 决策见
 `docs/operations/composite_r9_screening_terminal_2026-08-18.md`。
 
+r10 Harness 控制面已独立物化：6/6 pin ready、BFCL V3 marker 通过，official execution
+plan 为 `ready_to_execute`；acquisition/import audit、cohort binding 和 convergence
+audit 仍按 screening/freeze/import 门禁保持 blocked，scaffold 的
+`target_suite_calls_allowed=false`、`target_suite_calls_performed=false`、
+`provider_calls_performed=false`。本阶段使用已验证的 r7 21-suite dataset/source/case
+manifest 作为不可变基础输入，但不复用任何 r9 binding 或质量结果。详细证据见
+`docs/operations/composite_r10_harness_successor_2026-08-18.md`。
+
 ### 当前执行与 Harness gate
 
 r9 live screening（PID `1772237`）已自然退出；同 cohort supervisor 和 lineage watcher
@@ -61,6 +69,7 @@ target score 填充。只有 convergence audit 明确返回 `ready_for_target_ca
   statistical/latency/contamination audit 和最终 completion audit。
 
 详细 hash、Harness stage 和运行路径见
+`docs/operations/composite_r10_harness_successor_2026-08-18.md`；r9 控制面历史记录仍见
 `docs/operations/composite_r9_harness_successor_2026-08-18.md`。
 
 ## Composite successor intake（2026-08-17）
