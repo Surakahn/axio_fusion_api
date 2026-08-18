@@ -289,6 +289,23 @@ provider freeze 或 Harness target。
 immutable successor source manifest，重新执行 admission、完整 screening 和同 cohort
 Harness binding。三模型 transport gate 与 final-claim gate均不降低。
 
+## 2026-08-19 04:54（CST）续接运行态审计
+
+续接时重新核对 `AGENTS.md`、handoff、`PLAN.md`、r10 state 与控制面：screening PID
+`2281133`、supervisor PID `2283494`、lineage watcher PID `2365523` 均存活，命令行仍
+绑定同一个 frozen r10 plan；正式 `18900/health` 仍为 `ready`，公开模型为
+`axio-fast/axio-terra/axio-pro`，四种 API 格式和 `auto -> proxy` 网络均正常。
+
+campaign state 当前为 `status=running`、`completed_unit_count=10/16`、
+`failed_or_blocked_unit_count=2`、`ready_for_ranking=false`、
+`target_suite_calls_performed=false`。活动 `livebench_official_final_text_slice_2026_08_14`
+checkpoint 已推进至 `23/102`，当前暂无 transport failure；campaign/unit digest 与
+plan/registry/source 绑定保持稳定，全部私有输出和凭据隔离不变。
+
+本次只读控制面复核还确认 Harness 为 `6/6 pin ready` 但 cohort 仍 blocked；脚本
+`py_compile` 与实际公开符号导入检查通过。没有恢复 checkpoint、修改 frozen plan、
+重复启动 screening 或发起 target 调用。
+
 ## 后续顺序
 
 保持低频监控，等待 screening 自然终态；随后按固定顺序执行：
