@@ -1,5 +1,28 @@
 # Axio Fusion API Plan
 
+## Composite cohort r10 终态与 r11 successor（2026-08-19）
+
+r10 已自然终态：16/16 unit terminal、13 completed、3 failed，campaign 为 `partial`。
+transport-only admission 通过（6/8 canonical eligible，严格使用
+`transport_failure_rate_only`），但 complete-pool ranking 被不完整 unit/source coverage
+门禁拒绝；因此 r10 不产生 ranking、provider freeze、official import 或 target 授权。详细
+digest 与失败分母见
+`docs/operations/composite_r10_screening_terminal_2026-08-19.md`。
+
+当前主线已切换为全新的 immutable r11 successor：仅改变 source manifest 的 selection
+seed 和 registration date，不恢复或拼接 r10 checkpoint/completed subset，也不复用 r10
+transport/ranking/binding。固定顺序为：
+
+```text
+r11 source successor -> frozen screening plan -> zero-network preflight
+-> live non-target screening -> transport admission -> complete-pool ranking
+-> provider baseline freeze -> same-cohort official import -> convergence audit
+-> 21-suite target campaign
+```
+
+在 r11 convergence audit 返回 `ready_for_target_campaign` 前，target calls、provider
+baseline freeze、official import 和 superiority claim 均保持关闭。
+
 ## Composite cohort r10 当前主线（2026-08-18）
 
 ### 2026-08-19 00:16 现场快照
