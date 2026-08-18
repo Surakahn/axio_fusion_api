@@ -25,6 +25,13 @@
 缺少 manifest 参数误报为 dataset/case-hash blocker。剩余阻断均是预期的 screening
 未终态、ranking/freeze 尚不存在和 official import 尚未完成。
 
+另已为 r8 生成独立的 provider probe evidence audit，safe artifact
+`private/runs/2026-08-18-composite-cohort-r8/provider_probe_evidence_audit.r8.safe.json`，
+其内容 hash 为
+`62dda93d403701b9f6f06b0082a90300f80d63d23be51fce7e0cddd7ae1ef35b`，
+`status=ready`、`ready=true`。该 receipt 只验证 probe/registry 的 hash-bound 证据和
+敏感字段隔离，不能替代外部排名、transport admission 或 provider baseline freeze。
+
 ## 绑定规则
 
 该 scaffold 只属于 r8 successor，输入绑定 r8 plan digest
