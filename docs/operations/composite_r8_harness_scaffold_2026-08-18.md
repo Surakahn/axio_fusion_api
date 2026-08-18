@@ -16,9 +16,14 @@
 - acquisition status、official import audit 和 cohort binding 仍未 ready；
 - convergence audit 为 `running`，`next_gate=screening`；
 - scaffold receipt hash
-  `444b11b70ad244491d774b1cbb4b23ee783a91a8a7c846527ac6fe8442cb3886`；
+  `bb0e68a2d3fd1e69650f01aac9cfcf188b30f4912b4c31306e5c0fe0c8adddd6`；
 - `target_suite_calls_allowed=false`、`target_suite_calls_performed=false`、
   `provider_calls_performed=false`。
+
+本次重建显式绑定既有 21-suite dataset manifest 和 case manifest
+`ca4b319b594a8a8cb13bcfe27805d37edf02d130a979d6333a93ab3f7d1f4106`，因此不再把
+缺少 manifest 参数误报为 dataset/case-hash blocker。剩余阻断均是预期的 screening
+未终态、ranking/freeze 尚不存在和 official import 尚未完成。
 
 ## 绑定规则
 
