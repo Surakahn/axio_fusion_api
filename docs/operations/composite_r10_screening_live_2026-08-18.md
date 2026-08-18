@@ -164,6 +164,21 @@ external top-three 预注册与 r10 registry/transport/ranking digest 全部一�
 `scripts/prepare_composite_harness.py`，再由同 cohort binding/convergence audit
 决定是否开放 target calls。
 
+## 2026-08-19 01:44（CST）第七 serial unit 完成里程碑
+
+`livebench_official_final_text_slice_2026_08_14` 已自然终态：完整分母 `102/102`，
+`scored_case_count=101`、`transport_failure_count=1`、failure rate
+`0.009803921569`，unit 状态为 `completed`，mean score `0.80198019802`。该 unit 的
+完整分母和失败分类遥测已写入 r10 private evidence；它可在 campaign terminal 后
+参与完整候选池转换，但当前仍不能单独触发 ranking 或 superiority claim。
+
+campaign state 随之更新为 `status=running`、`completed_unit_count=5/16`、
+`failed_or_blocked_unit_count=2`、`ready_for_ranking=false`、
+`target_suite_calls_performed=false`。运行器已按 frozen schedule 进入下一个
+`mmlu_pro_official_test_2026_07_20` serial unit，活动 checkpoint 为 `1/112`；
+supervisor、watcher、transport admission、ranking、provider freeze 和 target
+继续保持关闭。
+
 ## 后续顺序
 
 保持低频监控，等待 screening 自然终态；随后按固定顺序执行：
