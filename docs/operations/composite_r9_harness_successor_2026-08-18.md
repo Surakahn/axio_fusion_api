@@ -92,6 +92,27 @@ digest 和 cohort binding 都是独立生成的；因此 Harness 不能通过复
 获得授权。所有 safe artifact 均不持久化 raw prompt、label、provider output、URL、
 credential 或 API key。
 
+## Serving registry 核对
+
+本轮只读 health 检查还发现正式 18900 进程仍为历史
+`scripts/run_server_noprefusion.py`，其 registry 文件 hash 为
+`09f79d3a869f81aec67036504b90ca091005dbf03d41f3b38e4db184b5268723`，加载 28 个
+profile；同一文件在 `require_prefusion=true` 下会被拒绝。这是已有 serving 漂移，
+不是 r9 Harness 写入造成的，因此当前 health 的 `ready` 不能替代正式 pre-Fusion
+serving gate。
+
+作为不打断 18900 的只读 staging 核验，r7 probe-bound registry
+（文件 hash `7d0a9b78a06ea7445c43b7c03e15d6bbedb3112ecf8fb7d1ad041301678c1ad8`）在
+备用 18901 端口通过 `require_prefusion=true` 加载，21 profiles、4 providers、5
+fast candidates，health 返回 200/ready；staging 随后已停止。一次客户端 live chat
+smoke 因 10 秒超时而断开，服务日志仅留下 BrokenPipe，不能当作质量或 API 成功证据，
+也没有进入 target benchmark。
+
+正式切换必须使用显式 `AXIO_FUSION_REGISTRY_PATH` 的 `scripts/run_server.py`，先对
+当前 registry 做只读 pre-Fusion 验证，再通过原子配置替换和最小化服务窗口完成；在
+切换前不停止 CPA Plus 正式服务，也不把旧 28-profile serving 结果带入 baseline
+freeze 或 superiority claim。
+
 ## 后续决策路径
 
 1. screening 自然终态后，监督器生成 r9 transport receipt；只有 `status=ready` 且

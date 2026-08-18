@@ -17,6 +17,14 @@
   `target_suite_calls_allowed=false`、`target_suite_calls_performed=false`。
 - [x] 对 r9 Harness 控制面执行 L1/L2 和专项回归：五个脚本通过 `py_compile` 与
   导入检查，Harness/绑定/审计/监督器测试 `21 passed`。
+- [x] 只读核对 18900 serving 身份：发现历史 `run_server_noprefusion.py` 与旧
+  28-profile registry；该 registry 在 `require_prefusion=true` 下 fail-closed，
+  不作为正式 serving 或 baseline 输入。
+- [x] 在备用 18901 端口验证 r7 probe-bound registry 的 pre-Fusion 加载与 health
+  200/ready（21 profiles、4 providers、5 fast candidates），随后停止 staging；
+  一次超时 live smoke 仅保留诊断日志，不计入 benchmark/API 成功证据。
+- [ ] 使用显式当前 pre-Fusion registry 通过 `scripts/run_server.py` 完成正式
+  serving 切换，并在切换前后做只读 health、四格式协议和 dry-run route-plan 验证。
 - [ ] 等待 screening 自然终态；终态前不得生成 ranking、provider freeze 或 target
   请求。
 - [ ] transport admission 至少通过 3 个 canonical models 后，才执行完整-pool
