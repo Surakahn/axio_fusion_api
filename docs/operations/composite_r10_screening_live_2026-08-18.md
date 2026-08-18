@@ -95,6 +95,47 @@ campaign state 更新为 `completed_unit_count=4/16`、`failed_or_blocked_unit_c
 terminal，transport admission、ranking、provider freeze、official import 与 target
 campaign 继续关闭。
 
+## 2026-08-19 01:16（CST）运行态审计与第七单元快照
+
+本次 continuation 对 r10 进行了只读 intake audit：screening PID `2281133`、
+convergence supervisor PID `2283494`、lineage watcher PID `2365523` 均存活，命令行仍
+绑定同一 r10 immutable plan；正式 `18900/health` 返回 `ready`，`model_count=21`、
+公开模型为 `axio-fast/axio-terra/axio-pro`，网络仍为 `auto -> proxy`，敏感字段继续
+全部为 `false`。当前状态仍为 `running`、`completed_unit_count=4/16`、
+`failed_or_blocked_unit_count=2`、`ready_for_ranking=false`、
+`target_suite_calls_performed=false`。
+
+当前活动 `livebench_official_final_text_slice_2026_08_14` checkpoint 已推进到
+`35/102`，已完成 case 暂无 transport failure；该 checkpoint 仍属于 private recovery
+root，不能作为排名或分数证据。已有 6 个终态 unit 的完整分母、失败分类遥测和 content
+digest 保持只读；失败 unit 不恢复、不重试、不拼接进 ranking。
+
+控制面回归同时完成：Harness scaffold/binding、convergence supervisor、official
+campaign 相关测试 `19 passed`，`prepare_composite_harness.py`、binding/audit/watcher
+等 5 个脚本通过 Python 3.11 `py_compile`。这只确认控制面结构可执行，不改变
+`target_suite_calls_allowed=false`。
+
+## 研究与推进闸门
+
+当前可信锚点为 r10 的 immutable plan、registry/source digest、private screening
+证据和 6/6 Harness pin/execution plan；transport admission、完整候选池 ranking、
+provider baseline freeze、同 cohort official import 和 convergence audit 仍未完成，
+历史 r8/r9 结果只能作 reference-only。后续严格按以下顺序推进：
+
+```text
+screening terminal
+  -> transport-only admission（至少 3 个 canonical models）
+  -> complete-pool ranking
+  -> provider baseline freeze
+  -> 同 cohort official import/audit
+  -> convergence audit = ready_for_target_campaign
+  -> 21-suite target、四格式 parity、统计/延迟/污染审计
+  -> completion audit
+```
+
+在 screening terminal 之前不做 target 请求、不修改 frozen plan、不复用旧 cohort，
+也不对当前 partial evidence 作 superiority claim。
+
 ## 后续顺序
 
 保持低频监控，等待 screening 自然终态；随后按固定顺序执行：
