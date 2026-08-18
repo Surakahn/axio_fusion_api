@@ -340,6 +340,22 @@ campaign state 当前为 `status=running`、`completed_unit_count=11/16`、
 `18/102` 且暂无 transport failure；screening 尚未 terminal，后置 transport admission、
 ranking、provider freeze、official import 和 target campaign 继续关闭。
 
+## 2026-08-19 05:48（CST）最新 LiveBench unit 完成里程碑
+
+最新 `livebench_official_final_text_slice_2026_08_14` serial unit 已自然终态：完整分母
+`102/102`，`scored_case_count=101`、`transport_failure_count=1`、failure rate
+`0.009803921569`，低于预注册的 `0.02` transport gate，unit 状态为 `completed`，
+mean score `0.80198019802`，p50/p95 latency 为 `11126.575/57258.982 ms`。该 unit
+完整分母、失败分类和 safe content digest 已写入 r10 private state；它仍不能单独触发
+ranking 或 superiority claim。
+
+campaign state 已更新为 `status=running`、`completed_unit_count=12/16`、
+`failed_or_blocked_unit_count=3`、`ready_for_ranking=false`、
+`target_suite_calls_performed=false`。运行器已进入最后的
+`mmlu_pro_official_test_2026_07_20` serial unit，当前 checkpoint 为 `14/112`，
+暂无 transport failure；screening 尚未 terminal，transport admission、ranking、
+provider freeze、official import 和 target campaign 继续关闭。
+
 ## 后续顺序
 
 保持低频监控，等待 screening 自然终态；随后按固定顺序执行：
