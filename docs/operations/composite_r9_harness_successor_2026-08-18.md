@@ -55,6 +55,9 @@ provider probe 和 r7 operational admission 作为 transport 输入；这些输�
 - convergence supervisor PID：`1877375`，间隔 600 秒，只等待 screening terminal，
   然后依次执行 transport admission 和 ranking conversion；它不会恢复进程、修改
   frozen plan 或启动 target campaign。
+- lineage watcher PID：`1891818`，间隔 600 秒重建同一 cohort 的 hash-only binding
+  和 convergence audit；screening 运行期间只输出安全快照，终态后输出一次最终
+  快照并退出，不执行 provider 或 target 请求。
 - 当前 live state 文件 hash：
   `7a5f6d313b80a17f641493f1a2d77467b77d82d3af2f0af356f27af0dc8cf68f`；状态为
   `running`，尚未允许 ranking，`target_suite_calls_performed=false`。
