@@ -23,10 +23,11 @@ live non-target screening。启动使用全新 r10 live state/private root：
 ## 当前进度
 
 启动命令使用 `setsid nohup`，screening 与两个监督进程均已脱离终端托管。首个 serial
-unit 已完整执行并安全归档：102/102 个 case 中 101 个正常完成、1 个 transport
-failure，完整失败分母已保留。campaign live state 已物化为 `running`，当前
-`completed_unit_count=1/16`、`failed_or_blocked_unit_count=0`；第二个 serial unit
-已启动并进入 provider 调用，其活动 checkpoint 当前为 1/112。checkpoint 只在
+已有两个 serial unit 完整执行并安全归档：一个为 112/112 且 0 个 transport failure，
+另一个为 102/102 且 1 个 transport failure，完整失败分母均已保留。campaign live
+state 当前为 `running`，`completed_unit_count=2/16`、`failed_or_blocked_unit_count=0`；
+第三个 serial unit 已启动并进入 provider 调用，其活动 checkpoint 当前为 2/102，
+其中两次请求均为 transport failure，尚未计入 terminal unit 统计。checkpoint 只在
 operator-owned private root 保存 provider 原始恢复数据，safe receipt 不包含这些内容。
 screening 尚未达到 campaign terminal，`ready_for_ranking=false`；当前进度不产生
 ranking、provider freeze 或质量结论。
