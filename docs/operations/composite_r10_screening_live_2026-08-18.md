@@ -179,6 +179,22 @@ campaign state 随之更新为 `status=running`、`completed_unit_count=5/16`、
 supervisor、watcher、transport admission、ranking、provider freeze 和 target
 继续保持关闭。
 
+## 2026-08-19 02:39（CST）第八 serial unit 完成里程碑
+
+`mmlu_pro_official_test_2026_07_20` 已自然终态：完整分母 `112/112`，
+`scored_case_count=110`、`transport_failure_count=2`、failure rate
+`0.017857142857`，低于预注册的 `0.02` transport gate，因此 unit 状态为
+`completed`，`fail_fast_unattempted_case_count=0`。两个 timeout 的失败分类和完整
+分母继续保留在 operator-owned private root；不读取其答案内容作为 transport admission
+依据。
+
+campaign state 更新为 `status=running`、`completed_unit_count=6/16`、
+`failed_or_blocked_unit_count=2`、`ready_for_ranking=false`、
+`target_suite_calls_performed=false`。运行器已进入第九个 serial unit
+`livebench_official_final_text_slice_2026_08_14`，活动 checkpoint 当前为 `1/102`。
+screening、supervisor、lineage watcher 与正式 Fusion 服务均保持存活；transport
+admission、ranking、provider freeze、official import 和 target campaign 仍关闭。
+
 ## 后续顺序
 
 保持低频监控，等待 screening 自然终态；随后按固定顺序执行：
