@@ -359,7 +359,11 @@ def audit_cohort(args: argparse.Namespace) -> dict[str, Any]:
     pre_target_ready = all(stage["status"] == "ready" for stage in stages[:9])
     any_running = any(stage["status"] == "running" for stage in stages)
     state = _read_object(args.state) or {}
-    target_calls_present = state.get("target_suite_calls_performed") is not False
+    # 缺失 state 只说明 screening artifact 尚未物化；不能把空对象误报为已发生
+    # target 调用。只要已有 state 但 flag 缺失，仍按 fail-closed 处理。
+    target_calls_present = bool(state) and (
+        state.get("target_suite_calls_performed") is not False
+    )
     reason_codes = {reason for stage in stages for reason in stage["reason_codes"]}
     if target_calls_present:
         reason_codes.add("screening_target_suite_calls_present")

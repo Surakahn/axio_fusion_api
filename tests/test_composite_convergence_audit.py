@@ -108,6 +108,18 @@ def test_running_screening_is_visible_without_claim_admission(tmp_path: Path) ->
     assert str(args.registry) not in encoded
 
 
+def test_missing_screening_state_does_not_imply_target_calls(tmp_path: Path) -> None:
+    args = _args(tmp_path)
+    args.state.unlink()
+
+    result = audit.audit_cohort(args)
+
+    assert result["status"] == "blocked"
+    assert result["target_suite_calls_allowed"] is False
+    assert "artifact_missing" in result["reason_codes"]
+    assert "screening_target_suite_calls_present" not in result["reason_codes"]
+
+
 def test_missing_binding_inputs_fail_closed_without_exception(tmp_path: Path) -> None:
     args = _args(tmp_path)
     _write(args.plan, {"ready": True, "plan_digest_sha256": "plan-digest"})
