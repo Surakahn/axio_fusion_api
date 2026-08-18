@@ -306,6 +306,22 @@ plan/registry/source 绑定保持稳定，全部私有输出和凭据隔离不�
 `py_compile` 与实际公开符号导入检查通过。没有恢复 checkpoint、修改 frozen plan、
 重复启动 screening 或发起 target 调用。
 
+## 2026-08-19 05:31（CST）新增 serial unit 完成里程碑
+
+活动 `livebench_official_final_text_slice_2026_08_14` serial unit 已自然终态：完整
+分母 `102/102`，`scored_case_count=102`、`transport_failure_count=0`、failure rate
+`0.0`，unit 状态为 `completed`，mean score `0.833333333333`，p50/p95 latency
+分别为 `26179.461/42171.016 ms`。完整分母、失败遥测和 safe content digest 已写入
+r10 private state；该结果仍只能在整个 campaign terminal 后参与完整候选池转换，不能
+单独触发 ranking 或 superiority claim。
+
+campaign state 已更新为 `status=running`、`completed_unit_count=11/16`、
+`failed_or_blocked_unit_count=2`、`ready_for_ranking=false`、
+`target_suite_calls_performed=false`。运行器已进入新的
+`mmlu_pro_official_test_2026_07_20` serial unit；当前 checkpoint 为 `0/112`。
+screening、supervisor、lineage watcher 与正式 Fusion 服务均保持存活，transport
+admission、ranking、provider freeze、official import 和 target campaign 继续关闭。
+
 ## 后续顺序
 
 保持低频监控，等待 screening 自然终态；随后按固定顺序执行：
