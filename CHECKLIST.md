@@ -1,5 +1,30 @@
 # Axio Fusion API Checklist
 
+## Composite cohort r9 Harness successor（2026-08-18）
+
+- [x] 保留 r8 全部只读终态证据；不恢复 r8 plan、checkpoint、completed subset、
+  ranking 或 Harness binding。
+- [x] 注册 r9 source successor，使用新的 selection seed；source receipt 与 plan
+  digest 独立绑定。
+- [x] 生成 r9 immutable screening plan：8 canonical groups、9 physical profiles、
+  2 source families、16 serial units、`max_workers=1`；zero-network preflight
+  为 `preflight_ready`，provider/target calls 均为 0。
+- [x] 以 `setsid` 启动 r9 live non-target screening（PID `1772237`），并以 600 秒
+  低频间隔启动 convergence supervisor（PID `1877375`）；未修改 frozen plan。
+- [x] 独立物化 r9 Harness pin、acquisition checklist、official execution plan、
+  import audit 和 cohort binding；6/6 pin ready，BFCL V3 marker 通过。
+- [x] 启动 r9 lineage watcher（PID `1891818`），只写 hash-only binding/audit，
+  `target_suite_calls_allowed=false`、`target_suite_calls_performed=false`。
+- [ ] 等待 screening 自然终态；终态前不得生成 ranking、provider freeze 或 target
+  请求。
+- [ ] transport admission 至少通过 3 个 canonical models 后，才执行完整-pool
+  ranking；不满足则保留 r9 终态并创建 r10 successor。
+- [ ] ranking ready 后生成当前 registry 绑定的 provider baseline freeze，并完成
+  21-suite official/audited import receipts。
+- [ ] convergence audit 返回 `ready_for_target_campaign` 后，才运行正式 target
+  campaign、四种 API parity、paired statistical/latency/contamination audit，
+  并检查三档 Fusion 对应单模型基线的优越性。
+
 ## Composite successor intake（2026-08-17）
 
 - [x] 读取当前 handoff、计划、Git、服务健康和 r2 screening state；确认工作树与
