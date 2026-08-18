@@ -108,10 +108,15 @@ fast candidates，health 返回 200/ready；staging 随后已停止。一次客�
 smoke 因 10 秒超时而断开，服务日志仅留下 BrokenPipe，不能当作质量或 API 成功证据，
 也没有进入 target benchmark。
 
-正式切换必须使用显式 `AXIO_FUSION_REGISTRY_PATH` 的 `scripts/run_server.py`，先对
-当前 registry 做只读 pre-Fusion 验证，再通过原子配置替换和最小化服务窗口完成；在
-切换前不停止 CPA Plus 正式服务，也不把旧 28-profile serving 结果带入 baseline
-freeze 或 superiority claim。
+正式切换已完成：保留旧 registry 文件及其 hash 作为回滚参照，优雅停止历史
+`run_server_noprefusion.py`，以 `setsid` 和显式 `AXIO_FUSION_REGISTRY_PATH` 启动
+`scripts/run_server.py`（当前 PID `1950874`）。切换后 health 为 HTTP 200/`ready`，
+加载 21 profiles、4 providers，network 为 `auto`/`proxy`；`/v1/models` 仍只暴露
+`axio-fast`、`axio-terra`、`axio-pro`。Chat/Completions、Responses、Anthropic、
+Gemini 四种入口的 route-plan dry-run 均通过，三个公开模型的 strategy/role plan
+与 r7 registry 一致。切换未停止 CPA Plus 正式服务，也未将旧 28-profile serving
+结果带入 baseline freeze 或 superiority claim；此次验证不包含 provider live smoke
+或 target-suite 请求。
 
 ## 后续决策路径
 
