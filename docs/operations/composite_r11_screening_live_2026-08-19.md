@@ -46,6 +46,18 @@ lineage watcher 当前 audit SHA-256：
 前不生成 transport admission、ranking、provider baseline freeze、official import 或
 target 请求。
 
+## 2026-08-19 06:48（CST）第二个 serial unit 完成
+
+第二个 serial unit 已自然终态：完整分母 `102/102`，transport failure `0`，failure rate
+`0.0`，unit 状态为 `completed`。第一个 unit 仍为 `failed`（112/112 transport failure，
+109 个 fail-fast 未尝试 case），两者均继续保留完整分母和私有 checkpoint 证据。
+
+campaign state 当前为 `status=running`、`completed_unit_count=1/16`、
+`failed_or_blocked_unit_count=1`、`ready_for_ranking=false`、
+`target_suite_calls_performed=false`；campaign digest 已更新为
+`5eceb3f65cf1b432488a38da95295395c209cc5bf26a5861811eb525d758a236`。运行器已进入第三个
+112-case serial unit，screening/supervisor/watcher 均仍存活，target gate 不变。
+
 ## 固定后续顺序
 
 ```text
@@ -57,4 +69,3 @@ screening terminal -> transport admission (failure-rate only)
 
 若 r11 仍为 partial 或 complete-pool ranking 被拒绝，保留完整分母并创建新的 immutable
 successor；不降低固定 3-model gate，不选择 completed subset，不声明 superiority。
-
