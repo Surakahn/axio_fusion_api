@@ -1,5 +1,59 @@
 # Axio Fusion API Plan
 
+## Composite cohort r9 当前主线（2026-08-18）
+
+### 已冻结的 route
+
+r8 已经是 `partial`，其 16 个 unit 中 7 个失败，不能进入 ranking；r8 的所有
+plan、checkpoint、completed subset、ranking 和 Harness binding 仅作只读证据。当前
+唯一主线是 r9 immutable successor：
+
+```text
+r9 source successor -> frozen screening plan -> zero-network preflight
+-> live non-target screening -> transport admission -> complete-pool ranking
+-> provider baseline freeze -> official Harness import -> convergence audit
+-> target campaign
+```
+
+r9 source manifest、probe-bound registry、r7 operational admission 和 selection seed
+各自保存内容 hash；r9 plan 为 8 canonical groups、9 physical profiles、2 source
+families、16 serial units、`max_workers=1`，预计 1712 次 provider calls。preflight 已
+验证 `network_calls_performed=false` 与 `target_suite_calls_performed=false`。
+
+### 当前执行与 Harness gate
+
+live screening 使用 `setsid` 单 worker 自然运行（PID `1772237`）；convergence
+supervisor（PID `1877375`）仅在 terminal 后依次做 transport admission 和 ranking，
+lineage watcher（PID `1891818`）每 600 秒重建 hash-only binding/audit。三者都不会
+恢复进程、修改 frozen plan 或启动 target。
+
+r9 独立 Harness 控制面已物化：6/6 pin ready、BFCL V3 marker 通过、official
+execution plan ready；acquisition/import 因 provider freeze 和 operator-owned
+official receipts 缺失而保持 blocked。当前 convergence audit 为
+`status=running`、`next_gate=screening`，`target_suite_calls_allowed=false`。
+
+### 路由与验证规则
+
+screening 必须完整 terminal 且 `ready_for_ranking=true` 才能转换 ranking；transport
+receipt 必须满足固定至少 3 个 canonical models，ranking 必须覆盖完整候选分母和
+独立 source families。provider freeze 还必须绑定当前 registry、probe evidence、
+transport receipt 和 operator-owned external top-three，不能用 prior、latency 或
+target score 填充。只有 convergence audit 明确返回 `ready_for_target_campaign`，
+才执行 21-suite official/audited Harness campaign，并分别比较 axio-fast/terra/pro
+与 rank 3/2/1 单模型 baseline。
+
+### 接续决策
+
+- screening 若终态 blocked/partial：保留完整失败分母，生成 r10 source successor，
+  不恢复 r9 或拼接 completed subset；
+- ranking ready 但 freeze/import 不完整：继续 r9 同 cohort 离线修复 binding，仍不
+  发送 target 请求；
+- convergence audit ready：才进入正式 target campaign、四种 API parity、paired
+  statistical/latency/contamination audit 和最终 completion audit。
+
+详细 hash、Harness stage 和运行路径见
+`docs/operations/composite_r9_harness_successor_2026-08-18.md`。
+
 ## Composite successor intake（2026-08-17）
 
 当前 r2 frozen screening 已终态但 transport admission blocked（4/10 units
