@@ -76,6 +76,13 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--harness-root", type=Path)
     parser.add_argument("--raw-root", type=Path)
     parser.add_argument("--bfcl-harness-root", type=Path)
+    parser.add_argument(
+        "--harness-pin-manifest",
+        type=Path,
+        help=(
+            "显式复用已验证的 hash-only Harness pin；只接受完整且敏感字段均为 false 的 manifest。"
+        ),
+    )
     parser.add_argument("--dataset-dir", type=Path, default=Path("data/benchmarks"))
     parser.add_argument("--safe-import-dir", type=Path, default=Path("outputallresult/fusion_api_product/imports"))
     parser.add_argument("--dataset-manifest", type=Path)
@@ -146,6 +153,36 @@ def _blocked_artifact(schema: str, *reasons: str) -> dict[str, Any]:
 
 def _optional_path(path: Path | None) -> Path | None:
     return path if path is not None and path.is_file() else None
+
+
+def _load_reusable_harness_pin(path: Path | None) -> dict[str, Any]:
+    """加载同一物理 Harness 的已验证 pin，不复制原始路径或运行结果。"""
+
+    if path is None:
+        return _blocked_artifact(PIN_SCHEMA, "harness_pin_reuse_path_missing")
+    payload = _read_object(path)
+    reasons: list[str] = []
+    if payload.get("schema") != PIN_SCHEMA:
+        reasons.append("harness_pin_reuse_schema_invalid")
+    suite_rows = payload.get("suites")
+    suite_count = payload.get("suite_count")
+    ready_count = payload.get("ready_suite_count")
+    blocked_count = payload.get("blocked_suite_count")
+    if not isinstance(suite_rows, list) or not suite_rows:
+        reasons.append("harness_pin_reuse_suites_missing")
+    if suite_count != ready_count or blocked_count != 0:
+        reasons.append("harness_pin_reuse_incomplete")
+    if payload.get("all_paths_hashed_only") is not True:
+        reasons.append("harness_pin_reuse_paths_not_hash_only")
+    for index, suite in enumerate(suite_rows or []):
+        if not isinstance(suite, Mapping) or suite.get("ready") is not True:
+            reasons.append(f"harness_pin_reuse_suite_{index}_not_ready")
+    for field in SENSITIVE_FIELDS:
+        if payload.get(field) is True:
+            reasons.append(f"harness_pin_reuse_{field}")
+    if reasons:
+        return _blocked_artifact(PIN_SCHEMA, *reasons)
+    return payload
 
 
 def _freeze_path(path: Path) -> Path | None:
@@ -268,17 +305,21 @@ def _audit_args(args: argparse.Namespace, paths: Mapping[str, Path]) -> argparse
 
 def _build_stage_payloads(args: argparse.Namespace, paths: Mapping[str, Path]) -> dict[str, dict[str, Any]]:
     freeze = _freeze_path(args.provider_baseline_freeze)
-    pin = _call_stage(
-        PIN_SCHEMA,
-        lambda: build_benchmark_harness_pin_manifest(
-            harness_root=args.harness_root,
-            raw_root=args.raw_root,
-            bfcl_harness_root=args.bfcl_harness_root,
+    reusable_pin = getattr(args, "harness_pin_manifest", None)
+    if reusable_pin is not None:
+        pin = _load_reusable_harness_pin(reusable_pin)
+    else:
+        pin = _call_stage(
+            PIN_SCHEMA,
+            lambda: build_benchmark_harness_pin_manifest(
+                harness_root=args.harness_root,
+                raw_root=args.raw_root,
+                bfcl_harness_root=args.bfcl_harness_root,
+            )
+            if args.harness_root is not None and args.raw_root is not None
+            else _blocked_artifact(PIN_SCHEMA, "harness_root_and_raw_root_required"),
+            missing_reason="harness_pin_generation_failed",
         )
-        if args.harness_root is not None and args.raw_root is not None
-        else _blocked_artifact(PIN_SCHEMA, "harness_root_and_raw_root_required"),
-        missing_reason="harness_pin_generation_failed",
-    )
     _write_stage(paths["harness_pin"], pin)
 
     checklist = _call_stage(

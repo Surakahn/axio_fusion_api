@@ -38,6 +38,7 @@ def _args(tmp_path: Path) -> argparse.Namespace:
         harness_root=None,
         raw_root=None,
         bfcl_harness_root=None,
+        harness_pin_manifest=None,
         dataset_dir=tmp_path / "datasets",
         safe_import_dir=tmp_path / "imports",
         dataset_manifest=None,
@@ -171,6 +172,34 @@ def test_missing_harness_roots_produce_safe_blocked_pin(tmp_path, monkeypatch) -
     assert pin["status"] == "blocked"
     assert "harness_root_and_raw_root_required" in pin["reason_codes"]
     assert pin["secrets_persisted"] is False
+
+
+def test_reusable_harness_pin_requires_complete_hash_only_manifest(tmp_path: Path) -> None:
+    pin = {
+        "schema": scaffold.PIN_SCHEMA,
+        "suite_count": 1,
+        "ready_suite_count": 1,
+        "blocked_suite_count": 0,
+        "suites": [{"suite_id": "fixture", "ready": True}],
+        "all_paths_hashed_only": True,
+        "raw_local_paths_persisted": False,
+        "raw_dataset_content_persisted": False,
+        "raw_prompts_persisted": False,
+        "raw_labels_persisted": False,
+        "raw_provider_outputs_persisted": False,
+        "secrets_persisted": False,
+    }
+    pin.update({field: False for field in scaffold.SENSITIVE_FIELDS})
+    source = tmp_path / "verified_pin.json"
+    _write(source, pin)
+
+    assert scaffold._load_reusable_harness_pin(source) == pin
+
+    pin["secrets_persisted"] = True
+    _write(source, pin)
+    blocked = scaffold._load_reusable_harness_pin(source)
+    assert blocked["schema"] == scaffold.PIN_SCHEMA
+    assert "harness_pin_reuse_secrets_persisted" in blocked["reason_codes"]
 
 
 def test_blocked_pin_manifest_is_audited_fail_closed(tmp_path: Path) -> None:

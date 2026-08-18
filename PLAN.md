@@ -23,6 +23,12 @@ r11 source successor -> frozen screening plan -> zero-network preflight
 在 r11 convergence audit 返回 `ready_for_target_campaign` 前，target calls、provider
 baseline freeze、official import 和 superiority claim 均保持关闭。
 
+r11 intake 已完成：source successor、frozen plan 和 zero-network preflight 均 ready；
+Harness 控制面已按同一 r11 output path 重新生成，复用的只是已验证 6/6 hash-only pin，
+没有复制原始 checkout、数据、答案或旧 cohort 结果。当前 r11 scaffold 为
+`status=blocked`、`next_gate=screening`，等待唯一 live non-target screening 启动；详细
+证据见 `docs/operations/composite_r11_successor_intake_2026-08-19.md`。
+
 ## Composite cohort r10 当前主线（2026-08-18）
 
 ### 2026-08-19 00:16 现场快照
