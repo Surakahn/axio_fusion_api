@@ -226,6 +226,23 @@ campaign state 更新为 `status=running`、`completed_unit_count=8/16`、
 transport admission、ranking、provider freeze、official import 和 target campaign
 仍关闭。
 
+## 2026-08-19 04:30（CST）持续运行 intake audit
+
+screening PID `2281133`、convergence supervisor PID `2283494`、lineage watcher PID
+`2365523` 均仍存活，命令行继续绑定同一 frozen r10 plan；正式 `18900/health` 返回
+`ready`，`model_count=21`、网络为 `auto -> proxy`，敏感字段仍全部为 `false`。
+
+campaign state 仍为 `status=running`、`completed_unit_count=8/16`、
+`failed_or_blocked_unit_count=2`、`ready_for_ranking=false`、
+`target_suite_calls_performed=false`。当前 `livebench_official_final_text_slice_2026_08_14`
+活动 checkpoint 已自然推进至 `66/102`，已完成 case 暂无新增 transport failure；该
+checkpoint 仍只属于 operator-owned private recovery root，不可提前转换为 ranking 或
+质量结论。
+
+本轮只读审计确认控制面没有 plan/registry/source digest 漂移，也没有重复启动、恢复
+失败 unit 或 target 请求。supervisor 仍只等待 screening terminal；transport admission、
+ranking、provider freeze、official import 和 target campaign 继续保持关闭。
+
 ## 后续顺序
 
 保持低频监控，等待 screening 自然终态；随后按固定顺序执行：
