@@ -92,3 +92,16 @@ campaign 仍为 `status=running`、`planned_task_count=16`、`completed_unit_cou
 `4d3bf242ae076f34a2cae6d6eab6103f450764f6f4a8dc8f8019535fbb2a395f`。运行器已进入第二个
 unit，task `99a42d6882bac42a2b7e465638bbcf57354718054480065a25c0487a3d5adf8c` 的 private
 checkpoint 为 `2/112`；完整 16-unit 分母、2% gate 和 target 禁止标志不变。
+
+## r14 screening 进度快照（2026-08-19 23:53 CST）
+
+r14 第二个 `mmlu_pro_official_test_2026_07_20` unit 已自然终态完成：task
+`99a42d6882bac42a2b7e465638bbcf57354718054480065a25c0487a3d5adf8c`，完整 `112/112`
+case，`scored_case_count=112`、transport failure `0/112`、failure rate `0.0`，reason
+codes 为空；mean score `0.848214285714`，p50/p95 latency
+`7163.040ms/25988.358ms`。campaign 仍为 `status=running`、`planned_task_count=16`、
+`completed_unit_count=2`、`failed_or_blocked_unit_count=0`、`ready_for_ranking=false`；
+state SHA-256 为 `2d69d5d847cc29d5df82855ae341e7ea0084895c70d4f5cf21348c6f1ff34cc8`，
+campaign digest 为 `432413b2a8312158f1c28d6673ed27c0ebf8ef03299c0bcc6bcc43505744a79a`。
+运行器已自动进入第三个 task `8172ac60d181dd7bbdcd78e0481af36cba1d342f38e7ea5aeb3e548177326828`，
+private checkpoint 为 `2/102`；完整 16-unit 分母、2% gate 和 target 禁止标志不变。
