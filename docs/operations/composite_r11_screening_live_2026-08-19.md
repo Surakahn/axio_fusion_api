@@ -185,6 +185,37 @@ campaign state 当前为 `status=running`、`completed_unit_count=6/16`、
 transport admission、complete-pool ranking、provider baseline freeze、official import
 与 target 请求继续关闭；不恢复或重试历史失败 unit，不拼接 completed subset。
 
+## 2026-08-19 11:09-12:24（CST）第十一个至第十四个 unit 完成
+
+r11 在冻结 plan 下继续以单 worker 串行推进，新增四个完整 unit 终态，均保留完整分母
+与 operator-owned private artifact：
+
+- 第十一个 unit（`a209fed42927c1f2`）：`112/112`，transport failure `0`，状态为
+  `completed`；unit artifact SHA-256 为
+  `ecd2d7620445dc5e712171f0eeaafe6353591bd730d54e18e6e32aedd8a3b171`，对应 state
+  文件 SHA-256 为 `34941ea71f8a8e040bb48e50643e528fa43f9320e9386668b64e56bbfb02aed8`。
+- 第十二个 unit（`120475a48c00dff3`）：`102/102`，transport failure `0`，状态为
+  `completed`；unit artifact SHA-256 为
+  `ae1beea116168d9e85c335bf7733056f08a7617932dd7bee57f283460aa851fe`，对应 state
+  文件 SHA-256 为 `4bb5b17208391518e0146651094da5c6338f65e05e63d848dff120e861f51959`。
+- 第十三个 unit（`ffb0c3e760b979b2`）：`112/112`，其中 `111` 个 case completed、
+  `1` 个 transport failure，failure rate 为 `0.008928571429`，低于预注册的 `0.02`
+  门槛，状态为 `completed`；unit artifact SHA-256 为
+  `b3a7a2d9594c372e9e013d7dabda48602c44bca7deb24a1b1f3ce87b9019a156`，对应 state
+  文件 SHA-256 为 `9b918a221f08847c870701a61f4b1d119c9c6bf19ee59f034dcacf6724bea6f6`。
+- 第十四个 unit（`fdb63ffeccb10c0f`）：`102/102`，transport failure `0`，状态为
+  `completed`；unit artifact SHA-256 为
+  `e97208000eea510bb96223cbfc83ffab94b9255533c3c2023e06f49ec08439ce`，对应 state
+  文件 SHA-256 为 `2b317dd8499ecff1d6f50c7187ebb0d879553f33f7c2d5b0b88c231e12a10952`。
+
+当前 campaign state 为 `status=running`、`completed_unit_count=10/16`、
+`failed_or_blocked_unit_count=4`、`ready_for_ranking=false`、
+`target_suite_calls_performed=false`；campaign digest 为
+`e6ecab5c19644513d1eb82a3f853a2d0da80bef4b220949e3340728bf0e54369`。运行器已进入第
+十五个 serial unit（任务哈希前缀 `8377e611e7dea9c5`，预期完整分母 `112`），当前
+checkpoint 为 `52/112`、状态为 `partial`。r11 仍未 terminal，所有 post-screening
+gate 与 target 请求继续关闭。
+
 ## 固定后续顺序
 
 ```text
