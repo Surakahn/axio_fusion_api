@@ -87,6 +87,18 @@ r13 唯一 live non-target screening 已通过 `setsid/nohup` 启动，screening
 case，checkpoint 状态为 `partial`。live campaign state 尚未完成首个 unit，target gate
 仍由 supervisor/watcher 关闭；不修改 frozen plan、不重试 case、不启动 target benchmark。
 
+### r13 screening 进度快照（2026-08-19 17:53 CST）
+
+r13 首个 `livebench_official_final_text_slice` unit 已自然终态失败：task
+`27fed11add78ea40a3dd7bba83f11272bb8a77bf6b48f514b563705dd3a27395` 完成完整 `102/102`
+case，transport failure rate 为 `0.676470588235`，按冻结 `2%` fail-fast gate 拒绝。
+campaign state 当前为 `status=running`、`completed_unit_count=0`、
+`failed_or_blocked_unit_count=1`、`ready_for_ranking=false`，state 文件 SHA-256 为
+`99a039c53ad97b7a4f33758dfd686420e8a806d39cb431a251d77bbf54b01835`，campaign digest 为
+`64c9115a5cd0042cb23e2062f90e1b1cb7852601160acc3fb6d8d6d856d84ff6`。第二个 task
+`d7e62dcf7e03031924cdba38ac78d78e5fd094d031e378c4fbeacae7eb383ecf` 已创建 `0/102`
+checkpoint；`retry_round_count=0`，不修改 frozen plan、不拼接 completed subset。
+
 ### r12 live screening 启动里程碑（2026-08-19 13:33 CST）
 
 r12 唯一 live non-target screening 已通过 `setsid/nohup` 启动，supervisor 与 lineage
