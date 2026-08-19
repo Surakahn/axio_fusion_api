@@ -118,3 +118,18 @@ state SHA-256 为 `d08873dff6efa3b10f657fcb4aedd306bddf0cc4627ecc8b5c1555a81969e
 campaign digest 为 `8b77d0094a34a8c7ed69f9f7a0f1cb54d726ec9e4f08597513406d38ba1673c5`。
 运行器已自动进入第四个 task `23042b50a134f1e3f11dc98b2af5100d059723861ebc4990995a2f4d5ff715a`，
 private checkpoint 为 `0/112`；完整 16-unit 分母、2% gate 和 target 禁止标志不变。
+
+## r14 screening 进度快照（2026-08-20 00:33 CST）
+
+r14 第四个 unit 已自然终态失败：task
+`23042b50a134f1e3f11dc98b2af5100d059723861ebdc4990995a2f4d5ff715a`，完整 `112` case
+分母中仅 `scored_case_count=9`，transport failure `103/112`、failure rate
+`0.919642857143`，触发冻结的 `2%` fail-fast gate；reason code 为
+`screening_unit_transport_failure_rate_exceeded`，p50/p95 latency
+`50839.414ms/90087.512ms`。campaign 仍为 `status=running`、`planned_task_count=16`、
+`completed_unit_count=3`、`failed_or_blocked_unit_count=1`、`ready_for_ranking=false`；
+state SHA-256 为 `f5671720569d866782cdf7e0604ab591ad20c0fe1b9b02192f602542eed6d6b1`，
+campaign digest 为 `95b172f2cb42852ff7abfeabe838be0e9389655658fdabbd9669920a9af79c4d`。
+运行器已自动进入第五个 task `b8ca59ff11f37f3a5ba609e1dba4f9bdf592d60bc3e24b61a1f5bb5530d7acc2`，
+private checkpoint 为 `8/102`；失败 unit 保留在完整分母中，不恢复、不拼接、不触发 ranking 或
+target benchmark。
