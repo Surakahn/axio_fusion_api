@@ -1,5 +1,46 @@
 # Axio Fusion API Plan
 
+## Composite cohort r14 successor intake（2026-08-19）
+
+r13 已完整 terminal 但 transport admission blocked：16/16 unit 中只有 7 个通过，8 个
+candidate canonical 中只有 2 个同时通过两套独立 source family 的 `2%` transport gate，
+低于固定的 3-model 最低门槛。r13 的 state、unit、transport、supervisor 和 Harness
+artifact 全部保留为 reference-only；r14 不读取 r13 score，不复用 r13 transport receipt，
+不恢复 checkpoint，也不拼接 survivor subset。
+
+r14 仅从 r13 source contract 创建新的 immutable successor，改变 selection seed 和注册事件：
+
+- source manifest：文件 SHA-256
+  `e1a676e3af28f48d9f5b5c374542875c5b5f773bf4053c2cf9cb68ea5e32464c`；successor receipt
+  SHA-256 `16e64cbef1dfe7d1bc7f454ae5df44b3c8113921c7b87d52bd3574720ee55785`；selection
+  seed hash `b9e8c86c72d875fdbc32c97b771cb73c6924385f873c37199aca78cc7c0b8bb9`；
+- frozen plan：文件 SHA-256
+  `988c0d793af89b1bdf0d681c200dca297ace43e9ce3d09cbe3f3fa8ad4bdefd0`，plan digest
+  `7937b8b99d71e37fc816915a37a62fe300c74ca3128ce1f83f511b5dc473a2ef`，8 canonical
+  groups/9 profiles、2 source families、16 serial units、`max_workers=1`、fail-fast
+  transport gate、预注册 provider calls `1712`；
+- zero-network preflight：state 文件 SHA-256
+  `8b453e782bf8f7d475cca9bc749cf8728b65cdfe5a1317ff243be0fa563a0bd8`，receipt SHA-256
+  `1eb08c69ce811408a60d5e9bfbd06ca7e5bde0d640f48bbb0286c27c5384034c`，campaign digest
+  `19a0ce6375812b654b49891cc1dd9e01618cdb320261cb6192959df66375682a`，
+  `status=preflight_ready`、`network_calls_performed=false`、
+  `target_suite_calls_performed=false`、`reason_codes=[]`。
+
+r14 Harness 控制面已离线生成于
+`private/runs/2026-08-19-composite-cohort-r14/harness_control.successor/`：pin SHA-256
+`22db330ab9e29949b567da420bfc2ca1f5db77f1a6e9c10a5d115bbcbad65b9c`（6/6 ready）、
+execution plan SHA-256 `dbb56204c2125eb84fbddba44252381bb0cfa476d11252feaad3e0e2af01c46a`
+（ready to execute）；acquisition、official import、provider freeze 与 cohort binding
+缺失，convergence audit SHA-256
+`86ff0e2e3c05716d326eb04e5c3d91b4651dadf8d643b6a67f55ad3681387d3e` 为 blocked，
+`next_gate=screening`、`target_suite_calls_allowed=false`。Harness scaffold 只证明控制面
+结构，不授权 target benchmark。
+
+r14 的下一步是只启动一套 `baseline-screening-run --live`，绑定上述 frozen plan、r7
+probe-bound registry 和 r7 operational admission；screening terminal 后由同 cohort
+supervisor 依次执行 transport admission 和完整 pool ranking。任何 partial/transport
+blocked 结果继续创建新的 immutable successor，不降低 gate，不做 superiority claim。
+
 ## Composite cohort r12 successor intake（2026-08-19）
 
 r11 已完成 16/16 个 serial unit，但 campaign 为 `partial`（11 completed、5 failed）。

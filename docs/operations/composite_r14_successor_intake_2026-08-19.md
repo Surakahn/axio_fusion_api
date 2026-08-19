@@ -1,0 +1,71 @@
+# Composite cohort r14 successor intake（2026-08-19）
+
+## 继任边界
+
+r13 已完整 terminal，但 transport admission blocked：16/16 unit 中只有 7 个通过，8 个
+candidate canonical 中只有 2 个同时通过两套独立 source family 的固定 `2%` transport
+failure gate，低于预注册的 3-model 最低门槛。r13 的 state、unit、transport、supervisor
+和 Harness artifact 全部封存为 reference-only；r14 不读取 r13 score，不复用 r13 transport
+receipt，不恢复 checkpoint，也不拼接 survivor subset。
+
+r14 仅从 r13 source contract 创建新的 immutable source successor，改变
+`pre_registration.selection_seed` 和新的 registration 事件：
+
+- source manifest SHA-256：`e1a676e3af28f48d9f5b5c374542875c5b5f773bf4053c2cf9cb68ea5e32464c`；
+- successor receipt SHA-256：`16e64cbef1dfe7d1bc7f454ae5df44b3c8113921c7b87d52bd3574720ee55785`；
+- selection seed hash：`b9e8c86c72d875fdbc32c97b771cb73c6924385f873c37199aca78cc7c0b8bb9`；
+- registered_on：`2026-08-19`；receipt `status=ready`，raw prompt/label/provider output、
+  provider URL 和 secret 持久化标志均为 `false`。
+
+## Frozen plan 与 zero-network preflight
+
+r14 plan 使用同一 r7 probe-bound registry、同一 r7 operational admission 和完整两套
+source family，不传入 r13 transport/ranking/freeze：
+
+- plan 文件 SHA-256：`988c0d793af89b1bdf0d681c200dca297ace43e9ce3d09cbe3f3fa8ad4bdefd0`；
+- plan digest：`7937b8b99d71e37fc816915a37a62fe300c74ca3128ce1f83f511b5dc473a2ef`；
+- registry SHA-256：`7d0a9b78a06ea7445c43b7c03e15d6bbedb3112ecf8fb7d1ad041301678c1ad8`；
+- source count/family count：`2/2`；canonical group/profile count：`8/9`；
+- `task_count=16`、`minimum_cases_per_source=100`、`max_workers=1`、fail-fast transport
+  gate 已预注册；estimated provider calls：`1712`；plan `ready=true`。
+
+zero-network preflight 已通过：
+
+- state SHA-256：`8b453e782bf8f7d475cca9bc749cf8728b65cdfe5a1317ff243be0fa563a0bd8`；
+- receipt SHA-256：`1eb08c69ce811408a60d5e9bfbd06ca7e5bde0d640f48bbb0286c27c5384034c`；
+- campaign digest：`19a0ce6375812b654b49891cc1dd9e01618cdb320261cb6192959df66375682a`；
+- `status=preflight_ready`、`network_calls_performed=false`、
+  `target_suite_calls_performed=false`、`reason_codes=[]`。
+
+## Harness 控制面
+
+控制面输出目录为
+`private/runs/2026-08-19-composite-cohort-r14/harness_control.successor/`。它只复用
+已验证的 hash-only pin 和 21-suite 定义，不复制旧 cohort 的原始 checkout、数据、答案、
+provider output 或质量结果：
+
+- pin SHA-256：`22db330ab9e29949b567da420bfc2ca1f5db77f1a6e9c10a5d115bbcbad65b9c`，6/6 ready；
+- execution plan SHA-256：`dbb56204c2125eb84fbddba44252381bb0cfa476d11252feaad3e0e2af01c46a`，
+  `ready_to_execute`；
+- scaffold：`status=blocked`、`provider_calls_performed=false`、
+  `target_suite_calls_performed=false`；
+- convergence audit SHA-256：`86ff0e2e3c05716d326eb04e5c3d91b4651dadf8d643b6a67f55ad3681387d3e`，
+  `status=blocked`、`next_gate=screening`、`target_suite_calls_allowed=false`。
+
+acquisition、official import、provider baseline freeze 和 cohort binding 是后续独立门禁，
+不能由 pin 或 execution plan 代替。
+
+## 下一步
+
+只启动一套 r14 `baseline-screening-run --live`，绑定 immutable plan/source/probe/admission，
+并由同一 cohort 的 supervisor/watcher 低频审计。screening terminal 前不启动 ranking、
+provider freeze、official import 或 target benchmark；terminal 后仍必须按
+
+```text
+transport admission -> complete-pool ranking -> provider baseline freeze
+-> same-cohort official import -> convergence audit -> 21-suite target campaign
+```
+
+单向推进。若 r14 仍 partial 或 transport-blocked，完整保留失败分母并创建新的 immutable
+successor，不降低 2% gate、不恢复 checkpoint、不拼接 survivor subset、不做 superiority
+claim。
