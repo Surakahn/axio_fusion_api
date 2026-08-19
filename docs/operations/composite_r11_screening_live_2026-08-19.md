@@ -259,6 +259,38 @@ terminal state 仍为 `ready_for_ranking=false`、`target_suite_calls_performed=
 receipt 通过前，不执行 ranking、provider baseline freeze、official import 或 target
 请求。
 
+## 2026-08-19 12:57（CST）r11 transport 与 ranking gate
+
+既有 supervisor 已按固定顺序完成 transport admission 和 ranking conversion：
+
+- transport receipt SHA-256：
+  `def96be76c4498788c25747d0b9f214c9da108e25df4d90ba2b6b6cf3067a92d`；
+  `status=ready`，候选 canonical pool 为 `8`，transport-eligible canonical 为 `5`，
+  profile 数为 `6`，固定最低要求 `3`；
+- transport 选择严格为 `selection_basis=transport_failure_rate_only`，
+  `quality_fields_used_for_selection=[]`；质量分、label、answer 和 provider output
+  未参与选择；receipt 绑定 r11 campaign、plan、registry、source manifest 和
+  `terminal_unit_count=16`；
+- ranking receipt SHA-256：
+  `3a0463adeb83b1a1fa81be6ee43d71323ff0ba0c6e9c01978792272b108d49e9`；
+  `screening_conversion_ready=false`，仅生成了候选 inventory 和空的 rank 槽位，未
+  产生 external ranking；blockers 为
+  `screening_ranking_campaign_not_complete`、`screening_ranking_campaign_unit_not_completed`、
+  `screening_ranking_candidate_source_coverage_incomplete`、
+  `screening_ranking_current_inputs_mismatch`、`screening_ranking_source_has_incomplete_unit`、
+  `screening_ranking_template_candidate_count_mismatch`；
+- supervisor receipt SHA-256：
+  `a0fa4682bc7c500a36fd6fc48dc07c6790361217e2c8607d39592c45875251fc`，
+  `status=blocked`、`error_code=screening_ranking_conversion_blocked`、
+  `ranking_ready=false`、`target_benchmark_started=false`、`plan_mutated=false`。
+
+因此 r11 只能封存为 `reference_only` partial cohort：不得使用其 transport receipt、
+candidate inventory、completed subset 或空 ranking 槽位生成 provider baseline freeze，
+也不得进入 official import 或 target Harness。Harness convergence audit 当前为
+`status=blocked`、`next_gate=screening`、`target_suite_calls_allowed=false`、
+`final_claim_allowed=false`。下一步只允许以新的 selection seed 和 registration date
+创建 immutable r12 successor，保留 r11 全部证据，不恢复或拼接 r11 结果。
+
 ## 固定后续顺序
 
 ```text
