@@ -55,6 +55,28 @@ r12 live non-target screening
 全部同 cohort ready，才允许 target calls；不做 superiority claim，不选择 completed
 subset，不降低固定 3-model transport gate。
 
+## Composite cohort r13 successor intake（2026-08-19）
+
+r12 已完整 terminal，但 campaign 为 `partial`，complete-pool ranking 被拒绝；r12
+transport/ranking/supervisor/binding/audit 全部保留为 reference-only，不恢复 checkpoint、
+不拼接 completed subset。当前已创建新的 immutable r13 successor：
+
+- source manifest：文件 SHA-256
+  `762e4a63d5d36e3996c710b7f77608b494d4507ace314bdf3bcc16acdce43e94`，selection seed
+  hash `f8a35d8235338707976f2509d464fb0d35aae44f31d42f780679378d55373012`；
+- frozen plan：文件 SHA-256
+  `fde4aa68dd56eb4a724e2bb90fe7a199ed009b5b1a84928b4caa57e0da341d05`，plan digest
+  `899f3cb3f7539ec0789458f21a85be7357042e0cb7275a171ba16ea40d030f97`，16 serial units、
+  8 canonical groups/9 profiles、`max_workers=1`；
+- r13 zero-network preflight：state SHA-256
+  `2ea7331d352cda4d00e2c9c0e305e7489e477c26a2e9714a489ffd2060cd2fba`，campaign digest
+  `36700ea5b5ab8c1eb781de9f319913c7fc9b127c11f8076dd88c3c9b0d2e1df0`，
+  `status=preflight_ready`、`network_calls_performed=false`、
+  `target_suite_calls_performed=false`、9/9 operational profiles ready。
+
+r13 仍遵循 `2% transport fail-fast`、最低 `3 canonical models`、完整 16-unit 分母和
+同 cohort ranking/freeze/import/audit 约束；target gate 继续关闭。
+
 ### r12 live screening 启动里程碑（2026-08-19 13:33 CST）
 
 r12 唯一 live non-target screening 已通过 `setsid/nohup` 启动，supervisor 与 lineage
