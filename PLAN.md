@@ -128,6 +128,17 @@ case。screening terminal 前继续关闭 transport/ranking/freeze/import 与 ta
 51.74、90.08、80.69 秒。当前计划各失败 unit 的 `retry_round_count=0`，不在 r12 内
 修改 retry 或阈值；只在完整 terminal/ranking 审计后决定是否需要新的 successor policy。
 
+### r12 screening 进度快照（2026-08-19 16:13 CST）
+
+第九个 `mmlu-pro` unit 已完成。当前 state 为 `status=running`、
+`planned_task_count=16`、`completed_unit_count=4`、`failed_or_blocked_unit_count=5`、
+`ready_for_ranking=false`，state SHA-256 为
+`7f2ceefb3c18ea84bec9903b8067fc18250269374f086a02b9006a5bc9f26889`，campaign digest
+为 `eceab7307f81a388bc3e7fc027eec9443d03c72dbe28162e7300705efca2f453`。第十个
+`livebench_official_final_text_slice` unit checkpoint task 为
+`0e9f42b79f925ff407f376defcc6f63df5812f71e25c27fc1778a42fd2cccc6d`，当前 `4/102`
+case。screening terminal 前继续关闭 transport/ranking/freeze/import 与 target gate。
+
 ## Composite cohort r10 终态与 r11 successor（2026-08-19）
 
 r10 已自然终态：16/16 unit terminal、13 completed、3 failed，campaign 为 `partial`。
