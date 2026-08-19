@@ -164,6 +164,20 @@ campaign 仍为 `status=running`、`planned_task_count=16`、`completed_unit_cou
 task `27e9f2ffb5dee02a405ac17d06af581220f82c191a70999d0a0a227e0483fb44`，private checkpoint
 为 `0/112`；不恢复失败 unit、不拼接 survivor subset、不触发 ranking 或 target benchmark。
 
+### r14 screening 进度快照（2026-08-20 02:34 CST）
+
+r14 第十个 unit 已自然终态完成：task
+`27e9f2ffb5dee02a405ac17d06af581220f82c191a70999d0a0a227e0483fb44`，完整 `112/112`
+case，`scored_case_count=111`、transport failure `1/112`、failure rate
+`0.008928571429`，低于冻结的 `2%` gate，reason codes 为空；mean score
+`0.873873873874`，p50/p95 latency `19156.567ms/35920.312ms`。campaign 仍为
+`status=running`、`planned_task_count=16`、`completed_unit_count=7`、
+`failed_or_blocked_unit_count=3`、`ready_for_ranking=false`；state SHA-256 为
+`c6bc4961893103a648b4ddf4c97f1ebb9813b7a26bc81400c21e224781ac6676`，campaign digest 为
+`1cc59aaa048a5a956e326f1340fdb7bc01281007366c50add76a87c0b89674eb`。运行器已进入第十一个
+task `22108aa291aa151c6dc679344e62e5809d149b5455f7f26573bd6409d758f784`，private checkpoint
+为 `5/102`；完整 16-unit 分母、2% gate 和 target 禁止标志不变。
+
 ## Composite cohort r12 successor intake（2026-08-19）
 
 r11 已完成 16/16 个 serial unit，但 campaign 为 `partial`（11 completed、5 failed）。
