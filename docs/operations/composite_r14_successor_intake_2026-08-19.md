@@ -69,3 +69,13 @@ transport admission -> complete-pool ranking -> provider baseline freeze
 单向推进。若 r14 仍 partial 或 transport-blocked，完整保留失败分母并创建新的 immutable
 successor，不降低 2% gate、不恢复 checkpoint、不拼接 survivor subset、不做 superiority
 claim。
+
+## r14 live screening 启动里程碑（2026-08-19 23:19 CST）
+
+r14 唯一 live non-target screening 已通过 `setsid/nohup` 启动：screening PID
+`1300532`、supervisor PID `1301981`、watcher PID `1302805`。三者命令行均绑定
+`baseline_screening_plan.r14.private.json`，没有并发第二套 screening。supervisor 已进入
+同一 PID/plan identity wait，watcher 初始 convergence audit 为 `blocked`、
+`next_gate=screening`、`target_suite_calls_allowed=false`。记录时 screening 仍在首个
+provider/preflight 阶段，live state 与 receipt 尚未落盘，尚未完成任何 unit；不修改 frozen
+plan、不恢复 r13 checkpoint、不发送 target 请求。
