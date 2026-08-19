@@ -230,3 +230,20 @@ failure rate `1.0`，触发冻结 `2%` fail-fast gate，未尝试 case `99`，re
 `293f704f651f84b73b4df7fea4c16ecff3f3f7c7a26fc88d2daa00a8318601a2`。运行器已自动进入
 最后第十六个 task `ee6379a028056fea4cb5291381b7b9989a36664769598152b18b7a399c022101`，checkpoint
 为 `6/112`；不修改 frozen plan、不拼接 completed subset，target gate 继续关闭。
+
+## r13 screening 终态（2026-08-19 23:00 CST）
+
+r13 的最后第十六个 `mmlu-pro` unit 已自然终态完成完整 `112/112` case：
+`scored_case_count=111`、transport failure `1/112`、failure rate
+`0.008928571429`，低于冻结的 `2%` gate，`fail_fast_triggered=false`，reason codes 为空；
+unit mean score 为 `0.810810810811`，p50/p95 latency 为 `19945.019ms/36101.205ms`。
+完整 campaign 当前为 `status=partial`、`planned_task_count=16`、
+`completed_unit_count=7`、`failed_or_blocked_unit_count=9`、`ready_for_ranking=false`。
+最终 state 文件 SHA-256 为
+`81c327fb5c43efc93b9531b12434f98a5244c4b5ead45fbbf8c5edf0a389a256`，screening receipt
+SHA-256 为 `031cd6b43206e24e0e778078f9918094eccd00670ce30591176ace3366b91563`，campaign
+digest 为 `5dc080cbefa0de102256058a1ae12dc28cb8b0c53a4d5362f6afe7cb1522fe22`。16/16
+unit 的完整失败分母已经封存；不恢复 checkpoint、不重试 case、不拼接 completed subset，
+不降低 transport gate。screening 主进程已退出，现有 supervisor/watcher 只等待其
+低频终态审计；transport admission、ranking、provider freeze、official import、cohort
+binding 与 target campaign 均尚未 ready，`target_suite_calls_performed=false`。
