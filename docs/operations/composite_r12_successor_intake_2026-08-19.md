@@ -109,6 +109,18 @@ unit，checkpoint task 为
 `77/102` case。screening receipt、transport admission、ranking 和 provider freeze
 仍未生成；`target_suite_calls_performed=false`，target gate 保持关闭。
 
+## Screening 进度快照（2026-08-19 15:26 CST）
+
+第六个 `livebench_official_final_text_slice` unit 已成功完成，r12 state 更新为
+`status=running`、`planned_task_count=16`、`completed_unit_count=1`、
+`failed_or_blocked_unit_count=5`、`ready_for_ranking=false`，state SHA-256 为
+`35134f156870a55d1633f16fc019feaacd9879e1454100b4a88551ef101424b7`。运行器已进入
+第七个 `mmlu-pro` unit，checkpoint task 为
+`eec4029d3c14e766c4365f35615bbe38a5760bfc657747808319989a99712cad`，已完成
+`37/112` case。screening receipt、transport admission、ranking 和 provider freeze
+仍未生成；`network_calls_performed=true`、`target_suite_calls_performed=false`，
+target gate 继续关闭。
+
 固定顺序为：
 
 ```text

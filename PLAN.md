@@ -89,6 +89,17 @@ transport failure rate 约 91.07%，仍按冻结的 2% gate 拒绝。第六个
 `850a79a30e584d817705b7d2fdd06b13411ad129324f81255a72fd119f2a405b`，已完成 `77/102`
 case。screening terminal 前不生成 ranking/freeze/import，也不打开 target gate。
 
+### r12 screening 进度快照（2026-08-19 15:26 CST）
+
+第六个 `livebench_official_final_text_slice` unit 已完成。当前 state 为
+`status=running`、`planned_task_count=16`、`completed_unit_count=1`、
+`failed_or_blocked_unit_count=5`、`ready_for_ranking=false`，state SHA-256 为
+`35134f156870a55d1633f16fc019feaacd9879e1454100b4a88551ef101424b7`。第七个
+`mmlu-pro` unit checkpoint task 为
+`eec4029d3c14e766c4365f35615bbe38a5760bfc657747808319989a99712cad`，已完成 `37/112`
+case。screening terminal 前仍不生成 transport/ranking/freeze/import，也不打开 target
+gate。
+
 ## Composite cohort r10 终态与 r11 successor（2026-08-19）
 
 r10 已自然终态：16/16 unit terminal、13 completed、3 failed，campaign 为 `partial`。
