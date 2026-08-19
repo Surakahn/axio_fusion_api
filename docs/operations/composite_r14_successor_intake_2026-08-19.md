@@ -160,3 +160,16 @@ case，`scored_case_count=111`、transport failure `1/112`、failure rate
 `473087a3e4dc1d6bcab4fa151d309d27eb8eb904a6e0968d5f0b3a1fdc5702b1`。运行器已自动进入第七个
 task `6eaa0f8c67c41d730c04341f002617100aabe5859980653683e56c5493b04400`，private
 checkpoint 为 `1/102`；完整 16-unit 分母、2% gate 和 target 禁止标志不变。
+
+## r14 screening 进度快照（2026-08-20 01:50 CST）
+
+r14 第七个 unit 已自然终态完成：task
+`6eaa0f8c67c41d730c04341f002617100aabe5859980653683e56c5493b04400`，完整 `102/102`
+case，`scored_case_count=102`、transport failure `0/102`、failure rate `0.0`，reason
+codes 为空；mean score `0.745098039216`，p50/p95 latency
+`13063.101ms/33250.024ms`。campaign 仍为 `status=running`、`planned_task_count=16`、
+`completed_unit_count=6`、`failed_or_blocked_unit_count=1`、`ready_for_ranking=false`；
+state SHA-256 为 `88da71b37c84853265d16f0b857b5770b3466d2b5c4ec9d0653ee1bf43da50bb`，
+campaign digest 为 `1ef641d774f872f06ebbcb8ca95f79c8fdf80764b0897e358f5b20830a57b366`。
+运行器已自动进入第八个 task `c320006a0f407b64da094d08e9029b54020055229f5f0ad69764b2d722a4bf13`，
+private checkpoint 为 `2/112`；完整 16-unit 分母、2% gate 和 target 禁止标志不变。
