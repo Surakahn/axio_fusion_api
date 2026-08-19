@@ -128,3 +128,16 @@ score 为 `0.792079207921`，p95 latency 为 `21217.921ms`。campaign 当前为
 `f7ae7602d28aef92ec652667983b2abc95590d072169b1afe53e53fa9828c51b`。运行器已自动进入
 第八个 task `de836731b675337719ab0b8d539264fbcf753a685f54cbe4680ebd3235fe6c0d`，checkpoint
 为 `16/112`；不修改 frozen plan、不拼接 completed subset，target gate 继续关闭。
+
+## r13 screening 进度快照（2026-08-19 20:16 CST）
+
+第八个 task `de836731b675337719ab0b8d539264fbcf753a685f54cbe4680ebd3235fe6c0d` 已自然
+终态失败：完成 `95/112` case，`scored_case_count=95`、transport failure `17/112`、
+failure rate `0.151785714286`，触发冻结 `2%` fail-fast gate，未尝试 case `14`，reason
+code 为 `screening_unit_transport_failure_rate_exceeded`。campaign 当前为
+`status=running`、`completed_unit_count=3`、`failed_or_blocked_unit_count=5`、
+`ready_for_ranking=false`；state 文件 SHA-256 为
+`400f0222c1b2d0b6f97d3a6c2c27d9b5f04a5a924c4eb92f1e23a613e5fc4329`，campaign digest 为
+`d73e800cf7d35b28b52966635a9edc0826d6c97c8f59ed4b0966e3b3b9b7d40a`。运行器已自动进入
+第九个 task `7a79b67ec4705c8a65079c56d0f5c7c103df5674573f8120f9a406fe44865b69`，checkpoint
+为 `5/102`；不修改 frozen plan、不拼接 completed subset，target gate 继续关闭。
