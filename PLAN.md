@@ -189,6 +189,19 @@ code 为 `screening_unit_transport_failure_rate_exceeded`。campaign 当前为
 第十个 task `f3dc7761386b6884797bf1c35717312f38664954d717b8e7c4f6b35018af6e74`，checkpoint
 为 `11/112`；不修改 frozen plan、不拼接 completed subset，target gate 继续关闭。
 
+### r13 screening 进度快照（2026-08-19 20:26 CST）
+
+第十个 task `f3dc7761386b6884797bf1c35717312f38664954d717b8e7c4f6b35018af6e74` 已自然
+终态失败：完成 `46/112` case，`scored_case_count=46`、transport failure `66/112`、
+failure rate `0.589285714286`，触发冻结 `2%` fail-fast gate，未尝试 case `63`，reason
+code 为 `screening_unit_transport_failure_rate_exceeded`。campaign 当前为
+`status=running`、`completed_unit_count=3`、`failed_or_blocked_unit_count=7`、
+`ready_for_ranking=false`；state 文件 SHA-256 为
+`a1cb6e99c0149e75467a1999b13dfa80e0925c63c38fcc8b5eecd3317285d906`，campaign digest 为
+`0d41f1c1c80115eaf72dc75458460f5de4f1da1fd87e12a7b868e43e9d272281`。运行器已自动进入
+第十一个 task `5f9fade1c7264f69ddf84df791ffcb14e68583cfae09e587188b226460a767f8`，checkpoint
+为 `4/102`；不修改 frozen plan、不拼接 completed subset，target gate 继续关闭。
+
 ### r12 live screening 启动里程碑（2026-08-19 13:33 CST）
 
 r12 唯一 live non-target screening 已通过 `setsid/nohup` 启动，supervisor 与 lineage
