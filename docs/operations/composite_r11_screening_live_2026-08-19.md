@@ -165,6 +165,26 @@ SHA-256 为 `1ea682b96905ced1ff003a6ccbb40e8691b4684dbc610874126c3b4dbeaf51d4`�
 complete-pool ranking、provider baseline freeze、official import 与 target 请求继续
 关闭。
 
+## 2026-08-19 10:08（CST）第十个 unit 完成
+
+第十个 serial unit（任务哈希前缀 `ab610273afe7c2e8`）已自然终态完成：完整分母
+`102/102`，transport failure `0`，failure rate `0.0`，状态为 `completed`。完整 unit
+artifact 的 SHA-256 为
+`194588ff51a01fc26102b963aa8f5255680008fb3a651f2e104f2b78a39bde3a`；raw provider
+output 仅保留在 operator-owned private artifact，safe state 仍为
+`raw_provider_outputs_persisted=false`、`secrets_persisted=false`。
+
+campaign state 当前为 `status=running`、`completed_unit_count=6/16`、
+`failed_or_blocked_unit_count=4`、`ready_for_ranking=false`、
+`target_suite_calls_performed=false`；campaign digest 更新为
+`6120db192fc456363866abc5933031ac75e9212aac006c8ae62ce1320dec92de`，state 文件 SHA-256
+为 `d0ff9b3390d0df905e8a29fe613dce9816950d9b6916c50648dc9a13a9823433`。
+
+运行器已进入第十一个 serial unit（任务哈希前缀 `a209fed42927c1f2`，预期完整分母
+`112`），当前 checkpoint 仅完成 `3` 个 case，仍为 `partial`。r11 尚未 terminal，因而
+transport admission、complete-pool ranking、provider baseline freeze、official import
+与 target 请求继续关闭；不恢复或重试历史失败 unit，不拼接 completed subset。
+
 ## 固定后续顺序
 
 ```text
