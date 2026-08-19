@@ -152,6 +152,29 @@ r12 已完成完整 `16/16` 个 unit，campaign 进入 `status=partial`，累计
 已生成，transport admission、ranking 和 provider freeze 尚未生成；supervisor/watcher
 正在等待 terminal state 后处理离线门禁，target gate 继续关闭。
 
+### r12 terminal / conversion 审计（2026-08-19 17:30 CST）
+
+r12 已自然终态并完成全部 `16/16` unit：`6 completed / 10 failed`，campaign 为
+`partial`，`ready_for_ranking=false`。screening state 文件 SHA-256 为
+`fc5d5201e14f1dd2d4cb2c06c997cbc410c2bcb023459cb2cd7192115125443b`，campaign digest 为
+`c78f4eb5ade227d959c2a035c772aa0a4a25bbbc049723e8329f326e2feeef77`。
+
+同 cohort supervisor 已完成离线转换：transport admission 为 `ready`，候选池 8 个
+canonical model 中有 3 个通过固定 2% failure-rate gate，完整 16-unit 分母和 2 个
+source family 均已绑定；`selection_basis=transport_failure_rate_only`、
+`quality_fields_used_for_selection=[]`。transport receipt SHA-256 为
+`6a397f1d34feaed413d4bfd0b3499a2381e8410331f8bb24fc259fe69d0b1556`。
+
+complete-pool ranking 明确 `screening_conversion_ready=false`，没有产生任何有效 rank；
+blockers 包括 campaign incomplete、source/unit coverage incomplete、
+`screening_ranking_current_inputs_mismatch` 和 candidate pool mismatch。ranking receipt
+SHA-256 为 `c03c3fbe0f628fae7ab132799e53a3f543ddb0f78255758316998b9fcdb3e91b`，supervisor
+receipt 为 `blocked`（SHA-256 `812d00ad91d1f0266a9f46307b8537fec6544b638c1acb98db7580577b2f58a9`）。
+lineage watcher 的同 cohort binding/audit 均为 `blocked`，`next_gate=screening`、
+`target_suite_calls_allowed=false`、`final_claim_allowed=false`；没有 provider freeze、
+official import 或 target 请求。r12 全部证据封存为 reference-only，不恢复或拼接
+completed subset，下一步创建新的 immutable r13 source successor。
+
 ### r12 screening 进度快照（2026-08-19 16:13 CST）
 
 第九个 `mmlu-pro` unit 已完成。当前 state 为 `status=running`、
