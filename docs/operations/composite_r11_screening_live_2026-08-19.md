@@ -113,6 +113,21 @@ SHA-256 为 `f0fdd5d0438fba828dd52dae6e5cf0c2c580e89d3ee9a1589fcd3fbf05b56782`�
 transport admission、complete-pool ranking、provider baseline freeze、official import
 与 target 请求全部保持关闭。
 
+## 2026-08-19 09:11（CST）第七个 unit 完成
+
+第七个 serial unit（任务哈希前缀 `ddc6e3f3bf176b77`）已自然终态：完整分母
+`112/112`，其中 `111` 个 case completed、`1` 个 transport failure，failure rate 为
+`0.008928571429`，低于预注册的 `0.02` fail-fast 门槛，因此 unit 状态为
+`completed`。campaign state 当前为 `status=running`、`completed_unit_count=5/16`、
+`failed_or_blocked_unit_count=2`、`ready_for_ranking=false`、
+`target_suite_calls_performed=false`；campaign digest 更新为
+`fd0a6812886f8fe4b102b75fba55d64223af6b702637d88bd99e3f0b2cc0d352`，state 文件
+SHA-256 为 `14cc904d0578cdd5c88eb1964dd0f325b675d6ce5c5fe8a119c0c9bd062d8bd5`。
+
+运行器已进入第八个 serial unit（任务哈希前缀 `419f1f94e11175a2`，预期完整分母
+`102`），当前 checkpoint 仅完成 `1` 个 case。该 transport failure 只按 unit 完整
+分母记录，不改变 ranking 规则；r11 尚未 terminal，所有后置 gate 继续关闭。
+
 ## 固定后续顺序
 
 ```text
