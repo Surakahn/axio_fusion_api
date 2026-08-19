@@ -66,6 +66,18 @@ target gate 仍关闭。现场进程为 screening `4178760`、supervisor `418163
 `network_calls_performed=true`、`target_suite_calls_performed=false`。screening receipt、
 transport admission 与 ranking 产物尚未出现；下一检查只做低频只读状态审计。
 
+### r12 screening 进度快照（2026-08-19 14:45 CST）
+
+r12 仍处于 screening gate：`status=running`、`planned_task_count=16`、
+`completed_unit_count=0`、`failed_or_blocked_unit_count=4`、`ready_for_ranking=false`。
+当前 state SHA-256 为
+`72b7c3877c717f37f4fa2eebb86138dbc45bde467cf7ffd8b37a8f4aa746afd8`。四个已终态
+unit 均按冻结的 2% transport failure-rate gate 失败，失败率约为 5.88%、100%、
+11.61%、43.14%，其中一项额外记录 `screening_unit_no_scores`；不调低阈值、不拼接
+completed subset。运行器已进入第五个 `mmlu-pro` unit，checkpoint task 为
+`b9d5456f3d18ba9a4f38888d732c7738c096a4908f1d392d2225f479cd2ab55a`，当前 `1/112`
+case；target gate 仍由 supervisor/watcher 关闭。
+
 ## Composite cohort r10 终态与 r11 successor（2026-08-19）
 
 r10 已自然终态：16/16 unit terminal、13 completed、3 failed，campaign 为 `partial`。

@@ -82,6 +82,20 @@ r12 plan/source/probe/admission/state/private root。当前现场证据（2026-0
 screening 终态前不得启动第二套 screening、恢复 r11 checkpoint、修改 frozen plan
 或发送 target 请求；后置转换继续由既有 supervisor/watcher 门禁控制。
 
+## Screening 进度快照（2026-08-19 14:45 CST）
+
+r12 仍在唯一 screening gate：state `status=running`、`planned_task_count=16`、
+`completed_unit_count=0`、`failed_or_blocked_unit_count=4`、`ready_for_ranking=false`，
+state SHA-256 为
+`72b7c3877c717f37f4fa2eebb86138dbc45bde467cf7ffd8b37a8f4aa746afd8`。四个已终态
+unit 均由冻结的 `max_transport_failure_rate=0.02` 触发失败（失败率分别为约
+5.88%、100%、11.61%、43.14%；其中一个同时记录 `screening_unit_no_scores`），
+完整失败分母保留在私有 unit artifacts 中。运行器已进入第五个 unit 的 checkpoint：
+task `b9d5456f3d18ba9a4f38888d732c7738c096a4908f1d392d2225f479cd2ab55a`，
+`mmlu-pro` 已完成 `1/112` case。screening receipt、transport admission、ranking
+和 provider freeze 尚未生成；`network_calls_performed=true`、
+`target_suite_calls_performed=false`，target gate 继续关闭。
+
 固定顺序为：
 
 ```text
