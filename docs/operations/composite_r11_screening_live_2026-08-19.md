@@ -216,6 +216,25 @@ r11 在冻结 plan 下继续以单 worker 串行推进，新增四个完整 unit
 checkpoint 为 `52/112`、状态为 `partial`。r11 仍未 terminal，所有 post-screening
 gate 与 target 请求继续关闭。
 
+## 2026-08-19 12:46（CST）第十五个 unit 完成
+
+第十五个 serial unit（任务哈希前缀 `8377e611e7dea9c5`）已自然终态完成：完整分母
+`112/112`，transport failure `0`，failure rate `0.0`，状态为 `completed`。完整 unit
+artifact SHA-256 为
+`deb17b265938632079b5fb07f2cb16134efd3061f5aeeaee970f4a9b10f1a241`；safe state 仍
+保持 `raw_provider_outputs_persisted=false`、`secrets_persisted=false`。
+
+campaign state 当前为 `status=running`、`completed_unit_count=11/16`、
+`failed_or_blocked_unit_count=4`、`ready_for_ranking=false`、
+`target_suite_calls_performed=false`；campaign digest 更新为
+`032bfa082e258bbaca35ce7891ad8359b06df3d83eb326f45412a636e3ddd065`，state 文件
+SHA-256 为 `153bdf488a7d35da829a485e2c987745af51b2c4fabbb84abff126d579ce7e66`。
+
+运行器已进入第十六个、也是最后一个 serial unit（任务哈希前缀
+`b7ed35c5067b1bed`，预期完整分母 `102`），当前 checkpoint 仅完成 `2` 个 case，仍为
+`partial`。r11 尚未 terminal，transport admission、complete-pool ranking、provider
+baseline freeze、official import 与 target 请求继续关闭。
+
 ## 固定后续顺序
 
 ```text
