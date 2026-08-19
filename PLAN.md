@@ -99,6 +99,17 @@ campaign state 当前为 `status=running`、`completed_unit_count=0`、
 `d7e62dcf7e03031924cdba38ac78d78e5fd094d031e378c4fbeacae7eb383ecf` 已创建 `0/102`
 checkpoint；`retry_round_count=0`，不修改 frozen plan、不拼接 completed subset。
 
+### r13 screening 进度快照（2026-08-19 18:24 CST）
+
+r13 已推进至 `0 completed / 3 failed`，campaign 仍为 `status=running`、
+`planned_task_count=16`、`ready_for_ranking=false`。前三个 terminal unit 的 transport
+failure rate 分别为 `0.676470588235`（102 case）、`0.333333333333`（112 case）和
+`1.0`（102 case），均由冻结 `2%` fail-fast gate 拒绝；其中后两个记录
+`screening_unit_no_scores`。state campaign digest 已更新为
+`9bcb44be4d442a34dffed1066f2a3657c244aaa53e2287f8e7c9dcd3a33c8ae2`。第四个 task
+`e2314df494955a51d8254373eece6ccc4aa518a22f615be36ffac399b8ccfa9e` 当前 checkpoint
+为 `3/102`；所有 unit `retry_round_count=0`，不修改 plan、不拼接 completed subset。
+
 ### r12 live screening 启动里程碑（2026-08-19 13:33 CST）
 
 r12 唯一 live non-target screening 已通过 `setsid/nohup` 启动，supervisor 与 lineage
