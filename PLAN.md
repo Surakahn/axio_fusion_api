@@ -51,6 +51,19 @@ r14 唯一 live non-target screening 已通过 `setsid/nohup` 启动，screening
 provider/preflight 阶段，live state 与 receipt 尚未落盘，尚未完成任何 unit；不修改 frozen
 plan、不恢复 r13 checkpoint、不发送 target 请求。
 
+### r14 screening 进度快照（2026-08-19 23:33 CST）
+
+r14 首个 `livebench_official_final_text_slice` unit 已自然终态完成：task
+`9f3c65a3400e64e7060275409ecb94735aa388d694a4be002d495605ee218d13`，完整 `102/102`
+case，`scored_case_count=102`、transport failure `0/102`、failure rate `0.0`，reason
+codes 为空；mean score `0.813725490196`，p50/p95 latency `7316.760ms/20261.479ms`。
+campaign 仍为 `status=running`、`planned_task_count=16`、`completed_unit_count=1`、
+`failed_or_blocked_unit_count=0`、`ready_for_ranking=false`；state SHA-256 为
+`48c5c55ac7d6273af07ec641b4cd572e5962af424e4fe3cfd888dd99e73dce39`，campaign digest 为
+`4d3bf242ae076f34a2cae6d6eab6103f450764f6f4a8dc8f8019535fbb2a395f`。运行器已进入第二个
+unit，task `99a42d6882bac42a2b7e465638bbcf57354718054480065a25c0487a3d5adf8c` 的 private
+checkpoint 为 `2/112`；完整 16-unit 分母、2% gate 和 target 禁止标志不变。
+
 ## Composite cohort r12 successor intake（2026-08-19）
 
 r11 已完成 16/16 个 serial unit，但 campaign 为 `partial`（11 completed、5 failed）。
