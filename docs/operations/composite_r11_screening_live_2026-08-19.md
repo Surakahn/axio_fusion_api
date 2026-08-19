@@ -146,6 +146,25 @@ campaign state 当前为 `status=running`、`completed_unit_count=5/16`、
 transport admission、complete-pool ranking、provider baseline freeze、official import
 与 target 请求继续关闭。
 
+## 2026-08-19 09:22（CST）第九个 unit 失败
+
+第九个 serial unit（任务哈希前缀 `fcf6ccd4e1017dc0`）已按冻结的 fail-fast 规则自然
+终态失败：完整分母 `112/112`，其中 `4` 个 case completed、`108` 个 transport
+failure，failure rate 为 `0.964285714286`，reason 为
+`screening_unit_transport_failure_rate_exceeded`。该 unit 的完整失败分母已保留，
+不恢复、不重试，也不将 partial score 送入 ranking。
+
+campaign state 当前为 `status=running`、`completed_unit_count=5/16`、
+`failed_or_blocked_unit_count=4`、`ready_for_ranking=false`、
+`target_suite_calls_performed=false`；campaign digest 更新为
+`ff7882142d41635a617338de706e2b5892fa0cc6b68d78206175f0b53632fa95`，state 文件
+SHA-256 为 `1ea682b96905ced1ff003a6ccbb40e8691b4684dbc610874126c3b4dbeaf51d4`。
+
+运行器已继续创建下一个 serial unit 的私有 checkpoint（任务哈希前缀
+`ab610273afe7c2e8`），当前尚无 case。r11 尚未 terminal，transport admission、
+complete-pool ranking、provider baseline freeze、official import 与 target 请求继续
+关闭。
+
 ## 固定后续顺序
 
 ```text
