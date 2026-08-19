@@ -120,6 +120,14 @@ case。screening terminal 前继续关闭 transport/ranking/freeze/import 以及
 `6f9c3ef80bae3b96e237bbc66d7cbff05573bdc1c3c79bf2439486d79a0a3975`，当前 `5/112`
 case。screening terminal 前继续关闭 transport/ranking/freeze/import 与 target gate。
 
+### r12 失败 telemetry 中间审计（2026-08-19 16:00 CST）
+
+五个失败 unit 均由冻结 2% gate 的 fail-fast 触发，失败分母包含真实 transport 事件和
+未尝试 case，不能把两者混同。已观测到的真实信号为 HTTP 500/503、timeout 与空输出；
+直接故障后分别有 3、109、10、99、41 个未尝试 case，p95 分别约为 20.14、23.24、
+51.74、90.08、80.69 秒。当前计划各失败 unit 的 `retry_round_count=0`，不在 r12 内
+修改 retry 或阈值；只在完整 terminal/ranking 审计后决定是否需要新的 successor policy。
+
 ## Composite cohort r10 终态与 r11 successor（2026-08-19）
 
 r10 已自然终态：16/16 unit terminal、13 completed、3 failed，campaign 为 `partial`。

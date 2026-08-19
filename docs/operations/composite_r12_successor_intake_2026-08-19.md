@@ -145,6 +145,28 @@ case。screening receipt、transport admission、ranking 和 provider freeze 仍
 `network_calls_performed=true`、`target_suite_calls_performed=false`，target gate
 继续关闭。
 
+## 失败 telemetry 中间审计（2026-08-19 16:00 CST）
+
+对五个失败 unit 的 hash-only state 与私有 telemetry 做了只读汇总；未读取或写入
+prompt、label、原始输出、provider URL 或 credential。所有五项均是冻结的 2% gate
+触发 `fail_fast`，因此 `transport_failure_count` 同时包含真实 transport 失败和
+`fail_fast_unattempted_case_count`，不能将后者误报为同等数量的真实上游故障：
+
+- `1d69e...`：102 case 中 96 个已评分、6 个失败；3 个真实事件为 2 次 HTTP 503 和
+  1 次空输出，随后 3 个未尝试；p95 为约 20.14 秒；
+- `44e2fe...`：112 case 中 0 个已评分、112 个失败；3 次 HTTP 500 后，109 个未尝试，
+  同时记录 `screening_unit_no_scores`；p95 为约 23.24 秒；
+- `a17bf8...`：112 case 中 99 个已评分、13 个失败；2 次 HTTP 503、1 次 timeout 后，
+  10 个未尝试；p95 为约 51.74 秒；
+- `b9d545...`：112 case 中 10 个已评分、102 个失败；1 次空输出、2 次 timeout 后，
+  99 个未尝试；p95 为约 90.08 秒；
+- `dc4185...`：102 case 中 58 个已评分、44 个失败；3 次 timeout 后，41 个未尝试；
+  p95 为约 80.69 秒。
+
+所有失败 unit 的 `retry_round_count=0`，符合当前 frozen plan 的零重试行为；这只是
+当前 cohort 的事实记录。r12 终态前不修改 retry/fail-fast 策略、不重试任何 case，后续
+是否需要新的 successor policy 只能在完整 cohort terminal 与 ranking 审计后决定。
+
 固定顺序为：
 
 ```text
