@@ -96,6 +96,19 @@ task `b9d5456f3d18ba9a4f38888d732c7738c096a4908f1d392d2225f479cd2ab55a`，
 和 provider freeze 尚未生成；`network_calls_performed=true`、
 `target_suite_calls_performed=false`，target gate 继续关闭。
 
+## Screening 进度快照（2026-08-19 15:13 CST）
+
+后续低频检查显示第五个 unit 也已自然终态失败：state 仍为 `status=running`、
+`planned_task_count=16`、`completed_unit_count=0`、`failed_or_blocked_unit_count=5`、
+`ready_for_ranking=false`，state SHA-256 为
+`bab7cf7c9b54875b24267c213e0eb87794d518649484db39a216a58c3bd25dbb`。该 unit 的
+transport failure rate 为约 91.07%，仍由冻结 2% gate 拒绝；不修改阈值、不恢复或
+拼接任何 completed subset。运行器已进入第六个 `livebench_official_final_text_slice`
+unit，checkpoint task 为
+`850a79a30e584d817705b7d2fdd06b13411ad129324f81255a72fd119f2a405b`，当前已完成
+`77/102` case。screening receipt、transport admission、ranking 和 provider freeze
+仍未生成；`target_suite_calls_performed=false`，target gate 保持关闭。
+
 固定顺序为：
 
 ```text

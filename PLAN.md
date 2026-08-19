@@ -78,6 +78,17 @@ completed subset。运行器已进入第五个 `mmlu-pro` unit，checkpoint task
 `b9d5456f3d18ba9a4f38888d732c7738c096a4908f1d392d2225f479cd2ab55a`，当前 `1/112`
 case；target gate 仍由 supervisor/watcher 关闭。
 
+### r12 screening 进度快照（2026-08-19 15:13 CST）
+
+第五个 unit 已自然终态失败，当前 state 为 `status=running`、`planned_task_count=16`、
+`completed_unit_count=0`、`failed_or_blocked_unit_count=5`、`ready_for_ranking=false`，
+state SHA-256 为
+`bab7cf7c9b54875b24267c213e0eb87794d518649484db39a216a58c3bd25dbb`。该 unit 的
+transport failure rate 约 91.07%，仍按冻结的 2% gate 拒绝。第六个
+`livebench_official_final_text_slice` unit checkpoint task 为
+`850a79a30e584d817705b7d2fdd06b13411ad129324f81255a72fd119f2a405b`，已完成 `77/102`
+case。screening terminal 前不生成 ranking/freeze/import，也不打开 target gate。
+
 ## Composite cohort r10 终态与 r11 successor（2026-08-19）
 
 r10 已自然终态：16/16 unit terminal、13 completed、3 failed，campaign 为 `partial`。
