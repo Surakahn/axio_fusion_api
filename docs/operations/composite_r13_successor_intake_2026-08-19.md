@@ -102,3 +102,16 @@ campaign 当前为 `status=running`、`completed_unit_count=2`、
 `7c74f960c37434dcb8d6cc5f74e5961fc358eafa37ca604018f5566c6e8168fc`。运行器已自动进入
 第六个 task `5f2f5361b9f6d92cdf4ab790d5c7a3c262906180ae298cd325b04c0966d79d49`，checkpoint
 为 `0/112`；不修改 frozen plan、不拼接 completed subset，target gate 继续关闭。
+
+## r13 screening 进度快照（2026-08-19 19:36 CST）
+
+第六个 task `5f2f5361b9f6d92cdf4ab790d5c7a3c262906180ae298cd325b04c0966d79d49` 已自然
+终态失败：完成 `19/112` case，`scored_case_count=19`、transport failure `93/112`、
+failure rate `0.830357142857`，触发冻结 `2%` fail-fast gate，未尝试 case `90`，reason
+code 为 `screening_unit_transport_failure_rate_exceeded`。campaign 当前为
+`status=running`、`completed_unit_count=2`、`failed_or_blocked_unit_count=4`、
+`ready_for_ranking=false`；state 文件 SHA-256 为
+`35d350c68aee93a22b1d515e03e9bb3c718f95cde6b4029fa822b2f0c4fa5b53`，campaign digest 为
+`ceec8c01f4d5378c63b7bf1c8f4cc771d41648d63773fcc9b188afeb31cd4f38`。运行器已自动进入
+第七个 task `e454627f2fc43c1ca1fbd8a277e9eaceed72122beb138f3a13501b5dc492dfb1`，checkpoint
+为 `4/102`；不修改 frozen plan、不拼接 completed subset，target gate 继续关闭。
