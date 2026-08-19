@@ -235,6 +235,30 @@ SHA-256 为 `153bdf488a7d35da829a485e2c987745af51b2c4fabbb84abff126d579ce7e66`�
 `partial`。r11 尚未 terminal，transport admission、complete-pool ranking、provider
 baseline freeze、official import 与 target 请求继续关闭。
 
+## 2026-08-19 12:50（CST）r11 screening terminal
+
+第十六个、也是最后一个 serial unit（任务哈希前缀 `b7ed35c5067b1bed`）已按冻结的
+fail-fast policy 自然终态失败：完整分母 `102/102`，`102` 个 transport failure，
+failure rate `1.0`，reason 为 `screening_unit_no_scores` 与
+`screening_unit_transport_failure_rate_exceeded`。该 unit 的完整 private artifact
+SHA-256 为
+`66469c3d2dae72816323f9d98e5a901af059c2c368c38da9873523ed6624e69b`；不恢复、不重试，
+不把任何 completed subset 提升为 ranking 输入。
+
+r11 screening 已整体 terminal：`status=partial`、`planned_task_count=16`、
+`completed_unit_count=11`、`failed_or_blocked_unit_count=5`；全部 16 个 unit 的完整
+分母、失败分类和私有证据均已保留。最终 campaign digest 为
+`87a6a158da4e4afb2cca1a5d18c2dd9992a731b070e9fe8ce901f02ca3c5b16`，state 文件
+SHA-256 为 `1bcc100bd3104b513b0ee0ca02de2b5c94b1abd89435ef7b1d96d3cfcf5c35cd`，
+screening receipt SHA-256 为
+`c1ac5c3460cf55a16ec83d0d3e89f26a16ff4cbc672bd6044c77c45aa8f75f36`。
+
+terminal state 仍为 `ready_for_ranking=false`、`target_suite_calls_performed=false`，
+并保持 `raw_provider_outputs_persisted=false`、`secrets_persisted=false`。既有 supervisor
+正在等待其 600 秒轮询周期后执行 transport failure-rate-only admission；在 admission
+receipt 通过前，不执行 ranking、provider baseline freeze、official import 或 target
+请求。
+
 ## 固定后续顺序
 
 ```text
