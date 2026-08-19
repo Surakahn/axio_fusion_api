@@ -55,6 +55,17 @@ r12 live non-target screening
 全部同 cohort ready，才允许 target calls；不做 superiority claim，不选择 completed
 subset，不降低固定 3-model transport gate。
 
+### r12 live screening 启动里程碑（2026-08-19 13:33 CST）
+
+r12 唯一 live non-target screening 已通过 `setsid/nohup` 启动，supervisor 与 lineage
+watcher 均绑定同一个 immutable r12 plan；当前不重复启动、不恢复 r11 checkpoint，且
+target gate 仍关闭。现场进程为 screening `4178760`、supervisor `4181633`、watcher
+`4182263`；state `status=running`、`planned_task_count=16`、`completed_unit_count=0`、
+`failed_or_blocked_unit_count=1`、`ready_for_ranking=false`，state SHA-256 为
+`562d7385b87159eacf82ce95977be74983beb27126e986cf134182a5f5dd25a2`，并确认
+`network_calls_performed=true`、`target_suite_calls_performed=false`。screening receipt、
+transport admission 与 ranking 产物尚未出现；下一检查只做低频只读状态审计。
+
 ## Composite cohort r10 终态与 r11 successor（2026-08-19）
 
 r10 已自然终态：16/16 unit terminal、13 completed、3 failed，campaign 为 `partial`。

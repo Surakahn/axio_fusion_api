@@ -65,12 +65,22 @@ checkout、dataset 内容、答案、provider output 或旧 cohort 结果：
 - scaffold：`status=blocked`，`provider_calls_performed=false`、
   `target_suite_calls_performed=false`，敏感字段均为 `false`。
 
-## 下一步
+## Live screening 已启动
 
-完成本阶段提交和推送后，只启动一个 r12 `baseline-screening-run --live`，使用
-`setsid nohup`、`max_workers=1`，并绑定 r12 plan/source/probe/admission/state/private
-root。同步启动一个 r12 专属 supervisor 和 watcher，三者命令行必须包含 r12 plan
-fragment；不得启动第二套 screening，不得恢复 r11 checkpoint，不得发送 target 请求。
+r12 `baseline-screening-run --live` 已按冻结 plan 启动，并由同一 cohort 的 supervisor
+和 lineage watcher 接管；三者均使用 `setsid/nohup`、`max_workers=1`，命令行绑定
+r12 plan/source/probe/admission/state/private root。当前现场证据（2026-08-19
+13:33 CST）如下：
+
+- screening PID：`4178760`；supervisor PID：`4181633`；watcher PID：`4182263`；
+- state：`status=running`、`planned_task_count=16`、`completed_unit_count=0`、
+  `failed_or_blocked_unit_count=1`、`ready_for_ranking=false`；
+- state 文件 SHA-256：`562d7385b87159eacf82ce95977be74983beb27126e986cf134182a5f5dd25a2`；
+- `network_calls_performed=true`、`target_suite_calls_performed=false`；
+- screening receipt、transport admission 和 ranking 尚未生成，target gate 保持关闭。
+
+screening 终态前不得启动第二套 screening、恢复 r11 checkpoint、修改 frozen plan
+或发送 target 请求；后置转换继续由既有 supervisor/watcher 门禁控制。
 
 固定顺序为：
 

@@ -6,8 +6,12 @@ from collections import defaultdict
 
 sys.path.insert(0, '/home/he/axio_fusion_api/src')
 
-CPA_URL = "http://127.0.0.1:8317/v1/responses"
-CPA_KEY = "sk-S9APc6QARCPCC4AeM"
+CPA_BASE_URL = os.environ.get("AXIO_CPA_PLUS_BASE_URL", "").rstrip("/")
+CPA_URL = os.environ.get(
+    "AXIO_BENCHMARK_RESPONSES_URL",
+    f"{CPA_BASE_URL}/responses" if CPA_BASE_URL else "",
+)
+CPA_KEY = os.environ.get("AXIO_CPA_PLUS_API_KEY", "")
 BENCH_DIR = Path("/mnt/storage/axio_fusion_benchmarks/standardized")
 REG_PATH = "/home/he/axio_fusion_api/private/runs/2026-08-09-prefusion-cohort-r43/runtime_registry.probe-bound.r43.private.json"
 OUTPUT_FILE = Path("/home/he/axio_fusion_api/private/bench_results_engine_v1.json")
@@ -20,7 +24,6 @@ SEED = 42
 
 random.seed(SEED)
 
-import requests
 from axio_fusion_api.schemas import FusionRequest
 from axio_fusion_api.registry import load_registry
 from axio_fusion_api.orchestrator import FusionEngine
@@ -43,15 +46,7 @@ SUITES = {
     "financebench": {"category": "vertical", "tf": "open", "qk": "prompt"},
     "legalbench": {"category": "vertical", "tf": "mcq", "qk": "question", "ok": "options"},
     "bizbench": {"category": "vertical", "tf": "open", "qk": "prompt"},
-    "policyllm_policybench":
-
-# Ensure direct CPA access without proxy
-import os as _os
-_os.environ.setdefault('AXIO_CPA_PLUS_BASE_URL', CPA_URL.replace('/responses', ''))
-_os.environ.setdefault('AXIO_CPA_PLUS_API_KEY', CPA_KEY)
-_os.environ.setdefault('no_proxy', '127.0.0.1,localhost')
-_os.environ.setdefault('NO_PROXY', '127.0.0.1,localhost')
- {"category": "vertical", "tf": "mcq", "qk": "question", "ok": "options"},
+    "policyllm_policybench": {"category": "vertical", "tf": "mcq", "qk": "question", "ok": "options"},
 }
 
 def load_suite(name):
@@ -175,6 +170,12 @@ def call_axio_engine(model, prompt):
     return "", last_err
 
 def call_cpa(model, prompt):
+    if not CPA_URL or not CPA_KEY:
+        return "", "missing_cpa_configuration"
+    try:
+        import requests
+    except ImportError:
+        return "", "requests_dependency_unavailable"
     body = {"model": model, "input": prompt, "max_output_tokens": MAX_TOKENS, "reasoning": {"effort": "max"}}
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {CPA_KEY}"}
     for attempt in range(MAX_RETRIES + 1):
