@@ -84,6 +84,20 @@ campaign state 当前为 `status=running`、`completed_unit_count=2/16`、
 partial，不能作为完整 unit 或 ranking 输入。transport admission、ranking、provider
 baseline freeze、official import 与 target 请求继续不存在。
 
+## 2026-08-19 08:05（CST）第五个 unit 完成
+
+第五个 serial unit 已自然终态：完整分母 `112/112`，transport failure `0`，failure
+rate `0.0`，状态为 `completed`。campaign state 随后更新为 `status=running`、
+`completed_unit_count=3/16`、`failed_or_blocked_unit_count=2`、
+`ready_for_ranking=false`、`target_suite_calls_performed=false`；campaign digest 更新为
+`00a8e37f1a5b3fc66260567f19ba0d62b372cfbcd935471a27ec74116c45982e`，state 文件 SHA-256
+为 `ca180d7d155abcb0bc591142346cacd97cadafbb93d65abe03a915d28dcef375`。
+
+运行器已进入第六个 serial unit（预期完整分母 `102`），刚开始执行。此前两个失败
+unit 的完整失败分母仍保留；本次里程碑不改变 frozen plan，不恢复或重试 checkpoint，
+也不授权 transport admission、ranking、provider baseline freeze、official import 或
+target 请求。
+
 ## 固定后续顺序
 
 ```text
