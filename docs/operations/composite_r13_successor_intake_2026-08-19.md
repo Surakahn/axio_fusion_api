@@ -247,3 +247,21 @@ unit 的完整失败分母已经封存；不恢复 checkpoint、不重试 case�
 不降低 transport gate。screening 主进程已退出，现有 supervisor/watcher 只等待其
 低频终态审计；transport admission、ranking、provider freeze、official import、cohort
 binding 与 target campaign 均尚未 ready，`target_suite_calls_performed=false`。
+
+## r13 transport admission 终态（2026-08-19 23:08 CST）
+
+既有 supervisor 在 screening terminal 后按冻结顺序完成 transport-only admission，未执行
+target 或 ranking 请求。transport receipt SHA-256 为
+`35db945c7b9aefdf08f627d5ebc32bda309c3609c0b3be5e81966b5cbdbe62d8`，supervisor receipt
+SHA-256 为 `b9dd703b2fe235fce3e1fd02833c8e64dcc9cc13abbb09c7c11dd046c2768a95`；两者均绑定
+r13 plan digest `899f3cb3f7539ec0789458f21a85be7357042e0cb7275a171ba16ea40d030f97`、campaign
+digest `5dc080cbefa0de102256058a1ae12dc28cb8b0c53a4d5362f6afe7cb1522fe22` 和最终 state
+SHA-256 `81c327fb5c43efc93b9531b12434f98a5244c4b5ead45fbbf8c5edf0a389a256`。
+admission 状态为 `blocked`：8 个 candidate canonical 中仅 2 个在两独立 source family
+都通过 `2%` transport failure gate，低于预注册的 `3` 模型最低门槛；唯一 blocker 为
+`transport_admission_fewer_than_minimum_models`。receipt 明确记录
+`selection_basis=transport_failure_rate_only`、`quality_fields_used_for_selection=[]`，
+没有使用分数、标签或 provider output。ranking 文件未生成，provider baseline freeze、
+official import、cohort binding 与 target campaign 继续关闭；r13 全部证据转为
+reference-only，下一次推进必须创建新的 immutable successor（例如 r14），不得恢复或拼接
+r13 survivor subset。
