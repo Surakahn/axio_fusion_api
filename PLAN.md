@@ -100,6 +100,16 @@ case。screening terminal 前不生成 ranking/freeze/import，也不打开 targ
 case。screening terminal 前仍不生成 transport/ranking/freeze/import，也不打开 target
 gate。
 
+### r12 screening 进度快照（2026-08-19 15:53 CST）
+
+第七个 `mmlu-pro` unit 已完成。当前 state 为 `status=running`、
+`planned_task_count=16`、`completed_unit_count=2`、`failed_or_blocked_unit_count=5`、
+`ready_for_ranking=false`，state SHA-256 为
+`625b8f84a8d4aeaaaaae0917d071156483cddced03cc2920ae55b235437dd8d3`。第八个
+`livebench_official_final_text_slice` unit checkpoint task 为
+`bd32f49dbc4f9a0af85985b77f8f26901ad2fa7a9c2136faf10e360063200e61`，已完成 `73/102`
+case。screening terminal 前继续关闭 transport/ranking/freeze/import 以及 target gate。
+
 ## Composite cohort r10 终态与 r11 successor（2026-08-19）
 
 r10 已自然终态：16/16 unit terminal、13 completed、3 failed，campaign 为 `partial`。
