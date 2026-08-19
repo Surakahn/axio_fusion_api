@@ -128,6 +128,24 @@ SHA-256 为 `14cc904d0578cdd5c88eb1964dd0f325b675d6ce5c5fe8a119c0c9bd062d8bd5`�
 `102`），当前 checkpoint 仅完成 `1` 个 case。该 transport failure 只按 unit 完整
 分母记录，不改变 ranking 规则；r11 尚未 terminal，所有后置 gate 继续关闭。
 
+## 2026-08-19 09:17（CST）第八个 unit 失败
+
+第八个 serial unit（任务哈希前缀 `419f1f94e11175a2`）已按冻结的 fail-fast 规则自然
+终态失败：完整分母 `102/102`，其中 `6` 个 case completed、`96` 个 transport
+failure，failure rate 为 `0.941176470588`，reason 为
+`screening_unit_transport_failure_rate_exceeded`。未将这部分结果提升为质量排名，也
+未恢复或重试该 unit 的 checkpoint。
+
+campaign state 当前为 `status=running`、`completed_unit_count=5/16`、
+`failed_or_blocked_unit_count=3`、`ready_for_ranking=false`、
+`target_suite_calls_performed=false`；campaign digest 更新为
+`2e80f8178ef56c08f3a5f5462ef77d2673d57df86f36ea7af3899b65f1ed46df`。
+
+运行器已创建下一个 serial unit 的私有 checkpoint（任务哈希前缀
+`fcf6ccd4e1017dc0`），当前为 `0` 个 case 的 partial checkpoint。r11 尚未 terminal，
+transport admission、complete-pool ranking、provider baseline freeze、official import
+与 target 请求继续关闭。
+
 ## 固定后续顺序
 
 ```text
