@@ -1,5 +1,60 @@
 # Axio Fusion API Plan
 
+## Composite cohort r12 successor intake（2026-08-19）
+
+r11 已完成 16/16 个 serial unit，但 campaign 为 `partial`（11 completed、5 failed）。
+其 transport-only admission 为 `ready`（5/8 canonical eligible），但 complete-pool
+ranking 被完整 campaign/source coverage 门禁拒绝；r11 已封存为 `reference_only`，不得
+复用 transport、candidate inventory、completed subset、ranking 槽位或任何旧 cohort
+freeze/binding。终态证据见
+`docs/operations/composite_r11_screening_live_2026-08-19.md`。
+
+当前主线已切换为新的 immutable r12 successor。r12 只从 r11 source successor 复制
+source contract，改变 selection seed 和新的 successor registration 事件；不恢复或拼接
+r11 checkpoint，不修改 r11 frozen plan，不重复上游探测：
+
+- source successor：文件 SHA-256
+  `44bc2c7ec6f9db22fc2724a17cb60036c50abcd5c646ebc2401ccac3fadc05e7`，receipt SHA-256
+  `b85fdd91ecb0faaf0f5b5e4f9e940e24d5cf09fd862348619d288991d302ef59`，selection seed
+  hash `0557b404e7ad918bf19bcb10880dc4aaffa91911a3574eb6ad52959e3b330ed6`，状态为
+  `ready`；
+- frozen plan：文件 SHA-256
+  `58e2a0acd39801a6245082d67e3ef5f93aa543836d28dd8f9a3ca94bba4c6c65`，plan digest
+  `b38052946a726ddb9d03aa6b4a04c19804e021731e508fa1048a63101afacde4`，16 个 serial
+  unit、2 个独立 source family、8 个 canonical groups/9 个 profiles、`max_workers=1`；
+- registry 仍绑定 r7 probe-bound registry SHA-256
+  `7d0a9b78a06ea7445c43b7c03e15d6bbedb3112ecf8fb7d1ad041301678c1ad8`，只复用同一
+  r7 operational admission，不输入 r11 transport receipt；
+- zero-network preflight：receipt SHA-256
+  `06ca721adac5984d153bd84d101655246f40afe460cf019fbe8798ae517061a9`，state SHA-256
+  `353f2c38e7661c6f9da0d79e59afc8cec20fe718af86e16ef5c09187dff4d4af`，campaign digest
+  `741e0c306ebcab33545300c8581467f828db504d1e635d2cc53e07166eb4ca3a`，
+  `status=preflight_ready`、`network_calls_performed=false`、`target_suite_calls_performed=false`。
+
+r12 Harness 控制面已按 r12 output path 离线重建：复用 6/6 hash-only pin（pin SHA-256
+`22db330ab9e29949b567da420bfc2ca1f5db77f1a6e9c10a5d115bbcbad65b9c`）以及已验证的
+21-suite dataset/case-hash 定义，不复制原始 checkout、数据内容、答案、provider output
+或旧 run。execution plan 为 `ready`（SHA-256
+`19e1cb2f0d42ce0a9d7b9577b584112c0438123200921e654de88a6635e2ce3a`）；acquisition、
+official import、cohort binding 和 convergence audit 均按前置缺失保持 `blocked`，
+`target_suite_calls_allowed=false`、`target_suite_calls_performed=false`。
+
+固定推进顺序：
+
+```text
+r12 live non-target screening
+-> terminal transport admission (failure-rate only)
+-> complete-pool ranking
+-> provider baseline freeze
+-> same-cohort official import
+-> convergence audit ready_for_target_campaign
+-> 21-suite target campaign
+```
+
+只有 r12 的 complete-pool ranking、provider freeze、official import 和 convergence audit
+全部同 cohort ready，才允许 target calls；不做 superiority claim，不选择 completed
+subset，不降低固定 3-model transport gate。
+
 ## Composite cohort r10 终态与 r11 successor（2026-08-19）
 
 r10 已自然终态：16/16 unit terminal、13 completed、3 failed，campaign 为 `partial`。

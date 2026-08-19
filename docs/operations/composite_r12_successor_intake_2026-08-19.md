@@ -1,0 +1,82 @@
+# Composite r12 successor Intake 与 Harness 控制面（2026-08-19）
+
+## 继任边界
+
+r11 已 16/16 unit terminal，但 campaign 为 `partial`（11 completed、5 failed），虽然
+transport-only admission 留下 5 个 canonical model，complete-pool ranking 仍因完整
+campaign/source coverage 不满足而 blocked。r11 的所有 state、private unit artifact、
+transport、ranking、supervisor 和 Harness audit 只读保留，不恢复、不重试、不拼接
+completed subset，也不作为 r12 的 ranking/freeze 输入。
+
+r12 从 r11 source successor 创建 immutable source successor，仅改变
+`pre_registration.selection_seed` 和新的 registration 事件：
+
+- source manifest：SHA-256 `44bc2c7ec6f9db22fc2724a17cb60036c50abcd5c646ebc2401ccac3fadc05e7`；
+- successor receipt：SHA-256 `b85fdd91ecb0faaf0f5b5e4f9e940e24d5cf09fd862348619d288991d302ef59`；
+- selection seed hash：`0557b404e7ad918bf19bcb10880dc4aaffa91911a3574eb6ad52959e3b330ed6`；
+- registered_on：`2026-08-19`；
+- receipt `status=ready`，raw prompt/label/provider output、provider URL 和 secret
+  持久化标志均为 `false`。
+
+## Frozen plan 与 preflight
+
+r12 plan 使用当前 r7 probe-bound registry 和 r7 operational admission，重新计算同一
+两套 source family 的完整候选分母；不传入 r11 transport/ranking/freeze：
+
+- plan 文件 SHA-256：`58e2a0acd39801a6245082d67e3ef5f93aa543836d28dd8f9a3ca94bba4c6c65`；
+- plan digest：`b38052946a726ddb9d03aa6b4a04c19804e021731e508fa1048a63101afacde4`；
+- registry SHA-256：`7d0a9b78a06ea7445c43b7c03e15d6bbedb3112ecf8fb7d1ad041301678c1ad8`；
+- source count/family count：`2/2`；canonical group/profile count：`8/9`；
+- `task_count=16`、`minimum_cases_per_source=100`、`max_workers=1`、fail-fast transport
+  gate 已预注册；
+- estimated provider calls：`1712`；plan `ready=true`。
+
+zero-network preflight 已通过：
+
+- receipt SHA-256：`06ca721adac5984d153bd84d101655246f40afe460cf019fbe8798ae517061a9`；
+- state SHA-256：`353f2c38e7661c6f9da0d79e59afc8cec20fe718af86e16ef5c09187dff4d4af`；
+- campaign digest：`741e0c306ebcab33545300c8581467f828db504d1e635d2cc53e07166eb4ca3a`；
+- `status=preflight_ready`、`mode=preflight`、`network_calls_performed=false`、
+  `target_suite_calls_performed=false`、`reason_codes=[]`。
+
+## Harness 控制面
+
+控制面输出目录为 `private/runs/2026-08-19-composite-cohort-r12/harness_control.successor/`。
+它只复用已验证的 hash-only Harness pin 和 21-suite benchmark 定义，不复制原始
+checkout、dataset 内容、答案、provider output 或旧 cohort 结果：
+
+- pin：SHA-256 `22db330ab9e29949b567da420bfc2ca1f5db77f1a6e9c10a5d115bbcbad65b9c`，
+  `6/6 ready`；
+- acquisition checklist：SHA-256
+  `a6923c000f8b28c1cc047b17ca920705fb33e6e7b27474ea19049206ba3e92dc`，
+  `template_ready`；
+- acquisition status：SHA-256
+  `c3a2097d040436f6e6ca79a56f134a811d0a9bf34cb2f87e1ac2029c2748356a`，等待 official
+  imports 和 provider freeze；
+- official execution plan：SHA-256
+  `19e1cb2f0d42ce0a9d7b9577b584112c0438123200921e654de88a6635e2ce3a`，`ready`；
+- official import audit：SHA-256
+  `bde2e1098b7459571c7ea6e34677ee5946166ded7e9dd5a00bf151fcaba4d380`，`blocked`；
+- initial cohort binding：SHA-256
+  `84aea0437d486a2b1f4ca45d3798f1990e7d4397abcc8d578d42cfd52d957ae6`，`blocked`；
+- convergence audit：SHA-256
+  `59b446f969bdf8b571b54aa3d29d44d62f02e166b5a195ea67992dfc76620d3c`，`blocked`、
+  `next_gate=screening`、`target_suite_calls_allowed=false`；
+- scaffold：`status=blocked`，`provider_calls_performed=false`、
+  `target_suite_calls_performed=false`，敏感字段均为 `false`。
+
+## 下一步
+
+完成本阶段提交和推送后，只启动一个 r12 `baseline-screening-run --live`，使用
+`setsid nohup`、`max_workers=1`，并绑定 r12 plan/source/probe/admission/state/private
+root。同步启动一个 r12 专属 supervisor 和 watcher，三者命令行必须包含 r12 plan
+fragment；不得启动第二套 screening，不得恢复 r11 checkpoint，不得发送 target 请求。
+
+固定顺序为：
+
+```text
+r12 live screening -> terminal transport admission
+-> complete-pool ranking -> provider baseline freeze
+-> same-cohort official import -> convergence audit
+-> ready_for_target_campaign -> 21-suite target
+```
