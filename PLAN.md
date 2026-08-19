@@ -215,6 +215,18 @@ code 为 `screening_unit_transport_failure_rate_exceeded`。campaign 当前为
 第十二个 task `bdbd40764ece9402d2752a6d981ce7020c7857460e321b5f270c16bc7b99856c`，checkpoint
 为 `8/112`；不修改 frozen plan、不拼接 completed subset，target gate 继续关闭。
 
+### r13 screening 进度快照（2026-08-19 21:17 CST）
+
+第十二个 task `bdbd40764ece9402d2752a6d981ce7020c7857460e321b5f270c16bc7b99856c` 已自然
+终态完成 `112/112` case，`scored_case_count=112`、transport failure `0/112`、mean
+score `0.767857142857`、p95 latency `51575.264ms`，reason codes 为空。campaign 当前为
+`status=running`、`completed_unit_count=4`、`failed_or_blocked_unit_count=8`、
+`ready_for_ranking=false`；state 文件 SHA-256 为
+`c87bfcdd8f758ccb56ce80a2db04ba019051a2eb41297ea9404ff9e73f36ccfc`，campaign digest 为
+`cb3be7eebf821474fce222f07313d4cd2aaa8100c324fb8ed409df0a5eb6b8d2`。运行器已自动进入
+第十三个 task `eed40af9b25c169eb5ff7b7de83943be78ab5b14d9791308614fecaf2b8854f3`，checkpoint
+为 `2/102`；不修改 frozen plan、不拼接 completed subset，target gate 继续关闭。
+
 ### r12 live screening 启动里程碑（2026-08-19 13:33 CST）
 
 r12 唯一 live non-target screening 已通过 `setsid/nohup` 启动，supervisor 与 lineage
