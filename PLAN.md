@@ -128,6 +128,17 @@ case。screening terminal 前继续关闭 transport/ranking/freeze/import 与 ta
 51.74、90.08、80.69 秒。当前计划各失败 unit 的 `retry_round_count=0`，不在 r12 内
 修改 retry 或阈值；只在完整 terminal/ranking 审计后决定是否需要新的 successor policy。
 
+### r12 screening 进度快照（2026-08-19 17:00 CST）
+
+r12 当前已写入 12 个 unit artifact，累计 `6 completed / 6 failed`，但 state 仍为
+`status=running`，完整 16-unit terminal gate 尚未满足。state SHA-256 为
+`2c479aacc823fe728f614359c415e66c9f2c1c1d0aa91a618e6743523160e285`，campaign digest 为
+`4ffe154097b67ad8f136fd7d14ee183646e057650e91251c58e8fbe5e0eb72bb`，
+`ready_for_ranking=false`、`target_suite_calls_performed=false`。第十三个 `mmlu-pro`
+unit active checkpoint task 为
+`a39bafd9951fa9e86b8b5708a5e073203fe55ed708859f3cbd8f676a6188cbda`，当前 `1/112`
+case；screening terminal 前继续关闭 transport/ranking/freeze/import 与 target gate。
+
 ### r12 screening 进度快照（2026-08-19 16:13 CST）
 
 第九个 `mmlu-pro` unit 已完成。当前 state 为 `status=running`、

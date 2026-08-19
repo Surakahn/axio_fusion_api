@@ -167,6 +167,19 @@ prompt、label、原始输出、provider URL 或 credential。所有五项均是
 当前 cohort 的事实记录。r12 终态前不修改 retry/fail-fast 策略、不重试任何 case，后续
 是否需要新的 successor policy 只能在完整 cohort terminal 与 ranking 审计后决定。
 
+## Screening 进度快照（2026-08-19 17:00 CST）
+
+r12 已推进至 `6 completed / 6 failed`，累计 12 个 unit artifact 已写入，但 campaign
+仍为 `status=running`，尚未满足完整 16-unit terminal gate。当前 state SHA-256 为
+`2c479aacc823fe728f614359c415e66c9f2c1c1d0aa91a618e6743523160e285`，
+`ready_for_ranking=false`、`network_calls_performed=true`、
+`target_suite_calls_performed=false`；campaign digest 为
+`4ffe154097b67ad8f136fd7d14ee183646e057650e91251c58e8fbe5e0eb72bb`。运行器已进入
+第十三个 `mmlu-pro` unit，active checkpoint task 为
+`a39bafd9951fa9e86b8b5708a5e073203fe55ed708859f3cbd8f676a6188cbda`，当前已完成
+`1/112` case。screening receipt、transport admission、ranking 和 provider freeze
+仍未生成；supervisor/watcher 继续关闭 target gate。
+
 ## Screening 进度快照（2026-08-19 16:13 CST）
 
 第九个 `mmlu-pro` unit 已成功完成，r12 state 更新为 `status=running`、
