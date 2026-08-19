@@ -78,3 +78,15 @@ failure rate 分别为 `0.676470588235`（102 case）、`1.0`（112 case）和
 checkpoint 为 `87/112`，已完成 case 暂未出现 transport failure；所有 unit
 `retry_round_count=0`，不修改 plan、不拼接 completed subset。supervisor 与 watcher
 仍保持 `next_gate=screening`、`target_suite_calls_allowed=false`。
+
+## r13 screening 进度快照（2026-08-19 18:59 CST）
+
+第四个 `mmlu-pro` unit `e2314df494955a51d8254373eece6ccc4aa518a22f615be36ffac399b8ccfa9e`
+已自然终态并完成 `112/112` case，`scored_case_count=112`、transport failure
+`0/112`、mean score `0.785714285714`、p95 latency `48656.944ms`，reason codes 为空。
+campaign 当前为 `status=running`、`completed_unit_count=1`、
+`failed_or_blocked_unit_count=3`、`ready_for_ranking=false`；state 文件 SHA-256 为
+`5fdb98d099336d6e45f7e55b6c61d0c9e630efc4c099c946f3d77ec7a9334165`，campaign digest 为
+`e0055ba70ba099913433bf9b87289cad65c3f423663e74621c0a5c1548155fdd`。运行器已自动进入
+第五个 task `d18c4a89ea4965086cd4c567b86bb24fafb013c5c1b1cb289e7a1d01869172d8`，checkpoint
+为 `1/102`；不修改 frozen plan、不拼接 completed subset，target gate 继续关闭。
