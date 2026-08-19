@@ -98,6 +98,21 @@ unit 的完整失败分母仍保留；本次里程碑不改变 frozen plan，不
 也不授权 transport admission、ranking、provider baseline freeze、official import 或
 target 请求。
 
+## 2026-08-19 08:19（CST）第六个 unit 完成
+
+任务哈希前缀为 `83092ece6c4e3502` 的第六个 serial unit 已自然终态：完整分母
+`102/102`，transport failure `0`，failure rate `0.0`，状态为 `completed`。campaign
+state 当前为 `status=running`、`completed_unit_count=4/16`、
+`failed_or_blocked_unit_count=2`、`ready_for_ranking=false`、
+`target_suite_calls_performed=false`；campaign digest 更新为
+`59c8f48c8f3098773e3c7090329abad52c9fd2eb7b2601584689e2b9f9def743`，state 文件
+SHA-256 为 `f0fdd5d0438fba828dd52dae6e5cf0c2c580e89d3ee9a1589fcd3fbf05b56782`。
+
+运行器已进入下一个 serial unit（任务哈希前缀 `ddc6e3f3bf176b77`，预期完整分母
+`112`），当前 checkpoint 仅有 `2` 个 completed case。r11 仍未 terminal，因而
+transport admission、complete-pool ranking、provider baseline freeze、official import
+与 target 请求全部保持关闭。
+
 ## 固定后续顺序
 
 ```text
