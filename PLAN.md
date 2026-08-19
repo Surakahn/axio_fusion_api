@@ -77,6 +77,16 @@ transport/ranking/supervisor/binding/audit 全部保留为 reference-only，不�
 r13 仍遵循 `2% transport fail-fast`、最低 `3 canonical models`、完整 16-unit 分母和
 同 cohort ranking/freeze/import/audit 约束；target gate 继续关闭。
 
+### r13 live screening 启动里程碑（2026-08-19 17:41 CST）
+
+r13 唯一 live non-target screening 已通过 `setsid/nohup` 启动，screening PID 为
+`566502`，supervisor PID 为 `567189`，watcher PID 为 `567994`；三者命令行均绑定
+`baseline_screening_plan.r13.private.json`，未重复启动其他 screening。首个
+`livebench_official_final_text_slice` checkpoint task 为
+`27fed11add78ea40a3dd7bba83f11272bb8a77bf6b48f514b563705dd3a27395`，已完成 `11/102`
+case，checkpoint 状态为 `partial`。live campaign state 尚未完成首个 unit，target gate
+仍由 supervisor/watcher 关闭；不修改 frozen plan、不重试 case、不启动 target benchmark。
+
 ### r12 live screening 启动里程碑（2026-08-19 13:33 CST）
 
 r12 唯一 live non-target screening 已通过 `setsid/nohup` 启动，supervisor 与 lineage

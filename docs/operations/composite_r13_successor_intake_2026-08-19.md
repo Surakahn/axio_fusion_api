@@ -43,3 +43,12 @@ r13 live non-target screening
 
 只有完整 r13 cohort 通过所有前置门禁后才允许 target 请求；在此之前不做 superiority
 claim，不选择 completed subset，不修改 frozen plan。
+
+## r13 live screening 启动里程碑（2026-08-19 17:41 CST）
+
+r13 唯一 live non-target screening 已通过 `setsid/nohup` 启动：screening PID
+`566502`、supervisor PID `567189`、watcher PID `567994`。三者命令行均绑定同一个
+immutable r13 frozen plan。首个 `livebench_official_final_text_slice` checkpoint task
+为 `27fed11add78ea40a3dd7bba83f11272bb8a77bf6b48f514b563705dd3a27395`，已完成 `11/102`
+case，状态为 `partial`；screening state 尚未完成首个 unit，supervisor/watcher 继续
+关闭 transport/ranking/freeze/import 和 target gate。不修改 frozen plan、不重试 case。
