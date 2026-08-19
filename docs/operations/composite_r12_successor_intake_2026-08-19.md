@@ -181,6 +181,18 @@ r12 已推进至 `6 completed / 7 failed`，累计 13 个 unit artifact 已写�
 `6/102` case。screening receipt、transport admission、ranking 和 provider freeze
 仍未生成；supervisor/watcher 继续关闭 target gate。
 
+## Screening terminal 快照（2026-08-19 17:24 CST）
+
+r12 已完成完整 `16/16` 个 unit，campaign 进入 `status=partial`，累计
+`6 completed / 10 failed`，`ready_for_ranking=false`。state 文件 SHA-256 为
+`fc5d5201e14f1dd2d4cb2c06c997cbc410c2bcb023459cb2cd7192115125443b`，campaign digest
+为 `c78f4eb5ade227d959c2a035c772aa0a4a25bbbc049723e8329f326e2feeef77`；
+`network_calls_performed=true`、`target_suite_calls_performed=false`。第十四个
+`livebench_official_final_text_slice` unit 的 transport failure rate 为 10.78%，
+第十五和第十六个 `mmlu-pro` unit 均因无有效输出触发冻结 2% gate。screening receipt
+已生成，transport admission、ranking 和 provider freeze 尚未生成；supervisor/watcher
+正在等待 terminal state 后处理离线门禁，target gate 继续关闭。
+
 ## Screening 进度快照（2026-08-19 16:13 CST）
 
 第九个 `mmlu-pro` unit 已成功完成，r12 state 更新为 `status=running`、
