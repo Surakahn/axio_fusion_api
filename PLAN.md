@@ -80,6 +80,30 @@ safe live state、screening receipt、transport admission、ranking、provider b
 official import 和 target campaign 仍不存在；supervisor 继续等待 terminal，watcher 继续
 保持 `next_gate=screening`、`target_suite_calls_allowed=false`、`target_suite_calls_performed=false`。
 
+## r17 screening 进入第二个 unit（2026-08-20 19:21 CST）
+
+低频只读复核确认唯一 screening PID `3739367`、同 cohort supervisor PID `3741799` 和
+lineage watcher PID `3742593` 均仍存活，命令行继续绑定同一 r17 frozen plan/source、r7
+probe-bound registry/probe/admission；frozen plan、source manifest 和 registry hash 未漂移。
+
+当前 safe live state 为 `status=running`、16 个 planned units 中 `0 completed / 1 failed_or_blocked`、
+`ready_for_ranking=false`，文件 SHA-256 为
+`a2d04dc54640a8001e5c471d4ba4e2bd9fae6a99cfb27fa63c06ba1b2aa49480`。第一个 unit 的私有
+终态 artifact 保留完整 `102/102` 分母，其中 `15 completed / 87 transport_failed`；它只说明
+transport 层的失败分母，不是答案质量、排名或 baseline evidence，不能抽取 survivor subset。
+
+screening 已按冻结的 serial schedule 进入第二个 unit。最新私有 checkpoint 为
+`checkpoint_status=partial`、`12/112`，文件 SHA-256 为
+`b56b0d2f28b7b385c73757eadd7ef8efc0a46dc786e42abaa3ae7dcaef8982a5`；该文件包含 raw provider
+output，只作为私有恢复证据，不进入 Git、不读取原文、不解释为质量分数或 ranking，也不手工
+恢复 checkpoint。
+
+screening receipt、transport admission、ranking、provider baseline freeze 和 target campaign
+仍未生成；Harness cohort binding/convergence audit 继续为 blocked，watcher 的
+`next_gate=screening`、`target_suite_calls_allowed=false`、`target_suite_calls_performed=false`
+保持不变。screening terminal 前不修改 frozen plan、不使用 `--retry-failed`、不启动第二套
+screening、不调整 router/prompt/weights，也不重启健康的生产 loopback 服务。
+
 ## r16 screening 与 transport 终态（2026-08-20 18:37 CST）
 
 r16 唯一 live non-target screening 已自然终态。screening receipt 与 safe state 均为
