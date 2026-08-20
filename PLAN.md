@@ -104,6 +104,43 @@ screening receipt、transport admission、ranking、provider baseline freeze 和
 保持不变。screening terminal 前不修改 frozen plan、不使用 `--retry-failed`、不启动第二套
 screening、不调整 router/prompt/weights，也不重启健康的生产 loopback 服务。
 
+## r17 20:11 CST 低频复核与后续收敛设计
+
+本次复核确认 r17 仍在唯一 live non-target screening 中，没有启动任何下游 gate。三个托管
+进程的 PID 和命令行 identity 未漂移；frozen plan/source/registry hash 仍分别为
+`336fa9c4f81223622a3f94d21cc249b4d20ba9b392a18a2e1aba54fbc5ba6565`、
+`7ba7fc8816cbd32881b47419e2d26d2fa26f7460d551b4d1c747195f8ae15b56`、
+`7d0a9b78a06ea7445c43b7c03e15d6bbedb3112ecf8fb7d1ad041301678c1ad8`。
+
+safe state 仍为 `running`，16 个 planned units 中 `0 completed / 1 failed_or_blocked`，
+`ready_for_ranking=false`，`network_calls_performed=true`，`target_suite_calls_performed=false`；
+state hash 为 `a2d04dc54640a8001e5c471d4ba4e2bd9fae6a99cfb27fa63c06ba1b2aa49480`。第二个
+MMLU-Pro unit 的私有 checkpoint 为 `partial`，预期 112 个 case，当前仅记录 111 个
+case-result 元数据，checkpoint hash 为
+`d69ef3c23cee241f72dcd94c40e4ef00181d4758f71715ab1a391ddd69e8c20c`；其中的 raw provider
+output 只能作为私有恢复证据，绝不能变成 score、ranking、freeze 或 completion evidence。
+
+当前研究与实现顺序已经固定为：
+
+1. screening terminal 后仅执行 transport admission；通过固定 2% gate 且至少 3 个
+   canonical model eligible 后，才执行 complete-pool ranking、external top-three 和
+   provider baseline freeze。
+2. baseline freeze 后才调研并实现受约束 portfolio/router optimizer：联合质量后验、
+   p50/p95 latency、成本、角色资格和跨 provider 独立性，使用 shadow replay 与独立
+   holdout，不允许读取 target labels。
+3. 同阶段设计 Judge/Synthesizer confidence calibration 与 independence-aware verifier
+   allocation；任何 early-exit 必须证明 process completion，不得把 degraded answer
+   伪装成完整 Fusion。
+4. 学习闭环只允许 allowlisted policy controls，必须经过 contamination audit、decision
+   replay、paired shadow evidence、rollback target 和显式 approval；禁止自动 benchmark-
+   driven promotion。
+5. 同 cohort Harness 放行后才执行 21-suite target campaign；最终以 paired comparison、
+   Holm-Bonferroni（21 x 3 claim family）、effect size、p50/p95 <= 3x、四协议 parity、
+   tool/schema 稳定性和污染审计共同决定完成状态。
+
+ 在 screening 期间不修改 router、prompt、weights、registry 或生产服务；所有算法调研结果
+ 先作为可审计设计和 shadow candidate，直到上游 evidence gate 完成。
+
 ## r16 screening 与 transport 终态（2026-08-20 18:37 CST）
 
 r16 唯一 live non-target screening 已自然终态。screening receipt 与 safe state 均为

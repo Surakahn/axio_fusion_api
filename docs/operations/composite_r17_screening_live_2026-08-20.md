@@ -43,3 +43,64 @@ external ranking、provider baseline freeze、same-cohort Harness import/converg
 21-suite target campaign 和 paired statistical/latency/contamination/API-parity audit。
 
 当前不得作任何 Fusion superiority claim。
+
+## 20:11 CST 低频复核
+
+本次复核仍只读取安全 state、进程身份、checkpoint 元数据和控制面产物；没有读取
+checkpoint 中的 provider 原文，也没有发送新的 provider/target 请求。
+
+- screening PID `3739367`、convergence supervisor PID `3741799`、lineage watcher PID
+  `3742593` 均仍由 init 托管，命令行 identity 未漂移；生产 loopback 未重启。
+- frozen plan/source/registry 的 SHA-256 仍分别为
+  `336fa9c4f81223622a3f94d21cc249b4d20ba9b392a18a2e1aba54fbc5ba6565`、
+  `7ba7fc8816cbd32881b47419e2d26d2fa26f7460d551b4d1c747195f8ae15b56`、
+  `7d0a9b78a06ea7445c43b7c03e15d6bbedb3112ecf8fb7d1ad041301678c1ad8`。
+- safe live state 仍为 `status=running`，16 个 planned units 中 `0 completed / 1
+  failed_or_blocked`，`ready_for_ranking=false`，`network_calls_performed=true`，
+  `target_suite_calls_performed=false`；state hash 仍为
+  `a2d04dc54640a8001e5c471d4ba4e2bd9fae6a99cfb27fa63c06ba1b2aa49480`。
+- 当前 MMLU-Pro unit 的私有 checkpoint 仍为 `partial`，预期 112 个 case，已写入 111
+  个 case-result 元数据；checkpoint SHA-256 为
+  `d69ef3c23cee241f72dcd94c40e4ef00181d4758f71715ab1a391ddd69e8c20c`，
+  `raw_provider_outputs_persisted=true` 仅表示私有恢复证据存在，不能转化为 score、
+  ranking、baseline 或 completion evidence。
+- 同 cohort Harness binding 仍为 `blocked`，convergence audit 仍为 `running` 且
+  `next_gate=screening`；`target_suite_calls_allowed=false`、
+  `target_suite_calls_performed=false`。没有 transport admission、ranking 或 provider
+  baseline freeze 产物。
+
+### Screening 后的收敛设计边界
+
+screening terminal 后只允许按既定单向 gate 推进：
+
+```text
+terminal screening
+  -> transport admission（完整分母、仅 transport 字段）
+  -> complete-pool ranking（两源 non-target calibration）
+  -> external top-three evidence
+  -> provider baseline freeze（fast candidate + cross-provider verifier）
+  -> same-cohort Harness import/convergence
+  -> 21-suite target campaign
+  -> paired statistics / latency / parity / contamination / final audit
+```
+
+只有 baseline freeze 完成后，才进入以下可审计算法工作流：
+
+1. **受约束 portfolio/router 优化**：以 non-target calibration 的质量后验、p50/p95
+   latency、成本和 provider/profile 独立性作为输入，在硬预算、角色资格、跨 provider
+   verifier 和 3x latency 约束下选择 panel；候选策略必须先 shadow replay，再用独立
+   holdout 运行，不能读取 21-suite target labels。
+2. **Judge/Synthesizer 校准**：按 suite/category/难度桶校准 confidence 与 claim
+   equivalence，单独测量 unsupported-high-confidence、同源共识和跨 provider verifier
+   缺口；任何早停策略必须保留 process-completion receipt，不能把 degraded answer 当成
+   完整 Fusion。
+3. **自适应学习闭环**：只允许 allowlisted policy controls（panel size、independence
+   threshold、escalation eligibility、compression preference）进入候选 policy；采用
+   contamination audit、decision replay、paired shadow evidence、rollback target 和
+   显式 approval record，禁止自动 benchmark-driven promotion。
+4. **最终统计与质量门禁**：对同 case hash 的 Axio/冻结 baseline 做 paired comparison，
+   以预注册的 Holm-Bonferroni family（21 suites x 3 tiers）控制多重比较，并同时检查
+   effect size、p50/p95 latency <= 3x、四协议 parity、tool/schema 稳定性和污染审计。
+
+ 在上述阶段完成前，任何新增算法只能作为研究设计或 shadow candidate，不得修改生产
+ router/prompt/weights，也不得宣称 superiority。
