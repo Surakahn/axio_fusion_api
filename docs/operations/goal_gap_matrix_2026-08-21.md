@@ -23,6 +23,8 @@ provider 能力组合成 `axio-fast`、`axio-terra`、`axio-pro`。Harness 只�
 - r18 source SHA-256：`3844caf2aa53e4e419f4b9a318ec571ed9a3463e1d56d2f7034989209c8ce815`。
 - r18 preflight：`preflight_ready`，`network_calls_performed=false`，
   `target_suite_calls_performed=false`，`ready_for_ranking=false`。
+- 当前 credential-ready 零网络预检已独立生成并与 r18 plan/source/r7 registry hash 绑定；
+  9/9 required profiles ready，但它不授权 live screening，也不代表任何 provider 能力。
 - 当前服务只读健康：`ready`，公共模型为三档，四种协议可用，`auto -> proxy`，
   生产 loopback 为 `127.0.0.1:18900`，当前 serving registry 为 r7 probe-bound。
 - 当前工程回归：`1074 passed, 7 skipped`；这是代码契约证据，不是能力或质量证据。
@@ -39,7 +41,7 @@ provider 能力组合成 `axio-fast`、`axio-terra`、`axio-pro`。Harness 只�
 | Pro 工作流 | **partial** | panel -> Judge -> targeted escalation -> acting Synthesizer；角色上下文隔离；公共 reasoning 清理 | 当前 dry-run 只有一个 provider hash，跨 provider 互补不足；质量/成本尚未实测 | baseline freeze 后做 provider diversity/error-correlation/quality shadow 优化 |
 | Router/编排算法 | **partial** | query analysis、canonical 去重、角色 gate、deadline/call/cost reservation、fallback、circuit recovery、safe trace | 静态 capability prior 仍未被完整双源 non-target evidence 替换；VOI/portfolio optimizer 未晋级 | 只在 baseline freeze 后使用 non-target/shadow/holdout 设计和审批 successor |
 | Judge/Synthesizer | **partial** | 结构化比较 rubric、consensus/contradiction/coverage、独立性 gate、输出归一化 | confidence calibration、abstention/repair 阈值尚无同 cohort 实证；不得以 target label 调参 | baseline freeze 后用 operational non-target cases 校准并绑定 rollback |
-| Provider admission | **blocked** | r7 probe-bound registry、四协议 adapter、90 秒 stream gate、健康和安全 receipt | r17 transport admission blocked；8 canonical 仅 1 个同时通过两源 2% gate，低于 minimum 3 | 明确授权后只启动唯一 r18 frozen live screening |
+| Provider admission | **blocked** | r7 probe-bound registry、四协议 adapter、90 秒 stream gate、健康和安全 receipt；r18 credential-ready 零网络预检 9/9 | r17 transport admission blocked；8 canonical 仅 1 个同时通过两源 2% gate，低于 minimum 3；credential readiness 不等于 transport admission | 明确授权后只启动唯一 r18 frozen live screening |
 | Ranking/baseline freeze | **blocked** | ranking conversion、external top-three、freeze 的 fail-closed 控制面已实现 | r18 尚未 terminal，故无完整 pool ranking、rank 1/2/3 或 freeze | r18 terminal -> transport admission -> complete-pool ranking -> external top-three -> freeze |
 | Harness 控制面 | **partial/ready offline** | hash-only pin、execution plan、持久化状态、可恢复 supervisor、import audit、convergence gate | r18 acquisition/import/binding/convergence 依赖上游 screening/freeze，当前 `next_gate=screening` | freeze 后绑定同 cohort official/audited runs，再审计放行 target |
 | 21-suite 资产 | **partial/blocked** | 9 类 21 套 matrix、case/source/decoding/统计合同；14 套可直接 materialize，6 套需 official import，GPQA 受授权门禁 | 没有完整同 cohort run；GPQA/官方 harness/import 仍不能冒充 ready | 先完成 baseline freeze 和官方/audited imports，再启动 target |

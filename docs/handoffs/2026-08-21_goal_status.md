@@ -54,6 +54,12 @@ Synthesizer、fallback、预算和安全工程统一提供 `axio-fast`、`axio-t
 - `private/current_channels.env` 的 registry identity 已与正式 r7 serving identity 对齐；
   `registry-diagnostic --require-prefusion` 和 provider 配置摘要均保持零网络，且未打印
   secret 值。该修正只消除未来启动的配置漂移，不改变当前运行进程或 r18 frozen 输入。
+- 使用同一 r18 plan/source/r7 registry 和 r7 operational-admission binding，额外生成了
+  独立的零网络 credential-ready preflight（不覆盖原始 preflight）：
+  `screening_state.r18.credentials-ready-preflight.private.json`、
+  `screening.preflight.receipt.r18.credentials-ready.private.json`；两者均为
+  `preflight_ready`、9/9 credential ready、`network_calls_performed=false`、
+  `target_suite_calls_performed=false`，仅用于后续授权前的 hash/PID 核验。
 - `python3.11 -m compileall -q src scripts`：通过。
 - 控制面专项回归：20 passed。
 - 全量回归：`1074 passed, 7 skipped in 272.24s`。
