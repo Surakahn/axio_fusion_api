@@ -1,5 +1,46 @@
 # Axio Fusion API Plan
 
+## r17 immutable successor 与 preflight（2026-08-20 18:58 CST）
+
+r16 transport admission blocked 后，已从 r16 source contract 注册新的 immutable r17 successor。
+source successor 只改变 `pre_registration.registered_on` 和 `selection_seed`，没有读取 r16
+score、transport receipt、ranking、checkpoint 或 survivor subset：
+
+- source manifest：`private/runs/2026-08-20-composite-cohort-r17/source_manifest.successor.r17.private.json`，SHA-256 `7ba7fc8816cbd32881b47419e2d26d2fa26f7460d551b4d1c747195f8ae15b56`；
+- successor receipt：`source_manifest_successor_receipt.r17.private.json`，SHA-256 `5103b24978c39aa2e5318601c9c6377b74948856bcee9c9c78dd7a68114ff640`；
+- selection seed：`composite-r17-2026-08-20-transport-successor`，hash `33d47ab09c2b0ac4b18297ad67ce10c730bbd65c3f1d2bb218f067bccc0c90e9`；
+- source contract 的 raw prompt、label、provider output、provider URL 和 secret 持久化标志均为 `false`。
+
+r17 frozen plan 已通过离线生成并绑定 r7 probe-bound registry、r7 private probe 与 r7
+operational admission：plan 文件 SHA-256 为
+`336fa9c4f81223622a3f94d21cc249b4d20ba9b392a18a2e1aba54fbc5ba6565`，plan digest 为
+`14f0a56ad4f22e21dacbb2209a7e3551517942eb0779dbc4158afd489f6d8c01`；2 个独立 source
+families、8 个 canonical groups、9 个 replicas、16 个 serial units、`max_workers=1`、
+固定 2% fail-fast gate、估算 provider calls `1712`，`ready=true`。r16 transport receipt
+没有作为 r17 的 transport-availability 输入。
+
+zero-network preflight 已完成：state SHA-256 为
+`ba2868a0842d804a38b22df876782c68a579f33fcd0d69600f01fad127b5f108`，receipt SHA-256 为
+`68c4bd646418f21b2877896c09fe21bcaa44937036b0e59acc1a920c386d3ee1`，campaign digest 为
+`0f92d77ddf0a67d2c5e7dc0eb39ea2ba71cbb4203075b51312de0658b08793a9`；状态为
+`preflight_ready`，`network_calls_performed=false`、`target_suite_calls_performed=false`，
+没有 provider/target 请求。
+
+同 cohort Harness 控制面已离线生成，使用已验证的 6/6 hash-only pin（SHA-256
+`22db330ab9e29949b567da420bfc2ca1f5db77f1a6e9c10a5d115bbcbad65b9c`）、r7 dataset/source/
+case-hash manifests 和默认 `data/benchmarks` 控制路径：execution plan SHA-256
+`3593437c083c780c09da784411ea7952c16f73913a68f8770a1fad757d2598ec`，acquisition status
+SHA-256 `87de4260c7c200f12680f1165625ef4fe666644750e885bf3321a934f5b0a5b8`，official import
+audit SHA-256 `b7474cddc260bdaf2a356ddcfa531620438d50f38761a54818c00dfad9c7dd7e`。目前 6 个
+official/audited suite imports 仍未提供，cohort binding/convergence audit 为 blocked，
+`next_gate=screening`、`target_suite_calls_allowed=false`、`target_suite_calls_performed=false`；
+这只是预期的控制面状态，不是 target benchmark 失败。
+
+下一步只启动一套绑定 r17 plan/source、r7 registry/probe/admission 的 live non-target
+screening。screening terminal 前不执行 transport/ranking/freeze/import/target；terminal 后
+仍严格沿 transport admission → complete-pool ranking → external top-three → provider
+baseline freeze → same-cohort Harness → convergence → 21-suite campaign 单向推进。
+
 ## r16 screening 与 transport 终态（2026-08-20 18:37 CST）
 
 r16 唯一 live non-target screening 已自然终态。screening receipt 与 safe state 均为
