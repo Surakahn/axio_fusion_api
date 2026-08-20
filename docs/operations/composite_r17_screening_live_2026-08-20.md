@@ -104,3 +104,19 @@ terminal screening
 
  在上述阶段完成前，任何新增算法只能作为研究设计或 shadow candidate，不得修改生产
  router/prompt/weights，也不得宣称 superiority。
+
+## 20:20 CST 第二个 unit 终态
+
+最新安全 state 已进入 `1 completed / 1 failed_or_blocked`，但整个 16-unit screening 仍为
+`status=running`、`ready_for_ranking=false`；`network_calls_performed=true`、
+`target_suite_calls_performed=false`。第二个 112-case unit 的 completed 只代表 transport
+终态，不代表答案质量、ranking 或 baseline evidence，也不允许抽取 survivor subset。
+
+筛选器随后按 frozen serial schedule 进入第三个 102-case unit。其私有 checkpoint 为
+`checkpoint_status=partial`、`3/102`，SHA-256 为
+`71fc050c8aa1364211ff1310d5457e2c65f93f26c50345f12c946d43f95af6d6`；文件含 raw provider
+output，仅供私有恢复证据使用，不读取原文、不进入 Git、不手工恢复。
+
+transport admission、ranking、provider baseline freeze 和 target campaign 仍不存在；
+lineage watcher 的 `next_gate=screening` 与 target-call 禁止标志未改变。继续按 10–20
+分钟低频只读核对，不修改 frozen 输入、不启动第二套 screening、不重启生产 loopback。

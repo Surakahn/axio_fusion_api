@@ -141,6 +141,28 @@ output 只能作为私有恢复证据，绝不能变成 score、ranking、freeze
  在 screening 期间不修改 router、prompt、weights、registry 或生产服务；所有算法调研结果
  先作为可审计设计和 shadow candidate，直到上游 evidence gate 完成。
 
+## r17 第二个 unit 终态与第三个 unit 启动（2026-08-20 20:20 CST）
+
+低频只读复核确认 r17 仍只有一套 screening、同 cohort supervisor 和 lineage watcher，三者
+命令行 identity 未漂移。safe state 已更新为 `status=running`、16 个 planned units 中
+`1 completed / 1 failed_or_blocked`，`ready_for_ranking=false`，`network_calls_performed=true`、
+`target_suite_calls_performed=false`；state SHA-256 为
+`0cddbd887aea6115205e33acd14d3333e2c09de398972a253501d3f51fd55d42`，campaign digest 为
+`b19c7e4ea9632d95c804d2fc4bd75729d5e80948af56d7958983a2b51045bc6f`。
+
+第二个 112-case unit 已进入 safe state 的 completed 计数，但该 completed 只表示该 unit
+满足 transport 层终态，不能解释为质量分数、外部排名或 baseline 证据；不抽取 survivor subset，
+不读取其私有 raw provider output。筛选器已按 frozen serial schedule 启动第三个 102-case
+unit，最新私有 checkpoint 为 `partial`、`3/102`，SHA-256 为
+`71fc050c8aa1364211ff1310d5457e2c65f93f26c50345f12c946d43f95af6d6`；该 checkpoint 仍只
+作私有恢复证据，`raw_provider_outputs_persisted=true`，不进入 Git。
+
+transport admission、ranking、provider baseline freeze、official import 和 target campaign
+仍未生成，watcher 仍保持 `next_gate=screening`、`target_suite_calls_allowed=false`、
+`target_suite_calls_performed=false`。继续低频只读观察，screening terminal 前不修改 frozen
+plan/source、router/prompt/weights/registry，不使用 `--retry-failed`，不启动第二套 screening，
+不重启健康生产服务。
+
 ## r16 screening 与 transport 终态（2026-08-20 18:37 CST）
 
 r16 唯一 live non-target screening 已自然终态。screening receipt 与 safe state 均为
