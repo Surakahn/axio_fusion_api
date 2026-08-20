@@ -23,14 +23,20 @@
 - operational admission SHA-256：
   `bf6db0c659b728a6d4c0a8e5d99c1fb9b66e1f70ec96977de048fd393c77af12`
 
-## 下一动作
+## 当前运行
 
-启动前重新执行只读核验，确认没有 r15 live PID、plan 文件未变、preflight 仍为 ready；
-然后用 `setsid/nohup env PYTHONPATH=src python3.11 -m axio_fusion_api.cli` 启动唯一
-`baseline-screening-run --live`，并保存 screening state、receipt、private root 和
-console log。启动后只做低频 PID/state/log 检查，不重试失败 case，不修改计划。
+唯一 r15 `baseline-screening-run --live` 已启动并由 `setsid/nohup` 托管：screening PID
+`2871629`、supervisor PID `2880595`、lineage watcher PID `2881730`。三者命令行持续绑定
+r15 plan/source 与 r7 registry/probe/admission，没有第二套 screening。
 
-screening terminal 后由同 cohort supervisor 执行 transport admission 和 ranking；只有
-完整-pool ranking ready 才能继续 external rank 1/2/3、provider freeze、official import、
-convergence audit 和 target campaign。任何未通过都必须注册下一个 successor，不能宣称
-Fusion superiority。
+截至 2026-08-20 12:25 CST，首个 serial unit checkpoint 为 `27/112`、状态 `partial`；safe
+live state 尚未到 terminal，故不能填写 completed/failed unit 计数。supervisor 仍等待
+terminal，watcher 的 convergence audit 为 `blocked`、`next_gate=screening`、
+`target_suite_calls_allowed=false`。transport admission、ranking、provider freeze、
+official import 和 target campaign 均未启动。
+
+后续仅做 10-20 分钟低频 PID/state/log 检查，不重试失败 case、不恢复 checkpoint、不修改
+frozen plan。screening terminal 后由同 cohort supervisor 执行 transport admission 和
+完整-pool ranking；只有 ranking ready 才能继续 external rank 1/2/3、provider freeze、
+official import、convergence audit 和 target campaign。任何未通过都必须注册下一个
+successor，不能宣称 Fusion superiority。

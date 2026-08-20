@@ -2264,3 +2264,8 @@ Latency superiority is also claim-gated on two distribution points: both p50 and
   `next_gate=screening`、`target_suite_calls_allowed=false`，transport/ranking/freeze/
   official import/target 均未启动；持续低频检查，禁止恢复 checkpoint、重试失败 case、
   修改 plan 或启动第二套 screening。
+- 2026-08-20 12:25：r15 screening 仍在唯一首个 serial unit，private checkpoint 已到
+  27/112、状态 `partial`；safe live state 尚未 terminal，因此 completed/failed unit
+  计数仍未生成。三个托管进程存活且 plan identity 未变，supervisor/watcher 保持
+  `next_gate=screening`、`target_suite_calls_allowed=false`，下游 transport/ranking/
+  freeze/import/target 产物均不存在。

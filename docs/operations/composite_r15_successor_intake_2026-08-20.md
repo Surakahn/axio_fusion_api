@@ -113,3 +113,12 @@ screening 仍在运行时不恢复 checkpoint、不使用 `--retry-failed`、不
 启动第二套 screening。后续状态只按 10-20 分钟低频检查；首个 unit terminal 后才记录
 准确的 completed/failed 分母并允许 supervisor 执行离线 transport admission 和完整池
 ranking。
+
+## r15 live screening 进度快照（2026-08-20 12:25 CST）
+
+screening PID `2871629`、supervisor PID `2880595`、watcher PID `2881730` 仍然存活，命令
+行 plan identity 未改变。首个 serial unit 的 private checkpoint 已推进到 `27/112`，
+checkpoint 状态仍为 `partial`；safe `screening_state.r15.live.private.json` 尚未写出，
+因此 completed/failed unit 计数仍不可宣告。transport admission、ranking、freeze、official
+import 和 target campaign 产物均不存在，supervisor/watcher 继续保持
+`next_gate=screening` 与 `target_suite_calls_allowed=false`。
