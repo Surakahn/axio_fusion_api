@@ -120,3 +120,16 @@ output，仅供私有恢复证据使用，不读取原文、不进入 Git、不�
 transport admission、ranking、provider baseline freeze 和 target campaign 仍不存在；
 lineage watcher 的 `next_gate=screening` 与 target-call 禁止标志未改变。继续按 10–20
 分钟低频只读核对，不修改 frozen 输入、不启动第二套 screening、不重启生产 loopback。
+
+## 20:29 CST 第三个 unit 低频进度
+
+三个托管进程仍存活且命令行 identity 未漂移。safe state 仍为 `status=running`，
+`1 completed / 1 failed_or_blocked`，`ready_for_ranking=false`，
+`target_suite_calls_performed=false`。第三个 102-case unit 的私有 checkpoint 已推进到
+`27/102`，状态为 `partial`，SHA-256 为
+`06b0f977dc940b91d80f1b1a1aad840ca2534f1d7d5bfa4881edb5cd4fd5c6b2`；其 raw provider
+output 仅供私有恢复证据使用，不读取、不提交、不解释为质量或排名证据。
+
+下游 transport admission、ranking、provider freeze、Harness import 与 target campaign
+仍不存在。继续低频读取 PID/state/checkpoint hash 和 supervisor/watcher 日志，保持
+`next_gate=screening` 与 target-call fail-closed 边界。

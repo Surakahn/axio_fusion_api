@@ -163,6 +163,24 @@ transport admission、ranking、provider baseline freeze、official import 和 t
 plan/source、router/prompt/weights/registry，不使用 `--retry-failed`，不启动第二套 screening，
 不重启健康生产服务。
 
+## r17 第三个 unit 低频进度（2026-08-20 20:29 CST）
+
+本次只读取 safe state、进程 identity、checkpoint 元数据和控制面日志。screening PID
+`3739367`、convergence supervisor PID `3741799`、lineage watcher PID `3742593` 仍存活，
+命令行继续绑定同一 r17 frozen plan/source 与 r7 probe-bound registry。
+
+safe state 仍为 `status=running`、16 个 planned units 中 `1 completed / 1 failed_or_blocked`，
+`ready_for_ranking=false`、`network_calls_performed=true`、`target_suite_calls_performed=false`；
+state SHA-256 仍为
+`0cddbd887aea6115205e33acd14d3333e2c09de398972a253501d3f51fd55d42`。第三个 102-case unit
+的私有 checkpoint 为 `partial`，当前已有 `27/102` 个 case-result 元数据，SHA-256 为
+`06b0f977dc940b91d80f1b1a1aad840ca2534f1d7d5bfa4881edb5cd4fd5c6b2`；其中 raw provider
+output 仍只作私有恢复证据，不读原文、不进入 Git、不作为 score/ranking/freeze 证据。
+
+transport admission、ranking、provider baseline freeze、Harness import 和 target campaign
+仍未生成；继续按既定 10–20 分钟低频策略观察，不恢复 checkpoint、不使用 `--retry-failed`、
+不修改 frozen 输入或生产 router，不重启健康服务。
+
 ## r16 screening 与 transport 终态（2026-08-20 18:37 CST）
 
 r16 唯一 live non-target screening 已自然终态。screening receipt 与 safe state 均为
