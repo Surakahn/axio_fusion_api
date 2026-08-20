@@ -90,3 +90,16 @@ official import 与 target campaign 仍未生成；supervisor/watcher 继续为
 `next_gate=screening`、`target_suite_calls_allowed=false`、`target_suite_calls_performed=false`。
 生产 loopback `/health` 只读检查返回 `ready`，公开模型仍为三个 Axio tier，network transport
 为 configured proxy；这些只证明服务工程健康，不证明 provider 能力或 superiority。
+
+## r16 低频进度复核（2026-08-20 15:29 CST）
+
+提交后的只读复核确认三项进程仍由 init 托管且命令行 identity 未变。当前活动 unit 的私有
+checkpoint 已推进到 `41/102`、`partial`，SHA-256 为
+`eb886b1d5bea0358b281fadba690fd54d0dc6451938c9ee03abd05696ba046a1`。checkpoint 仅是私有
+恢复证据，不能作为 unit 完成、质量分数、ranking 或 baseline freeze 依据。
+
+safe live state、screening receipt、transport admission、ranking、provider baseline freeze、
+official import 与 target campaign 仍未生成；supervisor/watcher 继续为
+`next_gate=screening`、`target_suite_calls_allowed=false`、`target_suite_calls_performed=false`。
+后续仍只低频检查，screening terminal 前不恢复 checkpoint、不使用 `--retry-failed`、不修改
+frozen plan、不启动第二套 screening，也不执行任何下游 gate。

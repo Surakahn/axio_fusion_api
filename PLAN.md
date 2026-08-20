@@ -74,6 +74,20 @@ import 和 target campaign 仍未生成；supervisor/watcher 继续保持 `next_
 proxy；这属于工程健康证据，不是 provider 能力或 superiority 证据。后续继续低频检查，
 screening terminal 前不得执行下游 gate。
 
+## r16 低频进度复核（2026-08-20 15:29 CST）
+
+提交后的只读复核确认 r16 唯一 screening、convergence supervisor、lineage watcher 仍由 init
+托管且命令行 identity 未变。当前活动 unit 的私有 checkpoint 已推进到 `41/102`，状态为
+`partial`，checkpoint SHA-256 为
+`eb886b1d5bea0358b281fadba690fd54d0dc6451938c9ee03abd05696ba046a1`。该 checkpoint 属于
+私有恢复证据，不能解释为 unit 完成、质量分数、ranking 或 baseline freeze 证据。
+
+safe live state、screening receipt、transport admission、ranking、provider baseline freeze、
+official import 与 target campaign 仍未生成；supervisor/watcher 继续保持
+`next_gate=screening`、`target_suite_calls_allowed=false`、`target_suite_calls_performed=false`。
+后续仍只做低频检查，screening terminal 前不执行任何下游 gate，不恢复 checkpoint、不使用
+`--retry-failed`、不修改 frozen plan、不启动第二套 screening。
+
 ## r16 低频进度复核（2026-08-20 15:15 CST）
 
 低频只读复核确认 r16 唯一 screening、convergence supervisor、lineage watcher 仍由 init
