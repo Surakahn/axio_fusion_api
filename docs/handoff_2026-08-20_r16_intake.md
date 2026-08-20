@@ -121,3 +121,16 @@ safe live state、screening receipt、transport admission、ranking、provider b
 official import 与 target campaign 仍未生成；supervisor/watcher 继续为
 `next_gate=screening`、`target_suite_calls_allowed=false`、`target_suite_calls_performed=false`。
 后续只低频检查，screening terminal 前不执行任何下游 gate。
+
+## r16 低频进度复核（2026-08-20 15:43 CST）
+
+三项进程仍由 init 托管且命令行 identity 未变。当前活动 unit 的私有 checkpoint 已推进到
+`63/102`、`partial`，SHA-256 为
+`a030b9b77c7b5372b99e1adc71678825d93b24aa3f00fe936108cf17ab451bee`。checkpoint 仅是私有
+恢复证据，不能作为 unit 完成、质量分数、ranking 或 baseline freeze 依据。
+
+safe live state、screening receipt、transport admission、ranking、provider baseline freeze、
+official import 与 target campaign 仍未生成；supervisor/watcher 继续为
+`next_gate=screening`、`target_suite_calls_allowed=false`、`target_suite_calls_performed=false`。
+后续只低频检查，screening terminal 前不恢复 checkpoint、不使用 `--retry-failed`、不修改
+frozen plan、不启动第二套 screening，也不执行下游 gate。
