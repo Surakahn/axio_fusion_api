@@ -1,5 +1,28 @@
 # Axio Fusion API Checklist
 
+## 当前 r17 与公共输出边界里程碑（2026-08-20）
+
+- [x] 重新核对 Goal/PRD：产品仍是独立 remote-only Fusion API，只公开
+  `axio-fast`、`axio-terra`、`axio-pro`，统一支持 Chat Completions、Responses、
+  Anthropic Messages、Gemini；图片 lane 与文本 Fusion 隔离。
+- [x] 完成公共输出归一化：只有完整内部 JSON/control envelope 才提取
+  `answer`/`final_answer`；普通 JSON 与显式 `json_object`/`json_schema` 保持原样。
+- [x] 四协议 buffered/streaming 渲染器统一使用公共文本；request-local stream gate
+  在 acting answer 确认前暂存 JSON-like 片段，safe metadata 不保存原文或 secrets。
+- [x] L1/L2 通过；兼容、流式和融合核心专项回归 `494 passed, 7 skipped`；全量回归
+  `1074 passed, 7 skipped`。
+- [x] 18900 health 为 `ready`；三档公开模型、四种协议、代理选择与 secrets-safe
+  约束通过；三个 tier 的 dry-run route plan 已核验，Pro 保留 Judge/Synthesizer。
+- [x] r17 仍是唯一 live non-target screening：`3 completed / 6 failed_or_blocked`，
+  `ready_for_ranking=false`，target calls 保持关闭；冻结 plan/source hash 未漂移。
+- [x] canonical convergence 文档已同步到 composite r17；旧 r43/r44 记录明确标为历史，
+  当前 authoritative benchmark 范围仍为 9 类 21 套。
+- [ ] 等待 r17 screening terminal；未终态前不得执行 transport admission、ranking、
+  provider baseline freeze、official/audited Harness import 或 target campaign。
+- [ ] terminal 后严格按 `transport admission -> complete-pool ranking -> external
+  top-three -> provider baseline freeze -> same-cohort Harness -> 21-suite campaign
+  -> final audit` 收敛；任何 gate 失败均创建 successor，不恢复 checkpoint 或降低阈值。
+
 ## Composite cohort r9 terminal / r10 successor（2026-08-18）
 
 - [x] 保留 r8 全部只读终态证据；不恢复 r8 plan、checkpoint、completed subset、
