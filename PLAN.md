@@ -26,6 +26,22 @@ transport admission -> complete-pool ranking -> external rank evidence -> provid
 baseline freeze -> official/audited Harness import -> convergence audit -> 21-suite
 campaign -> paired statistics/latency/API parity/contamination/final audit。
 
+### r15 14:00 工程与 live 进度增量
+
+14:00 CST safe state SHA-256 为
+`94a127931d3825b413e5c208b3a795dc6eb76c9026ef549eb46322805501a7ea`，r15 仍在
+`screening` gate：16 planned unit 中 `1 completed / 10 failed`，11/16 已写入 state，剩余
+5 个未 terminal，`ready_for_ranking=false`。failed transport 分母完整保留为
+`112/112 ×5`、`102/102 ×2`、`101/102`、`80/102`、`60/102`，不能抽取 survivor subset，
+不能恢复 checkpoint、使用 `--retry-failed` 或降低 `2%` gate。当前活动 task 为
+`13c5304ac5ef6a492ac6f5a023842224fb2fd64386f68a32465b3d97027eea3a`，checkpoint `6/102`，
+SHA-256 `0aba0016052153885e3562b789fc917c6dd8a10e6b8b0eefb721c2fb8e7e85d1`。
+
+工程回归已完成：`python3.11 -m pytest tests/ -x -q --tb=short` 为 `1066 passed,
+7 skipped`。这是代码基线证据，不是 provider ranking 或 Fusion superiority 证据；
+screening terminal 前仍禁止 transport conversion、ranking、freeze、official import 与
+target campaign。
+
 ## Composite cohort r14 successor intake（2026-08-19）
 
 r13 已完整 terminal 但 transport admission blocked：16/16 unit 中只有 7 个通过，8 个

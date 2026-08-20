@@ -183,3 +183,23 @@ transport admission、ranking、provider freeze、official import 和 target cam
 仍不存在；supervisor/watcher 继续保持 `next_gate=screening`、
 `target_suite_calls_allowed=false`。后续仍只做 10-20 分钟低频检查，不恢复 checkpoint、
 不使用 `--retry-failed`、不修改 frozen plan、不启动第二套 screening。
+
+## r15 live screening 与工程回归里程碑（2026-08-20 14:00 CST）
+
+14:00 CST 只读复核确认三个 init 托管进程仍存活，r15 plan/source 与 r7 probe-bound
+registry/admission 的命令行绑定未改变。safe state SHA-256 为
+`94a127931d3825b413e5c208b3a795dc6eb76c9026ef549eb46322805501a7ea`，campaign 仍为
+`running`：16 planned unit 中 `1 completed / 10 failed`，11/16 已写入 state，剩余 5 个
+未 terminal，`ready_for_ranking=false`、`target_suite_calls_performed=false`。唯一 completed
+unit 是 `112/112`、transport failure `0`；failed 分母为 `112/112 ×5`、`102/102 ×2`、
+`101/102`、`80/102`、`60/102`，均触发固定 `2%` gate，不能用于质量或排名。
+
+当前 task `13c5304ac5ef6a492ac6f5a023842224fb2fd64386f68a32465b3d97027eea3a` 的 private
+checkpoint 为 `6/102`、`partial`，SHA-256 为
+`0aba0016052153885e3562b789fc917c6dd8a10e6b8b0eefb721c2fb8e7e85d1`。screening receipt、
+transport admission、ranking、provider freeze、official import 和 target campaign 仍不
+存在，`next_gate=screening`、`target_suite_calls_allowed=false` 不变。
+
+同阶段的工程回归命令 `python3.11 -m pytest tests/ -x -q --tb=short` 已通过
+`1066 passed, 7 skipped`。该回归仅证明代码契约，没有授权任何 target request 或
+superiority claim。

@@ -110,3 +110,27 @@ screening 已进入第 9 个 serial unit，task 为
 `target_suite_calls_performed=false`、`next_gate=screening` 和
 `target_suite_calls_allowed=false` 继续成立。此次只追加只读进度记录，没有恢复
 checkpoint、重试失败 case、修改 frozen plan 或启动第二套 screening。
+
+## 14:00 CST 进度与工程回归里程碑
+
+截至 2026-08-20 14:00:38，screening PID `2871629`、supervisor PID `2880595` 和 lineage
+watcher PID `2881730` 仍由 init 托管且命令行绑定未改变。safe state 仍为 `running`，
+`planned_task_count=16`、`completed_unit_count=1`、`failed_or_blocked_unit_count=10`、
+`ready_for_ranking=false`、`target_suite_calls_performed=false`；state SHA-256 为
+`94a127931d3825b413e5c208b3a795dc6eb76c9026ef549eb46322805501a7ea`。目前 11/16 unit
+已写入 state，剩余 5 个未 terminal；唯一 completed unit 为 `112/112` 且 transport
+failure 为 `0`。10 个 failed unit 的完整分母为 `112/112`（5 个）、`102/102`（2 个）、
+`101/102`、`80/102` 和 `60/102`，全部超过冻结的 `2%` fail-fast gate，不能解释为能力
+分数、survivor subset 或 ranking。
+
+当前 serial unit 的 task 为
+`13c5304ac5ef6a492ac6f5a023842224fb2fd64386f68a32465b3d97027eea3a`，private checkpoint
+为 `6/102`、`checkpoint_status=partial`，SHA-256 为
+`0aba0016052153885e3562b789fc917c6dd8a10e6b8b0eefb721c2fb8e7e85d1`。screening receipt、
+transport admission、ranking、provider freeze、official import 和 target campaign 均仍
+不存在，后置 gate 保持关闭。本次继续只读观察，不恢复 checkpoint、不使用
+`--retry-failed`、不修改 frozen plan、不启动第二套 screening。
+
+独立工程回归在同一阶段完成：`python3.11 -m pytest tests/ -x -q --tb=short` 返回
+`1066 passed, 7 skipped`（约 4 分 31 秒）。该结果证明当前代码基线回归通过，不构成
+provider 能力、baseline ranking 或 Fusion superiority 证据。
