@@ -28,6 +28,10 @@ deadline、call/cost、canonical 去重、replica failover、工具隔离、stre
 terminal/transport-blocked，r18 仅到 zero-network preflight ready。不得把历史
 14-suite 结果、partial screening score 或静态 capability prior 写成 superiority。
 
+每轮交接前的逐域差距、证据锚点和下一条合法动作见
+`docs/operations/goal_gap_matrix_2026-08-21.md`；该矩阵只记录 hash-safe 状态，不改变
+任何冻结 screening 输入或生产路由。
+
 最终唯一合法路径：
 
 ```text
