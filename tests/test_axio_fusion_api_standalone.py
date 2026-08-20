@@ -7153,6 +7153,9 @@ def test_standalone_public_health_hashes_provider_format_inventory():
     assert readiness["provider_format_hash_counts"] == {
         f"{sha256_text(provider)}::responses": 1
     }
+    assert "weak_or_missing_tool_candidate" in readiness["warnings"]
+    assert "some_model_pricing_unknown" in readiness["warnings"]
+    assert "some_context_windows_unknown" in readiness["warnings"]
     assert "provider_format_counts" not in readiness
     assert readiness["raw_provider_names_persisted"] is False
     assert readiness["secrets_persisted"] is False

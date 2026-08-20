@@ -37,15 +37,26 @@ Synthesizer、fallback、预算和安全工程统一提供 `axio-fast`、`axio-t
 - 当前 registry 的 `tool_candidate_count=0`、`pricing_known_count=0`、
   `context_known_count=0`，且 Pro dry-run 的 provider diversity 仍只有一个 provider
   hash。这些是 admission/calibration 缺口，不是可以用静态先验掩盖的能力证据。
+- 只读配置审计发现 `private/current_channels.env` 原先仍指向旧的 28-profile Claude
+  artifact；已删除旧的重复覆盖声明，并将唯一 registry 声明精确修正为当前正式进程
+  使用的 r7 probe-bound 文件。路径与文件 hash 已核对一致，正式 loopback 未重启，CPA
+  Plus 未受影响。
 
 ## 本轮变更与验证
 
 - 新增 Goal 差距矩阵：`docs/operations/goal_gap_matrix_2026-08-21.md`。
 - 新增本交接：`docs/handoffs/2026-08-21_goal_status.md`。
 - `PLAN.md` 增加差距矩阵入口。
+- 公开 `/health` 投影已增加 hash-safe capability metadata warnings：当工具候选、价格
+  或 context window 未校准时分别报告固定 reason code；不改变 `ready` 可服务语义，也不
+  参与路由选择。正式 loopback 进程未为此重启，当前仍返回变更前的 `warnings=[]`；下次
+  受控发布后才会加载该修复。
+- `private/current_channels.env` 的 registry identity 已与正式 r7 serving identity 对齐；
+  `registry-diagnostic --require-prefusion` 和 provider 配置摘要均保持零网络，且未打印
+  secret 值。该修正只消除未来启动的配置漂移，不改变当前运行进程或 r18 frozen 输入。
 - `python3.11 -m compileall -q src scripts`：通过。
 - 控制面专项回归：20 passed。
-- 全量回归：`1074 passed, 7 skipped in 272.78s`。
+- 全量回归：`1074 passed, 7 skipped in 272.24s`。
 - 文档安全断言与 `git diff --check`：通过。
 
 ## 下一条合法动作

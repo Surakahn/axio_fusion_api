@@ -4238,6 +4238,17 @@ def _public_registry_readiness(profiles: Sequence[Any]) -> dict[str, Any]:
     """Project registry health into a public, identifier-safe API receipt."""
 
     internal = registry_readiness(profiles)
+    model_count = _optional_int(internal.get("model_count")) or 0
+    tool_candidate_count = _optional_int(internal.get("tool_candidate_count")) or 0
+    pricing_known_count = _optional_int(internal.get("pricing_known_count")) or 0
+    context_known_count = _optional_int(internal.get("context_known_count")) or 0
+    warnings = {str(item)[:120] for item in internal.get("warnings", []) if str(item)}
+    if model_count > 0 and tool_candidate_count < 1:
+        warnings.add("weak_or_missing_tool_candidate")
+    if pricing_known_count < model_count:
+        warnings.add("some_model_pricing_unknown")
+    if context_known_count < model_count:
+        warnings.add("some_context_windows_unknown")
     api_format_counts: dict[str, int] = {}
     provider_format_hash_counts: dict[str, int] = {}
     profile_hashes = set()
@@ -4255,7 +4266,7 @@ def _public_registry_readiness(profiles: Sequence[Any]) -> dict[str, Any]:
         "ready": internal.get("ready") is True,
         "status": str(internal.get("status") or "blocked"),
         "blockers": [str(item)[:120] for item in internal.get("blockers", []) if str(item)],
-        "warnings": [str(item)[:120] for item in internal.get("warnings", []) if str(item)],
+        "warnings": sorted(warnings),
         "model_count": len(profile_hashes),
         "provider_count": len(provider_hashes),
         "provider_hash_count": len(provider_hashes),
@@ -4265,9 +4276,9 @@ def _public_registry_readiness(profiles: Sequence[Any]) -> dict[str, Any]:
         "judge_candidate_count": _optional_int(internal.get("judge_candidate_count")) or 0,
         "structured_candidate_count": _optional_int(internal.get("structured_candidate_count")) or 0,
         "fast_candidate_count": _optional_int(internal.get("fast_candidate_count")) or 0,
-        "tool_candidate_count": _optional_int(internal.get("tool_candidate_count")) or 0,
-        "pricing_known_count": _optional_int(internal.get("pricing_known_count")) or 0,
-        "context_known_count": _optional_int(internal.get("context_known_count")) or 0,
+        "tool_candidate_count": tool_candidate_count,
+        "pricing_known_count": pricing_known_count,
+        "context_known_count": context_known_count,
         "raw_provider_names_persisted": False,
         "raw_provider_model_ids_persisted": False,
         "raw_provider_urls_persisted": False,
