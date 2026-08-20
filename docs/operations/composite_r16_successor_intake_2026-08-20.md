@@ -76,6 +76,19 @@ import 与 target campaign 仍不存在；supervisor/watcher 保持 `next_gate=s
 `target_suite_calls_allowed=false`、`target_suite_calls_performed=false`。继续低频观察，
 不恢复 checkpoint、不使用 `--retry-failed`、不修改 frozen plan、不启动第二套 screening。
 
+## r16 低频进度复核（2026-08-20 15:51 CST）
+
+r16 唯一 screening、convergence supervisor、lineage watcher 仍由 init 托管且 command-line
+identity 未变。当前活动 unit 私有 checkpoint 为 `74/102`、`partial`，SHA-256 为
+`cb77262a3ee7220ca8abc8861356896fb596a7707944d282826a8a863135c751`；该文件只作私有恢复
+证据，不能作为完成、质量、ranking 或 freeze 证据。
+
+safe live state、screening receipt、transport admission、ranking、provider freeze、official
+import 与 target campaign 仍不存在；supervisor/watcher 保持 `next_gate=screening`、
+`target_suite_calls_allowed=false`、`target_suite_calls_performed=false`。继续低频观察，
+不恢复 checkpoint、不使用 `--retry-failed`、不修改 frozen plan、不启动第二套 screening，
+也不执行任何下游 gate。
+
 ## r16 live screening 启动里程碑（2026-08-20 15:07 CST）
 
 r16 唯一 live non-target screening 已通过 `setsid/nohup` 启动：screening PID `3231684`、
