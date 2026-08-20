@@ -2238,3 +2238,13 @@ Latency superiority is also claim-gated on two distribution points: both p50 and
   freeze 已具备 ready 的 external top-three ranking 和匹配 digest，但仍因真实
   的 missing-fast-candidate portfolio 缺口阻塞。全量回归为 1036 passed、7
   skipped；未执行 target benchmark calls，也未做 superiority claim。
+- 2026-08-20：r14 composite screening 已自然终态，16/16 source units terminal，
+  10 completed、6 failed；最终 state 为 `partial`，transport-only admission 为
+  `ready`（4 个 eligible canonical，最低门槛 3），但完整-pool ranking conversion
+  因 partial campaign fail-closed，supervisor 为 `screening_ranking_conversion_blocked`。
+  r14 没有 provider baseline freeze、official/audited Harness import 或 target-suite
+  请求；保留完整失败分母，禁止恢复 checkpoint、拼接 survivor subset 或降低 2% gate。
+  下一步只注册新的 immutable r15 source successor，重新生成 plan/preflight 后再启动
+  一套 live screening，并严格沿 transport → ranking → external top-three → freeze →
+  Harness → convergence audit → 21-suite campaign 链路推进；在全部证据完成前不做
+  superiority claim。

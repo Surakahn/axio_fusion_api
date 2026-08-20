@@ -206,3 +206,49 @@ case，`scored_case_count=111`、transport failure `1/112`、failure rate
 `1cc59aaa048a5a956e326f1340fdb7bc01281007366c50add76a87c0b89674eb`。运行器已自动进入第十一个
 task `22108aa291aa151c6dc679344e62e5809d149b5455f7f26573bd6409d758f784`，private checkpoint
 为 `5/102`；完整 16-unit 分母、2% gate 和 target 禁止标志不变。
+
+## r14 最终 terminal 记录（2026-08-20 11:30 CST）
+
+r14 live screening 已自然终态结束，三个后台进程均已退出；没有重启、恢复或补跑旧
+unit。最终 state 与 receipt 均为 `partial`：冻结计划的 16/16 个 unit 已到 terminal，
+其中 10 个 completed、6 个 failed，`ready_for_ranking=false`，`target_suite_calls_performed=false`。
+最终 state 文件 SHA-256 为
+`c93bf49127608543b1e65ac411468e5e58371199c2bc67583a0ffb24c7ecf4c8`，campaign digest
+为 `c47b5dff5fea2730aa60da7097a3952d8043ae9560b0255f5fc785cc86a4715e`。
+
+六个失败 unit 的完整 transport 分母和失败率如下，失败 case 不从分母中删除：
+
+| task hash 前缀 | transport failure | failure rate | reason |
+| --- | ---: | ---: | --- |
+| `0cac063a` | 90/102 | 0.882352941176 | `screening_unit_transport_failure_rate_exceeded` |
+| `23042b50` | 103/112 | 0.919642857143 | `screening_unit_transport_failure_rate_exceeded` |
+| `70204b33` | 27/112 | 0.241071428571 | `screening_unit_transport_failure_rate_exceeded` |
+| `7c6cc2b7` | 102/102 | 1.0 | `screening_unit_no_scores`、`screening_unit_transport_failure_rate_exceeded` |
+| `c320006a` | 112/112 | 1.0 | `screening_unit_no_scores`、`screening_unit_transport_failure_rate_exceeded` |
+| `e57bf9ab` | 102/102 | 1.0 | `screening_unit_no_scores`、`screening_unit_transport_failure_rate_exceeded` |
+
+terminal transport admission receipt 为 `ready`，只按 transport failure rate 选择，
+`eligible_canonical_model_count=4`，最低门槛为 3；该 receipt 不含质量字段，也不授予
+ranking 权限。其 SHA-256 为
+`2b899c57bd4255a24aa823a6b7d3d00825a14c9f32604050d64d7b76230a7a7b`。
+
+随后执行的 ranking conversion 已 fail-closed：`screening_conversion_ready=false`，
+receipt SHA-256 为 `5d2c860588c7d44d9dd9effdd0b8fa8dd64bab0bcea9e3bc62dee4e0bbff0389`；
+supervisor receipt 为 `status=blocked`、`error_code=screening_ranking_conversion_blocked`、
+`ranking_ready=false`，SHA-256 为
+`f14eeae022d6970fb921eda4b51daca520321b8cc2318ff5868b23ce920d3741`。因此 r14 没有
+provider baseline freeze、external top-three evidence、official import、cohort-bound
+Harness 或 target-suite 请求。
+
+本终态的唯一有效推进方向是注册新的 immutable successor（建议 r15）：只复制 r14
+source contract，生成新的 selection seed、source successor receipt、frozen plan 和
+zero-network preflight；不得读取或拼接 r14 score、transport、ranking、checkpoint 或
+survivor subset，不得修改 r14 frozen plan，不得降低 2% gate，不得重复上游 probe。
+screening terminal 后仍必须严格执行：
+
+```text
+transport admission -> complete-pool ranking -> external rank 1/2/3 evidence
+-> provider baseline freeze -> official/audited Harness import
+-> same-cohort binding/convergence audit -> 21-suite target campaign
+-> paired statistics/latency/API parity/contamination/final audit
+```
