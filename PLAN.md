@@ -2257,3 +2257,10 @@ Latency superiority is also claim-gated on two distribution points: both p50 and
   一套绑定 r15 plan/source 与 r7 probe/admission 的 live screening，terminal 后再按
   transport → complete-pool ranking → external top-three → freeze → same-cohort Harness
   → convergence → 21-suite campaign 推进；旧 r14 结果、checkpoint 和 survivor subset 不得复用。
+- 2026-08-20：r15 唯一 live non-target screening 已用 `setsid/nohup` 启动，screening、
+  convergence supervisor、lineage watcher 三个 PID 均绑定同一 frozen plan/source/probe/
+  admission；首个 serial unit 已进入 provider 调用，private checkpoint 从 9/112 推进到
+  21/112，campaign 尚未产生 terminal state。supervisor/watcher 保持
+  `next_gate=screening`、`target_suite_calls_allowed=false`，transport/ranking/freeze/
+  official import/target 均未启动；持续低频检查，禁止恢复 checkpoint、重试失败 case、
+  修改 plan 或启动第二套 screening。

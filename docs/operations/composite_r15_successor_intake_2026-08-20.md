@@ -91,3 +91,25 @@ transport admission -> complete-pool ranking -> external rank 1/2/3 evidence
 任何 gate 失败都保留完整分母并注册新的 immutable successor；不选择 completed subset，
 不降低 2% gate，不将 benchmark 输出写入生产路由学习闭环，在全部证据完成前不做
 superiority claim。
+
+## r15 live screening 启动里程碑（2026-08-20 12:12 CST）
+
+r15 唯一 live non-target screening 已通过 `setsid/nohup` 启动：screening PID
+`2871629`、convergence supervisor PID `2880595`、lineage watcher PID `2881730`。三者
+均由 init 托管，screening 命令行持续绑定 r15 frozen plan、r15 source successor、r7
+probe-bound registry、r7 provider probe 和 r7 operational admission，没有并发第二套
+screening。
+
+启动后的低频核验确认：
+
+- screening 进程存活，已进入首个 serial unit 的真实 provider 调用；
+- private checkpoint 已出现并从 `9/112` 推进到 `21/112`，safe terminal state 尚未写出；
+- supervisor 仍在同一 PID/plan identity wait，watcher 已生成 `status=blocked`、
+  `next_gate=screening`、`target_suite_calls_allowed=false` 的初始 audit；
+- transport admission、ranking、provider freeze、official import 和 target campaign
+  均未启动，当前没有任何 superiority evidence。
+
+screening 仍在运行时不恢复 checkpoint、不使用 `--retry-failed`、不修改 frozen plan、不
+启动第二套 screening。后续状态只按 10-20 分钟低频检查；首个 unit terminal 后才记录
+准确的 completed/failed 分母并允许 supervisor 执行离线 transport admission 和完整池
+ranking。
