@@ -1,5 +1,31 @@
 # Axio Fusion API Plan
 
+## Composite cohort r15 当前主线快照（2026-08-20 13:48 CST）
+
+r15 是当前唯一允许的 live non-target screening。冻结输入保持不变：plan 文件 SHA-256
+`555350be7d681bd777094804b1936f65f1d05890fe33e87ec56bd6930eb846c3`、plan digest
+`d41becf244fcf5234d622a95ea95e8898ef94bd9a40d88e2ebef2e0ecaf3b038`、source SHA-256
+`745312def06231f320c7c9a48dcbd81e6742ee67800d8ecfc9d4d3309d620aec`、r7 probe-bound
+registry SHA-256 `7d0a9b78a06ea7445c43b7c03e15d6bbedb3112ecf8fb7d1ad041301678c1ad8`，
+`max_workers=1`、固定 `2%` transport fail-fast gate。唯一 screening PID 为 `2871629`，
+同 cohort supervisor/watcher PID 为 `2880595`/`2881730`。
+
+截至 13:48:48，safe state SHA-256 为
+`b27bee06ab1e75a97ce7f34b087bf570dad7105497cfca7dfedf88cbf55b6eea`，campaign 仍为
+`status=running`、16 planned unit 中 `1 completed / 7 failed`、`ready_for_ranking=false`；
+8/16 unit 已 terminal，9/16 unit 正在执行。completed/failed 的每个完整 transport 分母
+均已保留，不能抽取 completed subset、恢复 checkpoint、使用 `--retry-failed` 或启动
+第二套 screening。当前 task
+`23d2aad8799078241760998a00ba2db1e3852b2503cfbe087bcde2c1e4cbe154` 的 checkpoint 为
+`0/112`、SHA-256 `41f510d86b234361e7543d56668e00735f1312c239426ebe2888fc3bc2bcdbb0`。
+
+screening terminal 前 transport conversion/ranking/provider freeze/official import/target
+campaign 全部禁止；`target_suite_calls_performed=false`、`next_gate=screening`、
+`target_suite_calls_allowed=false` 仍成立。terminal 后只允许同 cohort 的完整分母
+transport admission -> complete-pool ranking -> external rank evidence -> provider
+baseline freeze -> official/audited Harness import -> convergence audit -> 21-suite
+campaign -> paired statistics/latency/API parity/contamination/final audit。
+
 ## Composite cohort r14 successor intake（2026-08-19）
 
 r13 已完整 terminal 但 transport admission blocked：16/16 unit 中只有 7 个通过，8 个

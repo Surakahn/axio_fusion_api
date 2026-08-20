@@ -164,3 +164,22 @@ private checkpoint 为 `68/112`、`checkpoint_status=partial`，checkpoint SHA-2
 尚未写出，不能填写完整 16-unit 分母或 ranking readiness。transport/ranking/freeze/import/
 target 产物继续缺失，`next_gate=screening`、`target_suite_calls_allowed=false` 不变。
 本次没有恢复 checkpoint、使用 `--retry-failed`、修改 frozen plan 或并发启动新的 screening。
+
+## r15 live screening 进度快照（2026-08-20 13:48 CST）
+
+13:48 CST 只读复核确认 screening PID `2871629`、convergence supervisor PID `2880595` 和
+lineage watcher PID `2881730` 仍存活，命令行继续绑定 r15 frozen plan/source 与 r7
+probe-bound registry/admission。safe state 为 `running`，16 个 planned unit 中已有
+`1 completed / 7 failed`，8/16 unit 已写入 state，state SHA-256 为
+`b27bee06ab1e75a97ce7f34b087bf570dad7105497cfca7dfedf88cbf55b6eea`。新增 failed unit 的
+完整分母为 `102/102` transport failures；此前各 failed unit 的完整分母全部保留，均因
+固定 `2%` gate fail-fast。以上是 transport evidence，不得当作质量分数或排名。
+
+当前进入第 9 个 serial unit：task
+`23d2aad8799078241760998a00ba2db1e3852b2503cfbe087bcde2c1e4cbe154`，checkpoint 为
+`0/112`、`partial`，SHA-256 为
+`41f510d86b234361e7543d56668e00735f1312c239426ebe2888fc3bc2bcdbb0`。screening receipt、
+transport admission、ranking、provider freeze、official import 和 target campaign
+仍不存在；supervisor/watcher 继续保持 `next_gate=screening`、
+`target_suite_calls_allowed=false`。后续仍只做 10-20 分钟低频检查，不恢复 checkpoint、
+不使用 `--retry-failed`、不修改 frozen plan、不启动第二套 screening。

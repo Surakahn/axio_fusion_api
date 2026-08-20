@@ -90,3 +90,23 @@ private checkpoint 已推进到 `68/112`，`checkpoint_status=partial`，文件 
 ranking、provider freeze、official import 与 target campaign 产物均不存在，
 `next_gate=screening`、`target_suite_calls_allowed=false` 保持不变。本次没有恢复
 checkpoint、重试 case、修改 frozen plan 或启动第二套 screening。
+
+## 13:48 CST 低频进度复核
+
+截至 2026-08-20 13:48:48，三个 init 托管进程仍存活，r15 命令行绑定未改变。safe live
+state 仍为 `status=running`、`planned_task_count=16`、`completed_unit_count=1`、
+`failed_or_blocked_unit_count=7`、`ready_for_ranking=false`；state SHA-256 为
+`b27bee06ab1e75a97ce7f34b087bf570dad7105497cfca7dfedf88cbf55b6eea`。当前已有 8/16
+unit 写入 state：唯一 completed unit 保留 `112/112`、transport failure `0`；7 个 failed
+unit 的完整分母均保留，具体为 `112/112`（3 个）、`102/102`（2 个）、`80/102` 和
+`60/102`，全部超过冻结的 `2%` transport fail-fast gate。它们只属于 transport evidence，不是能力
+分数、survivor subset 或 ranking 结果。
+
+screening 已进入第 9 个 serial unit，task 为
+`23d2aad8799078241760998a00ba2db1e3852b2503cfbe087bcde2c1e4cbe154`，private checkpoint
+当前 `0/112`、`checkpoint_status=partial`，checkpoint SHA-256 为
+`41f510d86b234361e7543d56668e00735f1312c239426ebe2888fc3bc2bcdbb0`。尚无
+`screening.live.receipt.r15.private.json`、transport admission 或 ranking 产物；
+`target_suite_calls_performed=false`、`next_gate=screening` 和
+`target_suite_calls_allowed=false` 继续成立。此次只追加只读进度记录，没有恢复
+checkpoint、重试失败 case、修改 frozen plan 或启动第二套 screening。
