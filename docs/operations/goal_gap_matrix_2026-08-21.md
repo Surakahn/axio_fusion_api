@@ -27,7 +27,7 @@ provider 能力组合成 `axio-fast`、`axio-terra`、`axio-pro`。Harness 只�
   9/9 required profiles ready，但它不授权 live screening，也不代表任何 provider 能力。
 - 当前服务只读健康：`ready`，公共模型为三档，四种协议可用，`auto -> proxy`，
   生产 loopback 为 `127.0.0.1:18900`，当前 serving registry 为 r7 probe-bound。
-- 当前工程回归：`1081 passed, 7 skipped`；这是代码契约证据，不是能力或质量证据。
+- 当前工程回归：`1083 passed, 7 skipped`；这是代码契约证据，不是能力或质量证据。
 
 ## 差距矩阵
 
@@ -40,7 +40,7 @@ provider 能力组合成 `axio-fast`、`axio-terra`、`axio-pro`。Harness 只�
 | Terra 工作流 | **blocked/partial** | selective fusion、独立性检查、Judge/Synth reservation、正确的 direct fallback；零网络 fake-provider 回归已证明完整 role pool 下 panel phase 可配置并执行全部已准入 expert | 当前 registry 没有同时满足 `independent_solver + judge` 的准入容量；不能用弱模型冒充；fake-provider 结果不构成 live 能力证据 | 完整 screening/ranking/freeze 后做 endpoint-bound role successor，再 shadow replay；若 live 再出现 partial panel，按 safe cause taxonomy 分诊 |
 | Pro 工作流 | **partial** | panel -> Judge -> targeted escalation -> acting Synthesizer；角色上下文隔离；公共 reasoning 清理 | 当前 dry-run 只有一个 provider hash，跨 provider 互补不足；质量/成本尚未实测 | baseline freeze 后做 provider diversity/error-correlation/quality shadow 优化 |
 | Router/编排算法 | **partial** | query analysis、canonical 去重、角色 gate、deadline/call/cost reservation、fallback、circuit recovery、safe trace | 静态 capability prior 仍未被完整双源 non-target evidence 替换；VOI/portfolio optimizer 未晋级 | 只在 baseline freeze 后使用 non-target/shadow/holdout 设计和审批 successor |
-| 自适应渠道校准 | **partial/guarded** | allowlisted channel fingerprint、reasoning/tool/vision/context/latency/cost/endpoint 变化检测；hash-only prompt/decision receipt；无证据或绑定缺失时 fail-closed；完整绑定也只允许 `shadow_candidate` | 尚无 provider baseline freeze 后的 operational calibration evidence；当前 CLI 不持久化原文且不能自动激活 | freeze 后以同 cohort non-target/holdout 生成五类绑定，人工审查后再做 shadow replay 和可回滚 successor |
+| 自适应渠道校准 | **partial/guarded** | allowlisted channel fingerprint、reasoning/tool/vision/context/latency/cost/endpoint 变化检测；hash-only prompt/decision receipt；CLI 可从五类本地 artifact 读取 SHA-256 并要求成组绑定；无证据或绑定缺失时 fail-closed；完整绑定也只允许 `shadow_candidate` | 尚无 provider baseline freeze 后的 operational calibration evidence；不能自动激活或写回 serving policy | freeze 后以同 cohort non-target/holdout 生成五类绑定，人工审查后再做 shadow replay 和可回滚 successor |
 | Judge/Synthesizer | **partial** | 结构化比较 rubric、consensus/contradiction/coverage、独立性 gate、输出归一化 | confidence calibration、abstention/repair 阈值尚无同 cohort 实证；不得以 target label 调参 | baseline freeze 后用 operational non-target cases 校准并绑定 rollback |
 | Provider admission | **blocked** | r7 probe-bound registry、四协议 adapter、90 秒 stream gate、健康和安全 receipt；r18 credential-ready 零网络预检 9/9 | r17 transport admission blocked；8 canonical 仅 1 个同时通过两源 2% gate，低于 minimum 3；credential readiness 不等于 transport admission | 明确授权后只启动唯一 r18 frozen live screening |
 | Ranking/baseline freeze | **blocked** | ranking conversion、external top-three、freeze 的 fail-closed 控制面已实现 | r18 尚未 terminal，故无完整 pool ranking、rank 1/2/3 或 freeze | r18 terminal -> transport admission -> complete-pool ranking -> external top-three -> freeze |

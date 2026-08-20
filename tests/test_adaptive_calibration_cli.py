@@ -1,6 +1,7 @@
 """自适应渠道校准 CLI 功能测试。"""
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -31,6 +32,7 @@ def _run_cli(
     *,
     fusion_scores: Path | None = None,
     baseline_scores: Path | None = None,
+    binding_artifacts: dict[str, Path] | None = None,
 ) -> dict:
     command = [
         sys.executable,
@@ -46,6 +48,15 @@ def _run_cli(
         command.extend(["--fusion-scores", str(fusion_scores)])
     if baseline_scores is not None:
         command.extend(["--baseline-scores", str(baseline_scores)])
+    for option, key in (
+        ("--registry-binding-artifact", "registry"),
+        ("--rollback-binding-artifact", "rollback"),
+        ("--prompt-pack-binding-artifact", "prompt_pack"),
+        ("--workflow-binding-artifact", "workflow"),
+        ("--contamination-audit-binding-artifact", "contamination"),
+    ):
+        if binding_artifacts is not None:
+            command.extend([option, str(binding_artifacts[key])])
     result = subprocess.run(
         command,
         check=True,
@@ -125,3 +136,84 @@ def test_cli_scores_emit_hash_only_blocked_receipt(tmp_path: Path) -> None:
     assert receipt["activation_ready"] is False
     assert receipt["promotion_gate"]["automatic_activation_allowed"] is False
     assert "axio-pro" not in json.dumps(payload, ensure_ascii=False)
+
+
+def test_cli_complete_binding_artifacts_emit_shadow_candidate(tmp_path: Path) -> None:
+    previous = tmp_path / "previous.json"
+    current = tmp_path / "current.json"
+    fusion_scores = tmp_path / "fusion_scores.json"
+    baseline_scores = tmp_path / "baseline_scores.json"
+    output = tmp_path / "result.json"
+    _write_manifest(previous, "nvidia")
+    _write_manifest(current, "cpa")
+    fusion_scores.write_text(json.dumps({"axio-pro": 0.8}), encoding="utf-8")
+    baseline_scores.write_text(json.dumps({"axio-pro": 1.0}), encoding="utf-8")
+    names = ("registry", "rollback", "prompt_pack", "workflow", "contamination")
+    binding_artifacts = {}
+    for index, name in enumerate(names):
+        path = tmp_path / f"{name}.json"
+        path.write_text(f"binding-{index}", encoding="utf-8")
+        binding_artifacts[name] = path
+
+    payload = _run_cli(
+        previous,
+        current,
+        output,
+        fusion_scores=fusion_scores,
+        baseline_scores=baseline_scores,
+        binding_artifacts=binding_artifacts,
+    )
+
+    receipt = payload["recalibration_receipt"]
+    assert receipt["status"] == "shadow_candidate"
+    assert receipt["ready_for_review"] is True
+    assert receipt["activation_ready"] is False
+    assert receipt["blockers"] == []
+    expected_digests = {
+        key: hashlib.sha256(binding_artifacts[name].read_bytes()).hexdigest()
+        for key, name in (
+            ("registry_profile_set_sha256", "registry"),
+            ("rollback_policy_digest_sha256", "rollback"),
+            ("prompt_pack_digest_sha256", "prompt_pack"),
+            ("workflow_digest_sha256", "workflow"),
+            ("contamination_audit_digest_sha256", "contamination"),
+        )
+    }
+    assert {
+        key: receipt[key] for key in expected_digests
+    } == expected_digests
+    assert receipt["promotion_gate"]["automatic_activation_allowed"] is False
+
+
+def test_cli_rejects_partial_binding_artifacts(tmp_path: Path) -> None:
+    previous = tmp_path / "previous.json"
+    current = tmp_path / "current.json"
+    output = tmp_path / "result.json"
+    binding = tmp_path / "registry.json"
+    _write_manifest(previous, "nvidia")
+    _write_manifest(current, "cpa")
+    binding.write_text("registry", encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(
+                Path(__file__).resolve().parent.parent
+                / "scripts/run_adaptive_calibration.py"
+            ),
+            "--previous-manifest",
+            str(previous),
+            "--current-manifest",
+            str(current),
+            "--registry-binding-artifact",
+            str(binding),
+            "--output",
+            str(output),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "五类校准绑定必须全部提供" in result.stderr
+    assert not output.exists()

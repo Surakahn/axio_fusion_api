@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import sys
@@ -34,7 +35,36 @@ def main() -> int:
     parser.add_argument("--current-manifest", required=True, type=Path)
     parser.add_argument("--fusion-scores", type=Path, help="校准得分文件 (JSON)")
     parser.add_argument("--baseline-scores", type=Path, help="基线得分文件 (JSON)")
-    parser.add_argument("--output", type=Path, default=Path("private/adaptive_calibration_result.json"))
+    parser.add_argument(
+        "--registry-binding-artifact",
+        type=Path,
+        help="registry/profile-set 绑定 artifact（只读取 SHA-256）",
+    )
+    parser.add_argument(
+        "--rollback-binding-artifact",
+        type=Path,
+        help="rollback target 绑定 artifact（只读取 SHA-256）",
+    )
+    parser.add_argument(
+        "--prompt-pack-binding-artifact",
+        type=Path,
+        help="prompt pack 绑定 artifact（只读取 SHA-256）",
+    )
+    parser.add_argument(
+        "--workflow-binding-artifact",
+        type=Path,
+        help="workflow 绑定 artifact（只读取 SHA-256）",
+    )
+    parser.add_argument(
+        "--contamination-audit-binding-artifact",
+        type=Path,
+        help="contamination audit 绑定 artifact（只读取 SHA-256）",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("private/adaptive_calibration_result.json"),
+    )
     args = parser.parse_args()
 
     try:
@@ -42,6 +72,7 @@ def main() -> int:
         current = _load_mapping(args.current_manifest, "current manifest")
         fusion_scores = _load_optional_mapping(args.fusion_scores, "fusion scores")
         baseline_scores = _load_optional_mapping(args.baseline_scores, "baseline scores")
+        binding_digests = _load_binding_digests(args)
     except ValueError as exc:
         parser.error(str(exc))
     changed = detect_channel_change(previous, current)
@@ -77,6 +108,7 @@ def main() -> int:
         decision,
         previous_channel_manifest=previous,
         current_channel_manifest=current,
+        **binding_digests,
     )
 
     output = {
@@ -111,6 +143,36 @@ def _load_optional_mapping(path: Path | None, label: str) -> Mapping[str, Any]:
     if path is None:
         return {}
     return _load_mapping(path, label)
+
+
+def _load_binding_digests(args: argparse.Namespace) -> dict[str, str]:
+    """读取完整的五类校准绑定，只把文件摘要传给 receipt。"""
+
+    fields = {
+        "registry_profile_set_sha256": args.registry_binding_artifact,
+        "rollback_policy_digest_sha256": args.rollback_binding_artifact,
+        "prompt_pack_digest_sha256": args.prompt_pack_binding_artifact,
+        "workflow_digest_sha256": args.workflow_binding_artifact,
+        "contamination_audit_digest_sha256": args.contamination_audit_binding_artifact,
+    }
+    supplied = [path is not None for path in fields.values()]
+    if any(supplied) and not all(supplied):
+        raise ValueError(
+            "五类校准绑定必须全部提供: registry、rollback、prompt-pack、"
+            "workflow、contamination-audit"
+        )
+    if not any(supplied):
+        return {key: "" for key in fields}
+    digests: dict[str, str] = {}
+    for field, path in fields.items():
+        if path is None:
+            raise ValueError(f"校准绑定 artifact 缺失: {field}")
+        try:
+            data = path.read_bytes()
+        except OSError as exc:
+            raise ValueError(f"校准绑定 artifact 读取失败 ({path}): {exc}") from exc
+        digests[field] = hashlib.sha256(data).hexdigest()
+    return digests
 
 
 def _build_snapshots(scores: Mapping[str, Any]) -> list[CalibrationSnapshot]:

@@ -219,3 +219,26 @@ plan/source/preflight hash 未变，preflight 仍为 `preflight_ready`、
 尚未将任何校准结果写回 serving registry/router。下一合法动作仍需明确
 `授权 r18 live screening`；授权前不得恢复 checkpoint、拼接 survivor subset、降低固定
 2% transport gate、修改 frozen plan/source/registry 或启动 21-suite target campaign。
+
+## 本轮离线增量：校准 artifact 绑定入口（2026-08-21）
+
+在不触碰 r18 或生产 serving 的前提下，继续完善自适应校准控制面：
+`scripts/run_adaptive_calibration.py` 现在支持五类本地绑定 artifact：registry/profile-set、
+rollback target、prompt pack、workflow 和 contamination audit。CLI 只在内存读取文件并
+计算 SHA-256，五类路径必须成组提供；任何 partial binding 都会在 receipt 生成前拒绝。
+
+完整 binding 加上 fusion/baseline scores 后，专项测试证明 receipt 为
+`shadow_candidate`、`ready_for_review=true`，但 `activation_ready=false`，自动激活仍关闭。
+无 scores 或缺 binding 的现有行为仍为 `blocked`，无变化渠道仍为 `not_required`。测试只
+验证 digest、状态和 redaction，不将 artifact 内容或 provider 输出写入结果。
+
+验证结果：自适应校准专项 `16 passed`；全量 `1083 passed, 7 skipped in 276.34s`；
+`py_compile`、`compileall`、关键导入和 `git diff --check` 均通过。没有 provider/target
+网络调用，没有修改 r18 plan/source/registry、生产 router/prompt/weights 或服务进程。
+当前生产 `/health` 仍为 `ready`，公开模型仍为三个 Axio tier；r18 仍为
+`preflight_ready / ready_for_ranking=false`，Harness convergence 仍为
+`blocked / next_gate=screening / target_suite_calls_allowed=false`。
+
+下一合法动作仍需明确 `授权 r18 live screening`。授权前不得恢复 checkpoint、拼接 survivor
+subset、降低固定 2% transport gate、修改 frozen plan/source/registry 或启动 21-suite target
+campaign；本轮 CLI 入口只为未来同 cohort non-target/holdout 证据准备安全绑定路径。

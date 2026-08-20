@@ -1085,3 +1085,8 @@ its unchecked items are not the current cohort's execution plan.
   binding shadow candidate 与 raw prompt/provider/secret redaction）；本轮全量回归
   `1081 passed, 7 skipped`，`py_compile`、`compileall`、导入和 `git diff --check`
   均通过。没有 provider/target 网络调用，也没有修改 r18 frozen 输入。
+- [x] 为校准 CLI 增加五类本地 artifact 绑定入口（registry/profile-set、rollback、
+  prompt-pack、workflow、contamination-audit）：只读取 SHA-256，要求五类成组提供，
+  部分绑定 fail-fast；完整绑定和得分证据可生成 `shadow_candidate`，仍禁止自动激活。
+  新增回归覆盖真实 artifact digest 比对与 partial-binding rejection；全量回归
+  `1083 passed, 7 skipped`，没有 provider/target 网络调用。

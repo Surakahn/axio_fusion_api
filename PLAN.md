@@ -76,6 +76,19 @@ router/prompt/weights 或服务进程。专项校准/CLI 回归为 `14 passed`�
 `screening -> transport admission -> complete-pool ranking -> baseline freeze ->
 same-cohort Harness -> 21-suite campaign` 顺序推进。
 
+## 本轮离线增量：校准 artifact 绑定入口（2026-08-21）
+
+为使校准凭证能够在真实 non-target/holdout 证据形成后使用，CLI 新增五类本地 artifact
+参数：registry/profile-set、rollback target、prompt pack、workflow、contamination
+audit。CLI 只读取每个文件的 SHA-256，不读取内容进入 prompt 或 receipt；五类路径必须
+全部提供或全部省略，部分绑定会在参数层 fail-fast。完整绑定加上 fusion/baseline
+scores 时，receipt 才能从 `blocked` 进入 `shadow_candidate`，但仍保持
+`activation_ready=false`、人工审查必需、`automatic_activation_allowed=false`。
+
+本轮专项回归 `16 passed`，全量回归 `1083 passed, 7 skipped`；L1/L2、`compileall`、
+导入和 `git diff --check` 均通过。该入口仍是离线控制面能力，没有读取 provider、没有
+改变 r18 frozen 输入、没有写入 serving policy，也没有授权 target benchmark。
+
 ## Terra panel 调度边界复核（2026-08-21）
 
 针对 AGENTS.md 记录的 Terra “部分 panel candidate”风险，本轮先做了零网络受控复现，
