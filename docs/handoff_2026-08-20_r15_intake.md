@@ -134,3 +134,20 @@ transport admission、ranking、provider freeze、official import 和 target cam
 独立工程回归在同一阶段完成：`python3.11 -m pytest tests/ -x -q --tb=short` 返回
 `1066 passed, 7 skipped`（约 4 分 31 秒）。该结果证明当前代码基线回归通过，不构成
 provider 能力、baseline ranking 或 Fusion superiority 证据。
+## 14:04 CST 低频进度复核
+
+截至 2026-08-20 14:04:57，三个 init 托管进程仍存活且 plan identity 未改变。safe state
+SHA-256 为 `3b0e4a3001423a964b1f5fb907acca2e30b2e48b10cb6798d26a0fe12a022096`，campaign
+仍为 `status=running`、16 planned unit 中 `1 completed / 11 failed`、`ready_for_ranking=false`、
+`target_suite_calls_performed=false`；12/16 unit 已写入 state，剩余 4 个未 terminal。唯一
+completed unit 仍是 `112/112`、transport failure `0`。11 个 failed unit 的完整分母为
+`112/112`（5 个）、`102/102`（2 个）、`101/102`、`92/102`、`80/102` 和 `60/102`，
+全部超过冻结的 `2%` transport fail-fast gate，只属于 transport evidence。
+
+当前已切换到下一个 serial unit，task 为
+`dd6e3d631867c96b5417ca5860af672e9de80961eae4f317e6c17e96fac9559a`，private checkpoint
+为 `2/102`、`checkpoint_status=partial`，SHA-256 为
+`0a75d69049abf3da03e37f9def47833f600ff8d49f937ee374bfdc5c37e915a8`。screening receipt、
+transport admission、ranking、provider freeze、official import、target campaign 仍不存在；
+后置 gate 继续关闭。本次未恢复 checkpoint、未使用 `--retry-failed`、未修改 frozen plan、
+未启动第二套 screening。

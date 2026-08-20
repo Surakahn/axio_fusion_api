@@ -42,6 +42,21 @@ SHA-256 `0aba0016052153885e3562b789fc917c6dd8a10e6b8b0eefb721c2fb8e7e85d1`。
 screening terminal 前仍禁止 transport conversion、ranking、freeze、official import 与
 target campaign。
 
+### r15 14:04 live screening 增量
+
+截至 14:04:57，safe state SHA-256 为
+`3b0e4a3001423a964b1f5fb907acca2e30b2e48b10cb6798d26a0fe12a022096`，r15 仍为
+`status=running`：16 planned unit 中 `1 completed / 11 failed`，12/16 已写入 state，剩余
+4 个未 terminal。failed 完整 transport 分母保留为 `112/112 ×5`、`102/102 ×2`、
+`101/102`、`92/102`、`80/102`、`60/102`，不允许抽取 survivor subset、恢复 checkpoint、
+使用 `--retry-failed` 或降低 `2%` gate。当前 task
+`dd6e3d631867c96b5417ca5860af672e9de80961eae4f317e6c17e96fac9559a` 的 checkpoint 为
+`2/102`，SHA-256 `0a75d69049abf3da03e37f9def47833f600ff8d49f937ee374bfdc5c37e915a8`。
+
+screening terminal 前后置 gate 仍全部关闭：`target_suite_calls_performed=false`、
+`next_gate=screening`、`target_suite_calls_allowed=false`；terminal 后才可由同 cohort
+supervisor 执行 transport admission 与完整池 ranking。
+
 ## Composite cohort r14 successor intake（2026-08-19）
 
 r13 已完整 terminal 但 transport admission blocked：16/16 unit 中只有 7 个通过，8 个

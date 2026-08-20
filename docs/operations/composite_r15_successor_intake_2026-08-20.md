@@ -203,3 +203,18 @@ transport admission、ranking、provider freeze、official import 和 target cam
 同阶段的工程回归命令 `python3.11 -m pytest tests/ -x -q --tb=short` 已通过
 `1066 passed, 7 skipped`。该回归仅证明代码契约，没有授权任何 target request 或
 superiority claim。
+## r15 live screening 进度快照（2026-08-20 14:04 CST）
+
+14:04:57 CST 只读核验确认 screening/supervisor/watcher 三个 PID 仍存活，命令行仍绑定
+r15 frozen plan/source 与 r7 registry/probe/admission。safe state SHA-256 为
+`3b0e4a3001423a964b1f5fb907acca2e30b2e48b10cb6798d26a0fe12a022096`；16 planned unit 中
+`1 completed / 11 failed`，12/16 已记录，剩余 4 个，`ready_for_ranking=false`、
+`target_suite_calls_performed=false`。唯一 completed unit 为 `112/112`、transport failure
+`0`；failed 分母为 `112/112 ×5`、`102/102 ×2`、`101/102`、`92/102`、`80/102`、
+`60/102`，全部触发固定 `2%` gate，不能转成质量或排名证据。
+
+当前 task `dd6e3d631867c96b5417ca5860af672e9de80961eae4f317e6c17e96fac9559a` 的 checkpoint
+为 `2/102`、`partial`，SHA-256 为
+`0a75d69049abf3da03e37f9def47833f600ff8d49f937ee374bfdc5c37e915a8`。screening receipt、
+transport admission、ranking、provider freeze、official import 和 target campaign 仍不
+存在，`next_gate=screening`、`target_suite_calls_allowed=false` 不变。
