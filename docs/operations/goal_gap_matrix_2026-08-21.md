@@ -42,7 +42,7 @@ provider 能力组合成 `axio-fast`、`axio-terra`、`axio-pro`。Harness 只�
 | Router/编排算法 | **partial** | query analysis、canonical 去重、角色 gate、deadline/call/cost reservation、fallback、circuit recovery、safe trace | 静态 capability prior 仍未被完整双源 non-target evidence 替换；VOI/portfolio optimizer 未晋级 | 只在 baseline freeze 后使用 non-target/shadow/holdout 设计和审批 successor |
 | 自适应渠道校准 | **partial/guarded** | allowlisted channel fingerprint、reasoning/tool/vision/context/latency/cost/endpoint 变化检测；hash-only prompt/decision receipt；CLI 可从五类本地 artifact 读取 SHA-256 并要求成组绑定；无证据或绑定缺失时 fail-closed；完整绑定也只允许 `shadow_candidate` | 尚无 provider baseline freeze 后的 operational calibration evidence；不能自动激活或写回 serving policy | freeze 后以同 cohort non-target/holdout 生成五类绑定，人工审查后再做 shadow replay 和可回滚 successor |
 | Judge/Synthesizer | **partial** | 结构化比较 rubric、consensus/contradiction/coverage、独立性 gate、输出归一化 | confidence calibration、abstention/repair 阈值尚无同 cohort 实证；不得以 target label 调参 | baseline freeze 后用 operational non-target cases 校准并绑定 rollback |
-| Provider admission | **blocked** | r7 probe-bound registry、四协议 adapter、90 秒 stream gate、健康和安全 receipt；r18 credential-ready 零网络预检 9/9 | r17 transport admission blocked；8 canonical 仅 1 个同时通过两源 2% gate，低于 minimum 3；credential readiness 不等于 transport admission | 明确授权后只启动唯一 r18 frozen live screening |
+| Provider admission | **blocked** | r7 probe-bound registry、四协议 adapter、90 秒 stream gate、健康和安全 receipt；r18 credential-ready 零网络预检 9/9；r17 transport failure 已按 source/canonical/类别完成 hash-safe 计数复核 | r17 transport admission blocked；8 canonical 仅 1 个同时通过两源 2% gate，低于 minimum 3；1712 case 中 916 个为 fail-fast 未尝试、799 次实际 provider attempt 中 37 次失败；credential readiness 不等于 transport admission | 明确授权后只启动唯一 r18 frozen live screening，并沿用完整分母与 failure taxonomy |
 | Ranking/baseline freeze | **blocked** | ranking conversion、external top-three、freeze 的 fail-closed 控制面已实现 | r18 尚未 terminal，故无完整 pool ranking、rank 1/2/3 或 freeze | r18 terminal -> transport admission -> complete-pool ranking -> external top-three -> freeze |
 | Harness 控制面 | **partial/ready offline** | hash-only pin、execution plan、持久化状态、可恢复 supervisor、import audit、convergence gate | r18 acquisition/import/binding/convergence 依赖上游 screening/freeze，当前 `next_gate=screening` | freeze 后绑定同 cohort official/audited runs，再审计放行 target |
 | 21-suite 资产 | **partial/blocked** | 9 类 21 套 matrix、case/source/decoding/统计合同；14 套可直接 materialize，6 套需 official import，GPQA 受授权门禁 | 没有完整同 cohort run；GPQA/官方 harness/import 仍不能冒充 ready | 先完成 baseline freeze 和官方/audited imports，再启动 target |
@@ -106,3 +106,13 @@ failure-cause evidence 的原则，Axio 采用以下边界：
 明确授权后执行 r18；在授权前仅进行只读核验、文档/离线控制面改进和不改变冻结输入的
 测试。下轮首先重新读取本矩阵、最新 handoff、r18 state/receipt、Goal/PRD，再决定是否
 进入唯一 live action。
+
+## 运输根因审计增量（2026-08-21）
+
+已对 r17 私有 unit 的 hash-safe transport telemetry 做可复现离线复核，并写入
+`docs/scout/transport_root_cause_audit_r17_r18_2026-08-21.md`：完整分母为 1712
+case，762 completed、950 transport-failed，其中 916 个由固定前三次失败后的
+fail-fast 补入；实际 provider attempts 为 799，失败 attempt 为 37（timeout 25、
+HTTP 5xx 8、empty output 4）。该审计没有读取 raw provider output，也没有网络调用，
+不改变 r17/r18 任何冻结输入。结论仍是 source/profile 相关 transport 不稳定与
+90 秒硬上限共同作用，不能据此调整 router、prompt、权重或 gate。

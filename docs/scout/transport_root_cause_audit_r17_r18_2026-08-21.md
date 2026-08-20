@@ -20,6 +20,30 @@ checkpoint、private provider output、原始 prompt、标签或密钥，没有�
   transport admission 为 `blocked`。没有 ranking、provider baseline freeze 或
   target benchmark 结果。
 
+### hash-safe transport 计数复核
+
+对 16 个私有 unit 只读取 `status`、`fail_fast_unattempted`、
+`failure_telemetry` 中的计数，以及 `transport_failure_class`、HTTP 状态和
+provider error code；没有读取或输出 `output`、prompt、label、URL、model id
+或 secret。可复现的完整分母如下：
+
+| 范围 | case 总数 | completed | transport-failed | fail-fast 未尝试 | provider attempts | failed attempts |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 全部 r17 | 1712 | 762 | 950 | 916 | 799 | 37 |
+| `mmlu_pro` source | 896 | 483 | 413 | 400 | 496 | 13 |
+| `livebench_official` source | 816 | 279 | 537 | 516 | 303 | 24 |
+
+实际 provider failure 的类别计数为 `timeout=25`、`provider_http_5xx=8`、
+`empty_provider_output=4`；对应的 HTTP 状态为 `500=6`、`503=2`，provider
+error code 为 `provider_request_timeout=25`、`http_error=8`、
+`empty_provider_response=4`。失败 unit 的前三次失败会触发 fail-fast，因而
+`916` 个未尝试 case 是完整分母中的失败证据，而不是额外的 provider 请求。
+没有发现失败后恢复为 completed 的 case；37 个失败 attempt 均归属于最终
+`transport_failed` case，其中部分 case 包含有限 retry round。
+
+这组计数与 admission receipt 的 `transport_failure_rate` 一致，但只解释
+transport 可用性，不提供能力分数、模型排序或质量结论。
+
 ### source/profile 组合分布
 
 以下只使用 safe hash 映射到当前 r7 probe-bound registry 的公开 profile 身份；表中

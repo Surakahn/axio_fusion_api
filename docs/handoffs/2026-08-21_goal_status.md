@@ -242,3 +242,25 @@ rollback target、prompt pack、workflow 和 contamination audit。CLI 只在内
 下一合法动作仍需明确 `授权 r18 live screening`。授权前不得恢复 checkpoint、拼接 survivor
 subset、降低固定 2% transport gate、修改 frozen plan/source/registry 或启动 21-suite target
 campaign；本轮 CLI 入口只为未来同 cohort non-target/holdout 证据准备安全绑定路径。
+
+## 本轮只读增量：r17 transport 根因计数复核
+
+在恢复 Goal 后，按当前 PRD、PLAN、CHECKLIST 与 r18 gate 重新做了只读 transport
+审计。仅读取 r17 私有 unit 的 hash-safe `status`、fail-fast 标记和 failure telemetry
+计数，没有读取 raw provider output、prompt、label、URL 或 secret，也没有发起新的
+provider/target 请求。
+
+- 完整分母：1712 case；762 completed、950 transport-failed；916 个是固定前三次
+  transport failure 后补入的 fail-fast 未尝试 case。
+- 实际 provider attempts：799；失败 attempt：37，其中 timeout 25、HTTP 5xx 8、
+  empty provider output 4；HTTP 状态为 500（6 次）和 503（2 次）。
+- 两个 source 的计数和 canonical 级分布已记录到
+  `docs/scout/transport_root_cause_audit_r17_r18_2026-08-21.md`。结论仍是
+  source/profile 相关 transport 不稳定与 90 秒硬上限共同作用，不是已定位的
+  router/prompt bug，也不是能力排名证据。
+
+这次复核没有改变 r17/r18 frozen plan/source/registry、生产 router/prompt/weights 或
+固定 2% gate。r18 仍是 `preflight_ready`，`ready_for_ranking=false`；Harness 仍为
+`next_gate=screening`、`target_suite_calls_allowed=false`。唯一下一动作仍需 operator
+明确回复 `授权 r18 live screening`，之后才按 screening -> transport admission ->
+ranking -> baseline freeze -> same-cohort Harness -> 21-suite campaign 顺序执行。

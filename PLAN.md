@@ -52,6 +52,18 @@ transport 根因复核
 plan、恢复 checkpoint、拼接 survivor subset、降低固定 2% transport gate 或提前
 target benchmark。
 
+## 本轮只读增量：r17 transport 根因计数复核（2026-08-21）
+
+已完成 r17 私有 unit 的 hash-safe transport telemetry 复核，结果写入
+`docs/scout/transport_root_cause_audit_r17_r18_2026-08-21.md`。1712 个 case 中
+762 个 completed、950 个 transport-failed，916 个为固定 fail-fast 补齐的未尝试
+分母；实际 provider attempts 为 799，37 次失败 attempt 分为 timeout 25、HTTP
+5xx 8、empty output 4。没有读取 raw provider output、prompt、label、URL 或 secret，
+没有进行 provider/target 请求，也没有修改 r17/r18 plan/source/registry、生产
+router/prompt/weights 或 gate。该结果只支持“source/profile 相关 transport 不稳定 +
+90 秒硬上限”的诊断，不是能力或排名证据；下一条合法动作仍是等待明确的
+`授权 r18 live screening`。
+
 ## 本轮离线增量：自适应校准 receipt 发布边界（2026-08-21）
 
 本轮继续沿“Fusion 负责能力组合、Harness 负责评测与证据链”的产品边界，补齐
