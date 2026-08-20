@@ -1,4 +1,4 @@
-# Convergence Execution Path (Active r43)
+# Convergence Execution Path (Active composite r17)
 
 This document is the canonical execution path for the current Axio Fusion
 milestone. It is intentionally short and operational. New provider channels,
@@ -51,58 +51,33 @@ The following order is the only path to a formal quality claim:
    baseline. If any gate fails, publish a diagnostic result and a bounded
    shadow-only improvement proposal; do not claim superiority.
 
-## Current State (2026-08-09, r43)
+## 当前状态（2026-08-20，composite r17）
 
-- Engineering readiness is complete: the Python 3.11 regression passes `1009`
-  tests, the four provider-input adapters pass dry checks, and all 12
-  Axio/public-surface cells pass the network-free protocol self-test.
-- The fresh r43 pre-Fusion generation cohort is terminal and ready. It
-  contains the complete discovered pool after candidate filtering, strict
-  three-sample streaming admission, and role-probe binding. Its private
-  generation, handoff, and runtime registry artifacts contain 10 logical
-  models and 10 eligible physical profiles. This is availability and
-  orchestration evidence only, not a model-quality or baseline-ranking claim.
-- The old `prefusion-probe-export` command intentionally accepts only the raw
-  `pre_fusion_model_screening.v1` schema. Passing the r43 generation wrapper to
-  it is a schema error, not a failed provider run. The explicit
-  `prefusion-generation-probe-export` command now projects the nested,
-  endpoint-bound `eligible_profile_bindings` into `provider_probe.v1` after
-  revalidating the complete one-to-one profile set and all strict-stream
-  multi-sample fields. The projection is offline and records
-  `projection_network_calls_performed=false`.
-- The r43 projected probe was bound to a new private copy of the r43 runtime
-  registry with `registry-bind-probe`. Its redacted registry evidence and the
-  generation-bound private/redacted probe artifacts passed
-  `provider-probe-evidence-audit` with zero blockers. This closes the
-  provider-probe evidence projection gap; it does not freeze rank 1/2/3.
-- The r43 external ranking artifact remains `template_only=true` with no rank
-  assignment. The complete live pool still needs two independent common
-  non-target ranking source families, exact identity attestations, population
-  counts, and stable source snapshots before a baseline freeze is legal.
-- The r24 full-pool fail-fast attempt was stopped after a private checkpoint
-  exposed duplicate MMLU-Pro case identities. Its private artifacts are
-  preserved as interrupted diagnostic evidence only; no unit answer or score
-  may be reused for ranking.
-- The MMLU-Pro adapter now binds category, source question identity, question
-  content, and options, excludes labels from identity, and rejects duplicate
-  or missing case IDs before plan execution. This changes the adapter digest,
-  so the next screening plan must be regenerated from a new source-manifest
-  binding.
-- The r25 cohort reached a terminal partial result and its transport-only
-  admission receipt retained zero eligible canonical models. It is preserved
-  as diagnostic evidence and cannot supply a provider baseline, a survivor
-  subset, or any later cohort input.
-- The r26 and r27 cohorts are retained as transport-only diagnostic evidence.
-  They are not resumable, rankable, or mergeable into r43. Their partial
-  answers, scores, failures, and survivor subsets remain excluded.
-- Ranking conversion is fail-closed for an interrupted campaign with no
-  complete cross-source candidate: it emits a template-only blocker receipt
-  rather than raising or deriving a partial rank.
-- The assembled 21-suite dataset and official harness manifests remain
-  provenance inputs only. They do not authorize target benchmark requests
-  while provider baseline screening is incomplete.
+- 工程就绪度已完成。本次代码变更后的 Python 3.11 全量回归为 `1074 passed, 7
+  skipped`；这是契约和集成证据，不是 provider 排名或 Fusion superiority 证据。
+- r17 是唯一活动的 immutable non-target screening cohort。冻结 plan 绑定 r7
+  probe-bound registry，包含 16 个串行 unit、2 个 source family、8 个 canonical
+  group、9 个 replica、`max_workers=1` 和固定 2% transport fail-fast gate。plan
+  SHA-256 为 `336fa9c4f81223622a3f94d21cc249b4d20ba9b392a18a2e1aba54fbc5ba6565`，
+  source SHA-256 为 `7ba7fc8816cbd32881b47419e2d26d2fa26f7460d551b4d1c747195f8ae15b56`。
+- live screening、同 cohort supervisor 和 lineage watcher 仍是唯一活动的筛选/控制进程。
+  safe state 为 `running`，当前 `3 completed / 6 failed_or_blocked`，
+  `ready_for_ranking=false`，`target_suite_calls_performed=false`；当前 state
+  SHA-256 为 `fdce96ba6a1d35568c2f9f50d1b21ffb5ce10d32de8a1130c9e513ef3e1d425c`。
+- 离线 Harness 控制面已有 6 个 hash-only pin 和 ready execution plan，但 acquisition/
+  import 尚未完成，同 cohort convergence 仍停留在 `next_gate=screening`，
+  `target_suite_calls_allowed=false`，尚未放行 target call。Harness 就绪不授权 target
+  call，也不能替代 provider baseline 证据。
+- 不恢复 partial checkpoint，不拼接 completed subset，不使用猜测排名或历史 cohort。
+  screening terminal 后唯一合法顺序是：transport admission -> complete-pool ranking
+  -> external top-three evidence -> provider baseline freeze -> 同 cohort 官方/审计
+  Harness -> 9 类 21 套 campaign -> final claim audit。
+- 公共 Fusion 产品仍可独立运行：`axio-fast`、`axio-terra`、`axio-pro` 均通过
+  Chat Completions、Responses、Anthropic Messages 和 Gemini surface 提供服务。本次
+  四协议公共输出边界与 request-local streaming gate 已记录在当前 commit journal，
+  没有改动 r17 frozen 输入。
 
-## r44 Screening Registration
+## Historical r44 Screening Registration
 
 The next cohort is registered at
 `private/runs/2026-08-09-prefusion-cohort-r44/`. It keeps the r43
@@ -120,7 +95,7 @@ denominator. Its private checkpoints are diagnostic until every task is
 terminal. No partial score, survivor subset, rank assignment, baseline
 freeze, or target benchmark request may be reused or promoted.
 
-## r43 Evidence Handoff
+## 历史 r43 Evidence Handoff
 
 The r43 screening process has already exited. Use the exact private generation
 artifact and do not start a provider request for this handoff:
@@ -171,9 +146,10 @@ The generated probe is a projection of already-bound evidence, not a new
 probe and not a ranking input. `provider-probe-evidence-audit` must be read
 before any baseline-freeze command. The r43 audit passing permits the
 provider-evidence gate to advance, but the external ranking template and
-official harness-import gate remain independently required.
+official harness-import gate remain independently required. This section is
+historical evidence only; it is not the active r17 execution input.
 
-## Change Policy Until the Gate
+## 当前 Gate 变更政策
 
 Only these changes are permitted before the baseline-freeze gate:
 
@@ -187,6 +163,6 @@ Only these changes are permitted before the baseline-freeze gate:
 
 Do not tune fusion prompts, route weights, model tiers, screening cases,
 scorers, concurrency, or benchmark decoding settings before the baseline
-freeze. The r43 generation-bound projection does not alter any of those
-inputs, which preserves the anti-cheating contract and keeps the next result
-scientifically interpretable.
+freeze. The current public-output normalization change does not alter any of
+those inputs, which preserves the anti-cheating contract and keeps the r17
+result scientifically interpretable.

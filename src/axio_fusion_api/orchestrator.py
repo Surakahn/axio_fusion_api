@@ -15,6 +15,7 @@ from typing import Any, Mapping, Sequence
 
 from .policy_control import load_active_routing_policy
 from .latency_policy import PROVIDER_MAX_RESPONSE_SECONDS, profile_latency_eligibility
+from .compat import normalize_public_output_text
 from .providers import HTTPProviderClient, ProviderCompletion, ProviderStreamObserver
 from .router import (
     _screening_role_allowed,
@@ -304,7 +305,7 @@ class PublicStreamInterruptedError(FusionExecutionError):
         self.client_cancelled = bool(client_cancelled)
 
 
-_PUBLIC_STREAM_OBSERVER: ContextVar[ProviderStreamObserver | None] = ContextVar(
+_PUBLIC_STREAM_OBSERVER: ContextVar[Any | None] = ContextVar(
     "axio_public_stream_observer",
     default=None,
 )
@@ -312,6 +313,65 @@ _PUBLIC_STREAM_CANCELLATION: ContextVar[threading.Event | None] = ContextVar(
     "axio_public_stream_cancellation",
     default=None,
 )
+
+
+class _BufferedPublicStreamObserver:
+    """在 acting 文本确定前暂存有歧义的 JSON-like 增量片段。
+
+    普通文本保持增量转发；以 ``{``、``[`` 或 JSON 代码围栏开头的 provider 输出只在请求
+    内存中暂存，待最终答案字段确定后再公开，避免 Synthesizer 内部信封泄漏到公共流。暂存
+    内容不会写入 receipt。
+    """
+
+    def __init__(
+        self,
+        on_text_delta: Any,
+        *,
+        structured_output: Mapping[str, Any],
+        cancellation_event: threading.Event | None = None,
+    ) -> None:
+        self._delegate = ProviderStreamObserver(
+            on_text_delta,
+            cancellation_event=cancellation_event,
+        )
+        self._structured_output = dict(structured_output)
+        self._pending: list[str] = []
+
+    @property
+    def emitted_text(self) -> bool:
+        return self._delegate.emitted_text
+
+    @property
+    def cancellation_requested(self) -> bool:
+        return self._delegate.cancellation_requested
+
+    def emit_text_delta(self, value: Any) -> bool:
+        text = str(value or "")
+        if not text or self.cancellation_requested:
+            return False
+        if self._pending or self._looks_json_like(text):
+            self._pending.append(text)
+            return not self.cancellation_requested
+        return self._delegate.emit_text_delta(text)
+
+    def flush(self, final_text: Any) -> bool:
+        if not self._pending and self._delegate.emitted_text:
+            return not self.cancellation_requested
+        candidate = str(final_text or "") or "".join(self._pending)
+        self._pending.clear()
+        public_text = normalize_public_output_text(
+            candidate,
+            structured_output=self._structured_output,
+        )
+        return self._delegate.emit_text_delta(public_text)
+
+    def cancel(self) -> None:
+        self._delegate.cancel()
+
+    @staticmethod
+    def _looks_json_like(value: str) -> bool:
+        prefix = str(value or "").lstrip()
+        return prefix.startswith(("{", "[", "```"))
 
 
 class _CallBudget:
@@ -2723,20 +2783,28 @@ class FusionEngine:
         the absence of provider deltas in the transport trace.
         """
 
-        observer = ProviderStreamObserver(
+        observer = _BufferedPublicStreamObserver(
             on_text_delta,
+            structured_output=request.structured_output,
             cancellation_event=cancellation_event,
         )
         observer_token = _PUBLIC_STREAM_OBSERVER.set(observer)
         cancellation_token = _PUBLIC_STREAM_CANCELLATION.set(cancellation_event)
         try:
             response = self.complete(request, live=live)
+            public_text = normalize_public_output_text(
+                response.text,
+                structured_output=request.structured_output,
+            )
             if cancellation_event is not None and cancellation_event.is_set():
                 raise PublicStreamInterruptedError(client_cancelled=True)
-            if response.text and not observer.emitted_text:
-                observer.emit_text_delta(response.text)
+            observer.flush(public_text)
+            if public_text and not observer.emitted_text:
+                observer.emit_text_delta(public_text)
             if cancellation_event is not None and cancellation_event.is_set():
                 raise PublicStreamInterruptedError(client_cancelled=True)
+            if public_text != response.text:
+                response = replace(response, text=public_text)
             if response_id or created is not None:
                 response = replace(
                     response,

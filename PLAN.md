@@ -1,5 +1,36 @@
 # Axio Fusion API Plan
 
+## 公共输出边界与四协议流式收敛（2026-08-20 22:32 CST）
+
+本阶段继续沿完整 Fusion API 产品主线推进，没有把 r17 screening 当成项目本体，也没有
+修改 r17 frozen plan/source/registry、生产 router/prompt/weights 或发送新的 benchmark
+target 请求。针对产品待办中“axio-pro 最终输出可能携带内部 JSON reasoning 结构”的缺口，
+在协议兼容层完成商业级公共文本边界收敛：
+
+- `compat.py` 新增保守的 `normalize_public_output_text()`，只在完整 JSON/control envelope
+  命中强内部字段（`reasoning_summary`、`ranked_candidates`、`ready_for_synthesis` 等）时
+  提取 `answer`/`final_answer`；普通业务 JSON 和调用方显式请求的 `json_object`/
+  `json_schema` 始终原样保留；
+- Chat Completions、Responses、Anthropic Messages、Gemini 以及 buffered/streaming 渲染器
+  统一使用同一归一化契约，usage 按实际公共文本重新计算；safe metadata 只记录应用标志、
+  长度和 SHA-256，不保存原文、provider 输出或密钥；
+- `orchestrator.py` 增加 request-local JSON-like stream gate。普通文本保持增量转发，疑似
+  Synthesizer JSON envelope 在最终输出确定后才释放公共 answer，避免 terminal event 之前
+  泄漏内部 reasoning；闸门不持久化原始内容。
+
+验证门禁：L1/L2 通过；兼容、流式和融合核心专项回归 `494 passed, 7 skipped`；全量
+`python3.11 -m pytest tests/ -x -q --tb=short` 为 `1074 passed, 7 skipped`
+（退出码 0）。该结果是工程回归证据，不是 provider 质量、baseline freeze、21-suite
+superiority 或最终完成证据。
+
+r17 仍是唯一活动 screening：PID `3739367`、supervisor `3741799`、watcher `3742593` 未
+漂移；safe state 仍 `running`、`ready_for_ranking=false`、`target_suite_calls_performed=false`，
+当前安全计数为 `3 completed / 6 failed_or_blocked`；Harness convergence 的
+`next_gate=screening`、`target_suite_calls_allowed=false` 保持 fail-closed。后续仍按
+`screening terminal -> transport admission -> complete-pool ranking -> external top-three ->
+provider baseline freeze -> same-cohort Harness -> 21-suite campaign -> final audit` 单向推进，
+在证据链完整前不作 superiority claim。
+
 ## r17 immutable successor 与 preflight（2026-08-20 18:58 CST）
 
 r16 transport admission blocked 后，已从 r16 source contract 注册新的 immutable r17 successor。

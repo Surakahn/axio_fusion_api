@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from dataclasses import replace
 from typing import Any, Mapping, Sequence
 
 from .content_contract import (
@@ -19,6 +20,7 @@ from .schemas import (
     canonical_public_model,
     normalize_reasoning_budget_tokens,
     normalize_reasoning_effort,
+    rough_token_count,
     sha256_text,
     stable_json,
 )
@@ -38,6 +40,125 @@ class CompatibilityError(ValueError):
     def __init__(self, code: str, message: str | None = None) -> None:
         self.code = str(code or "invalid_protocol_parameter")[:120]
         super().__init__((message or self.code)[:240])
+
+
+# 部分 Synthesizer 会把内部控制包而不是 acting answer 返回给调用方。字段集合保持收敛：
+# 只有同时呈现典型的 answer/reasoning 内部信封时才改写，普通 JSON 答案保持不变。
+_PUBLIC_ANSWER_FIELDS = ("answer", "final_answer", "output", "response", "content")
+_STRONG_INTERNAL_ENVELOPE_FIELDS = frozenset(
+    {
+        "reasoning",
+        "reasoning_summary",
+        "analysis",
+        "consensus",
+        "contradictions",
+        "missing_coverage",
+        "ranked_candidates",
+        "ready_for_synthesis",
+    }
+)
+
+
+def normalize_public_output_text(
+    value: Any,
+    *,
+    structured_output: Mapping[str, Any] | None = None,
+) -> str:
+    """在不泄漏内部 JSON 信封的前提下返回公共文本。
+
+    这是一个保守的兼容性修复：只有完整 JSON 对象或 JSON 代码围栏同时命中内部控制字段
+    时才提取字符串答案；调用方显式声明 JSON 输出契约时始终保留原始文本。
+    """
+
+    raw_text = str(value or "")
+    text = raw_text.strip()
+    requested_type = str(
+        structured_output.get("type") if isinstance(structured_output, Mapping) else ""
+    ).strip().casefold()
+    if not text or requested_type in {"json_object", "json_schema"}:
+        return raw_text
+    parsed = _parse_complete_public_json(text)
+    if not isinstance(parsed, Mapping):
+        return raw_text
+    fields = {str(key).strip().casefold() for key in parsed}
+    if not fields.intersection(_STRONG_INTERNAL_ENVELOPE_FIELDS):
+        return raw_text
+    for field in _PUBLIC_ANSWER_FIELDS:
+        candidate = parsed.get(field)
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return raw_text
+
+
+def _parse_complete_public_json(text: str) -> Any | None:
+    candidate = text.strip()
+    if candidate.casefold().startswith("```json") and candidate.endswith("```"):
+        candidate = candidate[7:-3].strip()
+    elif candidate.startswith("```") and candidate.endswith("```"):
+        candidate = candidate[3:-3].strip()
+    if not candidate.startswith(("{", "[")) or not candidate.endswith(("}", "]")):
+        return None
+    try:
+        return json.loads(candidate)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def _public_output_normalization_receipt(
+    original: Any,
+    normalized: str,
+    *,
+    structured_output: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    original_text = str(original or "")
+    requested_type = str(
+        structured_output.get("type") if isinstance(structured_output, Mapping) else ""
+    ).strip().casefold()
+    applied = original_text != normalized
+    return {
+        "schema": "axio_fusion_api.public_output_normalization.v1",
+        "applied": applied,
+        "reason": (
+            "internal_json_answer_extracted"
+            if applied
+            else "explicit_structured_output_preserved"
+            if requested_type in {"json_object", "json_schema"}
+            else "unchanged"
+        ),
+        "original_char_count": len(original_text),
+        "public_char_count": len(normalized),
+        "original_sha256": sha256_text(original_text),
+        "public_sha256": sha256_text(normalized),
+        "structured_output_type": requested_type,
+        "raw_output_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _public_text_and_normalization(
+    response: FusionResponse,
+) -> tuple[str, dict[str, Any]]:
+    public_text = normalize_public_output_text(
+        response.text,
+        structured_output=response.request.structured_output,
+    )
+    return public_text, _public_output_normalization_receipt(
+        response.text,
+        public_text,
+        structured_output=response.request.structured_output,
+    )
+
+
+def _public_usage(response: FusionResponse, public_text: str) -> dict[str, int]:
+    usage = response.usage()
+    if public_text == response.text:
+        return usage
+    completion_tokens = rough_token_count(public_text)
+    return {
+        "prompt_tokens": usage["prompt_tokens"],
+        "completion_tokens": completion_tokens,
+        "total_tokens": usage["prompt_tokens"] + completion_tokens,
+    }
 
 
 def canonicalize_payload(payload: Mapping[str, Any], *, api_format: str = "chat/completions") -> FusionRequest:
@@ -242,14 +363,15 @@ def render_response(
     responses_store: bool | None = None,
 ) -> dict[str, Any]:
     normalized = normalize_api_format(api_format or response.request.api_format)
-    usage = response.usage()
-    metadata = _response_metadata(response)
+    public_text, normalization_receipt = _public_text_and_normalization(response)
+    usage = _public_usage(response, public_text)
+    metadata = _response_metadata(response, normalization_receipt=normalization_receipt)
     if normalized == "responses" and responses_store is not None:
         metadata = _responses_continuation_metadata(metadata, stored=responses_store)
     tool_calls = tuple(call for call in response.tool_calls if isinstance(call, Mapping))
     if normalized == "responses":
         output = []
-        if response.text:
+        if public_text:
             output.append(
                 {
                     "type": "message",
@@ -260,7 +382,7 @@ def render_response(
                         {
                             "type": "output_text",
                             "annotations": [],
-                            "text": response.text,
+                            "text": public_text,
                         }
                     ],
                 }
@@ -307,7 +429,7 @@ def render_response(
             "top_p": response.request.top_p,
             "truncation": "disabled",
             "user": None,
-            "output_text": response.text,
+            "output_text": public_text,
             "output": output,
             "usage": _responses_usage_payload(usage),
             "metadata": metadata,
@@ -317,8 +439,8 @@ def render_response(
         return rendered
     if normalized == "anthropic":
         content = []
-        if response.text:
-            content.append({"type": "text", "text": response.text})
+        if public_text:
+            content.append({"type": "text", "text": public_text})
         content.extend(tool_call_to_anthropic(call) for call in tool_calls)
         if not content:
             content.append({"type": "text", "text": ""})
@@ -337,8 +459,8 @@ def render_response(
         }
     if normalized == "gemini":
         parts = []
-        if response.text:
-            parts.append({"text": response.text})
+        if public_text:
+            parts.append({"text": public_text})
         parts.extend(tool_call_to_gemini_part(call) for call in tool_calls)
         return {
             "responseId": response.response_id,
@@ -357,7 +479,7 @@ def render_response(
             },
             "metadata": metadata,
         }
-    message: dict[str, Any] = {"role": "assistant", "content": response.text or None}
+    message: dict[str, Any] = {"role": "assistant", "content": public_text or None}
     if tool_calls:
         message["tool_calls"] = [tool_call_to_chat(call) for call in tool_calls]
     return {
@@ -561,21 +683,30 @@ class IncrementalStreamRenderer:
         if self._completed:
             return b""
         self._completed = True
+        public_text = normalize_public_output_text(
+            response.text,
+            structured_output=response.request.structured_output,
+        )
+        public_response = (
+            response
+            if public_text == response.text
+            else replace(response, text=public_text)
+        )
         body = self.start()
-        remaining_text = self._remaining_final_text(response.text)
+        remaining_text = self._remaining_final_text(public_text)
         if remaining_text:
             self._completed = False
             body += self.text_delta(remaining_text)
             self._completed = True
-        tool_calls = tuple(call for call in response.tool_calls if isinstance(call, Mapping))
+        tool_calls = tuple(call for call in public_response.tool_calls if isinstance(call, Mapping))
         if self.api_format == "responses":
-            body += self._complete_responses(response, tool_calls)
+            body += self._complete_responses(public_response, tool_calls)
         elif self.api_format == "anthropic":
-            body += self._complete_anthropic(response, tool_calls)
+            body += self._complete_anthropic(public_response, tool_calls)
         elif self.api_format == "gemini":
-            body += self._complete_gemini(response, tool_calls)
+            body += self._complete_gemini(public_response, tool_calls)
         else:
-            body += self._complete_chat(response, tool_calls)
+            body += self._complete_chat(public_response, tool_calls)
         return body
 
     def error(self, *, code: str = "stream_interrupted", message: str = "The response stream ended before completion.") -> bytes:
@@ -1064,6 +1195,7 @@ def render_stream_events(
     include_usage: bool = False,
 ) -> bytes:
     normalized = normalize_api_format(api_format or response.request.api_format)
+    public_text, normalization_receipt = _public_text_and_normalization(response)
     tool_calls = tuple(call for call in response.tool_calls if isinstance(call, Mapping))
     if normalized == "responses":
         message_item_id = f"{response.response_id}-message"
@@ -1093,7 +1225,7 @@ def render_stream_events(
             "output": [],
             "output_text": "",
             "usage": None,
-            "metadata": _stream_metadata(response),
+            "metadata": _stream_metadata(response, normalization_receipt=normalization_receipt),
         }
         if responses_store is not None:
             created_response["store"] = bool(responses_store)
@@ -1118,7 +1250,7 @@ def render_stream_events(
             ),
         ]
         output_index = 0
-        if response.text or not tool_calls:
+        if public_text or not tool_calls:
             text_item = {
                 "type": "message",
                 "id": message_item_id,
@@ -1159,7 +1291,7 @@ def render_stream_events(
                             "output_index": output_index,
                             "content_index": 0,
                             "logprobs": [],
-                            "delta": response.text,
+                            "delta": public_text,
                         },
                     ),
                     (
@@ -1170,7 +1302,7 @@ def render_stream_events(
                             "output_index": output_index,
                             "content_index": 0,
                             "logprobs": [],
-                            "text": response.text,
+                            "text": public_text,
                         },
                     ),
                     (
@@ -1180,7 +1312,7 @@ def render_stream_events(
                             "item_id": message_item_id,
                             "output_index": output_index,
                             "content_index": 0,
-                            "part": {**text_part, "text": response.text},
+                            "part": {**text_part, "text": public_text},
                         },
                     ),
                     (
@@ -1191,7 +1323,7 @@ def render_stream_events(
                             "item": {
                                 **text_item,
                                 "status": "completed",
-                                "content": [{**text_part, "text": response.text}],
+                                "content": [{**text_part, "text": public_text}],
                             },
                         },
                     ),
@@ -1266,7 +1398,7 @@ def render_stream_events(
         )
         return _sse_bytes(_with_response_sequence_numbers(events, response_id=response.response_id))
     if normalized == "anthropic":
-        usage = response.usage()
+        usage = _public_usage(response, public_text)
         events = [
             (
                 "message_start",
@@ -1284,13 +1416,13 @@ def render_stream_events(
                             "input_tokens": usage["prompt_tokens"],
                             "output_tokens": 0,
                         },
-                        "metadata": _stream_metadata(response),
+                        "metadata": _stream_metadata(response, normalization_receipt=normalization_receipt),
                     },
                 },
             ),
         ]
         index = 0
-        if response.text or not tool_calls:
+        if public_text or not tool_calls:
             events.extend(
                 [
                     (
@@ -1306,7 +1438,7 @@ def render_stream_events(
                         {
                             "type": "content_block_delta",
                             "index": index,
-                            "delta": {"type": "text_delta", "text": response.text},
+                            "delta": {"type": "text_delta", "text": public_text},
                         },
                     ),
                     (
@@ -1370,7 +1502,7 @@ def render_stream_events(
         )
         return _sse_bytes(events)
     if normalized == "gemini":
-        usage = response.usage()
+        usage = _public_usage(response, public_text)
         events = [
             (
                 None,
@@ -1383,7 +1515,7 @@ def render_stream_events(
                             "content": {
                                 "role": "model",
                                 "parts": [
-                                    *([{"text": response.text}] if response.text else []),
+                                    *([{"text": public_text}] if public_text else []),
                                     *(tool_call_to_gemini_part(call) for call in tool_calls),
                                 ],
                             },
@@ -1395,7 +1527,7 @@ def render_stream_events(
                         "candidatesTokenCount": usage["completion_tokens"],
                         "totalTokenCount": usage["total_tokens"],
                     },
-                    "metadata": _stream_metadata(response),
+                    "metadata": _stream_metadata(response, normalization_receipt=normalization_receipt),
                 },
             )
         ]
@@ -1409,11 +1541,11 @@ def render_stream_events(
                 "created": response.created,
                 "model": response.request.public_model,
                 "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
-                "metadata": _stream_metadata(response),
+                "metadata": _stream_metadata(response, normalization_receipt=normalization_receipt),
             },
         )
     ]
-    if response.text:
+    if public_text:
         events.append(
             (
                 None,
@@ -1422,7 +1554,7 @@ def render_stream_events(
                     "object": "chat.completion.chunk",
                     "created": response.created,
                     "model": response.request.public_model,
-                    "choices": [{"index": 0, "delta": {"content": response.text}, "finish_reason": None}],
+                    "choices": [{"index": 0, "delta": {"content": public_text}, "finish_reason": None}],
                 },
             )
         )
@@ -1508,7 +1640,7 @@ def render_stream_events(
                     "created": response.created,
                     "model": response.request.public_model,
                     "choices": [],
-                    "usage": response.usage(),
+                    "usage": _public_usage(response, public_text),
                 },
             )
         )
@@ -1603,19 +1735,30 @@ def _plugin_config(plugin: Mapping[str, Any]) -> dict[str, Any]:
     return config
 
 
-def _stream_metadata(response: FusionResponse) -> dict[str, Any]:
+def _stream_metadata(
+    response: FusionResponse,
+    *,
+    normalization_receipt: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    _, derived_receipt = _public_text_and_normalization(response)
     return {
         "schema": "axio_fusion_api.stream_metadata.v1",
         "external_model_name": response.request.public_model,
         "provider_calls_recorded": response.provider_calls_recorded,
         "request_fingerprint": response.request.request_fingerprint,
+        "output_text_normalization": dict(normalization_receipt or derived_receipt),
         "raw_prompt_persisted": False,
         "raw_source_text_persisted": False,
         "secrets_persisted": False,
     }
 
 
-def _response_metadata(response: FusionResponse) -> dict[str, Any]:
+def _response_metadata(
+    response: FusionResponse,
+    *,
+    normalization_receipt: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    _, derived_receipt = _public_text_and_normalization(response)
     return {
         "schema": "axio_fusion_api.response_metadata.v1",
         "external_model_name": response.request.public_model,
@@ -1624,6 +1767,7 @@ def _response_metadata(response: FusionResponse) -> dict[str, Any]:
         "fusion_trace_summary": _public_trace_summary(response.trace),
         "provider_calls_recorded": response.provider_calls_recorded,
         "request_fingerprint": response.request.request_fingerprint,
+        "output_text_normalization": dict(normalization_receipt or derived_receipt),
         "internal_details_redacted": True,
         "provider_identifiers_redacted": True,
         "raw_prompt_persisted": False,

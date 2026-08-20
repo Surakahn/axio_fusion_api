@@ -15,7 +15,13 @@ STANDALONE_SRC = STANDALONE_ROOT / "src"
 if str(STANDALONE_SRC) not in sys.path:
     sys.path.insert(0, str(STANDALONE_SRC))
 
-from axio_fusion_api.compat import IncrementalStreamRenderer, canonicalize_payload
+from axio_fusion_api.compat import (
+    IncrementalStreamRenderer,
+    canonicalize_payload,
+    normalize_public_output_text,
+    render_response,
+    render_stream_events,
+)
 from axio_fusion_api.orchestrator import FusionEngine
 from axio_fusion_api import providers as provider_module
 from axio_fusion_api.providers import (
@@ -74,6 +80,201 @@ def test_incremental_renderer_preserves_native_terminal_shapes(
     assert delta_marker in delta
     assert terminal_marker in terminal
     assert "private request text" not in start + delta + terminal
+
+
+def test_public_output_normalization_extracts_internal_answer_envelope():
+    internal = json.dumps(
+        {
+            "answer": "最终面向用户的答案",
+            "reasoning_summary": ["内部推理不应出现在公共文本"],
+            "confidence": 0.93,
+        },
+        ensure_ascii=False,
+    )
+
+    assert normalize_public_output_text(internal) == "最终面向用户的答案"
+    assert normalize_public_output_text("```json\n" + internal + "\n```") == "最终面向用户的答案"
+    assert normalize_public_output_text("  plain text with spacing  ") == "  plain text with spacing  "
+
+
+def test_public_output_normalization_preserves_ordinary_and_explicit_json():
+    ordinary = '{"answer": "用户要求的 JSON", "kind": "public"}'
+    explicit_request = canonicalize_payload(
+        {
+            "model": "axio-pro",
+            "response_format": {"type": "json_object"},
+            "messages": [{"role": "user", "content": "return JSON"}],
+        }
+    )
+
+    assert normalize_public_output_text(ordinary) == ordinary
+    assert (
+        normalize_public_output_text(
+            '{"answer": "保留完整 JSON", "reasoning": ["private"]}',
+            structured_output=explicit_request.structured_output,
+        )
+        == '{"answer": "保留完整 JSON", "reasoning": ["private"]}'
+    )
+
+
+@pytest.mark.parametrize("api_format", ["chat/completions", "responses", "anthropic", "gemini"])
+def test_all_public_protocols_hide_internal_synthesizer_json(api_format: str):
+    internal = json.dumps(
+        {
+            "final_answer": "跨协议一致的公共答案",
+            "analysis": "provider-specific internal analysis",
+            "ranked_candidates": [{"candidate_id": "primary_solver", "score": 0.9}],
+        },
+        ensure_ascii=False,
+    )
+    request = canonicalize_payload(
+        {
+            "model": "axio-pro",
+            "messages": [{"role": "user", "content": "check"}],
+        },
+        api_format=api_format,
+    )
+    response = FusionResponse(
+        text=internal,
+        request=request,
+        route_plan={},
+        response_id="fusion-normalization-test",
+        created=1_700_000_000,
+    )
+
+    rendered = render_response(response, api_format=api_format)
+    serialized = json.dumps(rendered, ensure_ascii=False)
+    assert "跨协议一致的公共答案" in serialized
+    assert "provider-specific internal analysis" not in serialized
+    assert rendered["metadata"]["output_text_normalization"]["applied"] is True
+
+    stream = render_stream_events(response, api_format=api_format).decode("utf-8")
+    assert "跨协议一致的公共答案" in stream
+    assert "provider-specific internal analysis" not in stream
+
+
+def test_incremental_renderer_normalizes_final_internal_json_before_terminal_events():
+    request = canonicalize_payload(
+        {
+            "model": "axio-pro",
+            "messages": [{"role": "user", "content": "check"}],
+        }
+    )
+    response = FusionResponse(
+        text='{"answer":"incremental public answer","reasoning":"private"}',
+        request=request,
+        route_plan={},
+        response_id="fusion-incremental-normalization-test",
+        created=1_700_000_000,
+    )
+    renderer = IncrementalStreamRenderer(
+        request,
+        api_format="chat/completions",
+        response_id=response.response_id,
+        created=response.created,
+    )
+
+    stream = renderer.complete(response).decode("utf-8")
+
+    assert "incremental public answer" in stream
+    assert '"reasoning":"private"' not in stream
+
+
+def test_complete_stream_buffers_json_like_synthesizer_deltas_before_public_release():
+    class JsonSynthesisStreamingClient:
+        def complete(
+            self,
+            profile,
+            request,
+            *,
+            prompt,
+            system,
+            timeout=None,
+        ):
+            return self.complete_turn(
+                profile,
+                request,
+                prompt=prompt,
+                system=system,
+                timeout=timeout,
+            ).text
+
+        def complete_turn(
+            self,
+            profile,
+            request,
+            *,
+            prompt,
+            system,
+            timeout=None,
+            stream_observer=None,
+            cancellation_event=None,
+        ):
+            del profile, request, system, timeout, cancellation_event
+            if "Compare these Axio Fusion candidate answers" in prompt:
+                return ProviderCompletion(
+                    json.dumps(
+                        {
+                            "ranked_candidates": [
+                                {"candidate_id": "primary_solver", "score": 0.91},
+                                {"candidate_id": "independent_solver", "score": 0.87},
+                            ],
+                            "ready_for_synthesis": True,
+                        }
+                    )
+                )
+            if "Synthesize one final answer" in prompt:
+                assert stream_observer is not None
+                assert stream_observer.emit_text_delta('{"final_answer":"') is True
+                assert stream_observer.emit_text_delta("buffered answer") is True
+                assert stream_observer.emit_text_delta('","reasoning":"private"}') is True
+                return ProviderCompletion(
+                    '{"final_answer":"buffered answer","reasoning":"private"}'
+                )
+            return ProviderCompletion(
+                json.dumps(
+                    {
+                        "answer": "private candidate answer",
+                        "confidence": 0.82,
+                        "evidence": [{"claim": "fixture", "source": "unit"}],
+                    }
+                )
+            )
+
+    profiles = [
+        normalize_profile(
+            {
+                "provider": "buffered-alpha",
+                "model": "reasoner-a",
+                "capabilities": {"science_knowledge": 0.92, "structured_output": 0.88},
+            }
+        ),
+        normalize_profile(
+            {
+                "provider": "buffered-beta",
+                "model": "reasoner-b",
+                "capabilities": {"science_knowledge": 0.84, "structured_output": 0.88},
+            }
+        ),
+    ]
+    request = canonicalize_payload(
+        {
+            "model": "axio-pro",
+            "task_type": "science_research",
+            "messages": [{"role": "user", "content": "buffer this"}],
+        }
+    )
+    visible_deltas: list[str] = []
+
+    response = FusionEngine(
+        profiles,
+        client=JsonSynthesisStreamingClient(),
+        cache_enabled=False,
+    ).complete_stream(request, on_text_delta=visible_deltas.append, live=True)
+
+    assert response.text == "buffered answer"
+    assert "".join(visible_deltas) == "buffered answer"
+    assert all("reasoning" not in delta for delta in visible_deltas)
 
 
 @pytest.mark.parametrize(
