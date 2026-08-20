@@ -103,3 +103,21 @@ official import 与 target campaign 仍未生成；supervisor/watcher 继续为
 `next_gate=screening`、`target_suite_calls_allowed=false`、`target_suite_calls_performed=false`。
 后续仍只低频检查，screening terminal 前不恢复 checkpoint、不使用 `--retry-failed`、不修改
 frozen plan、不启动第二套 screening，也不执行任何下游 gate。
+
+## r16 过半进度复核（2026-08-20 15:35 CST）
+
+三项进程仍由 init 托管且命令行 identity 未变。当前活动 unit 的私有 checkpoint 已推进到
+`50/102`、`partial`，SHA-256 为
+`173ce7cd96c6789f2d330458c7ff5c51973b814226c660a61fc166d90d58852e`。checkpoint 仅是私有
+恢复证据，不能作为 unit 完成、质量分数、ranking 或 baseline freeze 依据。
+
+本次只读 hash 核验确认 r16 plan/source/preflight 输入均未漂移，分别保持既有
+`9582c0fd3045698fddca3c1358e989bbcd83fb28084f64747e3b77fb6d0a9ecd`、
+`cf38effec8b7420dcb2b4726e93835b99342d79164806068ab9a478068511bc4`、
+`3f7b5b367d8ad6d0887f1bd566d61f7d9463fc54adbfd5208090a3dfaf482310` 和
+`b61c75dd01902b80d1ba6e2b6ac2359aff49765fbc66ceb9ffd78531ea2bf9fd`。
+
+safe live state、screening receipt、transport admission、ranking、provider baseline freeze、
+official import 与 target campaign 仍未生成；supervisor/watcher 继续为
+`next_gate=screening`、`target_suite_calls_allowed=false`、`target_suite_calls_performed=false`。
+后续只低频检查，screening terminal 前不执行任何下游 gate。

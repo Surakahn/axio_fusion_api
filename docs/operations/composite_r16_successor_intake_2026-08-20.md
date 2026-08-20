@@ -50,6 +50,20 @@ baseline freeze 前不改 router 权重、prompt、panel 规则或 benchmark-dri
 closure 和历史 benchmark runner 清理；每项都必须以 shadow/non-target evidence 为先，并按
 L1 -> L2 -> L3 -> L4 -> commit/push 逐阶段落地。
 
+## r16 过半进度复核（2026-08-20 15:35 CST）
+
+r16 唯一 live screening、convergence supervisor、lineage watcher 仍由 init 托管，命令行
+仍绑定 frozen plan/source 与 r7 probe-bound registry/probe/admission。当前活动 unit 的私有
+checkpoint 为 `50/102`、`partial`，SHA-256 为
+`173ce7cd96c6789f2d330458c7ff5c51973b814226c660a61fc166d90d58852e`；该文件含 raw provider
+output，仅作私有恢复证据，不是完成、质量、ranking 或 freeze 证据。
+
+只读 hash 核验确认 r16 plan/source/preflight 输入未漂移；safe live state、screening receipt、
+transport admission、ranking、provider freeze、official import 和 target campaign 仍不存在。
+supervisor/watcher 保持 `next_gate=screening`、`target_suite_calls_allowed=false`、
+`target_suite_calls_performed=false`。继续遵守不恢复 checkpoint、不使用 `--retry-failed`、
+不修改 frozen plan、不启动第二套 screening 的约束。
+
 ## r16 live screening 启动里程碑（2026-08-20 15:07 CST）
 
 r16 唯一 live non-target screening 已通过 `setsid/nohup` 启动：screening PID `3231684`、
