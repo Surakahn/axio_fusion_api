@@ -101,3 +101,24 @@ live screening 授权。
 
 在此之前，下一合法动作仍是只读复核或等待 operator 授权，而不是执行 provider call。
 
+## 产品 runtime 的离线路由检查
+
+本轮对正在运行的 r7-bound production registry 调用 `/v1/axio/route-plan` 三次，
+请求只走 `engine.complete(live=false)`，没有 provider call：
+
+- `axio-fast`：`fast_direct_cascade`，只有 `primary_solver`，因
+  `insufficient_independent_models` fail-closed 为 direct。
+- `axio-terra`：`terra_direct`，因 `screening_role_gate_blocked_judge` 与
+  `insufficient_independent_models` fail-closed 为 direct。
+- `axio-pro`：`pro_panel_judge_escalation`，6 个角色（primary、independent、critic、
+  domain specialist、Judge、Synthesizer），Fusion admission 为 active，最终化为
+  `provider_judge_synthesis`。
+
+Pro 的该 dry-run 选席中实际 provider hash 只有一个，`provider_diversity=0.1667`；
+这不是运行时错误，但说明当前 r7 registry/静态先验下 Pro 的跨 provider 互补仍是
+待校准项。它必须在完整 provider baseline ranking/freeze 后用 non-target shadow
+和 error-correlation/quality/latency evidence 评估，不能直接用 target 分数改权重。
+
+代码回归同样保持绿色：`python3.11 -m pytest tests/ -x -q --tb=short` 为
+`1074 passed, 7 skipped`。这些是工程与路由契约证据，不是 provider 能力、21-suite
+分数或 superiority 证据。
