@@ -135,6 +135,24 @@ credentials-ready preflight 只证明 9/9 profile 的凭据可解析，不能替
 这次重审只刷新了私有 safe receipt，没有改变 r18 plan/source/registry、路由、prompt、
 weights 或生产服务；后续 live 授权前仍必须使用原始 preflight 的 state/path/hash。
 
+## 本轮受控发布与 dry-run 验证
+
+为使已提交的安全与 health 投影代码真正进入 Axio 进程，先优雅停止旧的 18900 进程，
+再使用 `private/current_channels.env`、显式 r7 probe-bound registry 和
+`setsid/nohup` 启动 `scripts/run_server.py`。新进程 PID 为 `759644`，由 init 托管；日志
+确认加载 21 profiles、创建 FusionEngine，未产生 provider 请求。
+
+发布后 `/health` 返回 `status=ready`，公开模型仍为三个 Axio tier，21 physical profiles、
+4 providers、网络 `auto -> proxy`。当前 warning 已如实暴露未校准能力：
+`some_context_windows_unknown`、`some_model_pricing_unknown`、
+`weak_or_missing_tool_candidate`；这三项是 admission/calibration 缺口，不被当作 ready
+或 superiority 证据，也没有自动阻断服务。
+
+随后通过本机 `/route-plan` 对 `axio-fast`、`axio-terra`、`axio-pro` 各执行一次 dry-run：
+Fast/Terra 因当前 role/admission 容量不足 fail-closed 到 direct，Pro 保留
+`pro_panel_judge_escalation` 与 Judge/Synthesizer。route plan 只返回 hash-safe metadata，
+没有写入 raw prompt、provider output 或 secret；这次验证没有改变 r18 frozen inputs。
+
 ## 下一条合法动作
 
 当前没有新的 live 授权。收到明确的“授权 r18 live screening”后，唯一允许的执行顺序是：
