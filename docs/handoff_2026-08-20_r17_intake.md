@@ -94,3 +94,22 @@ output，故只保存 hash、状态和计数，不读取内容、不进入 Git�
 safe live state、screening receipt 和所有下游 gate 产物仍未生成；supervisor/watcher 保持
 `next_gate=screening`、`target_suite_calls_allowed=false`、`target_suite_calls_performed=false`。
 继续按 10–20 分钟低频观察，screening terminal 前不触碰 frozen inputs。
+
+## r17 当前增量交接（2026-08-20 20:41 CST）
+
+低频只读检查确认唯一 live screening、同 cohort supervisor 和 lineage watcher 仍存活，
+三者的 plan/source/registry identity 未漂移，生产 loopback 未重启。safe live state 仍为
+`status=running`，16 个 planned units 中 `1 completed / 1 failed_or_blocked`，
+`ready_for_ranking=false`、`network_calls_performed=true`、`target_suite_calls_performed=false`；
+state SHA-256 为 `0cddbd887aea6115205e33acd14d3333e2c09de398972a253501d3f51fd55d42`。
+
+当前第三个 102-case unit 的私有 checkpoint 仍为 `partial`，已记录 `44/102` 个
+case-result 元数据，SHA-256 为 `3c4284f56b9c949e42c55cdffc180397213e93985a32df0e551ddc961bf1a29f`。
+该文件含 raw provider output，只能作为私有恢复证据；本轮未读取原文、未恢复 checkpoint、
+未提交该文件，也未把计数解释为质量、ranking、baseline 或 completion evidence。
+
+transport admission、ranking、provider baseline freeze、Harness import 和 target campaign
+仍未开始；watcher/supervisor 继续保持 `next_gate=screening`、
+`target_suite_calls_allowed=false`、`target_suite_calls_performed=false`。screening terminal
+前只允许继续低频只读观察，不使用 `--retry-failed`，不启动第二套 screening，不修改 frozen
+plan/source、router/prompt/weights 或生产服务。
