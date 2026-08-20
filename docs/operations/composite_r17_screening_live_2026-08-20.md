@@ -126,8 +126,8 @@ lineage watcher 的 `next_gate=screening` 与 target-call 禁止标志未改变�
 三个托管进程仍存活且命令行 identity 未漂移。safe state 仍为 `status=running`，
 `1 completed / 1 failed_or_blocked`，`ready_for_ranking=false`，
 `target_suite_calls_performed=false`。第三个 102-case unit 的私有 checkpoint 已推进到
-`27/102`，状态为 `partial`，SHA-256 为
-`06b0f977dc940b91d80f1b1a1aad840ca2534f1d7d5bfa4881edb5cd4fd5c6b2`；其 raw provider
+`31/102`，状态为 `partial`，SHA-256 为
+`d68e2327a3e458858da92789e1cbf02d005a9a4b503faed4a42dfa25f06a5077`；其 raw provider
 output 仅供私有恢复证据使用，不读取、不提交、不解释为质量或排名证据。
 
 下游 transport admission、ranking、provider freeze、Harness import 与 target campaign

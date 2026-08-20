@@ -173,8 +173,8 @@ safe state 仍为 `status=running`、16 个 planned units 中 `1 completed / 1 f
 `ready_for_ranking=false`、`network_calls_performed=true`、`target_suite_calls_performed=false`；
 state SHA-256 仍为
 `0cddbd887aea6115205e33acd14d3333e2c09de398972a253501d3f51fd55d42`。第三个 102-case unit
-的私有 checkpoint 为 `partial`，当前已有 `27/102` 个 case-result 元数据，SHA-256 为
-`06b0f977dc940b91d80f1b1a1aad840ca2534f1d7d5bfa4881edb5cd4fd5c6b2`；其中 raw provider
+的私有 checkpoint 为 `partial`，当前已有 `31/102` 个 case-result 元数据，SHA-256 为
+`d68e2327a3e458858da92789e1cbf02d005a9a4b503faed4a42dfa25f06a5077`；其中 raw provider
 output 仍只作私有恢复证据，不读原文、不进入 Git、不作为 score/ranking/freeze 证据。
 
 transport admission、ranking、provider baseline freeze、Harness import 和 target campaign
