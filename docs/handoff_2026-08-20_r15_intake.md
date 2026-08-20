@@ -1,0 +1,36 @@
+# r15 intake 交接（2026-08-20）
+
+## 已完成
+
+- r14 已封存为 `partial`，不再恢复或补跑。
+- r15 source successor、frozen screening plan、zero-network preflight 和 Harness scaffold
+  已生成并 hash 绑定。
+- r15 preflight 明确 `network_calls_performed=false`、`target_suite_calls_performed=false`；
+  Harness 明确 `next_gate=screening`、`target_suite_calls_allowed=false`。
+
+## 当前锚点
+
+- r15 run root：`private/runs/2026-08-20-composite-cohort-r15/`
+- plan：`baseline_screening_plan.r15.private.json`，文件 SHA-256
+  `555350be7d681bd777094804b1936f65f1d05890fe33e87ec56bd6930eb846c3`，digest
+  `d41becf244fcf5234d622a95ea95e8898ef94bd9a40d88e2ebef2e0ecaf3b038`
+- source：`source_manifest.successor.r15.private.json`，SHA-256
+  `745312def06231f320c7c9a48dcbd81e6742ee67800d8ecfc9d4d3309d620aec`
+- preflight state SHA-256：
+  `a83fe140d9e1c5034ce33fa97a3197e3dfa27d3e41bc1e20f7d320f9261e9fd2`
+- probe-bound registry SHA-256：
+  `7d0a9b78a06ea7445c43b7c03e15d6bbedb3112ecf8fb7d1ad041301678c1ad8`
+- operational admission SHA-256：
+  `bf6db0c659b728a6d4c0a8e5d99c1fb9b66e1f70ec96977de048fd393c77af12`
+
+## 下一动作
+
+启动前重新执行只读核验，确认没有 r15 live PID、plan 文件未变、preflight 仍为 ready；
+然后用 `setsid/nohup env PYTHONPATH=src python3.11 -m axio_fusion_api.cli` 启动唯一
+`baseline-screening-run --live`，并保存 screening state、receipt、private root 和
+console log。启动后只做低频 PID/state/log 检查，不重试失败 case，不修改计划。
+
+screening terminal 后由同 cohort supervisor 执行 transport admission 和 ranking；只有
+完整-pool ranking ready 才能继续 external rank 1/2/3、provider freeze、official import、
+convergence audit 和 target campaign。任何未通过都必须注册下一个 successor，不能宣称
+Fusion superiority。

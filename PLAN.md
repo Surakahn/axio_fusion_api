@@ -2248,3 +2248,12 @@ Latency superiority is also claim-gated on two distribution points: both p50 and
   一套 live screening，并严格沿 transport → ranking → external top-three → freeze →
   Harness → convergence audit → 21-suite campaign 链路推进；在全部证据完成前不做
   superiority claim。
+- 2026-08-20：r15 immutable successor 已完成注册、冻结计划和 zero-network preflight。
+  source successor receipt 为 ready；plan 为 `ready=true`（16 serial units、2 source
+  families、8 canonical groups/9 profiles、`max_workers=1`、2% fail-fast gate），preflight
+  为 `preflight_ready` 且 network/target calls 均为 false。r15 Harness 控制面已离线生成：
+  6/6 hash-only pin 和 execution plan ready，acquisition/import/binding/convergence audit
+  按预期 blocked，`next_gate=screening`、`target_suite_calls_allowed=false`。下一步只启动
+  一套绑定 r15 plan/source 与 r7 probe/admission 的 live screening，terminal 后再按
+  transport → complete-pool ranking → external top-three → freeze → same-cohort Harness
+  → convergence → 21-suite campaign 推进；旧 r14 结果、checkpoint 和 survivor subset 不得复用。
