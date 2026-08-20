@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import time
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
@@ -13,6 +14,7 @@ from typing import Any, Mapping, Sequence
 from .schemas import sha256_text, stable_json
 
 CALIBRATION_SCHEMA = "axio_fusion_api.adaptive_calibration.v1"
+CALIBRATION_RECEIPT_SCHEMA = "axio_fusion_api.adaptive_calibration_receipt.v1"
 CHANNEL_CHANGE_REASON = "channel_change_detected"
 FUSION_DEGRADATION_THRESHOLD = 0.90  # 融合低于单模型90%时触发重校准
 
@@ -65,6 +67,12 @@ def detect_channel_change(
     )
     current_digest = _channel_fingerprint(current_channel_manifest)
     return bool(prev_digest) and prev_digest != current_digest
+
+
+def channel_fingerprint(manifest: Mapping[str, Any] | None) -> str:
+    """返回只由安全白名单字段计算出的渠道指纹。"""
+
+    return _channel_fingerprint(manifest if isinstance(manifest, Mapping) else {})
 
 
 def _channel_fingerprint(manifest: Mapping[str, Any]) -> str:
@@ -232,6 +240,173 @@ def build_recalibration_decision(
         "raw_scores_persisted": False,
         "secrets_persisted": False,
     }
+
+
+def build_recalibration_receipt(
+    decision: Mapping[str, Any] | None,
+    *,
+    previous_channel_manifest: Mapping[str, Any] | None,
+    current_channel_manifest: Mapping[str, Any],
+    registry_profile_set_sha256: str = "",
+    rollback_policy_digest_sha256: str = "",
+    prompt_pack_digest_sha256: str = "",
+    workflow_digest_sha256: str = "",
+    contamination_audit_digest_sha256: str = "",
+) -> dict[str, Any]:
+    """构建不含 prompt 原文的 shadow 校准凭证。
+
+    该凭证只允许描述候选状态，不能直接激活任何生产 prompt 或路由策略。
+    缺少 registry、workflow、rollback、prompt pack 或 contamination 绑定时
+    必须保持 blocked，避免把一次渠道变化误当成可发布的自我改进。
+    """
+
+    decision = decision if isinstance(decision, Mapping) else {}
+    previous_digest = channel_fingerprint(previous_channel_manifest)
+    current_digest = channel_fingerprint(current_channel_manifest)
+    requested = decision.get("needs_recalibration") is True
+    blockers: list[str] = []
+    expected_previous = str(decision.get("previous_channel_digest_sha256") or "")
+    expected_current = str(decision.get("current_channel_digest_sha256") or "")
+    if expected_previous and expected_previous != previous_digest:
+        blockers.append("adaptive_calibration_previous_channel_digest_mismatch")
+    if expected_current and expected_current != current_digest:
+        blockers.append("adaptive_calibration_current_channel_digest_mismatch")
+    if requested:
+        for value, reason in (
+            (registry_profile_set_sha256, "adaptive_calibration_registry_binding_missing"),
+            (rollback_policy_digest_sha256, "adaptive_calibration_rollback_target_missing"),
+            (prompt_pack_digest_sha256, "adaptive_calibration_prompt_pack_binding_missing"),
+            (workflow_digest_sha256, "adaptive_calibration_workflow_binding_missing"),
+            (contamination_audit_digest_sha256, "adaptive_calibration_contamination_binding_missing"),
+        ):
+            if not _looks_like_sha256(value):
+                blockers.append(reason)
+        if not decision.get("evaluations"):
+            blockers.append("adaptive_calibration_operational_evidence_missing")
+    prompt_digest = ""
+    if requested and decision.get("evaluations"):
+        try:
+            prompt_digest = sha256_text(
+                build_recalibration_prompt(decision, current_channel_manifest)
+            )
+        except (AttributeError, TypeError, ValueError):
+            blockers.append("adaptive_calibration_prompt_generation_failed")
+    receipt = {
+        "schema": CALIBRATION_RECEIPT_SCHEMA,
+        "status": "not_required" if not requested else "shadow_candidate" if not blockers else "blocked",
+        "decision": _safe_decision_projection(decision),
+        "channel_changed": decision.get("channel_changed") is True,
+        "previous_channel_fingerprint_sha256": previous_digest,
+        "current_channel_fingerprint_sha256": current_digest,
+        "decision_digest_sha256": sha256_text(
+            stable_json(_safe_decision_projection(decision))
+        ),
+        "prompt_sha256": prompt_digest,
+        "registry_profile_set_sha256": _validated_digest(registry_profile_set_sha256),
+        "rollback_policy_digest_sha256": _validated_digest(rollback_policy_digest_sha256),
+        "prompt_pack_digest_sha256": _validated_digest(prompt_pack_digest_sha256),
+        "workflow_digest_sha256": _validated_digest(workflow_digest_sha256),
+        "contamination_audit_digest_sha256": _validated_digest(
+            contamination_audit_digest_sha256
+        ),
+        "ready_for_review": requested and not blockers,
+        "activation_ready": False,
+        "blockers": sorted(set(blockers)),
+        "promotion_gate": {
+            "eligible": False,
+            "shadow_only": True,
+            "human_approval_required": True,
+            "registry_binding_required": True,
+            "rollback_target_required": True,
+            "prompt_pack_review_required": True,
+            "workflow_review_required": True,
+            "contamination_audit_required": True,
+            "target_benchmark_data_allowed": False,
+            "automatic_activation_allowed": False,
+        },
+        "raw_prompt_persisted": False,
+        "raw_provider_names_persisted": False,
+        "raw_provider_model_ids_persisted": False,
+        "raw_provider_outputs_persisted": False,
+        "secrets_persisted": False,
+    }
+    receipt["receipt_digest_sha256"] = sha256_text(
+        stable_json(_recalibration_receipt_digest_input(receipt))
+    )
+    return receipt
+
+
+def _safe_decision_projection(decision: Mapping[str, Any]) -> dict[str, Any]:
+    evaluations = decision.get("evaluations")
+    rows = evaluations if isinstance(evaluations, list) else []
+    return {
+        "schema": str(decision.get("schema") or ""),
+        "channel_changed": decision.get("channel_changed") is True,
+        "previous_channel_digest_sha256": _validated_digest(
+            decision.get("previous_channel_digest_sha256")
+        ),
+        "current_channel_digest_sha256": _validated_digest(
+            decision.get("current_channel_digest_sha256")
+        ),
+        "needs_recalibration": decision.get("needs_recalibration") is True,
+        "evaluation_count": len(rows),
+        "evaluation_model_hashes": sorted(
+            sha256_text(str(row.get("model") or ""))
+            for row in rows
+            if isinstance(row, Mapping) and row.get("model")
+        ),
+        "evaluation_ratios": [
+            _safe_number(row.get("ratio"))
+            for row in rows
+            if isinstance(row, Mapping) and _safe_number(row.get("ratio")) is not None
+        ],
+        "reason_hashes": sorted(
+            sha256_text(str(reason))
+            for reason in decision.get("reasons", [])
+            if reason
+        ),
+    }
+
+
+def _recalibration_receipt_digest_input(receipt: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: receipt.get(key)
+        for key in (
+            "schema",
+            "status",
+            "channel_changed",
+            "previous_channel_fingerprint_sha256",
+            "current_channel_fingerprint_sha256",
+            "decision_digest_sha256",
+            "prompt_sha256",
+            "registry_profile_set_sha256",
+            "rollback_policy_digest_sha256",
+            "prompt_pack_digest_sha256",
+            "workflow_digest_sha256",
+            "contamination_audit_digest_sha256",
+            "ready_for_review",
+            "activation_ready",
+            "blockers",
+            "promotion_gate",
+        )
+    }
+
+
+def _validated_digest(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    return text if _looks_like_sha256(text) else ""
+
+
+def _looks_like_sha256(value: Any) -> bool:
+    return bool(re.fullmatch(r"[0-9a-f]{64}", str(value or "").strip().lower()))
+
+
+def _safe_number(value: Any) -> float | None:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return round(numeric, 6) if math.isfinite(numeric) else None
 
 
 META_PROMPT = """你是 Axio Fusion 的渠道适配架构师。系统当前检测到融合质量相对单模型基线退化，需要调整融合提示词或 Harness 组合流程。

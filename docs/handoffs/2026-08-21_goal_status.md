@@ -190,3 +190,32 @@ prompt、weights 或服务进程；它也不把任何分数写回 serving policy
 preflight 仍是 `preflight_ready`，`ready_for_ranking=false`、`target_suite_calls_allowed=false`，
 下一合法动作仍需 operator 明确回复 `授权 r18 live screening` 后才启动唯一一套
 screening。
+
+## 本轮离线增量：自适应校准 receipt 收敛（2026-08-21）
+
+在继续保持 r18 和 target benchmark fail-closed 的前提下，完成了自适应校准第二阶段：
+`adaptive_calibration.py` 现在生成 schema 为
+`axio_fusion_api.adaptive_calibration_receipt.v1` 的 hash-only 凭证。元提示词只在内存
+中生成，产物只保存 `prompt_sha256`、安全决策投影、渠道 fingerprint 和绑定摘要，不保存
+prompt 原文、provider 名称/模型 id、provider output、API key 或其他 secret。
+
+校准发布边界已锁定：
+
+- 渠道发生变化但没有 fusion/baseline scores 时为 `blocked`，不能凭配置变化直接形成
+  可发布建议；
+- 有退化得分但缺少 registry profile set、rollback target、prompt pack、workflow 或
+  contamination audit 任一 SHA-256 绑定时仍为 `blocked`；
+- 五类绑定和 operational evidence 齐全时最多是 `shadow_candidate`，
+  `ready_for_review=true` 但 `activation_ready=false`，且必须人工审查；
+- 健康且渠道未变化时为 `not_required`；CLI 不再暴露 `recalibration_prompt` 字段。
+
+验证结果：自适应校准专项 `14 passed`；全量 `1081 passed, 7 skipped in 274.27s`；
+`py_compile`、`compileall`、关键包导入和 `git diff --check` 均通过。只读复核确认 r18
+plan/source/preflight hash 未变，preflight 仍为 `preflight_ready`、
+`ready_for_ranking=false`、provider/target calls 均为 false；Harness convergence 仍
+`blocked`，生产 PID `759644` `/health` 仍 `ready`，无重启、无 provider/target 请求。
+
+本轮修改文件为 `adaptive_calibration.py`、`run_adaptive_calibration.py` 及其两份测试，
+尚未将任何校准结果写回 serving registry/router。下一合法动作仍需明确
+`授权 r18 live screening`；授权前不得恢复 checkpoint、拼接 survivor subset、降低固定
+2% transport gate、修改 frozen plan/source/registry 或启动 21-suite target campaign。

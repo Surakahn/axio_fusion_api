@@ -1076,3 +1076,12 @@ its unchecked items are not the current cohort's execution plan.
   capability/transport/endpoint changes and credential-only changes. This
   remains an offline shadow calibration signal and never auto-modifies the
   production router or benchmark policy.
+- [x] 将自适应渠道校准提升为 hash-only receipt 契约：渠道变化没有 operational
+  scores 时固定 `blocked`；有 scores 但缺少 registry/workflow/rollback/prompt-pack/
+  contamination 任一绑定时仍 `blocked`；完整绑定最多 `shadow_candidate`，保持
+  `activation_ready=false`、人工审批和自动激活关闭。CLI 不再持久化
+  `recalibration_prompt` 原文，只写 prompt/decision/channel digest。
+- [x] 为 receipt/CLI 增加 14 条回归（blocked、not_required、digest mismatch、完整
+  binding shadow candidate 与 raw prompt/provider/secret redaction）；本轮全量回归
+  `1081 passed, 7 skipped`，`py_compile`、`compileall`、导入和 `git diff --check`
+  均通过。没有 provider/target 网络调用，也没有修改 r18 frozen 输入。

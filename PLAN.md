@@ -52,6 +52,30 @@ transport 根因复核
 plan、恢复 checkpoint、拼接 survivor subset、降低固定 2% transport gate 或提前
 target benchmark。
 
+## 本轮离线增量：自适应校准 receipt 发布边界（2026-08-21）
+
+本轮继续沿“Fusion 负责能力组合、Harness 负责评测与证据链”的产品边界，补齐
+`adaptive_calibration.py` 的商业级校准凭证。渠道变化或融合退化只能在内存中生成元
+提示词，持久化产物只保存 prompt/决策/渠道绑定的 SHA-256 与 hash-safe 投影，不保存
+元提示词原文、provider 名称/模型 id、provider 输出或任何 secret。
+
+新增 `axio_fusion_api.adaptive_calibration_receipt.v1`：
+
+- 没有得分证据的渠道变化固定为 `blocked`，不能仅凭配置变化发布 prompt 建议；
+- 有融合/基线得分但缺少 registry profile set、workflow、rollback target、prompt
+  pack 或 contamination audit 任一绑定时仍为 `blocked`；
+- 五类绑定和 operational evidence 齐全时最多进入 `shadow_candidate`，
+  `activation_ready=false`、`automatic_activation_allowed=false`，必须人工审查；
+- 健康且未发生渠道变化的运行返回 `not_required`；CLI 不再输出或写入
+  `recalibration_prompt` 原文，只输出 `prompt_sha256`。
+
+本轮没有 provider/target 网络调用，没有修改 r18 frozen plan/source/registry、生产
+router/prompt/weights 或服务进程。专项校准/CLI 回归为 `14 passed`，全量回归为
+`1081 passed, 7 skipped`，`py_compile`、`compileall`、包导入和 `git diff --check`
+均通过。下一合法动作仍是等待明确的 `授权 r18 live screening`，然后严格按
+`screening -> transport admission -> complete-pool ranking -> baseline freeze ->
+same-cohort Harness -> 21-suite campaign` 顺序推进。
+
 ## Terra panel 调度边界复核（2026-08-21）
 
 针对 AGENTS.md 记录的 Terra “部分 panel candidate”风险，本轮先做了零网络受控复现，

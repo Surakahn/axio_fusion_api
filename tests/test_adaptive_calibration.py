@@ -5,6 +5,8 @@ from axio_fusion_api.adaptive_calibration import (
     CalibrationSnapshot,
     build_recalibration_decision,
     build_recalibration_prompt,
+    build_recalibration_receipt,
+    channel_fingerprint,
     detect_channel_change,
     evaluate_fusion_vs_baseline,
 )
@@ -165,3 +167,71 @@ def test_build_recalibration_prompt_contains_safe_channel_only():
     assert "secret-model" not in prompt
     assert "渠道摘要" in prompt
     assert "校准决策" in prompt
+
+
+def test_build_recalibration_receipt_is_shadow_candidate_with_complete_bindings():
+    previous = {
+        "providers": [
+            {"provider": "nvidia", "api_format": "chat", "models": [{"model": "m1"}]},
+        ]
+    }
+    current = {
+        "providers": [
+            {"provider": "cpa", "api_format": "responses", "models": [{"model": "m2"}]},
+        ]
+    }
+    decision = build_recalibration_decision(
+        [CalibrationSnapshot("axio-pro", 0.80, "2026-08-10")],
+        baseline_map={"axio-pro": 1.0},
+        channel_changed=True,
+        previous_channel_digest=channel_fingerprint(previous),
+        current_channel_digest=channel_fingerprint(current),
+    )
+    receipt = build_recalibration_receipt(
+        decision,
+        previous_channel_manifest=previous,
+        current_channel_manifest=current,
+        registry_profile_set_sha256="a" * 64,
+        rollback_policy_digest_sha256="b" * 64,
+        prompt_pack_digest_sha256="c" * 64,
+        workflow_digest_sha256="d" * 64,
+        contamination_audit_digest_sha256="e" * 64,
+    )
+
+    assert receipt["status"] == "shadow_candidate"
+    assert receipt["ready_for_review"] is True
+    assert receipt["activation_ready"] is False
+    assert len(receipt["prompt_sha256"]) == 64
+    assert receipt["blockers"] == []
+    assert receipt["promotion_gate"]["shadow_only"] is True
+    assert receipt["promotion_gate"]["human_approval_required"] is True
+    assert receipt["promotion_gate"]["automatic_activation_allowed"] is False
+    assert receipt["raw_prompt_persisted"] is False
+    assert receipt["raw_provider_names_persisted"] is False
+    assert receipt["raw_provider_model_ids_persisted"] is False
+
+
+def test_build_recalibration_receipt_blocks_digest_mismatch():
+    manifest = {
+        "providers": [
+            {"provider": "cpa", "api_format": "responses", "models": [{"model": "m1"}]},
+        ]
+    }
+    decision = {
+        "schema": "axio_fusion_api.adaptive_calibration.v1",
+        "channel_changed": True,
+        "previous_channel_digest_sha256": "f" * 64,
+        "current_channel_digest_sha256": channel_fingerprint(manifest),
+        "needs_recalibration": True,
+        "evaluations": [{"model": "axio-pro", "ratio": 0.8}],
+        "reasons": ["退化"],
+    }
+    receipt = build_recalibration_receipt(
+        decision,
+        previous_channel_manifest=manifest,
+        current_channel_manifest=manifest,
+    )
+
+    assert receipt["status"] == "blocked"
+    assert "adaptive_calibration_previous_channel_digest_mismatch" in receipt["blockers"]
+    assert receipt["activation_ready"] is False
