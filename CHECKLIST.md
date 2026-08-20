@@ -1,6 +1,6 @@
 # Axio Fusion API Checklist
 
-## 当前 r17 与公共输出边界里程碑（2026-08-20）
+## 当前 r17 终态、r18 successor 与公共输出边界（2026-08-21）
 
 - [x] 重新核对 Goal/PRD：产品仍是独立 remote-only Fusion API，只公开
   `axio-fast`、`axio-terra`、`axio-pro`，统一支持 Chat Completions、Responses、
@@ -13,15 +13,23 @@
   `1074 passed, 7 skipped`。
 - [x] 18900 health 为 `ready`；三档公开模型、四种协议、代理选择与 secrets-safe
   约束通过；三个 tier 的 dry-run route plan 已核验，Pro 保留 Judge/Synthesizer。
-- [x] r17 仍是唯一 live non-target screening：`3 completed / 6 failed_or_blocked`，
-  `ready_for_ranking=false`，target calls 保持关闭；冻结 plan/source hash 未漂移。
+- [x] r17 唯一 live non-target screening 已自然终态：`6 completed / 10 failed_or_blocked`，
+  `ready_for_ranking=false`，`target_suite_calls_performed=false`；完整失败分母和 frozen
+  plan/source hash 均已保留。
+- [x] r17 transport-only admission 已执行：8 个 canonical 中仅 1 个同时通过两个 source
+  family 的固定 2% gate，最低要求 3，receipt 为 `blocked`；未执行 ranking、provider
+  freeze、official import 或 target 请求。
 - [x] canonical convergence 文档已同步到 composite r17；旧 r43/r44 记录明确标为历史，
   当前 authoritative benchmark 范围仍为 9 类 21 套。
-- [ ] 等待 r17 screening terminal；未终态前不得执行 transport admission、ranking、
-  provider baseline freeze、official/audited Harness import 或 target campaign。
-- [ ] terminal 后严格按 `transport admission -> complete-pool ranking -> external
+- [x] 注册 r18 immutable source successor，只改变 registration date/selection seed；完成
+  16-unit frozen plan 与 zero-network preflight，未重复 provider probe。
+- [x] r18 Harness 控制面离线生成：pin/execution ready，acquisition/import/binding/
+  convergence 保持 blocked，`target_suite_calls_allowed=false`。
+- [ ] 明确授权并启动 r18 live screening；启动前必须完成 transport 根因复核，不能恢复
+  r17 checkpoint、使用 `--retry-failed`、降低 2% gate 或拼接 survivor subset。
+- [ ] r18 terminal 后严格按 `transport admission -> complete-pool ranking -> external
   top-three -> provider baseline freeze -> same-cohort Harness -> 21-suite campaign
-  -> final audit` 收敛；任何 gate 失败均创建 successor，不恢复 checkpoint 或降低阈值。
+  -> final audit` 收敛；任何 gate 失败均创建 successor，不降低阈值。
 
 ## Composite cohort r9 terminal / r10 successor（2026-08-18）
 

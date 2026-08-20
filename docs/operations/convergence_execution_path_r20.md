@@ -1,4 +1,4 @@
-# Convergence Execution Path (Active composite r17)
+# Convergence Execution Path (Active composite r18 control plane)
 
 This document is the canonical execution path for the current Axio Fusion
 milestone. It is intentionally short and operational. New provider channels,
@@ -51,31 +51,28 @@ The following order is the only path to a formal quality claim:
    baseline. If any gate fails, publish a diagnostic result and a bounded
    shadow-only improvement proposal; do not claim superiority.
 
-## 当前状态（2026-08-20，composite r17）
+## 当前状态（2026-08-21，composite r18 control plane）
 
-- 工程就绪度已完成。本次代码变更后的 Python 3.11 全量回归为 `1074 passed, 7
-  skipped`；这是契约和集成证据，不是 provider 排名或 Fusion superiority 证据。
-- r17 是唯一活动的 immutable non-target screening cohort。冻结 plan 绑定 r7
-  probe-bound registry，包含 16 个串行 unit、2 个 source family、8 个 canonical
-  group、9 个 replica、`max_workers=1` 和固定 2% transport fail-fast gate。plan
-  SHA-256 为 `336fa9c4f81223622a3f94d21cc249b4d20ba9b392a18a2e1aba54fbc5ba6565`，
-  source SHA-256 为 `7ba7fc8816cbd32881b47419e2d26d2fa26f7460d551b4d1c747195f8ae15b56`。
-- live screening、同 cohort supervisor 和 lineage watcher 仍是唯一活动的筛选/控制进程。
-  safe state 为 `running`，当前 `3 completed / 6 failed_or_blocked`，
-  `ready_for_ranking=false`，`target_suite_calls_performed=false`；当前 state
-  SHA-256 为 `fdce96ba6a1d35568c2f9f50d1b21ffb5ce10d32de8a1130c9e513ef3e1d425c`。
-- 离线 Harness 控制面已有 6 个 hash-only pin 和 ready execution plan，但 acquisition/
-  import 尚未完成，同 cohort convergence 仍停留在 `next_gate=screening`，
-  `target_suite_calls_allowed=false`，尚未放行 target call。Harness 就绪不授权 target
-  call，也不能替代 provider baseline 证据。
-- 不恢复 partial checkpoint，不拼接 completed subset，不使用猜测排名或历史 cohort。
-  screening terminal 后唯一合法顺序是：transport admission -> complete-pool ranking
-  -> external top-three evidence -> provider baseline freeze -> 同 cohort 官方/审计
+- 工程就绪度已完成。当前 Python 3.11 全量回归为 `1074 passed, 7 skipped`；这是契约
+  和集成证据，不是 provider 排名或 Fusion superiority 证据。
+- r17 已自然终态并被封存为 reference-only：16/16 unit terminal，`6 completed /
+  10 failed_or_blocked`，transport admission 仅 `1/8` canonical 同时通过两个 source
+  family 的固定 2% gate，最低要求 3；未生成 ranking 或 baseline freeze。
+- 当前唯一可继续的 successor 控制面是 r18。r18 绑定 r7 probe-bound registry，plan
+  包含 16 个串行 unit、2 个 source family、8 个 canonical group、9 个 replica、
+  `max_workers=1` 和固定 2% fail-fast gate；plan SHA-256 为
+  `58c1d7d20f3d064252e5551abdbc10ddf26ed075ca0d97e660e62f20fdc1e504`，source SHA-256
+  为 `3844caf2aa53e4e419f4b9a318ec571ed9a3463e1d56d2f7034989209c8ce815`。
+- r18 zero-network preflight 为 `preflight_ready`，`network_calls_performed=false`、
+  `target_suite_calls_performed=false`；Harness pin/execution 已离线生成，但 acquisition、
+  import、binding 和 convergence 仍未放行，`target_suite_calls_allowed=false`。
+- 当前尚未授权 r18 live screening。启动前不能恢复 r17 checkpoint、不能使用
+  `--retry-failed`、不能降低 2% gate、不能拼接 survivor subset，也不能把 r18 preflight
+  当作 provider evidence。授权后仍必须完整执行 screening -> transport admission ->
+  complete-pool ranking -> external top-three -> provider baseline freeze -> 同 cohort
   Harness -> 9 类 21 套 campaign -> final claim audit。
-- 公共 Fusion 产品仍可独立运行：`axio-fast`、`axio-terra`、`axio-pro` 均通过
-  Chat Completions、Responses、Anthropic Messages 和 Gemini surface 提供服务。本次
-  四协议公共输出边界与 request-local streaming gate 已记录在当前 commit journal，
-  没有改动 r17 frozen 输入。
+- 公共 Fusion 产品仍可独立运行：`axio-fast`、`axio-terra`、`axio-pro` 均通过四种公共
+  协议提供服务；四协议公共输出边界与 request-local streaming gate 已在前一里程碑验证。
 
 ## Historical r44 Screening Registration
 

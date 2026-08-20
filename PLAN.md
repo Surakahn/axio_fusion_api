@@ -1,5 +1,35 @@
 # Axio Fusion API Plan
 
+## r17 终态、transport gate 与 r18 离线 successor（2026-08-21 00:09 CST）
+
+r17 唯一 live non-target screening 已自然终态，16/16 unit terminal，safe state 为
+`partial`：`6 completed / 10 failed_or_blocked`、`ready_for_ranking=false`、
+`target_suite_calls_performed=false`。同 cohort transport-only admission 已执行且严格只
+使用完整 transport 分母：8 个 canonical 中只有 1 个同时通过两个 source family 的固定
+2% gate，最低要求为 3，receipt 为 `blocked`，唯一 blocker 为
+`transport_admission_fewer_than_minimum_models`。没有 ranking、provider baseline freeze、
+official import 或 target 请求，不能把 completed unit 或 partial score 当作能力证据。
+
+r17 的 state/receipt/transport/supervisor/Harness 证据全部保留为 reference-only；不读取或
+恢复 raw checkpoint，不拼接 survivor subset，不修改 r17 frozen plan/source/registry。当前
+工作区已离线注册 r18 immutable successor，只改变 source contract 的注册日期和 selection
+seed，没有重复 provider probe：
+
+- r18 source SHA-256：`3844caf2aa53e4e419f4b9a318ec571ed9a3463e1d56d2f7034989209c8ce815`；
+- r18 plan SHA-256：`58c1d7d20f3d064252e5551abdbc10ddf26ed075ca0d97e660e62f20fdc1e504`；
+- plan digest：`a626b9be599041b03c899880eee0fb10be7b7a7b5f22f2f0ccef95ad204cbf86`；
+- 2 source families、8 canonical groups、9 replicas、16 serial units、`max_workers=1`、
+  固定 2% fail-fast gate；
+- r18 zero-network preflight 为 `preflight_ready`，campaign digest
+  `fdc903a9e90a82e5753c17b49c8dd0f6b732100b8668dc14f576f1669481966d`；
+- r18 Harness 仅离线生成 pin/execution/scaffold，acquisition/import/binding/convergence
+  仍保持 blocked，`target_suite_calls_allowed=false`。
+
+r18 当前只到控制面 ready，尚未授权 live screening。后续必须先完成 transport 根因复核，
+再明确授权 r18 live screening；不得降低 2% gate。合法路径仍为
+`screening -> transport admission -> complete-pool ranking -> external top-three ->
+provider baseline freeze -> same-cohort Harness -> 9 类 21 套 campaign -> final audit`。
+
 ## 公共输出边界与四协议流式收敛（2026-08-20 22:32 CST）
 
 本阶段继续沿完整 Fusion API 产品主线推进，没有把 r17 screening 当成项目本体，也没有
