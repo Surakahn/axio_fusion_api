@@ -2962,6 +2962,14 @@ Latency superiority is also claim-gated on two distribution points: both p50 and
   616 tests passed in 208.64 seconds; compilation passed. The independent
   external evaluator regression passed 18 tests separately. These are code and
   protocol readiness results only, not benchmark scores or superiority claims.
+
+- 2026-08-21：补强自适应渠道校准的 hash-only 指纹。旧指纹只比较 provider、model 和
+  api_format，无法捕获 reasoning transport、工具/视觉准入、能力/时延/成本元数据或
+  endpoint binding 的变化；现在通过安全白名单纳入这些校准相关字段，endpoint 仅保留
+  SHA-256，API key/env 轮换明确忽略。新增 4 条回归并通过校准、CLI、渠道配置专项
+  `38 passed`；该信号只生成 shadow recalibration 建议，不改生产 router、r18 frozen
+  plan/source/registry，也不触发 provider 或 target 请求。r18 仍为
+  `preflight_ready`、`next_gate=screening`，等待明确 live screening 授权。
 - 2026-08-16：完成 transport5 非目标筛选 cohort，并为 provider baseline
   freeze 增加严格的 transport-only admission 路径。该路径将 receipt 绑定到
   原始 registry hash 或显式 probe-bound 派生物，拒绝 benchmark/质量选择字段，

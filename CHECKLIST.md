@@ -1070,3 +1070,9 @@ its unchecked items are not the current cohort's execution plan.
   production configuration; and propagate the setting through CLI, dynamic
   enrollment, and atomic refresh. The stopped v8 baseline campaign remains
   historical and cannot supply ranking or capability evidence.
+- [x] Harden adaptive channel recalibration fingerprints: include only
+  allowlisted model capability, reasoning/tool/vision, latency/cost and
+  endpoint-binding hashes; ignore API-key rotation; add regressions for
+  capability/transport/endpoint changes and credential-only changes. This
+  remains an offline shadow calibration signal and never auto-modifies the
+  production router or benchmark policy.

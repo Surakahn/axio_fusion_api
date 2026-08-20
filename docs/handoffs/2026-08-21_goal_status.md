@@ -174,3 +174,19 @@ r18 preflight/hash/PID 只读校验
 subset、降低 2% gate、修改生产 router/prompt/weights 或启动 target benchmark。若
 transport 仍 blocked，保留完整分母并创建新的 immutable successor；不得把 partial score
 写成能力或 superiority claim。
+
+## 本轮离线增量：自适应渠道指纹
+
+按 Goal 中“渠道变化后只允许通过 shadow/non-target 生成可审计校准建议”的边界，补强
+`adaptive_calibration.py` 的渠道指纹：现在只纳入安全白名单中的 provider/model/API
+格式、reasoning transport、tool/vision 准入、能力分、上下文、时延/成本元数据；
+endpoint/base-url 只保存 SHA-256，`api_key`、`api_key_env` 和其他凭据字段不参与指纹。
+因此 endpoint 或能力契约变化会触发校准，而单纯密钥轮换不会制造无意义的 prompt
+重校准。新增回归覆盖 capability/transport/endpoint 变化和 credential-only 变化，校准、
+CLI、渠道配置专项共 `38 passed`。
+
+该改动没有 provider/target 网络请求，没有修改 r18 plan/source/registry、生产 router、
+prompt、weights 或服务进程；它也不把任何分数写回 serving policy。当前 r18 原始
+preflight 仍是 `preflight_ready`，`ready_for_ranking=false`、`target_suite_calls_allowed=false`，
+下一合法动作仍需 operator 明确回复 `授权 r18 live screening` 后才启动唯一一套
+screening。

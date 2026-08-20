@@ -33,6 +33,76 @@ def test_detect_channel_change_returns_false_on_identical_channel():
     assert detect_channel_change(manifest, manifest) is False
 
 
+def test_detect_channel_change_tracks_capability_transport_and_endpoint_binding():
+    previous = {
+        "providers": [
+            {
+                "provider": "nvidia",
+                "api_format": "chat",
+                "base_url": "https://provider-a.example/v1",
+                "models": [
+                    {
+                        "model": "m1",
+                        "capabilities": {"logic": 0.8},
+                        "reasoning_transport": {
+                            "status": "verified",
+                            "transport": "chat_reasoning_effort",
+                            "supported_efforts": ["low", "high"],
+                        },
+                        "tool_calling_eligible": False,
+                    }
+                ],
+            }
+        ]
+    }
+    current = {
+        "providers": [
+            {
+                "provider": "nvidia",
+                "api_format": "chat",
+                "base_url": "https://provider-b.example/v1",
+                "models": [
+                    {
+                        "model": "m1",
+                        "capabilities": {"logic": 0.9},
+                        "reasoning_transport": {
+                            "status": "verified",
+                            "transport": "chat_reasoning_effort",
+                            "supported_efforts": ["low", "medium", "high"],
+                        },
+                        "tool_calling_eligible": True,
+                    }
+                ],
+            }
+        ]
+    }
+    assert detect_channel_change(previous, current) is True
+
+
+def test_detect_channel_change_ignores_credential_rotation():
+    previous = {
+        "providers": [
+            {
+                "provider": "cpa",
+                "api_format": "responses",
+                "api_key_env": "CPA_KEY_OLD",
+                "models": [{"model": "m1"}],
+            }
+        ]
+    }
+    current = {
+        "providers": [
+            {
+                "provider": "cpa",
+                "api_format": "responses",
+                "api_key_env": "CPA_KEY_ROTATED",
+                "models": [{"model": "m1"}],
+            }
+        ]
+    }
+    assert detect_channel_change(previous, current) is False
+
+
 def test_evaluate_fusion_vs_baseline_above_threshold():
     result = evaluate_fusion_vs_baseline(0.95, 1.0, "axio-pro")
     assert result["ratio"] == 0.95

@@ -5,15 +5,39 @@
 from __future__ import annotations
 
 import json
+import math
 import time
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
-from .schemas import sha256_text
+from .schemas import sha256_text, stable_json
 
 CALIBRATION_SCHEMA = "axio_fusion_api.adaptive_calibration.v1"
 CHANNEL_CHANGE_REASON = "channel_change_detected"
 FUSION_DEGRADATION_THRESHOLD = 0.90  # 融合低于单模型90%时触发重校准
+
+_CHANNEL_MODEL_SCALAR_FIELDS = (
+    "model",
+    "id",
+    "name",
+    "api_format",
+    "protocol",
+    "tool_capability",
+    "tool_capability_source",
+    "tool_probe_status",
+    "tool_calling_eligible",
+    "supports_tools",
+    "supports_vision",
+    "vision_input_eligible",
+    "vision_probe_status",
+    "vision_capability_source",
+    "context_tokens",
+    "p50_latency_ms",
+    "p95_latency_ms",
+    "input_cost_per_million",
+    "output_cost_per_million",
+)
+_CHANNEL_ENDPOINT_FIELDS = ("base_url", "endpoint", "base_url_env", "endpoint_env")
 
 
 @dataclass(frozen=True)
@@ -31,7 +55,8 @@ def detect_channel_change(
 ) -> bool:
     """检测渠道配置是否发生变化。
 
-    比较渠道指纹(provider列表+模型列表+协议), 忽略API key等敏感值。
+    比较安全白名单渠道指纹。模型的 reasoning/tool/vision 能力、时延/成本
+    元数据以及 endpoint binding 变化都会触发重校准；API key 轮换不会触发。
     """
     prev_digest = (
         _channel_fingerprint(previous_channel_manifest)
@@ -43,18 +68,103 @@ def detect_channel_change(
 
 
 def _channel_fingerprint(manifest: Mapping[str, Any]) -> str:
-    """渠道指纹: provider + model + api_format 的有序哈希。"""
-    providers = []
-    for provider in manifest.get("providers", []):
+    """生成不含密钥和原始 endpoint 的稳定渠道指纹。"""
+
+    providers: list[dict[str, Any]] = []
+    if not isinstance(manifest, Mapping):
+        return sha256_text(
+            stable_json(
+                {"schema": "axio_fusion_api.channel_fingerprint.v2", "providers": []}
+            )
+        )
+    provider_rows = manifest.get("providers", [])
+    if not isinstance(provider_rows, list):
+        provider_rows = []
+    for provider in provider_rows:
         if not isinstance(provider, Mapping):
             continue
-        provider_name = str(provider.get("provider") or provider.get("name") or "")
-        models = [str(m.get("model") or "") for m in provider.get("models", []) if isinstance(m, Mapping)]
-        api_format = str(provider.get("api_format") or "")
-        providers.append(
-            {"provider": provider_name, "models": sorted(models), "api_format": api_format}
+        row: dict[str, Any] = {
+            "provider": str(provider.get("provider") or provider.get("name") or ""),
+            "api_format": str(provider.get("api_format") or ""),
+            "protocol": str(provider.get("protocol") or ""),
+        }
+        _add_endpoint_hashes(row, provider)
+        model_rows = provider.get("models", [])
+        if not isinstance(model_rows, list):
+            model_rows = []
+        row["models"] = sorted(
+            (_safe_model_fingerprint(model, row["api_format"]) for model in model_rows),
+            key=stable_json,
         )
-    return sha256_text(json.dumps(providers, sort_keys=True))
+        providers.append(row)
+    providers.sort(key=stable_json)
+    return sha256_text(stable_json({"schema": "axio_fusion_api.channel_fingerprint.v2", "providers": providers}))
+
+
+def _safe_model_fingerprint(value: Any, provider_api_format: str) -> dict[str, Any]:
+    """保留校准相关的非敏感模型元数据，不把任意配置写入指纹。"""
+
+    if not isinstance(value, Mapping):
+        return {"model": str(value or "")[:160], "api_format": provider_api_format}
+    row: dict[str, Any] = {}
+    for field in _CHANNEL_MODEL_SCALAR_FIELDS:
+        scalar = _safe_scalar(value.get(field))
+        if scalar is not None:
+            row[field] = scalar
+    if "api_format" not in row and provider_api_format:
+        row["api_format"] = provider_api_format
+    capabilities = value.get("capabilities")
+    if isinstance(capabilities, Mapping):
+        numeric = {
+            str(key): round(float(item), 8)
+            for key, item in capabilities.items()
+            if isinstance(item, (int, float))
+            and not isinstance(item, bool)
+            and math.isfinite(float(item))
+        }
+        if numeric:
+            row["capabilities"] = dict(sorted(numeric.items()))
+    reasoning = value.get("reasoning_transport")
+    if isinstance(reasoning, Mapping):
+        effort_map = reasoning.get("effort_map", {})
+        if not isinstance(effort_map, Mapping):
+            effort_map = {}
+        supported_efforts = reasoning.get("supported_efforts", [])
+        if not isinstance(supported_efforts, (list, tuple, set, frozenset)):
+            supported_efforts = []
+        row["reasoning_transport"] = {
+            "status": str(reasoning.get("status") or ""),
+            "transport": str(reasoning.get("transport") or ""),
+            "supported_efforts": sorted(
+                str(item) for item in supported_efforts
+                if isinstance(item, (str, int, float))
+            ),
+            "effort_map": {
+                str(key): str(item)
+                for key, item in sorted(effort_map.items(), key=lambda pair: str(pair[0]))
+                if isinstance(key, (str, int, float)) and isinstance(item, (str, int, float))
+            },
+        }
+    _add_endpoint_hashes(row, value)
+    return row
+
+
+def _add_endpoint_hashes(target: dict[str, Any], value: Mapping[str, Any]) -> None:
+    for field in _CHANNEL_ENDPOINT_FIELDS:
+        raw = value.get(field)
+        if raw not in (None, ""):
+            target[f"{field}_sha256"] = sha256_text(str(raw))
+
+
+def _safe_scalar(value: Any) -> bool | float | int | str | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        numeric = float(value)
+        return round(numeric, 8) if math.isfinite(numeric) else None
+    if isinstance(value, str):
+        return value[:160]
+    return None
 
 
 def evaluate_fusion_vs_baseline(
