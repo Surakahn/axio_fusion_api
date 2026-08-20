@@ -202,6 +202,19 @@ campaign 仍不存在；supervisor/watcher 继续保持 `next_gate=screening`、
 低频只读观察，禁止恢复 checkpoint、使用 `--retry-failed`、启动第二套 screening、修改
 frozen plan/source、调整 router/prompt/weights 或重启健康生产服务。
 
+## 工程回归验证（2026-08-20 20:51 CST）
+
+使用当前工作树执行 `python3.11 -m pytest tests/ -x -q --tb=short`，进程退出码为 `0`，
+结果为 `1066 passed, 7 skipped in 273.89s`。本次没有修改 Python 核心代码、生产 registry
+或活动 screening plan；该结果只证明现有工程回归门禁通过，不是 provider 质量、benchmark
+排名、baseline freeze 或 Fusion superiority evidence。
+
+r17 仍处于唯一 live non-target screening：safe state 为 `status=running`、
+`1 completed / 1 failed_or_blocked`、`ready_for_ranking=false`、
+`target_suite_calls_performed=false`；第三个 102-case unit 的私有 checkpoint 仍为
+`partial`，当时安全元数据为 `70/102`，raw provider output 仍不读取、不提交、不转化为
+质量证据。supervisor/watcher 继续保持 `next_gate=screening` 和 target-call fail-closed。
+
 ## r16 screening 与 transport 终态（2026-08-20 18:37 CST）
 
 r16 唯一 live non-target screening 已自然终态。screening receipt 与 safe state 均为

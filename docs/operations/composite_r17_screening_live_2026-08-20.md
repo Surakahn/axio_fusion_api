@@ -156,3 +156,16 @@ transport admission、ranking、provider baseline freeze、Harness import 和 ta
 日志及下游 artifact，保持 `next_gate=screening` 与 target-call fail-closed 边界；不恢复
 checkpoint、不使用 `--retry-failed`、不启动第二套 screening、不修改 frozen 输入或生产
 router，不重启健康服务。
+
+## 20:51 CST 工程回归验证
+
+本轮用当前工作树执行 `python3.11 -m pytest tests/ -x -q --tb=short`，退出码为 `0`，
+得到 `1066 passed, 7 skipped in 273.89s`。这是代码与协议回归证据，不是 provider 质量、
+benchmark 排名、baseline freeze 或 Fusion superiority claim；本轮没有修改 Python 核心
+代码、生产 registry 或 r17 frozen screening plan。
+
+回归期间 r17 后台 screening/supervisor/watcher 身份未漂移，safe state 仍为 `running`、
+`1 completed / 1 failed_or_blocked`、`ready_for_ranking=false`、
+`target_suite_calls_performed=false`；活动第三个 unit 的私有 checkpoint 只以安全计数
+`70/102` 记录，raw provider output 未读取。下游 transport admission、ranking、freeze、
+Harness import 和 target campaign 仍未启动。
