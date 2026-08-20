@@ -2285,6 +2285,15 @@ Latency superiority is also claim-gated on two distribution points: both p50 and
   import 与 target campaign 均不存在。state 继续绑定 r15 plan/source 与 r7 registry/probe
   hash，`network_calls_performed=true`、`target_suite_calls_performed=false`；本次未恢复
   checkpoint、未重试失败 case、未修改 frozen plan、未启动第二套 screening。
+- 2026-08-20 13:37：r15 safe live state 更新为 `status=running`、16 个 planned unit 中
+  `1 completed / 3 failed`、`ready_for_ranking=false`，state SHA-256 为
+  `698ce13d3b1cf3e8f57c22c074da3be554cdd3e99e7bdd792d8182ce2f2114a5`。新增 failed unit
+  的完整分母为 `42/102` scored/transport split，即 `60/102` transport failures、failure
+  rate `0.588235294118`，触发固定 `2%` fail-fast；旧失败分母和 completed unit 均保留。
+  当前 checkpoint 已切换到新的 112-case unit，`0/112`、状态 `partial`；screening receipt、
+  transport admission、ranking、provider freeze、official import 与 target campaign 均不
+  存在，`target_suite_calls_performed=false` 保持不变。本次未恢复 checkpoint、未重试失败
+  case、未修改 frozen plan、未启动第二套 screening。
 - 2026-08-20 12:35：低频只读复核确认 r15 唯一 screening、supervisor、lineage watcher
   仍由 init 托管且 plan identity 未改变。首个 serial unit private checkpoint 推进至
   48/112，状态仍为 `partial`，checkpoint SHA-256 为

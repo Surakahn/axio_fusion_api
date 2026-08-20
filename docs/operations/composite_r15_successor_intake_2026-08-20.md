@@ -144,6 +144,18 @@ state 的 r15 plan/source 与 r7 registry/probe hash binding 未改变，
 `target_suite_calls_performed=false` 保持不变。本次没有恢复 checkpoint、重试失败 case、
 修改 frozen plan 或启动第二套 screening。
 
+## r15 live screening 进度快照（2026-08-20 13:37 CST）
+
+safe state 最新为 `running`：16 个 planned unit 中 `1 completed / 3 failed`，
+`ready_for_ranking=false`，state SHA-256 为
+`698ce13d3b1cf3e8f57c22c074da3be554cdd3e99e7bdd792d8182ce2f2114a5`。
+新增 failed unit 保留 `42/102` scored/transport 分母，即 `60/102` transport failures、
+failure rate `0.588235294118`，触发固定 `2%` gate；不解释为质量或 ranking 结果。当前
+活动 checkpoint 为新的 `0/112`、状态 `partial`，screening receipt、transport admission、
+ranking、freeze/import/target 产物均不存在，`target_suite_calls_performed=false` 继续为
+false。本次没有恢复 checkpoint、使用 `--retry-failed`、修改 frozen plan 或启动第二套
+screening。
+
 ## r15 live screening 进度快照（2026-08-20 12:45 CST）
 
 低频只读核验确认三个 init 托管进程仍存活且 plan identity 未改变。首个 serial unit 的

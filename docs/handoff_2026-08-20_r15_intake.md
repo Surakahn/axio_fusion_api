@@ -67,6 +67,19 @@ admission 或 ranking 产物。state 的 plan/source/registry hash 继续绑定 
 plan/source 与 r7 probe-bound registry，`network_calls_performed=true`、
 `target_suite_calls_performed=false`，后置 gate 继续关闭。
 
+## 13:37 CST 低频进度复核
+
+截至 2026-08-20 13:37:17，r15 safe live state 已更新为 `status=running`、
+`planned_task_count=16`、`completed_unit_count=1`、`failed_or_blocked_unit_count=3`、
+`ready_for_ranking=false`；state SHA-256 为
+`698ce13d3b1cf3e8f57c22c074da3be554cdd3e99e7bdd792d8182ce2f2114a5`。新增 failed unit 的
+完整分母为 `42/102` scored/transport split，即 `60/102` transport failures、failure rate
+`0.588235294118`，同样触发固定 `2%` fail-fast；先前 `80/102`、`112/112` 失败分母和
+唯一 `112/112` completed unit 均保留。当前 checkpoint 已切换到新的 112-case unit，
+`0/112`、状态 `partial`；screening receipt、transport admission、ranking、freeze/import/
+target 产物仍不存在，`target_suite_calls_performed=false` 不变。三个 init 托管进程仍存活，
+本次未恢复 checkpoint、未重试失败 case、未修改 frozen plan、未启动第二套 screening。
+
 ## 12:45 CST 低频进度复核
 
 截至 2026-08-20 12:45:18，r15 screening PID `2871629`、supervisor PID `2880595` 和
