@@ -59,6 +59,23 @@ screening terminal，watcher 保持 `next_gate=screening`、`target_suite_calls_
 不得恢复 r15/r16 checkpoint、不得使用 `--retry-failed`、不得修改 frozen plan、不得启动第二套
 screening；screening terminal 后才由同 cohort supervisor 执行 transport admission。
 
+## r16 低频进度复核（2026-08-20 15:15 CST）
+
+低频只读复核确认 r16 唯一 screening、convergence supervisor、lineage watcher 仍由 init
+托管且命令行 identity 未改变。当前活动 unit 的私有 checkpoint 已推进到 `16/102`，状态为
+`partial`，checkpoint SHA-256 为
+`4e746fe5901b3b1ee2d4a82d0dfd326e7852d66ef371d0b920a3419dbe1bd95f`；该文件属于私有恢复
+证据，含 raw provider output，不能解释为 unit 完成、质量分数或 ranking 证据。safe live state
+仍未生成，完整 screening 分母、transport admission、ranking、provider freeze、official
+import 和 target campaign 均不存在；supervisor/watcher 继续保持 `next_gate=screening`、
+`target_suite_calls_allowed=false`、`target_suite_calls_performed=false`。
+
+本次只读工程审计发现的历史 benchmark runner 裸 `except:` 与重复路径，已在 Goal framing 中
+列为 baseline freeze 后的独立遗留清理工作；本轮不修改这些脚本，不改变 r16 frozen plan、
+provider registry、router 权重、prompt、panel policy 或任何 benchmark-driven routing，避免
+把工程清理混入当前 provider evidence lineage。后续仍只按低频检查推进，screening terminal
+前不得执行下游 gate。
+
 ## Composite cohort r15 当前主线快照（2026-08-20 13:48 CST）
 
 r15 是当前唯一允许的 live non-target screening。冻结输入保持不变：plan 文件 SHA-256

@@ -64,3 +64,16 @@ checkpoint、screening receipt、transport admission、ranking、provider freeze
 
 后续只做低频只读检查，不恢复 checkpoint、不使用 `--retry-failed`、不修改 frozen plan、不启动
 第二套 screening；screening terminal 后才执行同 cohort transport admission。
+
+## r16 低频进度复核（2026-08-20 15:15 CST）
+
+三项进程仍存活且均绑定 r16 frozen plan/source 与 r7 probe-bound registry/probe/admission。
+当前活动 unit 的私有 checkpoint 为 `16/102`、`partial`，SHA-256 为
+`4e746fe5901b3b1ee2d4a82d0dfd326e7852d66ef371d0b920a3419dbe1bd95f`。checkpoint 仅是私有
+恢复证据，raw provider output 未进入 Git，不能作为 unit 完成、质量分数或 ranking 依据。
+
+safe live state、screening receipt、transport admission、ranking、provider baseline freeze、
+official import 与 target campaign 仍未生成；supervisor/watcher 仍为
+`next_gate=screening`、`target_suite_calls_allowed=false`、`target_suite_calls_performed=false`。
+本轮只读审计确认历史 benchmark runner 的裸 `except:`/重复路径属于 baseline freeze 后的
+独立清理项，当前不改动它们，不改变 frozen plan 或任何 routing/prompt/panel policy。
