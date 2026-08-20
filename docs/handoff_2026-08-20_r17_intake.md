@@ -113,3 +113,20 @@ transport admission、ranking、provider baseline freeze、Harness import 和 ta
 `target_suite_calls_allowed=false`、`target_suite_calls_performed=false`。screening terminal
 前只允许继续低频只读观察，不使用 `--retry-failed`，不启动第二套 screening，不修改 frozen
 plan/source、router/prompt/weights 或生产服务。
+
+## r17 第三个 unit 终态与第四个 unit 交接（2026-08-20 20:58 CST）
+
+screening 已按 frozen serial schedule 完成第三个 102-case unit，safe state 计数更新为
+`2 completed / 1 failed_or_blocked`；整个 16-unit campaign 仍为 `status=running`，
+`ready_for_ranking=false`、`network_calls_performed=true`、`target_suite_calls_performed=false`，
+state SHA-256 为 `bd5333cc4789c133f41485ecd2f86626efc497f22b61305c3e0754d9650019fd`。
+
+当前已进入第四个 112-case serial unit，私有 checkpoint 为 `partial`、`0/112`，SHA-256
+为 `d4ca62df881c011cde06132ada864d20e8308832117a858a1b6de523c7048a88`。它含 raw provider
+output，只作私有恢复证据；本次未读取原文、未恢复 checkpoint、未提交私有文件，也未把
+completed unit 解释为质量、ranking、baseline 或 completion evidence。
+
+下游 transport admission、ranking、provider baseline freeze、Harness import 和 target
+campaign 仍未开始；继续低频只读观察并保持 `next_gate=screening`、
+`target_suite_calls_allowed=false`、`target_suite_calls_performed=false`，不修改 frozen
+plan/source、router/prompt/weights，不启动第二套 screening 或重启生产服务。

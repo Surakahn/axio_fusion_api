@@ -215,6 +215,26 @@ r17 仍处于唯一 live non-target screening：safe state 为 `status=running`�
 `partial`，当时安全元数据为 `70/102`，raw provider output 仍不读取、不提交、不转化为
 质量证据。supervisor/watcher 继续保持 `next_gate=screening` 和 target-call fail-closed。
 
+## r17 第三个 unit 终态与第四个 unit 启动（2026-08-20 20:58 CST）
+
+screening 按 frozen serial schedule 完成第三个 102-case unit，并安全计入
+`completed_unit_count=2`；完整 campaign 仍为 `status=running`、16 个 planned units 中
+`2 completed / 1 failed_or_blocked`，`ready_for_ranking=false`、
+`network_calls_performed=true`、`target_suite_calls_performed=false`。safe state SHA-256
+为 `bd5333cc4789c133f41485ecd2f86626efc497f22b61305c3e0754d9650019fd`。
+
+筛选器已进入第四个 112-case serial unit。最新私有 checkpoint 为
+`checkpoint_status=partial`、`0/112`，文件 SHA-256 为
+`d4ca62df881c011cde06132ada864d20e8308832117a858a1b6de523c7048a88`；该文件含
+`raw_provider_outputs_persisted=true`，只作为私有恢复证据，不读取原文、不进入 Git、不
+解释为质量、ranking、freeze 或 completion evidence。
+
+下游 transport admission、ranking、provider baseline freeze、Harness import 和 target
+campaign 仍不存在；supervisor/watcher 继续保持 `next_gate=screening`、
+`target_suite_calls_allowed=false`、`target_suite_calls_performed=false`。本次未恢复 checkpoint、
+未使用 `--retry-failed`、未启动第二套 screening、未修改 frozen plan/source、router/prompt/
+weights 或生产服务。
+
 ## r16 screening 与 transport 终态（2026-08-20 18:37 CST）
 
 r16 唯一 live non-target screening 已自然终态。screening receipt 与 safe state 均为
