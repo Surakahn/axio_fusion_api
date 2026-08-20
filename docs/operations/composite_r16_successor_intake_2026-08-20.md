@@ -123,6 +123,23 @@ watcher 保持 `next_gate=screening`、`target_suite_calls_allowed=false`、
 `target_suite_calls_performed=false`。不得恢复任一 checkpoint、使用 `--retry-failed`、修改
 frozen plan、拼接 survivor subset 或启动第二套 screening。
 
+## r16 第三个 unit 终态与第四个 unit 启动（2026-08-20 16:18 CST）
+
+safe live state 更新为 SHA-256
+`f0e37f0ed5bcb83197a00364492a5bd7803f03e0caf5eec58bbc269f6533d01a`，campaign digest 为
+`f2619ac4c1dcfe6189884a71da44adb306a18543bfbc8c82c460bed430f80577`；campaign 仍为
+`status=running`，16 个 planned units 中 `0 completed / 3 failed`，`ready_for_ranking=false`。
+第三个 unit 的完整 transport 分母为 `0/102` scored、`102/102` transport failures、failure rate
+`1.0`，触发 `screening_unit_no_scores` 与固定 2% fail-fast；这只是 screening failure
+evidence，不是质量或 ranking 结果。
+
+筛选器已按 frozen serial schedule 进入第四个 unit，当前 checkpoint 属于新的 `112`-case
+unit、状态 `partial`；该中间 checkpoint 仅是私有恢复证据。safe screening receipt、transport
+admission、ranking、provider freeze、official import 与 target campaign 仍不存在；supervisor/
+watcher 保持 `next_gate=screening`、`target_suite_calls_allowed=false`、
+`target_suite_calls_performed=false`。不得恢复任一 checkpoint、使用 `--retry-failed`、修改
+frozen plan、拼接 survivor subset 或启动第二套 screening。
+
 ## r16 live screening 启动里程碑（2026-08-20 15:07 CST）
 
 r16 唯一 live non-target screening 已通过 `setsid/nohup` 启动：screening PID `3231684`、
