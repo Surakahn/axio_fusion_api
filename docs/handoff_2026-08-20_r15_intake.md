@@ -35,6 +35,19 @@ terminal，watcher 的 convergence audit 为 `blocked`、`next_gate=screening`�
 `target_suite_calls_allowed=false`。transport admission、ranking、provider freeze、
 official import 和 target campaign 均未启动。
 
+## 12:35 CST 低频进度复核
+
+截至 2026-08-20 12:35:08，screening PID `2871629`、supervisor PID `2880595`、lineage
+watcher PID `2881730` 均存活，命令行仍绑定同一 r15 frozen plan/source 与 r7
+registry/probe/admission。首个 serial unit 的 private checkpoint 已推进到 `48/112`，
+`checkpoint_status=partial`，文件 SHA-256 为
+`803226be75520e912374c14e0e622a63292f623a9e0ca530d94dc982edb49016`；safe
+`screening_state.r15.live.private.json` 仍不存在，因此完整 campaign 的
+`completed_unit_count`、`failed_or_blocked_unit_count` 和 `ready_for_ranking` 仍不可宣告。
+transport admission、ranking、provider freeze、official import 与 target campaign 产物均
+不存在，后置 gate 保持关闭。本次只追加状态记录，没有恢复 checkpoint、重试 case、修改
+frozen plan 或启动第二套 screening。
+
 后续仅做 10-20 分钟低频 PID/state/log 检查，不重试失败 case、不恢复 checkpoint、不修改
 frozen plan。screening terminal 后由同 cohort supervisor 执行 transport admission 和
 完整-pool ranking；只有 ranking ready 才能继续 external rank 1/2/3、provider freeze、

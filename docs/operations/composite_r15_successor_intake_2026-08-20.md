@@ -122,3 +122,13 @@ checkpoint 状态仍为 `partial`；safe `screening_state.r15.live.private.json`
 因此 completed/failed unit 计数仍不可宣告。transport admission、ranking、freeze、official
 import 和 target campaign 产物均不存在，supervisor/watcher 继续保持
 `next_gate=screening` 与 `target_suite_calls_allowed=false`。
+
+## r15 live screening 进度快照（2026-08-20 12:35 CST）
+
+低频只读核验显示三个 init 托管进程仍存活且 plan identity 未改变。首个 serial unit 的
+private checkpoint 为 `48/112`、`checkpoint_status=partial`，checkpoint SHA-256 为
+`803226be75520e912374c14e0e622a63292f623a9e0ca530d94dc982edb49016`；safe live state 尚未
+写出，不能提前填写完整 16-unit 分母或 ranking readiness。transport/ranking/freeze/import/
+target 产物继续缺失，watcher 的 `next_gate=screening`、`target_suite_calls_allowed=false`
+不变。本次没有恢复 checkpoint、使用 `--retry-failed`、修改 frozen plan 或并发启动新的
+screening。
