@@ -104,11 +104,11 @@ official import 与 target campaign 仍未生成；supervisor/watcher 继续为
 后续仍只低频检查，screening terminal 前不恢复 checkpoint、不使用 `--retry-failed`、不修改
 frozen plan、不启动第二套 screening，也不执行任何下游 gate。
 
-## r16 低频进度复核（2026-08-20 15:51 CST）
+## r16 低频进度复核（2026-08-20 15:50 CST）
 
 三项进程仍由 init 托管且 command-line identity 未变。当前活动 unit 的私有 checkpoint 已
-推进到 `74/102`、`partial`，SHA-256 为
-`cb77262a3ee7220ca8abc8861356896fb596a7707944d282826a8a863135c751`。checkpoint 仅是私有
+推进到 `79/102`、`partial`，SHA-256 为
+`d8371b7c7a84f04c0bdb0b6c1ff922d340f797f83b3c21f3359c0eff20ba69d7`。checkpoint 仅是私有
 恢复证据，不能作为 unit 完成、质量分数、ranking 或 baseline freeze 依据。
 
 safe live state、screening receipt、transport admission、ranking、provider baseline freeze、
