@@ -54,6 +54,19 @@ frozen plan。screening terminal 后由同 cohort supervisor 执行 transport ad
 official import、convergence audit 和 target campaign。任何未通过都必须注册下一个
 successor，不能宣称 Fusion superiority。
 
+## 13:34 CST 阶段性终态分母复核
+
+截至 2026-08-20 13:34:09，r15 safe live state 已首次写出，但 campaign 仍为
+`status=running`，不是 screening terminal：`planned_task_count=16`、
+`completed_unit_count=1`、`failed_or_blocked_unit_count=2`、`ready_for_ranking=false`。
+已完成的两个失败 unit 保留完整分母：一个为 `80/102` transport failures（failure rate
+`0.78431372549`），另一个为 `112/112` transport failures（failure rate `1.0`）；两者均
+触发冻结的 `2%` fail-fast gate。当前已进入下一个 102-case unit，private checkpoint 为
+`42/102`、状态 `partial`，尚无 `screening.live.receipt.r15.private.json`、transport
+admission 或 ranking 产物。state 的 plan/source/registry hash 继续绑定 r15 frozen
+plan/source 与 r7 probe-bound registry，`network_calls_performed=true`、
+`target_suite_calls_performed=false`，后置 gate 继续关闭。
+
 ## 12:45 CST 低频进度复核
 
 截至 2026-08-20 12:45:18，r15 screening PID `2871629`、supervisor PID `2880595` 和

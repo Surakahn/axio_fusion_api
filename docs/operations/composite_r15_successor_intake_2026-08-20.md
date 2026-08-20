@@ -133,6 +133,17 @@ target 产物继续缺失，watcher 的 `next_gate=screening`、`target_suite_ca
 不变。本次没有恢复 checkpoint、使用 `--retry-failed`、修改 frozen plan 或并发启动新的
 screening。
 
+## r15 safe state 阶段性复核（2026-08-20 13:34 CST）
+
+r15 已写出 safe live state，但仍处于 screening gate：`status=running`、16 个计划 unit 中
+`1 completed / 2 failed`，`ready_for_ranking=false`。两个 failed unit 的完整 transport
+分母分别为 `80/102` 和 `112/112`，均因超过固定 `2%` gate 失败；这只是 transport 证据，
+不能解释为能力分数或 ranking 结果。当前活动 checkpoint 为 `42/102`、状态 `partial`，
+screening receipt、transport admission、ranking、freeze/import/target 产物均不存在。
+state 的 r15 plan/source 与 r7 registry/probe hash binding 未改变，
+`target_suite_calls_performed=false` 保持不变。本次没有恢复 checkpoint、重试失败 case、
+修改 frozen plan 或启动第二套 screening。
+
 ## r15 live screening 进度快照（2026-08-20 12:45 CST）
 
 低频只读核验确认三个 init 托管进程仍存活且 plan identity 未改变。首个 serial unit 的
