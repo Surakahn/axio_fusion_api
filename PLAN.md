@@ -1,5 +1,53 @@
 # Axio Fusion API Plan
 
+## 用户确认的核心理念与最终收敛（2026-08-21）
+
+Axio 的 Fusion 本质是 remote-only 的模型能力组合服务：不是训练一套本地模型，
+也不是把某个 provider alias 重新命名，而是用可复用的 prompt 流程、路由、编排、
+角色分配、Judge/Synthesizer、fallback、成本/延迟/并发预算和安全/可观测工程，
+把多个远程渠道提供的能力融合成三个稳定的公共模型名：`axio-fast`、`axio-terra`、
+`axio-pro`。Harness 只负责评测、控制、恢复和证据链，不是 Fusion 产品本体；它
+只能在 shadow/non-target 阶段推动 policy successor，不能把 benchmark 标签或结果
+写回生产路由。
+
+参考边界已经固定：吸收 Sakana AI Fugu/TRINITY/Conductor 的黑盒模型池、动态
+workflow、worker 隔离和显式上下文拓扑；吸收 OpenRouter Fusion 的 panel 并行、
+Judge 结构化比较和单一最终 Synthesizer；吸收 Harness Engineering 的 workflow
+automation、持久化状态、可恢复后台任务、context engineering、权限、评测和证据
+链。完整映射和非目标见
+`docs/scout/axio_fusion_goal_reference_architecture_2026-08-21.md`。
+
+三档公共模型代表三种受预算约束的工作流，而非三个隐藏单模型：Fast 是 bounded
+direct cascade，Terra 是选择性互补融合，Pro 是 expert panel -> Judge -> targeted
+repair -> acting Synthesizer。简单任务可不启用多模型；复杂任务也必须服从
+deadline、call/cost、canonical 去重、replica failover、工具隔离、streaming 和
+3x latency guard。
+
+当前工程主线已经完成 runtime、四协议适配、图片隔离和 Harness 离线控制面；真正
+尚未完成的是完整 provider baseline lineage 和最终 21-suite 质量证据。r17 已
+terminal/transport-blocked，r18 仅到 zero-network preflight ready。不得把历史
+14-suite 结果、partial screening score 或静态 capability prior 写成 superiority。
+
+最终唯一合法路径：
+
+```text
+transport 根因复核
+ -> 明确授权 r18 live screening
+ -> terminal screening
+ -> transport admission
+ -> complete-pool ranking
+ -> external top-three
+ -> provider baseline freeze
+ -> same-cohort Harness pin/import/convergence
+ -> 9 类 21 套 benchmark
+ -> paired statistics / latency / cost / contamination / final audit
+```
+
+在每个功能拆解前，先回到产品/PRD 契约确认真实意图；当未知会改变后续 gate 时，
+先做本地证据和一手参考调研，再开始架构或代码变更。不得修改冻结 screening
+plan、恢复 checkpoint、拼接 survivor subset、降低固定 2% transport gate 或提前
+target benchmark。
+
 ## r17 终态、transport gate 与 r18 离线 successor（2026-08-21 00:09 CST）
 
 r17 唯一 live non-target screening 已自然终态，16/16 unit terminal，safe state 为
