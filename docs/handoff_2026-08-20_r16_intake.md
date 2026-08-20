@@ -161,6 +161,27 @@ supervisor/watcher 保持 `next_gate=screening`、`target_suite_calls_allowed=fa
 `target_suite_calls_performed=false`。不得恢复任一 checkpoint、不得使用 `--retry-failed`、
 不得修改 frozen plan、不得拼接 completed/survivor subset、不得启动第二套 screening。
 
+## r16 第四个 unit 终态与第五个 unit 启动（2026-08-20 16:54 CST）
+
+r16 safe live state 更新为 SHA-256
+`a27ee4a15e2c1ebe892f9ddfcf29d421ca20cf97cf9423541dc56a4f64b3496d`；campaign digest 为
+`ea29512ad166c949aa412310cc0fe5dd32cdb7c2d838648d18f82eb175a2c896`。campaign 仍为
+`status=running`，16 个 planned units 中 `0 completed / 4 failed`，`ready_for_ranking=false`，
+`network_calls_performed=true`、`target_suite_calls_performed=false`。第四个 unit
+`69efb856ac5b893e75548c5d92ed500b1c8e6deac0e8d93b672e7196aa91236a` 已自然终态失败：
+`46/112` scored、`66/112` transport failures、failure rate `0.589285714286`，reason code
+为 `screening_unit_transport_failure_rate_exceeded`。完整失败分母继续保留为 provider
+transport evidence，不能解释为质量分数、survivor subset 或 ranking。
+
+筛选器已按 frozen serial schedule 进入第五个 unit；当前私有 checkpoint 属于新的 `102`-case
+unit，`0/102`、状态 `partial`，checkpoint SHA-256 为
+`9fd45ccb2b29a1f060d5cbbadb6563ce93773af5e4daf1a0383aa2469fde5250`。该 checkpoint 仅是
+私有恢复证据，不能作为 unit 完成、transport admission 或 ranking 依据。screening receipt、
+transport admission、ranking、provider baseline freeze、official import 与 target campaign
+仍未生成；supervisor/watcher 继续保持 `next_gate=screening`、`target_suite_calls_allowed=false`、
+`target_suite_calls_performed=false`。不得恢复任一 checkpoint、不得使用 `--retry-failed`、
+不得修改 frozen plan、不得拼接 completed/survivor subset、不得启动第二套 screening。
+
 ## r16 低频进度复核（2026-08-20 15:50 CST）
 
 三项进程仍由 init 托管且 command-line identity 未变。当前活动 unit 的私有 checkpoint 已
