@@ -77,3 +77,16 @@ official import 与 target campaign 仍未生成；supervisor/watcher 仍为
 `next_gate=screening`、`target_suite_calls_allowed=false`、`target_suite_calls_performed=false`。
 本轮只读审计确认历史 benchmark runner 的裸 `except:`/重复路径属于 baseline freeze 后的
 独立清理项，当前不改动它们，不改变 frozen plan 或任何 routing/prompt/panel policy。
+
+## r16 低频进度复核（2026-08-20 15:24 CST）
+
+三项进程仍由 init 托管且命令行 identity 未改变。当前活动 unit 的私有 checkpoint 已推进到
+`31/102`、`partial`，SHA-256 为
+`779e5b887cbe275e236dae269741e28b02446711976b8de86b236d10fac4fb62`。checkpoint 仅是私有
+恢复证据，不能作为 unit 完成、质量分数、ranking 或 baseline freeze 依据。
+
+safe live state、screening receipt、transport admission、ranking、provider baseline freeze、
+official import 与 target campaign 仍未生成；supervisor/watcher 继续为
+`next_gate=screening`、`target_suite_calls_allowed=false`、`target_suite_calls_performed=false`。
+生产 loopback `/health` 只读检查返回 `ready`，公开模型仍为三个 Axio tier，network transport
+为 configured proxy；这些只证明服务工程健康，不证明 provider 能力或 superiority。

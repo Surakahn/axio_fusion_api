@@ -59,6 +59,21 @@ screening terminal，watcher 保持 `next_gate=screening`、`target_suite_calls_
 不得恢复 r15/r16 checkpoint、不得使用 `--retry-failed`、不得修改 frozen plan、不得启动第二套
 screening；screening terminal 后才由同 cohort supervisor 执行 transport admission。
 
+## r16 低频进度复核（2026-08-20 15:24 CST）
+
+低频只读复核确认 r16 唯一 screening、convergence supervisor、lineage watcher 仍由 init
+托管，三者命令行仍绑定 r16 frozen plan/source 与 r7 probe-bound registry/probe/admission。
+当前活动 unit 的私有 checkpoint 已推进到 `31/102`，状态为 `partial`，checkpoint SHA-256 为
+`779e5b887cbe275e236dae269741e28b02446711976b8de86b236d10fac4fb62`。该 checkpoint 仅是
+私有恢复证据，包含 raw provider output，不能解释为 unit 完成、质量分数或 ranking 证据。
+
+safe live state、screening receipt、transport admission、ranking、provider freeze、official
+import 和 target campaign 仍未生成；supervisor/watcher 继续保持 `next_gate=screening`、
+`target_suite_calls_allowed=false`、`target_suite_calls_performed=false`。生产 loopback
+`/health` 已只读核验为 `ready`，公开模型仍仅为三个 Axio tier，服务网络选择为 configured
+proxy；这属于工程健康证据，不是 provider 能力或 superiority 证据。后续继续低频检查，
+screening terminal 前不得执行下游 gate。
+
 ## r16 低频进度复核（2026-08-20 15:15 CST）
 
 低频只读复核确认 r16 唯一 screening、convergence supervisor、lineage watcher 仍由 init
