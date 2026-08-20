@@ -1,5 +1,37 @@
 # Axio Fusion API Plan
 
+## r16 screening 与 transport 终态（2026-08-20 18:37 CST）
+
+r16 唯一 live non-target screening 已自然终态。screening receipt 与 safe state 均为
+`status=partial`：16/16 unit terminal，其中 2 个 `completed`、14 个 `failed`，
+`ready_for_ranking=false`，`network_calls_performed=true`，`target_suite_calls_performed=false`。
+screening state SHA-256 为
+`c51ee8a8e39f4ac67cdf34249b30da1ed799e4dccecc49bd289314b526658f81`，receipt SHA-256 为
+`c5cf1b28fd37508cd6e31033dcb3d42650c24dfb452adf5f3afe5ebc924f302`，campaign digest 为
+`b63b3a231a1f51a8628ea85268cfd304f64a84c0ced416beb062ec739ab1f438`。
+
+完整失败分母保留在私有 receipt：5 个 `102/102`、4 个 `112/112` 的全量 transport
+failure，另有 `24/102`、`66/112`、`84/112`、`96/112`、`46/112` 的失败分母；仅有
+两个 `102/102` unit 为零 transport failure。以上是 transport evidence，不是质量分数、
+ranking 或 baseline freeze 证据；不得抽取成功 unit、拼接旧 cohort 或恢复 checkpoint。
+
+同 cohort supervisor 已只执行允许的 transport admission：receipt SHA-256 为
+`9c9bed1793081127f0af4f46f935f134ba437697c25f1ff5b08e205ba5c813d9`，绑定 r16 plan
+SHA-256 `9582c0fd3045698fddca3c1358e989bbcd83fb28084f64747e3b77fb6d0a9ecd`、plan digest
+`23c1b22a1708e38579f2c8f70f82bfe36a1bb7d4bde20e9aa337e289f8e969ad`、source manifest
+SHA-256 `cf38effec8b7420dcb2b4726e93835b99342d79164806068ab9a478068511bc4` 和 r7
+probe-bound registry SHA-256 `7d0a9b78a06ea7445c43b7c03e15d6bbedb3112ecf8fb7d1ad041301678c1ad8`。
+结果为 `status=blocked`、`eligible_canonical_model_count=0`、最低要求 3，唯一 blocker
+为 `transport_admission_fewer_than_minimum_models`；ranking conversion、provider
+baseline freeze、official import 与 target campaign 均未启动。supervisor receipt
+`status=blocked`，`transport_return_code=2`，`target_benchmark_started=false`。
+
+因此 r16 已封存为 reference-only。下一步只能从 r16 source contract 创建新的 immutable
+r17 successor，只改变 `pre_registration.registered_on` 与新的 `selection_seed`，再离线
+生成新的 frozen plan、zero-network preflight 和同 cohort Harness 控制面；不得读取 r16
+score、transport 结果、checkpoint、survivor subset 或 ranking，不降低 2% gate，不提前
+发送 target 请求。生产 loopback 继续保持只读健康状态，不切换 registry、不重启服务。
+
 ## r16 生产 loopback registry 只读核验（2026-08-20 17:16 CST）
 
 生产 loopback `127.0.0.1:18900/health` 返回 `status=ready`，服务仍为独立
