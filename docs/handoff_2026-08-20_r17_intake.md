@@ -82,3 +82,15 @@ SHA-256 `37135e43adaddbca18253d65f0311b8a6f8855cf337002ab29797c4831f389ee`，
 后续以 10–20 分钟为间隔做低频只读检查；不得恢复 checkpoint、修改 r17 plan、调整 router/
 prompt/weights 或重启健康的生产 loopback。screening terminal 后才允许同 cohort supervisor
 执行 transport admission。
+
+## r17 首个 serial unit 进度（2026-08-20 19:07 CST）
+
+低频检查确认 screening/supervisor/watcher 三个 PID 仍存活且命令行 identity 未变。首个
+serial unit 的私有 checkpoint 为 `checkpoint_status=partial`、`9/102`，SHA-256 为
+`1c026cc71b94babb9aa90a5a48f9fa4edc371751cdc5ae185ad7a88221b87e30`。它包含 raw provider
+output，故只保存 hash、状态和计数，不读取内容、不进入 Git，不作为 ranking 或质量证据，也
+不恢复 checkpoint。
+
+safe live state、screening receipt 和所有下游 gate 产物仍未生成；supervisor/watcher 保持
+`next_gate=screening`、`target_suite_calls_allowed=false`、`target_suite_calls_performed=false`。
+继续按 10–20 分钟低频观察，screening terminal 前不触碰 frozen inputs。

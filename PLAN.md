@@ -67,6 +67,19 @@ request、case answer 或 target call，未进入 r17 lineage。随后使用进�
 和 hash、supervisor/watcher 日志及下游 artifact；screening terminal 前不修改 plan、不调整
 router/prompt/weights、不重启生产 loopback 服务。
 
+## r17 首个 serial unit checkpoint（2026-08-20 19:07 CST）
+
+低频只读检查确认 screening PID `3739367`、supervisor PID `3741799`、watcher PID `3742593`
+仍由 init 托管，命令行仍绑定 r17 frozen plan/source 与 r7 registry/probe/admission。首个
+serial unit 已生成私有 checkpoint：`checkpoint_status=partial`、`9/102`，文件 SHA-256 为
+`1c026cc71b94babb9aa90a5a48f9fa4edc371751cdc5ae185ad7a88221b87e30`。checkpoint 属于私有
+恢复证据，标记 `raw_provider_outputs_persisted=true`，不进入 Git、不解释为 unit 完成、质量
+分数或 ranking，也不允许手工恢复或拼接。
+
+safe live state、screening receipt、transport admission、ranking、provider baseline freeze、
+official import 和 target campaign 仍不存在；supervisor 继续等待 terminal，watcher 继续
+保持 `next_gate=screening`、`target_suite_calls_allowed=false`、`target_suite_calls_performed=false`。
+
 ## r16 screening 与 transport 终态（2026-08-20 18:37 CST）
 
 r16 唯一 live non-target screening 已自然终态。screening receipt 与 safe state 均为
