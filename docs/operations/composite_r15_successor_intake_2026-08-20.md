@@ -1,5 +1,16 @@
 # Composite cohort r15 successor intake（2026-08-20）
 
+## r15 最终终态与 successor 路由
+
+r15 已在 14:42 CST 自然终态：16/16 unit terminal，screening receipt 为 `partial`，1
+completed、15 failed；14:47 CST supervisor 完成 transport admission，结果为 `blocked`，
+`eligible_canonical_model_count=0`、最低要求为 3，唯一 blocker 为
+`transport_admission_fewer_than_minimum_models`。ranking、provider baseline freeze 和
+target benchmark 均未启动，完整失败分母保留为 reference-only。
+
+正确动作是注册新的 immutable r16 successor，而不是恢复或拼接 r15。r16 生成、preflight
+与 Harness 控制面见 [r16 successor intake](</home/he/axio_fusion_api/docs/operations/composite_r16_successor_intake_2026-08-20.md>)。
+
 ## 继任边界
 
 r14 已自然终态为 `partial`：16/16 unit terminal，10 completed、6 failed，ranking
@@ -214,7 +225,23 @@ r15 frozen plan/source 与 r7 registry/probe/admission。safe state SHA-256 为
 `60/102`，全部触发固定 `2%` gate，不能转成质量或排名证据。
 
 当前 task `dd6e3d631867c96b5417ca5860af672e9de80961eae4f317e6c17e96fac9559a` 的 checkpoint
-为 `2/102`、`partial`，SHA-256 为
+为 `2/112`、`partial`，SHA-256 为
 `0a75d69049abf3da03e37f9def47833f600ff8d49f937ee374bfdc5c37e915a8`。screening receipt、
+transport admission、ranking、provider freeze、official import 和 target campaign 仍不
+存在，`next_gate=screening`、`target_suite_calls_allowed=false` 不变。
+
+## r15 live screening 进度快照（2026-08-20 14:17 CST）
+
+14:17:37 CST 只读核验确认三个 init 托管进程仍存活，命令行继续绑定同一 r15 frozen
+plan/source 与 r7 probe-bound registry/admission。safe state SHA-256 为
+`e4fbe624e2a0d8e7692dc6eaa7698f9197d27afea77650b8ad74ebb5a10d557d`；16 planned unit 中
+`1 completed / 12 failed`，13/16 已写入 state，剩余 3 个，`ready_for_ranking=false`、
+`target_suite_calls_performed=false`。新增 failed unit 的分母是 `102/112` transport
+failures；完整 failed 分母为 `112/112 ×5`、`102/112`、`102/102 ×2`、`101/102`、
+`92/102`、`80/102`、`60/102`，均触发固定 `2%` gate，不能用于质量或排名。
+
+当前 task `fce71276a5c3344d9a534c42a84b5f75fdee4d97b7f9660bb9af3796f8ec5166` 的 checkpoint
+为 `6/102`、`partial`，SHA-256 为
+`2c4aa0ad9ed3c423ec599412781f87e3d124f347c8b63fec2555007d8eac570a`。screening receipt、
 transport admission、ranking、provider freeze、official import 和 target campaign 仍不
 存在，`next_gate=screening`、`target_suite_calls_allowed=false` 不变。

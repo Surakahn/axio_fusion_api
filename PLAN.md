@@ -1,5 +1,49 @@
 # Axio Fusion API Plan
 
+## Composite cohort r15 terminal 与 r16 当前锚点（2026-08-20 14:55 CST）
+
+r15 已自然终态并完成同 cohort 的 transport admission。最终 screening receipt
+`private/runs/2026-08-20-composite-cohort-r15/screening.live.receipt.r15.private.json`
+为 `status=partial`，16/16 unit terminal，其中 1 completed、15 failed；campaign digest
+为 `61a02eaecfcfa17b1e9458c8384ffcff47a4addef63af89aa0efed1c5aee67d7`，state SHA-256 为
+`262c2711bf7d5c5e42d21fa7e303e27d7bdc123deb66f0a7ebc3f8af662c919d`。唯一 completed unit
+为 `112/112`、transport failure `0`；失败分母完整保留为
+`112/112 ×5`、`104/112`、`102/102 ×2`、`102/112`、`101/102`、`98/102`、`93/102`、
+`92/102`、`80/102`、`60/102`，均超过固定 `2%` transport gate，唯一 `112/112` completed
+unit 除外。以上是完整 transport 分母，不是质量分数或 ranking。
+
+transport admission receipt
+`private/runs/2026-08-20-composite-cohort-r15/transport_admission.r15.private.json`
+为 `blocked`：8 个 candidate canonical 中 `eligible_canonical_model_count=0`，最低要求
+为 3，唯一 blocker 为 `transport_admission_fewer_than_minimum_models`。supervisor 返回
+`transport_return_code=2`、`ranking_file_sha256=""`、`target_benchmark_started=false`；
+没有 ranking、provider baseline freeze 或 target request，所有完整失败 evidence 保留为
+reference-only。
+
+r16 已从 r15 source contract 创建新的 immutable successor，只改变 registered_on 与
+selection seed，不读取 r15 score、transport、checkpoint、survivor subset 或 ranking：
+
+- source manifest SHA-256：`cf38effec8b7420dcb2b4726e93835b99342d79164806068ab9a478068511bc4`；
+  successor receipt SHA-256：`f0cbfa13788314f85bb4e4abf889a9a522a5df4cafcb65efeda6fed0457c1ede`；
+- selection seed：`composite-r16-2026-08-20-transport-successor`；selection seed hash：
+  `0f05adcba97d02c23fecdb36d2be6029ed73cf0e9d46a8aef2321441b0125134`；
+- frozen plan SHA-256：`9582c0fd3045698fddca3c1358e989bbcd83fb28084f64747e3b77fb6d0a9ecd`；
+  plan digest：`23c1b22a1708e38579f2c8f70f82bfe36a1bb7d4bde20e9aa337e289f8e969ad`；
+- plan 为 `ready=true`，2 source families、8 canonical groups/9 replicas、16 serial units、
+  `max_workers=1`、固定 `2%` fail-fast、estimated provider calls `1712`；
+- zero-network preflight 为 `preflight_ready`，state SHA-256
+  `3f7b5b367d8ad6d0887f1bd566d61f7d9463fc54adbfd5208090a3dfaf482310`，receipt SHA-256
+  `b61c75dd01902b80d1ba6e2b6ac2359aff49765fbc66ceb9ffd78531ea2bf9fd`，campaign digest
+  `af9aeed814a6e20940dd8f2a3d497e3ce9115d326ffd9e2e999bef826e2e31dc`，
+  `network_calls_performed=false`、`target_suite_calls_performed=false`；
+- r16 Harness 控制面已离线生成，pin 6/6 ready、execution plan `ready_to_execute`，
+  convergence audit `blocked/next_gate=screening`，target calls 与 provider calls 均为 false。
+
+当前唯一下一步是启动一套绑定 r16 plan/source、r7 probe-bound registry/admission 的
+live non-target screening；启动前必须再做命令行 identity、PID、日志和 preflight hash 核验。
+不得恢复 r15、不得使用 `--retry-failed`、不得启动第二套 screening；terminal 后才可由
+同 cohort supervisor 执行 transport admission，只有 admission ready 才可进入完整池 ranking。
+
 ## Composite cohort r15 当前主线快照（2026-08-20 13:48 CST）
 
 r15 是当前唯一允许的 live non-target screening。冻结输入保持不变：plan 文件 SHA-256
@@ -51,11 +95,26 @@ target campaign。
 `101/102`、`92/102`、`80/102`、`60/102`，不允许抽取 survivor subset、恢复 checkpoint、
 使用 `--retry-failed` 或降低 `2%` gate。当前 task
 `dd6e3d631867c96b5417ca5860af672e9de80961eae4f317e6c17e96fac9559a` 的 checkpoint 为
-`2/102`，SHA-256 `0a75d69049abf3da03e37f9def47833f600ff8d49f937ee374bfdc5c37e915a8`。
+`2/112`，SHA-256 `0a75d69049abf3da03e37f9def47833f600ff8d49f937ee374bfdc5c37e915a8`。
 
 screening terminal 前后置 gate 仍全部关闭：`target_suite_calls_performed=false`、
 `next_gate=screening`、`target_suite_calls_allowed=false`；terminal 后才可由同 cohort
 supervisor 执行 transport admission 与完整池 ranking。
+
+### r15 14:17 live screening 增量
+
+截至 14:17:37，safe state SHA-256 为
+`e4fbe624e2a0d8e7692dc6eaa7698f9197d27afea77650b8ad74ebb5a10d557d`，r15 仍为
+`status=running`：16 planned unit 中 `1 completed / 12 failed`，13/16 已写入 state，剩余
+3 个未 terminal。新增 failed unit 为 `102/112` transport failures；完整 failed 分母保留
+为 `112/112 ×5`、`102/112`、`102/102 ×2`、`101/102`、`92/102`、`80/102`、`60/102`，
+不允许恢复 checkpoint、使用 `--retry-failed`、拼接 survivor subset 或降低 `2%` gate。
+当前活动 task 为 `fce71276a5c3344d9a534c42a84b5f75fdee4d97b7f9660bb9af3796f8ec5166`，checkpoint
+`6/102`，SHA-256 `2c4aa0ad9ed3c423ec599412781f87e3d124f347c8b63fec2555007d8eac570a`。
+
+`target_suite_calls_performed=false`、`next_gate=screening`、`target_suite_calls_allowed=false`
+继续成立；screening terminal 前禁止 transport conversion、ranking、freeze、official import
+与 target campaign。
 
 ## Composite cohort r14 successor intake（2026-08-19）
 

@@ -1,5 +1,17 @@
 # r15 intake 交接（2026-08-20）
 
+## 最终终态与 r16 切换
+
+r15 已自然终态：16/16 unit terminal，screening receipt 为 `partial`，1 completed、15
+failed；transport admission 为 `blocked`，8 个 candidate canonical 中 0 个通过固定 2%
+transport gate，最低要求为 3。supervisor 返回 `transport_return_code=2`，未生成 ranking、
+provider baseline freeze 或 target 请求，`target_benchmark_started=false`。r15 的完整分母、
+state、receipt、transport admission 与控制面 artifact 全部保留为 reference-only。
+
+随后已注册 r16 immutable successor；详见 [r16 intake](</home/he/axio_fusion_api/docs/handoff_2026-08-20_r16_intake.md>)。
+不恢复 r15 checkpoint、不使用 `--retry-failed`、不拼接 survivor subset、不降低 2% gate、
+不重复上游 probe。
+
 ## 已完成
 
 - r14 已封存为 `partial`，不再恢复或补跑。
@@ -146,8 +158,25 @@ completed unit 仍是 `112/112`、transport failure `0`。11 个 failed unit 的
 
 当前已切换到下一个 serial unit，task 为
 `dd6e3d631867c96b5417ca5860af672e9de80961eae4f317e6c17e96fac9559a`，private checkpoint
-为 `2/102`、`checkpoint_status=partial`，SHA-256 为
+为 `2/112`、`checkpoint_status=partial`，SHA-256 为
 `0a75d69049abf3da03e37f9def47833f600ff8d49f937ee374bfdc5c37e915a8`。screening receipt、
 transport admission、ranking、provider freeze、official import、target campaign 仍不存在；
 后置 gate 继续关闭。本次未恢复 checkpoint、未使用 `--retry-failed`、未修改 frozen plan、
 未启动第二套 screening。
+
+## 14:17 CST 低频进度复核
+
+截至 2026-08-20 14:17:37，三个 init 托管进程仍存活，safe state SHA-256 为
+`e4fbe624e2a0d8e7692dc6eaa7698f9197d27afea77650b8ad74ebb5a10d557d`。campaign 仍为
+`status=running`、16 planned unit 中 `1 completed / 12 failed`，13/16 unit 已写入 state，
+剩余 3 个未 terminal，`ready_for_ranking=false`、`target_suite_calls_performed=false`。
+新增 failed unit 的完整分母为 `102/112` transport failures；当前 failed 分母完整保留为
+`112/112 ×5`、`102/112`、`102/102 ×2`、`101/102`、`92/102`、`80/102`、`60/102`，
+均属于固定 `2%` transport fail-fast evidence，不能转为质量或排名。
+
+当前 serial task 为
+`fce71276a5c3344d9a534c42a84b5f75fdee4d97b7f9660bb9af3796f8ec5166`，checkpoint `6/102`、
+`partial`，SHA-256 `2c4aa0ad9ed3c423ec599412781f87e3d124f347c8b63fec2555007d8eac570a`。
+screening receipt、transport admission、ranking、provider freeze、official import 和
+target campaign 仍不存在；本次未恢复 checkpoint、未使用 `--retry-failed`、未修改 frozen
+plan、未启动第二套 screening。

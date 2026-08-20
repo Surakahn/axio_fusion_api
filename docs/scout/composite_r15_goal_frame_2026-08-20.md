@@ -1,11 +1,32 @@
-# Composite r15 Goal framing（2026-08-20）
+# Composite r15/r16 Goal framing（2026-08-20）
+
+## 当前主线切换：r15 terminal -> r16 successor
+
+r15 已自然终态，16/16 unit terminal，transport admission 为 `blocked`：8 个 candidate
+canonical 中 0 个满足固定 2% transport gate，最低要求为 3。r15 不产生 ranking、provider
+baseline freeze 或 target 证据；完整 state、screening receipt、transport receipt、supervisor
+receipt 和 Harness audit 均保留为 reference-only。当前 goal 已切换到 r16 immutable successor，
+不恢复 r15、不拼接 completed subset、不降低 gate、不重复上游 probe。
+
+r16 的 frozen plan、zero-network preflight 和 Harness scaffold 已生成并 hash 绑定：plan
+digest `23c1b22a1708e38579f2c8f70f82bfe36a1bb7d4bde20e9aa337e289f8e969ad`，source SHA-256
+`cf38effec8b7420dcb2b4726e93835b99342d79164806068ab9a478068511bc4`，preflight campaign
+digest `af9aeed814a6e20940dd8f2a3d497e3ce9115d326ffd9e2e999bef826e2e31dc`。计划为 16 个
+serial units、2 source families、8 canonical groups/9 replicas、`max_workers=1` 和 2%
+fail-fast；preflight 明确无 network/target call。Harness pin 6/6 ready，但 acquisition、
+official import、binding 和 convergence 仍 blocked，`next_gate=screening`。
+
+下一阶段不是再设计未经 baseline 证明的 Fusion 算法，而是获得完整 provider baseline
+lineage。只有 r16 terminal 且 transport admission ready，才进入 complete-pool ranking、
+external rank 1/2/3、provider freeze、same-cohort official/audited import、21-suite target
+campaign 和最终统计审计。
 
 ## 结论
 
-当前 goal 的下一锚点是继续等待唯一 r15 non-target screening 自然终态。产品、代码和
-Harness 控制面已经有可验证的工程基础；当前缺口是完整 provider baseline evidence
-lineage，不是再增加一个未经基线验证的 Fusion 算法。screening terminal 以前不得进入
-transport conversion、ranking、provider freeze、official import 或 target campaign。
+当前 goal 的下一锚点是唯一 r16 non-target screening 的自然终态。产品、代码和 Harness
+控制面已经有可验证的工程基础；当前缺口是完整 provider baseline evidence lineage，
+不是再增加一个未经基线验证的 Fusion 算法。screening terminal 以前不得进入 transport
+conversion、ranking、provider freeze、official import 或 target campaign。
 
 ## Goal 与 PRD 契约
 
@@ -25,20 +46,15 @@ transport conversion、ranking、provider freeze、official import 或 target ca
 
 ## 当前证据位置
 
-截至 2026-08-20 14:04:57，r15 safe state 为 `running`，16 planned unit 中
-`1 completed / 11 failed`，12/16 已写入 state，剩余 4 个；state SHA-256 为
-`3b0e4a3001423a964b1f5fb907acca2e30b2e48b10cb6798d26a0fe12a022096`。唯一通过 unit 为
-`112/112`、transport failure `0`；失败分母完整保留为 `112/112 x5`、`102/102 x2`、
-`101/102`、`92/102`、`80/102`、`60/102`，原因均属于 transport fail-fast evidence，
-不是能力分数或 ranking。当前活动 checkpoint 是 `dd6e3d631867c96b5417ca5860af672e9de80961eae4f317e6c17e96fac9559a`
-的 `2/102` partial，SHA-256 为
-`0a75d69049abf3da03e37f9def47833f600ff8d49f937ee374bfdc5c37e915a8`。
-
-三项进程仍由 init 托管：screening `2871629`、supervisor `2880595`、watcher `2881730`。
-`target_suite_calls_performed=false`、`ready_for_ranking=false`，screening receipt、
-transport admission、ranking、provider freeze 和 target 产物均不存在。全量工程回归
-`python3.11 -m pytest tests/ -x -q --tb=short` 已为 `1066 passed, 7 skipped`；这只是
-代码契约证据，不是 provider 能力或 superiority 证据。
+当前 r15 已 terminal：16/16 unit terminal，screening receipt 为 `partial`，1 completed、
+15 failed；transport admission 为 `blocked`，8 个 candidate canonical 中 0 个满足固定 2%
+transport gate，最低要求为 3。state SHA-256 为 `262c2711bf7d5c5e42d21fa7e303e27d7bdc123deb66f0a7ebc3f8af662c919d`，
+screening receipt SHA-256 为 `29dff8639fd59596eb66cb5643bfee2f08d82ada96359a983ca54559dc14513`，
+transport receipt SHA-256 为 `53c60e97cae40db1094d5e472e2a2ff2688760ec60be7453d1e29dd33388b639`。
+唯一 completed unit 为 `112/112`、transport failure `0`；其余失败 unit 的完整 transport
+分母均保留，不能解释为质量分数、survivor subset 或 ranking。supervisor 未生成 ranking、
+provider freeze 或 target 产物，`target_benchmark_started=false`。工程回归 `1066 passed,
+7 skipped` 仍只是代码契约证据。
 
 ## 正式评价契约
 

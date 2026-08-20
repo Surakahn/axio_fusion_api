@@ -1,0 +1,53 @@
+# r16 intake 交接（2026-08-20）
+
+## r15 封存结论
+
+r15 已自然终态，16/16 unit terminal，screening receipt 为 `partial`，1 completed、15
+failed。transport admission 为 `blocked`：8 个 candidate canonical 中 0 个满足固定 2%
+transport gate，最低要求为 3，blocker 为 `transport_admission_fewer_than_minimum_models`。
+完整失败分母保留在 r15 私有 state/receipt，不能抽取 survivor subset、恢复 checkpoint、使用
+`--retry-failed`、拼接 completed unit 或降低 gate。r15 没有 ranking、provider baseline
+freeze、official import 或 target request。
+
+关键 r15 证据：
+
+- screening receipt：`private/runs/2026-08-20-composite-cohort-r15/screening.live.receipt.r15.private.json`，SHA-256 `29dff8639fd59596eb66cb5643bfee2f08d82ada96359a983ca54559dc14513`；
+- transport admission：`private/runs/2026-08-20-composite-cohort-r15/transport_admission.r15.private.json`，SHA-256 `53c60e97cae40db1094d5e472e2a2ff2688760ec60be7453d1e29dd33388b639`；
+- supervisor：`private/runs/2026-08-20-composite-cohort-r15/convergence_supervisor.r15.private.json`，`status=blocked`、`transport_return_code=2`、`target_benchmark_started=false`。
+
+## r16 immutable successor
+
+r16 只从 r15 source contract 创建新的 source successor，只改变 pre-registration 日期和
+selection seed；不读取 r15 score、transport receipt、ranking、checkpoint 或 survivor subset：
+
+- run root：`private/runs/2026-08-20-composite-cohort-r16/`；
+- source manifest：`source_manifest.successor.r16.private.json`，SHA-256 `cf38effec8b7420dcb2b4726e93835b99342d79164806068ab9a478068511bc4`；
+- successor receipt：`source_manifest_successor_receipt.r16.private.json`，SHA-256 `f0cbfa13788314f85bb4e4abf889a9a522a5df4cafcb65efeda6fed0457c1ede`；
+- selection seed：`composite-r16-2026-08-20-transport-successor`，hash `0f05adcba97d02c23fecdb36d2be6029ed73cf0e9d46a8aef2321441b0125134`；
+- plan：`baseline_screening_plan.r16.private.json`，SHA-256 `9582c0fd3045698fddca3c1358e989bbcd83fb28084f64747e3b77fb6d0a9ecd`，digest `23c1b22a1708e38579f2c8f70f82bfe36a1bb7d4bde20e9aa337e289f8e969ad`；
+- plan binding：2 source families、8 canonical groups/9 replicas、16 serial units、`max_workers=1`、2% fail-fast、estimated calls `1712`、`ready=true`。
+
+## Zero-network preflight 与 Harness
+
+- preflight state：`screening_state.r16.preflight.private.json`，SHA-256 `3f7b5b367d8ad6d0887f1bd566d61f7d9463fc54adbfd5208090a3dfaf482310`；
+- preflight receipt：`screening.preflight.receipt.r16.private.json`，SHA-256 `b61c75dd01902b80d1ba6e2b6ac2359aff49765fbc66ceb9ffd78531ea2bf9fd`；
+- campaign digest：`af9aeed814a6e20940dd8f2a3d497e3ce9115d326ffd9e2e999bef826e2e31dc`；
+- `status=preflight_ready`、`network_calls_performed=false`、`target_suite_calls_performed=false`；
+- Harness 目录：`harness_control.successor/`；pin 6/6 ready、execution plan `ready_to_execute`，convergence `blocked/next_gate=screening`；所有 provider/target call 标志均为 false。
+
+## 唯一后续路径
+
+启动前只做一次只读核验：r16 plan/source/probe/admission hash、无同名 live screening、命令
+行 identity、preflight flags 和工作树状态。随后用 `setsid/nohup` 启动一套 `baseline-screening-run --live`，绑定 r16 frozen inputs；screening terminal 前不执行 transport conversion、ranking、freeze、official import 或 target campaign。
+
+terminal 后严格执行：
+
+```text
+transport admission -> complete-pool ranking -> external rank 1/2/3 evidence
+-> provider baseline freeze -> same-cohort official/audited import
+-> cohort binding/convergence audit -> 21-suite target campaign
+-> paired statistics/latency/API parity/contamination/final audit
+```
+
+所有文档、receipt、commit message 使用中文；private evidence 不进入 Git，不写入 secrets、
+raw prompt、label、provider URL、raw output。未完成完整证据前不做 superiority claim。
