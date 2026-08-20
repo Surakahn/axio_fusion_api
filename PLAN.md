@@ -44,6 +44,21 @@ live non-target screening；启动前必须再做命令行 identity、PID、日�
 不得恢复 r15、不得使用 `--retry-failed`、不得启动第二套 screening；terminal 后才可由
 同 cohort supervisor 执行 transport admission，只有 admission ready 才可进入完整池 ranking。
 
+## r16 live screening 启动里程碑（2026-08-20 15:07 CST）
+
+r16 唯一 live non-target screening 已使用 `setsid/nohup` 启动：screening PID `3231684`、
+convergence supervisor PID `3231745`、lineage watcher PID `3231746`。三者命令行均绑定
+r16 frozen plan/source 与 r7 probe-bound registry、provider probe、operational admission；
+没有第二套 screening。启动后 PID、命令行 plan identity、supervisor 初始 wait 事件和 watcher
+初始 convergence snapshot 均通过核验，未发现参数解析或 `ModuleNotFoundError`。
+
+当前 screening 尚未产生 safe live state 或 checkpoint；screening receipt、transport admission、
+ranking、provider freeze、official import 和 target campaign 均不存在。supervisor 正等待
+screening terminal，watcher 保持 `next_gate=screening`、`target_suite_calls_allowed=false`、
+`target_suite_calls_performed=false`。后续只做 10-20 分钟低频 PID/state/checkpoint/log 检查，
+不得恢复 r15/r16 checkpoint、不得使用 `--retry-failed`、不得修改 frozen plan、不得启动第二套
+screening；screening terminal 后才由同 cohort supervisor 执行 transport admission。
+
 ## Composite cohort r15 当前主线快照（2026-08-20 13:48 CST）
 
 r15 是当前唯一允许的 live non-target screening。冻结输入保持不变：plan 文件 SHA-256

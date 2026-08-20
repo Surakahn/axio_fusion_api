@@ -51,3 +51,16 @@ transport admission -> complete-pool ranking -> external rank 1/2/3 evidence
 
 所有文档、receipt、commit message 使用中文；private evidence 不进入 Git，不写入 secrets、
 raw prompt、label、provider URL、raw output。未完成完整证据前不做 superiority claim。
+
+## r16 live screening 启动里程碑（2026-08-20 15:07 CST）
+
+r16 唯一 live non-target screening 已通过 `setsid/nohup` 启动：screening PID `3231684`、
+convergence supervisor PID `3231745`、lineage watcher PID `3231746`。三者命令行均绑定
+r16 frozen plan/source 与 r7 probe-bound registry/probe/admission；PID、命令行 identity、
+supervisor wait 和 watcher 初始 convergence snapshot 均通过核验。当前没有 safe live state、
+checkpoint、screening receipt、transport admission、ranking、provider freeze、official import
+或 target campaign。supervisor/watcher 保持 `next_gate=screening`、
+`target_suite_calls_allowed=false`、`target_suite_calls_performed=false`。
+
+后续只做低频只读检查，不恢复 checkpoint、不使用 `--retry-failed`、不修改 frozen plan、不启动
+第二套 screening；screening terminal 后才执行同 cohort transport admission。
