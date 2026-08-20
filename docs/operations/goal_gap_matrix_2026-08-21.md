@@ -27,7 +27,7 @@ provider 能力组合成 `axio-fast`、`axio-terra`、`axio-pro`。Harness 只�
   9/9 required profiles ready，但它不授权 live screening，也不代表任何 provider 能力。
 - 当前服务只读健康：`ready`，公共模型为三档，四种协议可用，`auto -> proxy`，
   生产 loopback 为 `127.0.0.1:18900`，当前 serving registry 为 r7 probe-bound。
-- 当前工程回归：`1074 passed, 7 skipped`；这是代码契约证据，不是能力或质量证据。
+- 当前工程回归：`1076 passed, 7 skipped`；这是代码契约证据，不是能力或质量证据。
 
 ## 差距矩阵
 
@@ -37,7 +37,7 @@ provider 能力组合成 `axio-fast`、`axio-terra`、`axio-pro`。Harness 只�
 | 四协议公共 API | **done/partial** | Chat Completions、Responses、Anthropic Messages、Gemini 的规范化输入、流式输出、错误和 reasoning 公共边界已有回归 | 必须在正式 campaign 对 12 个 tier/surface 单元做同 cohort parity | campaign 放行后运行四面配对 parity 和失败审计 |
 | 图片能力 | **done** | verified image registry、generation/editing 探针、multipart/90 秒门禁、text/image 隔离 | 不是文本 Fusion 能力，不得混入 21-suite 文本 claim | 仅按独立 image registry 维护和回归 |
 | Fast 工作流 | **partial** | bounded direct cascade、轻量验证开关、replica failover、3x/预算 guard、fail-closed | 当前 r7 role/capability admission 使多数复杂请求退回 direct；实际 pricing/tool metadata 未校准 | baseline freeze 后用 non-target shadow 校准 light-verify 的 VOI/成本阈值 |
-| Terra 工作流 | **blocked/partial** | selective fusion、独立性检查、Judge/Synth reservation、正确的 direct fallback | 当前 registry 没有同时满足 `independent_solver + judge` 的准入容量；不能用弱模型冒充 | 完整 screening/ranking/freeze 后做 endpoint-bound role successor，再 shadow replay |
+| Terra 工作流 | **blocked/partial** | selective fusion、独立性检查、Judge/Synth reservation、正确的 direct fallback；零网络 fake-provider 回归已证明完整 role pool 下 panel phase 可配置并执行全部已准入 expert | 当前 registry 没有同时满足 `independent_solver + judge` 的准入容量；不能用弱模型冒充；fake-provider 结果不构成 live 能力证据 | 完整 screening/ranking/freeze 后做 endpoint-bound role successor，再 shadow replay；若 live 再出现 partial panel，按 safe cause taxonomy 分诊 |
 | Pro 工作流 | **partial** | panel -> Judge -> targeted escalation -> acting Synthesizer；角色上下文隔离；公共 reasoning 清理 | 当前 dry-run 只有一个 provider hash，跨 provider 互补不足；质量/成本尚未实测 | baseline freeze 后做 provider diversity/error-correlation/quality shadow 优化 |
 | Router/编排算法 | **partial** | query analysis、canonical 去重、角色 gate、deadline/call/cost reservation、fallback、circuit recovery、safe trace | 静态 capability prior 仍未被完整双源 non-target evidence 替换；VOI/portfolio optimizer 未晋级 | 只在 baseline freeze 后使用 non-target/shadow/holdout 设计和审批 successor |
 | Judge/Synthesizer | **partial** | 结构化比较 rubric、consensus/contradiction/coverage、独立性 gate、输出归一化 | confidence calibration、abstention/repair 阈值尚无同 cohort 实证；不得以 target label 调参 | baseline freeze 后用 operational non-target cases 校准并绑定 rollback |
@@ -46,7 +46,7 @@ provider 能力组合成 `axio-fast`、`axio-terra`、`axio-pro`。Harness 只�
 | Harness 控制面 | **partial/ready offline** | hash-only pin、execution plan、持久化状态、可恢复 supervisor、import audit、convergence gate | r18 acquisition/import/binding/convergence 依赖上游 screening/freeze，当前 `next_gate=screening` | freeze 后绑定同 cohort official/audited runs，再审计放行 target |
 | 21-suite 资产 | **partial/blocked** | 9 类 21 套 matrix、case/source/decoding/统计合同；14 套可直接 materialize，6 套需 official import，GPQA 受授权门禁 | 没有完整同 cohort run；GPQA/官方 harness/import 仍不能冒充 ready | 先完成 baseline freeze 和官方/audited imports，再启动 target |
 | Benchmark campaign | **blocked** | 独立 evaluator、四面 API、paired statistics、Holm、effect size、3x latency、污染审计的代码/合同已具备 | `target_suite_calls_allowed=false`，无 provider baseline freeze，无 campaign 证据 | convergence 返回 `ready_for_target_campaign` 后再按锁定矩阵运行 |
-| 商业级运维 | **partial** | 生产 health ready；proxy auto；setsid 服务；atomic/safe receipts；secret/raw output 隔离；公开 hash-safe capability metadata warnings 已实现；`current_channels.env` registry identity 已对齐 r7 serving identity | 当前正式进程尚未重启，仍运行变更前 warning 代码；auth 未启用；pricing/context/tool 能力字段为 unknown；跨 provider diversity 不足 | 下次受控发布时加载 warning 修复；按部署策略决定 auth；baseline 后补齐 admission metadata |
+| 商业级运维 | **partial** | 生产 health ready；proxy auto；setsid 服务；atomic/safe receipts；secret/raw output 隔离；公开 hash-safe capability metadata warnings 已实现；public/operator key 比较使用 constant-time 语义；`current_channels.env` registry identity 已对齐 r7 serving identity | 当前正式进程尚未重启，仍运行变更前 warning 代码；auth 未启用；pricing/context/tool 能力字段为 unknown；跨 provider diversity 不足 | 下次受控发布时加载 warning 修复；按部署策略决定 auth；baseline 后补齐 admission metadata |
 | 代码质量与冗余 | **partial** | 核心 `src`、测试和控制面回归绿；关键边界有类型/异常/receipt | 历史 benchmark scripts 有重复 runner 与裸 `except`；不能在 baseline gate 前混入重构 | baseline freeze 后拆独立 legacy cleanup，逐文件 L1-L4 验证 |
 
 ## 当前必须保持不变的边界

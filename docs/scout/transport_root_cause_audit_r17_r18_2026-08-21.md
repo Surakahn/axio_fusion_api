@@ -120,5 +120,5 @@ Pro 的该 dry-run 选席中实际 provider hash 只有一个，`provider_divers
 和 error-correlation/quality/latency evidence 评估，不能直接用 target 分数改权重。
 
 代码回归同样保持绿色：`python3.11 -m pytest tests/ -x -q --tb=short` 为
-`1074 passed, 7 skipped`。这些是工程与路由契约证据，不是 provider 能力、21-suite
+`1076 passed, 7 skipped`。这些是工程与路由契约证据，不是 provider 能力、21-suite
 分数或 superiority 证据。

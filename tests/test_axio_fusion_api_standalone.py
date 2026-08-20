@@ -6789,6 +6789,31 @@ def test_standalone_gateway_cors_preflight_requires_explicit_allowlist_and_prese
     assert operator["error"]["code"] == "operator_authorization_required"
 
 
+def test_standalone_gateway_auth_matching_is_exact_and_constant_time_compatible(monkeypatch):
+    monkeypatch.setenv("AXIO_FUSION_API_KEYS", "public-key,second-public-key")
+    monkeypatch.setenv("AXIO_FUSION_OPERATOR_API_KEYS", "operator-key")
+
+    compare_calls = []
+
+    def compare_digest(left, right):
+        compare_calls.append((left, right))
+        return left == right
+
+    monkeypatch.setattr(server_module.hmac, "compare_digest", compare_digest)
+
+    assert server_module._authorized({"x-api-key": "public-key"}) is True
+    assert server_module._authorized({"x-api-key": "public-key-prefix"}) is False
+    assert server_module._operator_authorized(
+        {"x-axio-operator-key": "operator-key"},
+        require_explicit_operator_key=True,
+    ) is True
+    assert server_module._operator_authorized(
+        {"x-axio-operator-key": "operator-key-prefix"},
+        require_explicit_operator_key=True,
+    ) is False
+    assert len(compare_calls) == 6
+
+
 def test_standalone_gateway_cors_rejects_disallowed_origin_without_echo(monkeypatch):
     monkeypatch.setenv("AXIO_FUSION_CORS_ALLOW_ORIGINS", "https://studio.example")
 

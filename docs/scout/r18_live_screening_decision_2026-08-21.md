@@ -13,7 +13,7 @@ screening？
 
 - Goal 仍为 active，产品契约是 remote-only Fusion API，公共模型只有
   `axio-fast`、`axio-terra`、`axio-pro`。
-- 工程基线已通过：`1074 passed, 7 skipped`；四协议、图片隔离、safe trace 和
+- 工程基线已通过：`1076 passed, 7 skipped`；四协议、图片隔离、safe trace 和
   Harness 控制面已有离线证据。
 - r17 已 terminal，但 transport admission blocked：16/16 unit、6 completed、
   10 failed，8 canonical 中只有 1 个通过两个 source family 的 2% gate，minimum
@@ -64,4 +64,3 @@ screening？
 
 在收到明确授权前，本决策包的状态为 `target_calls_allowed=false`，Goal 保持 active，
 不宣称项目完成或模型 superiority。
-

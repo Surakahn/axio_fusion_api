@@ -52,6 +52,37 @@ transport 根因复核
 plan、恢复 checkpoint、拼接 survivor subset、降低固定 2% transport gate 或提前
 target benchmark。
 
+## Terra panel 调度边界复核（2026-08-21）
+
+针对 AGENTS.md 记录的 Terra “部分 panel candidate”风险，本轮先做了零网络受控复现，
+没有把未经授权的 live screening 当成调试手段。完整角色池下，当前运行时能够保留高推理
+请求的外层 deadline、配置最小 panel phase，并完成全部已准入 expert 后进入 Judge/
+Synthesizer；专项回归结果为 `5 passed`。因此目前没有足够证据修改 `_DeadlineBudget`、
+panel phase 公式或 Terra deadline。
+
+工程结论是双重 gate：
+
+1. 调度代码的 panel 预算/执行循环以 fake-provider 回归锁定，后续 live trace 必须按
+   transport、phase deadline、future cancellation 和 role admission 分类；
+2. r7 正式 Terra 仍因 `independent_solver`/`judge` role capacity 不足而正确
+   fail-closed，只有新的 endpoint-bound role probe、complete-pool ranking 和 provider
+   freeze 才能生成 Terra role successor。
+
+这条复核不改变 r18 immutable 输入、2% transport gate 或 target benchmark gate；它只
+   减少错误修复和把弱模型提升为 Judge 的风险。
+
+## 网关鉴权时序安全加固（2026-08-21）
+
+当前 public/operator 鉴权的配置契约保持不变：public key 仍由
+`AXIO_FUSION_API_KEYS` 注入，operator 控制面仍由
+`AXIO_FUSION_OPERATOR_API_KEYS` 单独保护；本次只将密钥比较从集合交集改为
+`hmac.compare_digest`，避免按前缀/字符逐步比较造成不必要的时序信号。空配置仍保持
+现有 loopback 兼容语义，没有擅自开启生产鉴权，也没有重启服务。
+
+新增回归覆盖 public/operator 精确匹配、近似密钥拒绝和 compare-digest 调用；该改动
+不读取 provider、不修改 r18 frozen plan/source/registry、router、prompt、weights 或
+benchmark policy。
+
 ## r17 终态、transport gate 与 r18 离线 successor（2026-08-21 00:09 CST）
 
 r17 唯一 live non-target screening 已自然终态，16/16 unit terminal，safe state 为
@@ -101,7 +132,7 @@ target 请求。针对产品待办中“axio-pro 最终输出可能携带内部 
   泄漏内部 reasoning；闸门不持久化原始内容。
 
 验证门禁：L1/L2 通过；兼容、流式和融合核心专项回归 `494 passed, 7 skipped`；全量
-`python3.11 -m pytest tests/ -x -q --tb=short` 为 `1074 passed, 7 skipped`
+`python3.11 -m pytest tests/ -x -q --tb=short` 为 `1075 passed, 7 skipped`
 （退出码 0）。该结果是工程回归证据，不是 provider 质量、baseline freeze、21-suite
 superiority 或最终完成证据。
 

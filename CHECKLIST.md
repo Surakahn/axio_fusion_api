@@ -10,7 +10,9 @@
 - [x] 四协议 buffered/streaming 渲染器统一使用公共文本；request-local stream gate
   在 acting answer 确认前暂存 JSON-like 片段，safe metadata 不保存原文或 secrets。
 - [x] L1/L2 通过；兼容、流式和融合核心专项回归 `494 passed, 7 skipped`；全量回归
-  `1074 passed, 7 skipped`。
+  `1076 passed, 7 skipped`。
+- [x] public/operator 网关鉴权使用 `hmac.compare_digest` 做精确密钥匹配，保留
+  operator 控制面隔离；鉴权、CORS 和控制面专项回归通过。
 - [x] 18900 health 为 `ready`；三档公开模型、四种协议、代理选择与 secrets-safe
   约束通过；三个 tier 的 dry-run route plan 已核验，Pro 保留 Judge/Synthesizer。
 - [x] r17 唯一 live non-target screening 已自然终态：`6 completed / 10 failed_or_blocked`，
@@ -25,6 +27,9 @@
   16-unit frozen plan 与 zero-network preflight，未重复 provider probe。
 - [x] r18 Harness 控制面离线生成：pin/execution ready，acquisition/import/binding/
   convergence 保持 blocked，`target_suite_calls_allowed=false`。
+- [x] 用零网络 fake-provider 回归复核 Terra panel budget：完整 4-role expert pool 在
+  `reasoning_effort=high` 下均完成，12,000ms panel phase 配置成功，Judge/Synthesizer
+  各执行 1 次；该结果仅区分调度预算与 r7 role-admission blocker，不作为 live 能力证据。
 - [ ] 明确授权并启动 r18 live screening；启动前必须完成 transport 根因复核，不能恢复
   r17 checkpoint、使用 `--retry-failed`、降低 2% gate 或拼接 survivor subset。
 - [ ] r18 terminal 后严格按 `transport admission -> complete-pool ranking -> external

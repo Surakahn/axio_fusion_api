@@ -53,7 +53,7 @@ The following order is the only path to a formal quality claim:
 
 ## 当前状态（2026-08-21，composite r18 control plane）
 
-- 工程就绪度已完成。当前 Python 3.11 全量回归为 `1074 passed, 7 skipped`；这是契约
+- 工程就绪度已完成。当前 Python 3.11 全量回归为 `1076 passed, 7 skipped`；这是契约
   和集成证据，不是 provider 排名或 Fusion superiority 证据。
 - r17 已自然终态并被封存为 reference-only：16/16 unit terminal，`6 completed /
   10 failed_or_blocked`，transport admission 仅 `1/8` canonical 同时通过两个 source

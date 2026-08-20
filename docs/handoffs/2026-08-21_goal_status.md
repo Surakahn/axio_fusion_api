@@ -62,8 +62,78 @@ Synthesizer、fallback、预算和安全工程统一提供 `axio-fast`、`axio-t
   `target_suite_calls_performed=false`，仅用于后续授权前的 hash/PID 核验。
 - `python3.11 -m compileall -q src scripts`：通过。
 - 控制面专项回归：20 passed。
-- 全量回归：`1074 passed, 7 skipped in 272.24s`。
+- 全量回归：`1075 passed, 7 skipped in 275.11s`。
 - 文档安全断言与 `git diff --check`：通过。
+
+## 本轮增量：Terra panel 预算边界复核
+
+在不触碰 r18 frozen plan/source/registry、生产 router/prompt/weights 或 provider 网络的
+前提下，新增零网络 fake-provider 回归
+`test_terra_high_effort_panel_completes_all_admitted_experts_before_control_stages`。
+它绑定 8 个不同 canonical identity、`axio-terra`、`reasoning_effort=high`、6-call 上限，
+验证 4 个 expert role 全部完成、12,000ms panel phase 配置成功、Judge/Synthesizer 各 1 次、
+无 pending/cancelled future，专项结果为 `5 passed`。
+
+这条证据只说明当前 panel 调度在完整 role pool 下没有确定性预算截断；它不代表真实
+provider 能力，也不改变 r7 Terra 的 role-contract admission blocker。后续 live evidence
+仍必须把 provider transport、phase deadline、future cancellation 与 role admission 分开
+记录；在 baseline freeze 前不放宽 role gate、不改生产路由、不启动 target benchmark。
+
+## 本轮验证复核（全量回归与 r18 身份）
+
+本轮没有新增 provider 或 target 网络调用，完成以下可重复的只读验证：
+
+- `python3.11 -m py_compile tests/test_fusion_core_regressions.py`、
+  `python3.11 -m compileall -q src scripts`、`git diff --check` 均通过；
+- 全量 `PYTHONPATH=src python3.11 -m pytest tests/ -x -q --tb=short`：
+  `1075 passed, 7 skipped in 275.11s`；
+- r18 plan/source/serving registry SHA-256 仍分别为
+  `58c1d7d20f3d064252e5551abdbc10ddf26ed075ca0d97e660e62f20fdc1e504`、
+  `3844caf2aa53e4e419f4b9a318ec571ed9a3463e1d56d2f7034989209c8ce815`、
+  `7d0a9b78a06ea7445c43b7c03e15d6bbedb3112ecf8fb7d1ad041301678c1ad8`；
+- r18 仍为 16 tasks、2 source families、8 canonical groups、9 replicas、
+  `max_workers=1`、`ready_for_ranking=false`；原始 preflight 与独立
+  credential-ready preflight 的 `network_calls_performed` 和
+  `target_suite_calls_performed` 均为 `false`，后者仅证明 9/9 credential ready；
+- 绑定当前 r7 registry 的离线路由复核仍为：Fast `fast_direct_cascade`（因
+  `insufficient_independent_models` direct）、Terra `terra_direct`（因
+  `screening_role_gate_blocked_judge` 与 `insufficient_independent_models` direct）、
+  Pro `pro_panel_judge_escalation`（Fusion active，保留 Judge/Synthesizer）。
+
+## 本轮增量：网关鉴权时序安全
+
+为补齐商业级安全门禁，在不改变 public/operator 鉴权配置语义的前提下，
+`server.py` 将 API key 比较从集合交集改为 `hmac.compare_digest`；public key 与
+operator key 仍分离，近似/前缀密钥仍拒绝，空配置的现有 loopback 兼容行为保持不变。
+该变更不触碰 r18 frozen 输入、provider 网络或生产 serving registry，正式 loopback
+未重启。
+
+- L1：`python3.11 -m py_compile src/axio_fusion_api/server.py tests/test_axio_fusion_api_standalone.py`；
+- L2：关键 server 导入通过；
+- L3：鉴权/CORS/operator 专项 `12 passed`；全量回归 `1076 passed, 7 skipped in 274.87s`；
+- `git diff --check` 通过，未在 trace/receipt 中保存密钥。
+
+这些结果只更新工程契约证据，不改变 r18 授权门、provider ranking/freeze 或 21-suite
+target gate。
+
+## 本轮 intake 与 convergence 只读审计
+
+按非空 Goal 的 intake-audit 规则重新核对了产品 PRD、当前 handoff、差距矩阵、r18
+immutable plan/source、r7 probe-bound registry 和 Harness 控制面。可信锚点仍是 r18
+原始 `screening_state.r18.preflight.private.json` 及其已绑定的 Harness artifact；
+credentials-ready preflight 只证明 9/9 profile 的凭据可解析，不能替换原始 state，也
+不能写入 cohort binding。
+
+使用当前审计器对原始 state 做 hash-only convergence 重审，结果为：
+
+- `status=blocked`，`next_gate=screening`；
+- `target_suite_calls_allowed=false`、`final_claim_allowed=false`；
+- `plan_mutated=false`，没有 provider 或 target 网络调用；
+- Harness pin 与 execution plan 保持 ready，但 transport admission、ranking、provider
+  baseline freeze、official import 和 target campaign 仍是未完成或 blocked 阶段。
+
+这次重审只刷新了私有 safe receipt，没有改变 r18 plan/source/registry、路由、prompt、
+weights 或生产服务；后续 live 授权前仍必须使用原始 preflight 的 state/path/hash。
 
 ## 下一条合法动作
 

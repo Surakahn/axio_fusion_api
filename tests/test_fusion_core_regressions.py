@@ -83,6 +83,88 @@ def _profile(index: int, *, critique: float = 0.8, structured: float = 0.84):
     )
 
 
+class _TerraPanelClient:
+    """为 Terra panel 调度回归提供不触网的结构化 provider 替身。"""
+
+    def __init__(self):
+        self.calls = []
+
+    def complete(self, profile, request, *, prompt, system, timeout=None):
+        del request, system
+        self.calls.append(
+            {
+                "profile": profile.profile_id,
+                "prompt": prompt,
+                "timeout": timeout,
+            }
+        )
+        lowered = prompt.lower()
+        if "compare these axio fusion candidate answers" in lowered:
+            return json.dumps(
+                {
+                    "consensus": [{
+                        "claim": "fixture consensus",
+                        "supporting_candidates": [
+                            "primary_solver",
+                            "independent_solver",
+                            "critic",
+                        ],
+                    }],
+                    "contradictions": [],
+                    "missing_coverage": [],
+                    "collective_blind_spots": [],
+                    "ranked_candidates": [
+                        {"candidate_id": "primary_solver", "score": 0.92},
+                        {"candidate_id": "independent_solver", "score": 0.90},
+                        {"candidate_id": "critic", "score": 0.89},
+                    ],
+                    "follow_up_tasks": [],
+                    "ready_for_synthesis": True,
+                }
+            )
+        if "synthesize one final answer" in lowered:
+            return "terra fixture synthesized"
+        return json.dumps(
+            {
+                "answer": f"candidate from {profile.model}",
+                "evidence": [{
+                    "claim": "fixture",
+                    "source": "unit",
+                    "reliability": 0.90,
+                }],
+                "assumptions": [],
+                "uncertainties": [],
+                "confidence": 0.90,
+            }
+        )
+
+
+def _terra_panel_profiles():
+    """构造不同 canonical identity 的完整 Terra 角色池。"""
+
+    return [
+        normalize_profile(
+            {
+                "provider": f"terra-panel-provider-{index}",
+                "model": f"terra-panel-model-{index}",
+                "canonical_model_id": f"terra-panel-model-{index}",
+                "p50_latency_ms": 120,
+                "p95_latency_ms": 180,
+                "capabilities": {
+                    "science_knowledge": 0.90,
+                    "logic": 0.90,
+                    "math": 0.90,
+                    "critique": 0.90,
+                    "structured_output": 0.90,
+                    "long_context": 0.90,
+                    "daily_work": 0.90,
+                },
+            }
+        )
+        for index in range(8)
+    ]
+
+
 def _capability_band_profile(model: str, *, core_average: float) -> ModelProfile:
     """Build a synthetic profile with one uniform core reasoning average."""
 
@@ -234,6 +316,73 @@ def test_runtime_fusion_latency_budget_preserves_full_deadline_for_high_effort()
     assert receipt["applied"] is False
     assert receipt["reason"] == "reasoning_effort_requires_full_request_deadline"
     assert receipt["reasoning_effort"] == "max"
+
+
+def test_terra_high_effort_panel_completes_all_admitted_experts_before_control_stages():
+    """区分 panel 调度执行与 registry 的 Terra 角色准入门禁。"""
+
+    profiles = _terra_panel_profiles()
+    request = canonicalize_payload(
+        {
+            "model": "axio-terra",
+            "quality_target": 0.95,
+            "reasoning_effort": "high",
+            "max_total_model_calls": 6,
+            "messages": [{
+                "role": "user",
+                "content": "Review a complex medical scientific workflow and contradictions.",
+            }],
+        }
+    )
+    client = _TerraPanelClient()
+
+    response = FusionEngine(
+        profiles,
+        client=client,
+        cache_enabled=False,
+    ).complete(request, live=True)
+
+    admitted_expert_roles = {
+        "primary_solver",
+        "independent_solver",
+        "critic",
+        "domain_specialist",
+    }
+    returned_expert_roles = {
+        candidate.role
+        for candidate in response.candidates
+        if candidate.role in admitted_expert_roles
+    }
+    phase = response.route_plan["runtime_fusion_panel_phase"]
+    wave = response.trace["parallel_wave"]
+    control_call_indices = [
+        index
+        for index, call in enumerate(client.calls)
+        if any(
+            marker in call["prompt"].lower()
+            for marker in (
+                "compare these axio fusion candidate answers",
+                "synthesize one final answer",
+            )
+        )
+    ]
+
+    assert returned_expert_roles == admitted_expert_roles
+    assert all(candidate.status == "completed" for candidate in response.candidates)
+    assert len(client.calls) == 6
+    assert control_call_indices == [4, 5]
+    assert phase["outer_budget_ms"] == 15_000
+    assert phase["configured"] is True
+    assert phase["panel_phase_budget_ms"] >= 12_000
+    assert wave["enabled"] is True
+    assert wave["pending_future_count"] == 0
+    assert wave["future_cancelled_count"] == 0
+    assert response.trace["runtime_expert_panel"]["admitted_role_count"] == 4
+    assert response.trace["provider_call_count"] == 6
+    assert response.trace["judge_provider_call_count"] == 1
+    assert response.trace["synthesis_provider_call_count"] == 1
+    assert response.trace["raw_prompt_persisted"] is False
+    assert response.trace["secrets_persisted"] is False
 
 
 def test_initial_stage_failover_does_not_consume_explicitly_reserved_initial_shape():

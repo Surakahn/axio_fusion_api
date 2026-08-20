@@ -114,3 +114,26 @@ cross-provider verifier capacity >= 1（最终 claim 需要）
 - 不能在此阶段修改生产 router/weights 或启动任何 target benchmark 请求。
 
 本调查结论是后续 successor 的设计输入，不是生产变更，也不是最终能力声明。
+
+## 2026-08-21 零网络 panel budget 复现
+
+为区分历史“Terra 只完成部分 panel candidate”现象的预算根因与 role admission 根因，
+新增了一个完全使用 fake provider 的回归场景：8 个不同 canonical identity 的高能力
+profile、`axio-terra`、`quality_target=0.95`、`reasoning_effort=high`、6-call 上限。
+该场景不读取真实 provider 输出、不访问网络，也不改变 r18 或生产 registry。
+
+受控结果：
+
+- 4 个已准入 expert role（`primary_solver`、`independent_solver`、`critic`、
+  `domain_specialist`）均完成；没有 pending/cancelled future；
+- panel phase 外层预算为 15,000ms，成功配置 12,000ms 的最小 panel window；
+- Judge 与 Synthesizer 各完成 1 次，共 6 次 fake provider call；
+- targeted regression：`5 passed`（包含 runtime latency budget 相关断言）。
+
+因此，当前调度循环在完整角色池和高推理强度下没有复现确定性的“1-6/10 budget
+截断”。这不是 live provider 能力证据，也不能解除 r7 的 Terra role-contract blocker：
+r7 仍缺少同时可用的 `independent_solver`/`judge` capacity，正式路径仍必须
+`terra_direct` fail-closed，直到新的 endpoint-bound role probe 和 provider freeze
+完成。若未来 live trace 再出现部分 candidate，必须优先按 safe receipt 区分
+`fusion_panel_phase_deadline_exhausted`、provider transport failure、future cancellation
+和 role admission，再决定是否注册 successor。

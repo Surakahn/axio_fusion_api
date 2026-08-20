@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import threading
@@ -8,7 +9,7 @@ import uuid
 from dataclasses import dataclass, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 from urllib.parse import unquote, urlparse
 
 from .compat import (
@@ -4493,7 +4494,7 @@ def _authorized(headers: Mapping[str, str]) -> bool:
     keys = _server_keys()
     if not keys:
         return True
-    return bool(_presented_auth_values(headers) & keys)
+    return _auth_values_match(_presented_auth_values(headers), keys)
 
 
 def _server_keys() -> set[str]:
@@ -4511,7 +4512,25 @@ def _operator_authorized(
         if require_explicit_operator_key:
             return False
         return _authorized(headers)
-    return bool(_presented_auth_values(headers, include_operator_key=True) & keys)
+    return _auth_values_match(
+        _presented_auth_values(headers, include_operator_key=True),
+        keys,
+    )
+
+
+def _auth_values_match(
+    presented_values: Iterable[str],
+    configured_values: Iterable[str],
+) -> bool:
+    """Compare credentials without exposing prefix-dependent timing signals."""
+
+    matched = False
+    for presented in presented_values:
+        for configured in configured_values:
+            # Do not short-circuit after a match: the configured key order
+            # must not influence the amount of comparison work.
+            matched = hmac.compare_digest(presented, configured) or matched
+    return matched
 
 
 def _operator_keys() -> set[str]:
