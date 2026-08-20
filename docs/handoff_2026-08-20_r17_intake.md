@@ -59,3 +59,26 @@ target campaign，并执行 paired statistics、Holm correction、effect size、
 latency 3x、contamination、failure analysis 和 final completion audit。此前不做
 superiority claim，不改 production router/prompt/weights。
 
+## r17 live screening 启动里程碑（2026-08-20 19:02 CST）
+
+r17 唯一 live non-target screening 的真实 Python PID 为 `3739367`，由 init 托管；命令行
+持续绑定 r17 frozen plan/source 与 r7 probe-bound registry、provider probe、operational
+admission。screening console 初始为空，safe live state 尚未产生，当前仍处于首个真实
+provider/preflight 阶段，不能填写 completed/failed 分母或 ranking readiness。
+
+同 cohort supervisor PID 为 `3741799`，watcher PID 为 `3742593`，均由 init 托管并绑定相同
+plan fragment。watcher 首个 hash-only snapshot 为 `status=blocked`、`next_gate=screening`、
+`target_suite_calls_allowed=false`、`target_suite_calls_performed=false`；supervisor 已进入
+同一 PID/plan identity wait。transport admission、ranking、provider freeze、official import
+和 target campaign 产物均不存在。
+
+启动前一次未 source channel env 的尝试已保留为 bad-credentials evidence，没有发出网络请求：
+state SHA-256 `df0f8bef44bdd7db485e8e782d19378eb928316b1fc3ec6af8aea361c95c6109`，receipt
+SHA-256 `37135e43adaddbca18253d65f0311b8a6f8855cf337002ab29797c4831f389ee`，
+`network_calls_performed=false`，原因仅为 9 个 profile 的 credential readiness 缺失。
+该失败不属于 screening lineage；随后在进程环境 source `private/current_channels.env` 后
+重启同一 frozen plan，没有 `--retry-failed`、checkpoint 恢复或第二套 screening。
+
+后续以 10–20 分钟为间隔做低频只读检查；不得恢复 checkpoint、修改 r17 plan、调整 router/
+prompt/weights 或重启健康的生产 loopback。screening terminal 后才允许同 cohort supervisor
+执行 transport admission。

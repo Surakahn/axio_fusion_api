@@ -41,6 +41,32 @@ screening。screening terminal 前不执行 transport/ranking/freeze/import/targ
 仍严格沿 transport admission → complete-pool ranking → external top-three → provider
 baseline freeze → same-cohort Harness → convergence → 21-suite campaign 单向推进。
 
+## r17 live screening 启动（2026-08-20 19:02 CST）
+
+r17 只启动了一套 live non-target screening，真实 Python PID 为 `3739367`，由 init 托管；
+命令行绑定 r17 frozen plan/source、r7 probe-bound registry、r7 private probe 和
+operational admission。screening console 初始为空且尚未写 safe live state，表示仍在首个
+provider/preflight 阶段，不提前填写 unit 分母或 ranking readiness。
+
+同 cohort convergence supervisor PID `3741799`、lineage watcher PID `3742593` 均由 init 托管，
+命令行使用同一 r17 plan fragment。watcher 初始 snapshot 为 `status=blocked`、
+`next_gate=screening`、`target_suite_calls_allowed=false`、`target_suite_calls_performed=false`；
+supervisor 已进入同一 PID/plan identity wait。transport admission、ranking、provider freeze、
+official import 与 target campaign 均尚未启动。
+
+启动前一次未 source channel env 的参数级尝试已改名保留为
+`screening_state.r17.live.bad-credentials.private.json` 与对应 receipt/log；它的 state SHA-256
+为 `df0f8bef44bdd7db485e8e782d19378eb928316b1fc3ec6af8aea361c95c6109`，receipt SHA-256 为
+`37135e43adaddbca18253d65f0311b8a6f8855cf337002ab29797c4831f389ee`，
+`network_calls_performed=false`，唯一原因是 live credential readiness 缺失，没有 provider
+request、case answer 或 target call，未进入 r17 lineage。随后使用进程环境 source
+`private/current_channels.env` 重启同一 frozen plan，未使用 `--retry-failed`、未恢复 checkpoint、
+未启动第二套 screening。
+
+后续只按 10–20 分钟低频核对三个 PID、plan/source/registry hash、safe state/checkpoint mtime
+和 hash、supervisor/watcher 日志及下游 artifact；screening terminal 前不修改 plan、不调整
+router/prompt/weights、不重启生产 loopback 服务。
+
 ## r16 screening 与 transport 终态（2026-08-20 18:37 CST）
 
 r16 唯一 live non-target screening 已自然终态。screening receipt 与 safe state 均为
