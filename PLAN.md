@@ -2269,6 +2269,14 @@ Latency superiority is also claim-gated on two distribution points: both p50 and
   计数仍未生成。三个托管进程存活且 plan identity 未变，supervisor/watcher 保持
   `next_gate=screening`、`target_suite_calls_allowed=false`，下游 transport/ranking/
   freeze/import/target 产物均不存在。
+- 2026-08-20 12:45：低频只读复核确认 r15 唯一 screening、supervisor、lineage watcher
+  仍由 init 托管且 plan identity 未改变。首个 serial unit private checkpoint 推进至
+  68/112，状态仍为 `partial`，checkpoint SHA-256 为
+  `3aafaf214d732dfa72b0f323a9087a347284dad5fce0afd0b4855ae8e81beef6`；safe live state
+  仍未生成，完整 campaign 分母、transport admission、ranking、provider freeze、official
+  import 和 target campaign 均不可宣告。`next_gate=screening`、
+  `target_suite_calls_allowed=false` 保持不变；本次未恢复 checkpoint、未重试 case、未修改
+  frozen plan、未启动第二套 screening。
 - 2026-08-20 12:35：低频只读复核确认 r15 唯一 screening、supervisor、lineage watcher
   仍由 init 托管且 plan identity 未改变。首个 serial unit private checkpoint 推进至
   48/112，状态仍为 `partial`，checkpoint SHA-256 为

@@ -53,3 +53,14 @@ frozen plan。screening terminal 后由同 cohort supervisor 执行 transport ad
 完整-pool ranking；只有 ranking ready 才能继续 external rank 1/2/3、provider freeze、
 official import、convergence audit 和 target campaign。任何未通过都必须注册下一个
 successor，不能宣称 Fusion superiority。
+
+## 12:45 CST 低频进度复核
+
+截至 2026-08-20 12:45:18，r15 screening PID `2871629`、supervisor PID `2880595` 和
+lineage watcher PID `2881730` 仍存活，命令行 plan identity 未改变。首个 serial unit 的
+private checkpoint 已推进到 `68/112`，`checkpoint_status=partial`，文件 SHA-256 为
+`3aafaf214d732dfa72b0f323a9087a347284dad5fce0afd0b4855ae8e81beef6`；safe live state
+仍不存在，完整 campaign 分母和 `ready_for_ranking` 仍不可宣告。transport admission、
+ranking、provider freeze、official import 与 target campaign 产物均不存在，
+`next_gate=screening`、`target_suite_calls_allowed=false` 保持不变。本次没有恢复
+checkpoint、重试 case、修改 frozen plan 或启动第二套 screening。

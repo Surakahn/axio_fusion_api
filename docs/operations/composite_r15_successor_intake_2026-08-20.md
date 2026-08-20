@@ -132,3 +132,12 @@ private checkpoint 为 `48/112`、`checkpoint_status=partial`，checkpoint SHA-2
 target 产物继续缺失，watcher 的 `next_gate=screening`、`target_suite_calls_allowed=false`
 不变。本次没有恢复 checkpoint、使用 `--retry-failed`、修改 frozen plan 或并发启动新的
 screening。
+
+## r15 live screening 进度快照（2026-08-20 12:45 CST）
+
+低频只读核验确认三个 init 托管进程仍存活且 plan identity 未改变。首个 serial unit 的
+private checkpoint 为 `68/112`、`checkpoint_status=partial`，checkpoint SHA-256 为
+`3aafaf214d732dfa72b0f323a9087a347284dad5fce0afd0b4855ae8e81beef6`；safe live state
+尚未写出，不能填写完整 16-unit 分母或 ranking readiness。transport/ranking/freeze/import/
+target 产物继续缺失，`next_gate=screening`、`target_suite_calls_allowed=false` 不变。
+本次没有恢复 checkpoint、使用 `--retry-failed`、修改 frozen plan 或并发启动新的 screening。
