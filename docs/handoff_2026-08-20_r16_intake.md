@@ -1,5 +1,19 @@
 # r16 intake 交接（2026-08-20）
 
+## r16 生产 loopback registry 只读核验（2026-08-20 17:16 CST）
+
+生产服务 `127.0.0.1:18900/health` 返回 `status=ready`，公开模型仍为三个 Axio tier，四种
+API format 均可用，网络选择为 `auto -> proxy`，敏感字段保持 `false`。服务 PID `1950874`
+通过显式 `AXIO_FUSION_REGISTRY_PATH` 加载 r7 probe-bound registry：
+`private/runs/2026-08-17-composite-cohort-r7-prefusion-full/runtime_registry.probe-bound.r7.private.json`，
+SHA-256 为 `7d0a9b78a06ea7445c43b7c03e15d6bbedb3112ecf8fb7d1ad041301678c1ad8`。健康投影的
+`model_count=21`、`provider_count=4` 与 r16 frozen plan/screening 的 registry 绑定一致；
+本次只读核验不重启服务、不切换 registry，也不证明 provider 能力或 superiority。
+
+AGENTS.md 中 r43 的 10-profile serving 检查项属于另一阶段的历史基线。r16 运行期间继续
+保留当前 r7 绑定；只有 r16 terminal 并进入新的 serving 里程碑后，才重新审计是否需要
+registry successor，避免在 live evidence lineage 中引入配置漂移。
+
 ## r15 封存结论
 
 r15 已自然终态，16/16 unit terminal，screening receipt 为 `partial`，1 completed、15

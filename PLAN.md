@@ -1,5 +1,23 @@
 # Axio Fusion API Plan
 
+## r16 生产 loopback registry 只读核验（2026-08-20 17:16 CST）
+
+生产 loopback `127.0.0.1:18900/health` 返回 `status=ready`，服务仍为独立
+remote-only 产品，公开模型为三个 Axio tier，四种 API format 均在服务面声明，网络为
+`auto -> proxy`，敏感字段和原始 provider 标识均未暴露。服务 PID `1950874` 的
+`AXIO_FUSION_REGISTRY_PATH` 明确指向
+`private/runs/2026-08-17-composite-cohort-r7-prefusion-full/runtime_registry.probe-bound.r7.private.json`，
+该 registry SHA-256 为 `7d0a9b78a06ea7445c43b7c03e15d6bbedb3112ecf8fb7d1ad041301678c1ad8`，
+公开健康投影报告 `model_count=21`、`provider_count=4`、profile-set SHA-256
+`e330997565bc0a19f3df2353ff7db24dfdfc68591adb2521a88e5a6a5f38dcce`。
+
+这与当前 r16 frozen plan 一致：r16 screening、supervisor 和生产服务均绑定 r7
+probe-bound registry；因此不能把 21 profiles 误判为未通过 r43 的 10-profile serving
+基线，也不能在 live screening 期间切换 registry 或重启服务。AGENTS.md 中 r43 的 10-profile
+检查项保留为历史阶段约束；r16 terminal 后若进入新的生产 serving 里程碑，再单独审计并
+决定 registry 是否需要 successor 切换。本次仅记录健康和绑定证据，不产生 provider 能力或
+superiority claim。
+
 ## Composite cohort r15 terminal 与 r16 当前锚点（2026-08-20 14:55 CST）
 
 r15 已自然终态并完成同 cohort 的 transport admission。最终 screening receipt
