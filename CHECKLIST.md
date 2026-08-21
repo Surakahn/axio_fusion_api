@@ -44,7 +44,7 @@
   plan/source/r7 registry 与 operational admission，核对原始及 credential-ready
   preflight、`auto -> proxy`、PID 命令绑定和敏感字段 fail-closed；receipt 状态为
   `ready_for_operator_authorization`，明确 `authorization_required=true`，不发起
-  provider/target 请求，也不自动授权 screening；专项 `4 passed`，全量回归
+  provider/target 请求，也不自动授权 screening；专项 `5 passed`，全量回归
   `1092 passed, 7 skipped`。
 - [ ] 明确授权并启动 r18 live screening；启动前必须完成 transport 根因复核，不能恢复
   r17 checkpoint、使用 `--retry-failed`、降低 2% gate 或拼接 survivor subset。
