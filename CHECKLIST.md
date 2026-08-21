@@ -27,6 +27,16 @@
   16-unit frozen plan 与 zero-network preflight，未重复 provider probe。
 - [x] r18 Harness 控制面离线生成：pin/execution ready，acquisition/import/binding/
   convergence 保持 blocked，`target_suite_calls_allowed=false`。
+- [x] 新增可复用 `scripts/audit_screening_transport.py`：先按 64 位 hash unit 文件名
+  allowlist 发现输入，再只读取 unit 的 failure telemetry；checkpoint、日志和其它
+  private artifact 不会被打开；输出为 atomic、hash-only root-cause receipt。
+- [x] 真实 r17 receipt 回归通过：16 units、1712 cases、762 completed、950
+  transport-failed、916 fail-fast、799 provider attempts、37 failed attempts；真实
+  failure class 与 fail-fast reason 分开统计，receipt hash 为
+  `f91f064539dd246ae5836c669e40c0dc931d9f4b15028fb2075cdd0069081b73`。
+- [x] L1/L2/L3/L4 控制面验证通过：专项 transport audit `4 passed`，Harness/screening/
+  convergence 相关回归 `88 passed`，全量 `1087 passed, 7 skipped`，compileall、导入、
+  CLI help 和 `git diff --check` 通过；没有 provider/target 网络调用。
 - [x] 用零网络 fake-provider 回归复核 Terra panel budget：完整 4-role expert pool 在
   `reasoning_effort=high` 下均完成，12,000ms panel phase 配置成功，Judge/Synthesizer
   各执行 1 次；该结果仅区分调度预算与 r7 role-admission blocker，不作为 live 能力证据。

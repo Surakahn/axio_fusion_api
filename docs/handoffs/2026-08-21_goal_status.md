@@ -264,3 +264,24 @@ provider/target 请求。
 `next_gate=screening`、`target_suite_calls_allowed=false`。唯一下一动作仍需 operator
 明确回复 `授权 r18 live screening`，之后才按 screening -> transport admission ->
 ranking -> baseline freeze -> same-cohort Harness -> 21-suite campaign 顺序执行。
+
+## 本轮实现增量：可复用 transport 根因审计入口
+
+为避免每个 cohort 手工读取 private unit，新增 `scripts/audit_screening_transport.py`。
+它先按 64 位 hash 文件名 allowlist 发现 unit，再只读取
+`non_target_screening_unit_private.v1` 的状态和 failure telemetry allowlist；checkpoint、
+日志和其它 private artifact 不会被打开。审计输出通过 atomic replace 写入，包含输入
+hash、完整分母、fail-fast、provider attempt/failure、source/canonical 机制分布和
+admission 一致性检查；不保存 raw provider output、prompt、label、URL、model id 或 secret。
+
+真实 r17 回归已生成 receipt：
+`private/runs/2026-08-20-composite-cohort-r17/transport_root_cause_audit.r17.safe.json`
+（SHA-256 `f91f064539dd246ae5836c669e40c0dc931d9f4b15028fb2075cdd0069081b73`）。结果为
+16 units、1712 cases、762 completed、950 transport-failed、916 fail-fast、799 provider
+attempts、37 failed attempts；provider failure 与 `screening_fail_fast_gate` 单独统计，
+`transport_admission_status=blocked` 保持不变。
+
+验证结果：transport audit 专项 `4 passed`，Harness/screening/convergence 相关回归
+`88 passed`，全量 `1087 passed, 7 skipped`，L1/L2、compileall、CLI help 和
+`git diff --check` 均通过。本轮没有 provider/target 网络调用，没有修改 r18 frozen
+plan/source/registry、生产 router/prompt/weights 或服务进程。

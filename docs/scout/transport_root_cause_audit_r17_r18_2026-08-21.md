@@ -44,6 +44,35 @@ error code 为 `provider_request_timeout=25`、`http_error=8`、
 这组计数与 admission receipt 的 `transport_failure_rate` 一致，但只解释
 transport 可用性，不提供能力分数、模型排序或质量结论。
 
+正式 r17 复用结果：
+
+- receipt：`private/runs/2026-08-20-composite-cohort-r17/transport_root_cause_audit.r17.safe.json`
+- SHA-256：`f91f064539dd246ae5836c669e40c0dc931d9f4b15028fb2075cdd0069081b73`
+- 审计输入 `status=ready`，但 `transport_admission_status=blocked`；这两个状态不可互相替代。
+- source/canonical 分组同时保留 failure class、provider error code、HTTP status 和
+  fail-fast reason，便于下一 cohort 区分 workload/provider/协议交互，而不读取 raw output。
+
+## 可复用审计入口
+
+后续每个 terminal screening cohort 可以使用同一个零网络审计器重新生成上述
+receipt，不需要手写统计，也不触碰 frozen plan：
+
+```bash
+PYTHONPATH=src python3.11 scripts/audit_screening_transport.py \
+  --plan <screening-plan.private.json> \
+  --campaign-state <screening-state.private.json> \
+  --transport-admission <transport-admission.private.json> \
+  --unit-root <screening_private> \
+  --output <transport-root-cause-audit.safe.json>
+```
+
+审计器先按 64 位 hash unit 文件名 allowlist 发现输入，再只允许读取
+`non_target_screening_unit_private.v1` 的计数和 `failure_telemetry` allowlist；
+checkpoint、日志或其它 private artifact 不会被打开。输出以 atomic replace 写入，保存输入文件 hash、unit/case/attempt 分母、
+source/canonical hash 分组、failure class/HTTP/error-code 计数和 binding mismatch
+reason code。输出的 `status=ready` 只表示输入自洽；即使
+`transport_admission_status=blocked`，也不会被解释成能力失败或 ranking 结果。
+
 ### source/profile 组合分布
 
 以下只使用 safe hash 映射到当前 r7 probe-bound registry 的公开 profile 身份；表中

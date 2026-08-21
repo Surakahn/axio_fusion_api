@@ -64,6 +64,24 @@ router/prompt/weights 或 gate。该结果只支持“source/profile 相关 tran
 90 秒硬上限”的诊断，不是能力或排名证据；下一条合法动作仍是等待明确的
 `授权 r18 live screening`。
 
+## 本轮离线增量：可复用 transport 根因审计入口（2026-08-21）
+
+新增 `scripts/audit_screening_transport.py` 及其零网络测试。该工具把已终态
+screening 的 private unit telemetry 转换为 hash-only receipt，校验 plan/state/
+transport binding、完整 case 分母、fail-fast、provider attempt/failure 分类和
+unit admission 一致性；不读取或输出 raw provider output、prompt、label、URL、model
+id 或 secret，不修改 frozen plan，不恢复 checkpoint，不触发 provider/target 请求。
+`status=ready` 只表示审计输入自洽，`transport_admission_status` 单独表达 admission
+结果，避免将 blocked 误报成成功。后续 r18 terminal 后优先复用该入口生成正式
+transport diagnosis，再进入 ranking gate。
+
+真实 r17 复核已生成
+`private/runs/2026-08-20-composite-cohort-r17/transport_root_cause_audit.r17.safe.json`，
+SHA-256 为 `f91f064539dd246ae5836c669e40c0dc931d9f4b15028fb2075cdd0069081b73`；
+输出重现 16 units/1712 cases/762 completed/950 failed/916 fail-fast/799 attempts/
+37 failed attempts，且 `transport_admission_status=blocked` 保持不变。全量回归为
+`1087 passed, 7 skipped`。该 receipt 只证明审计输入自洽，不授权 r18 live screening。
+
 ## 本轮离线增量：自适应校准 receipt 发布边界（2026-08-21）
 
 本轮继续沿“Fusion 负责能力组合、Harness 负责评测与证据链”的产品边界，补齐
