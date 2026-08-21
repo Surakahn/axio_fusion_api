@@ -52,6 +52,24 @@ transport 根因复核
 plan、恢复 checkpoint、拼接 survivor subset、降低固定 2% transport gate 或提前
 target benchmark。
 
+## 本轮离线增量：r18 启动前 preflight verifier（2026-08-21）
+
+新增 `scripts/verify_screening_preflight.py` 和专项测试，用于在任何 operator
+授权前对 r18 的 frozen plan/source/registry、r7 operational admission、原始
+preflight、credential-ready preflight、代理策略和可选 PID 做零网络、hash-only
+核验。它校验 schema、digest、2% fail-fast/双 source 合同、remote-only/no-cheat
+边界、9/9 credential readiness、`auto -> proxy` 选择以及 live 命令的
+`baseline-screening-run --live` 与三个输入绑定；receipt 不保存路径、命令行、
+provider 标识、URL、prompt、输出、标签或 secret。
+
+真实 r18 核验 receipt：
+`private/runs/2026-08-21-composite-cohort-r18/screening_preflight_verifier.r18.safe.json`，
+状态为 `ready_for_operator_authorization`，receipt SHA-256 为
+`9e2fed685743449bd88675bed12ad209691a6059f68e2b70892c641330f6a9d8`。该状态明确
+`authorization_required=true`，不启动进程、不产生 provider/target 请求，也不等价于
+`授权 r18 live screening`。验证专项为 `5 passed`，全量回归为 `1092 passed, 7
+skipped`；r18 plan/source digest 未变。
+
 ## 本轮只读增量：r17 transport 根因计数复核（2026-08-21）
 
 已完成 r17 私有 unit 的 hash-safe transport telemetry 复核，结果写入

@@ -285,3 +285,33 @@ attempts、37 failed attempts；provider failure 与 `screening_fail_fast_gate` 
 `88 passed`，全量 `1087 passed, 7 skipped`，L1/L2、compileall、CLI help 和
 `git diff --check` 均通过。本轮没有 provider/target 网络调用，没有修改 r18 frozen
 plan/source/registry、生产 router/prompt/weights 或服务进程。
+
+## 本轮实现增量：r18 启动前 preflight verifier
+
+为把授权前的最后一次只读核验固定成可复用控制面入口，新增
+`scripts/verify_screening_preflight.py` 和 `tests/test_screening_preflight_verifier.py`。
+verifier 只读取 frozen plan/source/registry、r7 operational admission、r18 原始与
+credential-ready preflight；复用现有网络策略的 secret-free summary，检查 schema、
+digest、双 source/2% fail-fast 合同、remote-only/no-cheat 字段、9/9 credential readiness、
+`auto -> proxy`、可选 PID 的 `baseline-screening-run --live` 输入绑定以及变体和嵌套
+anti-leakage 字段。receipt 只保存文件哈希、状态、reason code 和命令哈希，不保存路径、
+命令行、provider 标识、URL、prompt、输出、标签或 secret。
+
+真实 receipt：
+`private/runs/2026-08-21-composite-cohort-r18/screening_preflight_verifier.r18.safe.json`，
+SHA-256 为 `9e2fed685743449bd88675bed12ad209691a6059f68e2b70892c641330f6a9d8`，状态为
+`ready_for_operator_authorization`、`authorization_required=true`、PID 为
+`not_started`。这只证明启动前静态输入自洽，不授权 live screening；没有产生 provider
+或 target 请求，也没有修改 r18 frozen plan/source/registry、生产 router/prompt/weights
+或服务进程。
+
+验证：专项 `5 passed`；`python3.11 -m compileall -q src scripts tests`、关键包和
+脚本导入、CLI help、敏感字段扫描、`git diff --check` 通过；全量回归为
+`1092 passed, 7 skipped in 278.61s`。r18 plan SHA-256 仍为
+`58c1d7d20f3d064252e5551abdbc10ddf26ed075ca0d97e660e62f20fdc1e504`，source SHA-256
+仍为 `3844caf2aa53e4e419f4b9a318ec571ed9a3463e1d56d2f7034989209c8ce815`。
+
+下一条合法动作未改变：等待 operator 明确回复 `授权 r18 live screening`；授权后先
+复用该 verifier 做最后一次静态核验，再用唯一一套 `setsid/nohup` live screening，并
+沿 `screening -> transport admission -> complete-pool ranking -> external top-three ->
+provider baseline freeze -> same-cohort Harness -> 21-suite campaign` 单向推进。
