@@ -228,6 +228,17 @@ def _stage_snapshot(name: str, path: Path, payload: Mapping[str, Any]) -> dict[s
         for reason in payload.get("reason_codes", [])
         if str(reason)
     ]
+    if name == "execution_plan":
+        reasons.extend(
+            _safe_reason(reason)
+            for reason in payload.get("formal_cohort_binding_reason_codes", [])
+            if str(reason)
+        )
+        reasons.extend(
+            _safe_reason(reason)
+            for reason in payload.get("planning_reason_codes", [])
+            if str(reason)
+        )
     sensitive_ok = _sensitive_values_are_safe(payload)
     schema_ok = bool(payload.get("schema"))
     ready = schema_ok and sensitive_ok and not reasons
@@ -370,6 +381,7 @@ def _build_stage_payloads(args: argparse.Namespace, paths: Mapping[str, Path]) -
             import_batch_template_path=paths["import_template"],
             acquisition_status_path=paths["acquisition_status"],
             harness_pin_manifest_path=paths["harness_pin"],
+            provider_baseline_freeze_path=freeze,
         ),
         missing_reason="official_harness_execution_plan_generation_failed",
     )

@@ -273,10 +273,19 @@ def _validate_execution_plan(
     payload: Mapping[str, Any],
     harness_pin_path: Path,
     acquisition_path: Path,
+    provider_baseline_freeze_path: Path,
     reasons: list[str],
 ) -> None:
     if payload.get("schema") != EXECUTION_PLAN_SCHEMA or payload.get("status") != "ready_to_execute":
         reasons.append("execution_plan_not_ready")
+    if payload.get("execution_authorized") is not True:
+        reasons.append("execution_plan_not_authorized")
+    if payload.get("matrix_mode") != "formal_top_three_cohort":
+        reasons.append("execution_plan_formal_cohort_required")
+    if payload.get("formal_top_three_cohort_complete") is not True:
+        reasons.append("execution_plan_formal_cohort_incomplete")
+    if payload.get("formal_cohort_binding_reason_codes") not in ([], None):
+        reasons.append("execution_plan_formal_cohort_binding_blocked")
     if payload.get("all_tasks_ready_to_execute") is not True:
         reasons.append("execution_plan_tasks_not_ready")
     if payload.get("all_required_outputs_are_hash_only_import_sources") is not True:
@@ -285,6 +294,14 @@ def _validate_execution_plan(
         reasons.append("execution_plan_harness_pin_path_binding_mismatch")
     if payload.get("acquisition_status_path_sha256") != _sha256_text(str(acquisition_path)):
         reasons.append("execution_plan_acquisition_path_binding_mismatch")
+    if payload.get("provider_baseline_freeze_path_sha256") != _sha256_text(
+        str(provider_baseline_freeze_path)
+    ):
+        reasons.append("execution_plan_provider_baseline_freeze_path_binding_mismatch")
+    if payload.get("provider_baseline_freeze_content_sha256") != _sha256_file(
+        provider_baseline_freeze_path
+    ):
+        reasons.append("execution_plan_provider_baseline_freeze_content_binding_mismatch")
     if not _looks_like_sha256(payload.get("execution_plan_digest_sha256")):
         reasons.append("execution_plan_digest_missing")
     _require_false_flags(payload, prefix="execution_plan", reasons=reasons)
@@ -369,6 +386,7 @@ def _validate_inputs(
         payload=payloads["execution_plan"],
         harness_pin_path=paths["harness_pin"],
         acquisition_path=paths["acquisition_status"],
+        provider_baseline_freeze_path=paths["provider_baseline_freeze"],
         reasons=reasons,
     )
     _validate_acquisition(payloads["acquisition_status"], reasons)

@@ -1662,6 +1662,12 @@ def build_benchmark_acquisition_checklist(
         "run_unit_count_by_type": _acquisition_candidate_counts(candidate_receipts),
         "api_surface_contract": _api_surface_contract(),
         "provider_baseline_selection": str(matrix.get("provider_baseline_selection") or ""),
+        "matrix_mode": str(matrix.get("matrix_mode") or "diagnostic"),
+        "formal_top_three_cohort": dict(
+            matrix.get("formal_top_three_cohort")
+            if isinstance(matrix.get("formal_top_three_cohort"), Mapping)
+            else {}
+        ),
         "available_provider_baseline_count": matrix.get("available_provider_baseline_count"),
         "input_receipts": {
             "registry": _evidence_path_receipt(registry_path, kind="registry"),
@@ -1819,6 +1825,16 @@ def build_official_import_batch_template(
         "template_status": "requires_operator_fill_before_import",
         "acquisition_checklist_path_sha256": sha256_text(str(acquisition_checklist_path)),
         "input_checklist_schema": str(checklist.get("schema") or "") if isinstance(checklist, Mapping) else "",
+        "matrix_mode": str(checklist.get("matrix_mode") or "diagnostic") if isinstance(checklist, Mapping) else "diagnostic",
+        "formal_top_three_cohort": dict(
+            checklist.get("formal_top_three_cohort")
+            if isinstance(checklist, Mapping)
+            and isinstance(checklist.get("formal_top_three_cohort"), Mapping)
+            else {}
+        ),
+        "provider_baseline_selection": str(checklist.get("provider_baseline_selection") or "") if isinstance(checklist, Mapping) else "",
+        "run_unit_count": _optional_int(checklist.get("run_unit_count")) or 0 if isinstance(checklist, Mapping) else 0,
+        "candidate_count": _optional_int(checklist.get("candidate_count")) or 0 if isinstance(checklist, Mapping) else 0,
         "harness_pin_manifest_path_sha256": sha256_text(str(harness_pin_manifest_path)) if harness_pin_manifest_path else "",
         "harness_pin_applied_entry_count": sum(1 for row in replacements if row.get("harness_pin_applied") is True),
         "input_requirement_count": len(rows),
@@ -1876,6 +1892,7 @@ def build_official_harness_execution_plan(
     import_batch_template_path: str | Path,
     acquisition_status_path: str | Path | None = None,
     harness_pin_manifest_path: str | Path | None = None,
+    provider_baseline_freeze_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Build a hash-only execution plan for official/audited harness runs.
 
@@ -1906,6 +1923,36 @@ def build_official_harness_execution_plan(
     }
     pin_by_suite = _harness_pin_rows_by_suite(_load_optional_json_object(harness_pin_manifest_path))
     acquisition = _load_optional_json_object(acquisition_status_path)
+    freeze = _load_optional_json_object(provider_baseline_freeze_path)
+    matrix_mode = str(batch.get("matrix_mode") or "diagnostic")
+    formal_cohort = batch.get("formal_top_three_cohort")
+    formal_cohort = formal_cohort if isinstance(formal_cohort, Mapping) else {}
+    formal_binding_reasons: list[str] = []
+    if not provider_baseline_freeze_path or not freeze:
+        formal_binding_reasons.extend(
+            ("provider_baseline_freeze_required", "diagnostic_matrix_not_executable")
+        )
+    else:
+        if freeze.get("schema") != "axio_fusion_api.provider_baseline_freeze_manifest.v1":
+            formal_binding_reasons.append("provider_baseline_freeze_schema_invalid")
+        if freeze.get("final_claim_freeze_ready") is not True:
+            formal_binding_reasons.append("provider_baseline_freeze_not_ready")
+        if freeze.get("provider_baseline_selection") != EXTERNAL_PROVIDER_RANKING_SELECTION_MODE:
+            formal_binding_reasons.append("formal_top_three_cohort_required")
+        if freeze.get("selected_provider_baseline_count") != len(EXTERNAL_PROVIDER_RANKING_REQUIRED_RANKS):
+            formal_binding_reasons.append("formal_top_three_cohort_incomplete")
+        if not _looks_like_sha256(freeze.get("freeze_digest_sha256")):
+            formal_binding_reasons.append("provider_baseline_freeze_digest_missing")
+    if matrix_mode != "formal_top_three_cohort":
+        formal_binding_reasons.append("diagnostic_matrix_not_executable")
+    if formal_cohort.get("complete") is not True:
+        formal_binding_reasons.append("formal_top_three_cohort_incomplete")
+    expected_formal_run_unit_count = (
+        len(AXIO_BENCHMARK_PUBLIC_MODELS) * len(AXIO_BENCHMARK_API_FORMATS)
+        + len(EXTERNAL_PROVIDER_RANKING_REQUIRED_RANKS)
+    )
+    if _optional_int(batch.get("run_unit_count")) != expected_formal_run_unit_count:
+        formal_binding_reasons.append("formal_top_three_cohort_run_unit_count_mismatch")
     tasks = []
     for index, entry in enumerate(imports):
         replacement = replacement_by_index.get(index, {})
@@ -1930,9 +1977,27 @@ def build_official_harness_execution_plan(
     blocked = [task for task in tasks if task.get("ready_to_execute") is not True]
     by_suite = _official_harness_execution_summary_by_suite(tasks)
     acquisition_summary = _official_execution_plan_acquisition_summary(acquisition)
+    acquisition_ready = (
+        acquisition_summary.get("ready_to_assemble_manifest") is True
+        and acquisition_summary.get("official_import_missing_count") == 0
+    )
+    task_ready = not blocked
+    acquisition_reason = "official_import_acquisition_incomplete" if not acquisition_ready else ""
+    if formal_binding_reasons or not task_ready:
+        status = "blocked"
+    elif not acquisition_ready:
+        status = "planned"
+    else:
+        status = "ready_to_execute"
     digest_input = {
         "schema": "axio_fusion_api.official_harness_execution_plan_digest.v1",
         "batch_sha256": sha256_text(batch_text),
+        "matrix_mode": matrix_mode,
+        "formal_top_three_cohort_complete": not formal_binding_reasons,
+        "provider_baseline_freeze_content_sha256": _file_content_sha256(provider_baseline_freeze_path),
+        "formal_cohort_binding_reason_codes": sorted(set(formal_binding_reasons)),
+        "planning_reason_codes": [acquisition_reason] if acquisition_reason else [],
+        "execution_task_count": len(tasks),
         "task_receipts": [
             {
                 "execution_task_id": task.get("execution_task_id"),
@@ -1954,11 +2019,17 @@ def build_official_harness_execution_plan(
     }
     return {
         "schema": "axio_fusion_api.official_harness_execution_plan.v1",
-        "status": "ready_to_execute" if not blocked else "blocked",
+        "status": status,
         "import_batch_template_sha256": sha256_text(batch_text),
         "import_batch_template_path_sha256": sha256_text(str(import_batch_template_path)),
         "acquisition_status_path_sha256": sha256_text(str(acquisition_status_path)) if acquisition_status_path else "",
         "harness_pin_manifest_path_sha256": sha256_text(str(harness_pin_manifest_path)) if harness_pin_manifest_path else "",
+        "provider_baseline_freeze_path_sha256": sha256_text(str(provider_baseline_freeze_path)) if provider_baseline_freeze_path else "",
+        "provider_baseline_freeze_content_sha256": _file_content_sha256(provider_baseline_freeze_path),
+        "matrix_mode": matrix_mode,
+        "formal_top_three_cohort_complete": not formal_binding_reasons,
+        "formal_cohort_binding_reason_codes": sorted(set(formal_binding_reasons)),
+        "planning_reason_codes": [acquisition_reason] if acquisition_reason else [],
         "execution_plan_digest_sha256": sha256_text(stable_json(digest_input)),
         "suite_count": len(by_suite),
         "execution_task_count": len(tasks),
@@ -1971,11 +2042,17 @@ def build_official_harness_execution_plan(
             for task in tasks
         ),
         "all_tasks_ready_to_execute": not blocked,
+        "execution_authorized": status == "ready_to_execute",
         "all_required_outputs_are_hash_only_import_sources": True,
         "source_template_complete_task_count": sum(1 for task in tasks if task.get("source_template_complete") is True),
         "api_surface_contract": _api_surface_contract(),
         "acquisition_status_summary": acquisition_summary,
-        "blocking_reason_counts": _count_reason_codes(blocked),
+        "blocking_reason_counts": _count_reason_codes(
+            [
+                *blocked,
+                *({"reason_codes": sorted(set(formal_binding_reasons))},),
+            ]
+        ),
         "tasks": tasks,
         "summary_by_suite": by_suite,
         "execution_controls": {
@@ -2844,6 +2921,17 @@ def _load_optional_json_object(path: str | Path | None) -> dict[str, Any]:
         return {}
     payload = json.loads(selected.read_text(encoding="utf-8"))
     return dict(payload) if isinstance(payload, Mapping) else {}
+
+
+def _file_content_sha256(path: str | Path | None) -> str:
+    """Return a UTF-8 artifact digest without persisting its contents."""
+
+    if not path:
+        return ""
+    try:
+        return sha256_text(Path(path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        return ""
 
 
 def _case_hash_rows_by_suite(payload: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
@@ -9623,7 +9711,7 @@ def _fusion_live_runbook_stages(
             "04_official_harness_imports",
             "Pin and import official or audited harness outputs for suites that cannot be scored by the local generic runner.",
             [
-                "axio-fusion-api-standalone benchmark-official-harness-execution-plan --import-batch-template <PINNED_IMPORT_BATCH_TEMPLATE> --acquisition-status <ACQUISITION_STATUS_SAFE_JSON> --harness-pin-manifest <HARNESS_PIN_MANIFEST_SAFE_JSON> --output <SAFE_WORK_DIR>/official_harness_execution_plan.safe.json",
+                "axio-fusion-api-standalone benchmark-official-harness-execution-plan --import-batch-template <PINNED_IMPORT_BATCH_TEMPLATE> --acquisition-status <ACQUISITION_STATUS_SAFE_JSON> --harness-pin-manifest <HARNESS_PIN_MANIFEST_SAFE_JSON> --provider-baseline-freeze <SAFE_WORK_DIR>/provider_baseline_freeze.safe.json --output <SAFE_WORK_DIR>/official_harness_execution_plan.safe.json",
                 "axio-fusion-api-standalone benchmark-import-official-batch --batch-file <PINNED_IMPORT_BATCH_TEMPLATE> --output-dir <SAFE_OFFICIAL_IMPORT_DIR> --output <SAFE_WORK_DIR>/official_import_batch_receipt.safe.json",
             ],
             ["official_harness_execution_plan", "official_import_receipts"],
@@ -11253,6 +11341,14 @@ def _fusion_artifact_summary(name: str, artifact: Mapping[str, Any]) -> dict[str
         "harness_pin_applied_entry_count": _optional_int(payload.get("harness_pin_applied_entry_count")) or 0,
         "execution_task_count": _optional_int(payload.get("execution_task_count")) or 0,
         "ready_task_count": _optional_int(payload.get("ready_task_count")) or 0,
+        "execution_authorized": payload.get("execution_authorized") is True,
+        "matrix_mode": str(payload.get("matrix_mode") or ""),
+        "formal_top_three_cohort_complete": payload.get("formal_top_three_cohort_complete") is True,
+        "formal_cohort_binding_reason_codes": [
+            str(reason)
+            for reason in payload.get("formal_cohort_binding_reason_codes", [])
+            if str(reason)
+        ],
         "harness_pin_complete_task_count": _optional_int(payload.get("harness_pin_complete_task_count")) or 0,
         "source_template_complete_task_count": _optional_int(payload.get("source_template_complete_task_count")) or 0,
         "official_import_expected_count": _optional_int(payload.get("official_import_expected_count")) or 0,
@@ -11292,7 +11388,17 @@ def _fusion_artifact_ready(name: str, payload: Mapping[str, Any], artifact: Mapp
         ready_count = _optional_int(payload.get("ready_task_count")) or 0
         pin_count = _optional_int(payload.get("harness_pin_complete_task_count")) or 0
         source_count = _optional_int(payload.get("source_template_complete_task_count")) or 0
-        return task_count > 0 and ready_count == task_count and pin_count == task_count and source_count == task_count
+        return (
+            task_count > 0
+            and ready_count == task_count
+            and pin_count == task_count
+            and source_count == task_count
+            and payload.get("status") == "ready_to_execute"
+            and payload.get("execution_authorized") is True
+            and payload.get("matrix_mode") == "formal_top_three_cohort"
+            and payload.get("formal_top_three_cohort_complete") is True
+            and payload.get("formal_cohort_binding_reason_codes") in ([], None)
+        )
     if name == "official_import_audit":
         official_count = _optional_int(payload.get("official_suite_count")) or 0
         ready_count = _optional_int(payload.get("ready_official_suite_count")) or 0
@@ -11379,6 +11485,20 @@ def _fusion_official_import_cohort_readiness(
         reasons.append("official_import_top_three_run_unit_contract_mismatch")
     if (_optional_int(official_import_audit.get("loaded_run_count")) or 0) != required_import_count:
         reasons.append("official_import_expected_count_mismatch")
+    template_formal_cohort = template_payload.get("formal_top_three_cohort")
+    template_formal_cohort = template_formal_cohort if isinstance(template_formal_cohort, Mapping) else {}
+    if template_payload.get("matrix_mode") != "formal_top_three_cohort":
+        reasons.append("official_import_formal_cohort_required")
+    if template_formal_cohort.get("complete") is not True:
+        reasons.append("official_import_formal_cohort_incomplete")
+    if plan_payload.get("matrix_mode") != "formal_top_three_cohort":
+        reasons.append("official_import_execution_plan_formal_cohort_required")
+    if plan_payload.get("formal_top_three_cohort_complete") is not True:
+        reasons.append("official_import_execution_plan_formal_cohort_incomplete")
+    if plan_payload.get("formal_cohort_binding_reason_codes") not in ([], None):
+        reasons.append("official_import_execution_plan_formal_cohort_blocked")
+    if plan_payload.get("execution_authorized") is not True:
+        reasons.append("official_import_execution_plan_not_authorized")
     for row in (acquisition, official_import_audit):
         if (_optional_int(row.get("candidate_count")) or 0) != required_candidate_count:
             reasons.append("official_import_top_three_run_unit_contract_mismatch")

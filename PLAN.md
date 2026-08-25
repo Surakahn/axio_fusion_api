@@ -32,6 +32,12 @@ terminal/transport-blocked，r18 仅到 zero-network preflight ready。不得把
 `docs/operations/goal_gap_matrix_2026-08-21.md`；该矩阵只记录 hash-safe 状态，不改变
 任何冻结 screening 输入或生产路由。
 
+本轮最新交接（2026-08-26）见
+`docs/handoffs/2026-08-26_formal_harness_execution_gate.md`；本轮新增的控制面 successor
+位于 `private/runs/2026-08-26-composite-cohort-r18-harness-formal-gate/`，只用于证明
+execution plan 已按 provider baseline freeze 和 formal top-three cohort fail-closed，
+不替代 r18 frozen plan/source，也不授权 screening 或 target benchmark。
+
 最终唯一合法路径：
 
 ```text

@@ -25,6 +25,10 @@ provider 能力组合成 `axio-fast`、`axio-terra`、`axio-pro`。Harness 只�
   `target_suite_calls_performed=false`，`ready_for_ranking=false`。
 - 当前 credential-ready 零网络预检已独立生成并与 r18 plan/source/r7 registry hash 绑定；
   9/9 required profiles ready，但它不授权 live screening，也不代表任何 provider 能力。
+- 2026-08-26 新增 formal Harness execution gate successor：
+  `private/runs/2026-08-26-composite-cohort-r18-harness-formal-gate/`。它只验证控制面
+  语义，不覆盖 2026-08-21 旧 artifact；当前 execution plan 因缺少 provider freeze
+  明确为 `blocked`。
 - 当前服务只读健康：`ready`，公共模型为三档，四种协议可用，`auto -> proxy`，
   生产 loopback 为 `127.0.0.1:18900`，当前 serving registry 为 r7 probe-bound。
 - 当前工程回归：`1092 passed, 7 skipped`；这是代码契约证据，不是能力或质量证据。
@@ -44,7 +48,7 @@ provider 能力组合成 `axio-fast`、`axio-terra`、`axio-pro`。Harness 只�
 | Judge/Synthesizer | **partial** | 结构化比较 rubric、consensus/contradiction/coverage、独立性 gate、输出归一化 | confidence calibration、abstention/repair 阈值尚无同 cohort 实证；不得以 target label 调参 | baseline freeze 后用 operational non-target cases 校准并绑定 rollback |
 | Provider admission | **blocked** | r7 probe-bound registry、四协议 adapter、90 秒 stream gate、健康和安全 receipt；r18 credential-ready 零网络预检 9/9；可复用 transport 审计入口已真实重放 r17 并生成 hash-only receipt；新增 r18 启动前 verifier 已核对 frozen binding、proxy、PID 约束和敏感字段 | r17 transport admission blocked；8 canonical 仅 1 个同时通过两源 2% gate，低于 minimum 3；1712 case 中 916 个为 fail-fast 未尝试、799 次实际 provider attempt 中 37 次失败；credential readiness 和 verifier ready 都不等于 transport admission | 明确授权后只启动唯一 r18 frozen live screening，并沿用完整分母、allowlist 审计与 failure taxonomy |
 | Ranking/baseline freeze | **blocked** | ranking conversion、external top-three、freeze 的 fail-closed 控制面已实现 | r18 尚未 terminal，故无完整 pool ranking、rank 1/2/3 或 freeze | r18 terminal -> transport admission -> complete-pool ranking -> external top-three -> freeze |
-| Harness 控制面 | **partial/ready offline** | hash-only pin、execution plan、持久化状态、可恢复 supervisor、import audit、convergence gate | r18 acquisition/import/binding/convergence 依赖上游 screening/freeze，当前 `next_gate=screening` | freeze 后绑定同 cohort official/audited runs，再审计放行 target |
+| Harness 控制面 | **partial/ready offline** | hash-only pin、formal cohort gate、execution plan 状态机（blocked/planned/ready）、持久化状态、可恢复 supervisor、import audit、convergence gate | r18 provider freeze 尚未完成；新 successor 已正确将 diagnostic execution plan 标为 `blocked`，当前 `next_gate=screening` | freeze 后以同 cohort 15-unit/90-import 形态重建，再审计放行 target |
 | 21-suite 资产 | **partial/blocked** | 9 类 21 套 matrix、case/source/decoding/统计合同；14 套可直接 materialize，6 套需 official import，GPQA 受授权门禁 | 没有完整同 cohort run；GPQA/官方 harness/import 仍不能冒充 ready | 先完成 baseline freeze 和官方/audited imports，再启动 target |
 | Benchmark campaign | **blocked** | 独立 evaluator、四面 API、paired statistics、Holm、effect size、3x latency、污染审计的代码/合同已具备 | `target_suite_calls_allowed=false`，无 provider baseline freeze，无 campaign 证据 | convergence 返回 `ready_for_target_campaign` 后再按锁定矩阵运行 |
 | 商业级运维 | **partial** | 生产 health ready；PID `759644` 已通过 setsid 受控发布加载最新代码；proxy auto；atomic/safe receipts；secret/raw output 隔离；公开 capability warnings 已实际返回；public/operator key 比较使用 constant-time 语义；`current_channels.env` registry identity 已对齐 r7 serving identity | auth 未启用；pricing/context/tool 能力字段为 unknown；跨 provider diversity 不足 | 按部署策略决定 auth；baseline 后补齐 admission metadata，并以 non-target/shadow 证据校准跨 provider 组合 |

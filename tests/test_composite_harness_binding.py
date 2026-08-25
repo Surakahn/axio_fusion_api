@@ -95,10 +95,16 @@ def _inputs(tmp_path: Path) -> argparse.Namespace:
         {
             "schema": binding.EXECUTION_PLAN_SCHEMA,
             "status": "ready_to_execute",
+            "execution_authorized": True,
+            "matrix_mode": "formal_top_three_cohort",
+            "formal_top_three_cohort_complete": True,
+            "formal_cohort_binding_reason_codes": [],
             "all_tasks_ready_to_execute": True,
             "all_required_outputs_are_hash_only_import_sources": True,
             "harness_pin_manifest_path_sha256": binding._sha256_text(str(pin)),
             "acquisition_status_path_sha256": "placeholder",
+            "provider_baseline_freeze_path_sha256": binding._sha256_text(str(freeze)),
+            "provider_baseline_freeze_content_sha256": binding._sha256_file(freeze),
             "execution_plan_digest_sha256": "e" * 64,
         },
     )
@@ -158,4 +164,3 @@ def test_binding_rejects_ranking_content_drift(tmp_path: Path) -> None:
     result = binding.build_binding(args)
     assert result["status"] == "blocked"
     assert "provider_baseline_freeze_ranking_binding_mismatch" in result["reason_codes"]
-

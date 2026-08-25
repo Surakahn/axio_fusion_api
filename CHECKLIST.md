@@ -1,5 +1,21 @@
 # Axio Fusion API Checklist
 
+## 2026-08-26 Formal Harness execution gate
+
+- [x] execution plan 显式绑定 provider baseline freeze、formal top-three cohort 和固定
+  15 run units；无 freeze 的 diagnostic matrix fail-closed 为 `blocked`。
+- [x] formal cohort 合法但 official import/acquisition 未完成时返回 `planned`；只有
+  task、acquisition 和同 cohort binding 全部完成才输出 `ready_to_execute` 与
+  `execution_authorized=true`。
+- [x] CLI、composite scaffold、binding、convergence 和 artifact readiness 均消费同一
+  formal gate；freeze path/content digest 与 execution plan 绑定。
+- [x] 新增离线 successor
+  `private/runs/2026-08-26-composite-cohort-r18-harness-formal-gate/`，无 provider/target
+  请求，execution plan/convergence 均正确 blocked。
+- [x] L1/L2、专项 `16 passed`、全量 `1093 passed, 7 skipped`、`git diff --check` 通过。
+- [ ] 明确授权 r18 live screening；在 screening terminal、transport admission、ranking
+  和 provider freeze 之前，不执行 formal Harness imports 或 21-suite target campaign。
+
 ## 当前 r17 终态、r18 successor 与公共输出边界（2026-08-21）
 
 - [x] 重新核对 Goal/PRD：产品仍是独立 remote-only Fusion API，只公开

@@ -224,6 +224,10 @@ def _execution_plan_stage(path: Path | None) -> dict[str, Any]:
     value = _read_object(path)
     ready = bool(value) and (
         value.get("status") == "ready_to_execute"
+        and value.get("execution_authorized") is True
+        and value.get("matrix_mode") == "formal_top_three_cohort"
+        and value.get("formal_top_three_cohort_complete") is True
+        and value.get("formal_cohort_binding_reason_codes") in ([], None)
         and value.get("all_tasks_ready_to_execute") is True
         and value.get("all_required_outputs_are_hash_only_import_sources") is True
         and value.get("secrets_persisted") is False

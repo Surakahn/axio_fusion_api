@@ -18290,7 +18290,11 @@ def test_standalone_official_harness_execution_plan_from_pinned_import_template_
     first_task = plan["tasks"][0]
 
     assert plan["schema"] == "axio_fusion_api.official_harness_execution_plan.v1"
-    assert plan["status"] == "ready_to_execute"
+    assert plan["status"] == "blocked"
+    assert plan["matrix_mode"] == "diagnostic"
+    assert plan["formal_top_three_cohort_complete"] is False
+    assert "provider_baseline_freeze_required" in plan["formal_cohort_binding_reason_codes"]
+    assert "diagnostic_matrix_not_executable" in plan["formal_cohort_binding_reason_codes"]
     assert plan["execution_task_count"] == expected_task_count
     assert plan["ready_task_count"] == expected_task_count
     assert plan["suite_count"] == _benchmark_official_import_suite_count()
@@ -18306,7 +18310,7 @@ def test_standalone_official_harness_execution_plan_from_pinned_import_template_
     assert "source_template_sha256" in first_task
     assert "source" not in first_task
     assert cli_plan["execution_task_count"] == plan["execution_task_count"]
-    assert cli_plan["blocking_reason_counts"] == {}
+    assert cli_plan["blocking_reason_counts"]["provider_baseline_freeze_required"] == 1
     assert "SECRET_CPA-PLUS_MODEL" not in serialized
     assert "SECRET_AISZ_MODEL" not in serialized
     assert "SECRET_EXECUTION_PLAN_DATASET_DIR" not in serialized
@@ -18320,6 +18324,141 @@ def test_standalone_official_harness_execution_plan_from_pinned_import_template_
     assert '"raw_candidate_ids_persisted": true' not in serialized
     assert '"raw_source_paths_persisted": true' not in serialized
     assert '"raw_provider_outputs_persisted": true' not in serialized
+
+
+def test_standalone_formal_harness_execution_plan_requires_complete_imports(tmp_path):
+    registry_path = _write_live_runbook_registry_fixture(tmp_path)
+    freeze_path, _ = _write_ready_provider_baseline_freeze_for_registry_fixture(
+        tmp_path, registry_path
+    )
+    checklist = build_benchmark_acquisition_checklist(
+        registry_path=registry_path,
+        base_dir=str(tmp_path / "datasets"),
+        import_dir=str(tmp_path / "imports"),
+        include_provider_baselines=True,
+        max_provider_baselines=None,
+        provider_baseline_freeze_path=freeze_path,
+        min_cases_per_suite=100,
+    )
+    assert checklist["matrix_mode"] == "formal_top_three_cohort"
+    assert checklist["formal_top_three_cohort"]["complete"] is True
+    assert checklist["run_unit_count"] == 15
+    checklist_path = tmp_path / "formal_checklist.json"
+    checklist_path.write_text(json.dumps(checklist), encoding="utf-8")
+    harness_pin_path = tmp_path / "formal_harness_pins.json"
+    harness_pin_path.write_text(
+        json.dumps(
+            {
+                "schema": "axio_fusion_api.benchmark_harness_pin_manifest.v1",
+                "suites": [
+                    {
+                        "suite_id": suite["suite_id"],
+                        "task_format": suite["task_format"],
+                        "ready": True,
+                        "harness_name": f"{suite['suite_id']} official",
+                        "harness_name_sha256": sha256_text(f"{suite['suite_id']} official"),
+                        "harness_version": f"commit:{suite['suite_id']}",
+                        "harness_version_sha256": sha256_text(f"commit:{suite['suite_id']}"),
+                        "dataset_snapshot_sha256": sha256_text(f"{suite['suite_id']}:dataset"),
+                        "evaluator_config_sha256": sha256_text(f"{suite['suite_id']}:evaluator"),
+                        "prompt_protocol_sha256": sha256_text(f"{suite['suite_id']}:prompt"),
+                        "decoding_config_sha256": sha256_text(f"{suite['suite_id']}:decoding"),
+                        "raw_local_paths_persisted": False,
+                        "raw_provider_outputs_persisted": False,
+                    }
+                    for suite in benchmark_manifest()["suites"]
+                    if _suite_requires_official_harness_for_test(suite)
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    import_template = build_official_import_batch_template(
+        acquisition_checklist_path=checklist_path,
+        harness_pin_manifest_path=harness_pin_path,
+    )
+    import_template_path = tmp_path / "formal_import_template.json"
+    import_template_path.write_text(json.dumps(import_template), encoding="utf-8")
+    acquisition_status_path = tmp_path / "formal_acquisition_status.json"
+    acquisition_status_path.write_text(
+        json.dumps(
+            {
+                "schema": "axio_fusion_api.benchmark_acquisition_status.v1",
+                "ready_to_assemble_manifest": False,
+                "official_import_expected_count": import_template["import_entry_count"],
+                "official_import_provided_count": 0,
+                "official_import_missing_count": import_template["import_entry_count"],
+                "secrets_persisted": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    planned = build_official_harness_execution_plan(
+        import_batch_template_path=import_template_path,
+        acquisition_status_path=acquisition_status_path,
+        harness_pin_manifest_path=harness_pin_path,
+        provider_baseline_freeze_path=freeze_path,
+    )
+    assert planned["status"] == "planned"
+    assert planned["formal_top_three_cohort_complete"] is True
+    assert planned["formal_cohort_binding_reason_codes"] == []
+    assert planned["planning_reason_codes"] == ["official_import_acquisition_incomplete"]
+
+    acquisition_status_path.write_text(
+        json.dumps(
+            {
+                "schema": "axio_fusion_api.benchmark_acquisition_status.v1",
+                "ready_to_assemble_manifest": True,
+                "official_import_expected_count": import_template["import_entry_count"],
+                "official_import_provided_count": import_template["import_entry_count"],
+                "official_import_missing_count": 0,
+                "secrets_persisted": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    ready = build_official_harness_execution_plan(
+        import_batch_template_path=import_template_path,
+        acquisition_status_path=acquisition_status_path,
+        harness_pin_manifest_path=harness_pin_path,
+        provider_baseline_freeze_path=freeze_path,
+    )
+    assert ready["status"] == "ready_to_execute"
+    assert ready["formal_top_three_cohort_complete"] is True
+    assert ready["all_tasks_ready_to_execute"] is True
+    assert ready["planning_reason_codes"] == []
+    cli_output_path = tmp_path / "formal_execution_plan_cli.json"
+    assert fusion_cli_main(
+        [
+            "benchmark-official-harness-execution-plan",
+            "--import-batch-template",
+            str(import_template_path),
+            "--acquisition-status",
+            str(acquisition_status_path),
+            "--harness-pin-manifest",
+            str(harness_pin_path),
+            "--provider-baseline-freeze",
+            str(freeze_path),
+            "--output",
+            str(cli_output_path),
+        ]
+    ) == 0
+    cli_ready = json.loads(cli_output_path.read_text(encoding="utf-8"))
+    assert cli_ready["status"] == "ready_to_execute"
+    assert cli_ready["execution_authorized"] is True
+
+    invalid_freeze_path = tmp_path / "invalid_freeze.json"
+    invalid_freeze = json.loads(freeze_path.read_text(encoding="utf-8"))
+    invalid_freeze["final_claim_freeze_ready"] = False
+    invalid_freeze_path.write_text(json.dumps(invalid_freeze), encoding="utf-8")
+    blocked = build_official_harness_execution_plan(
+        import_batch_template_path=import_template_path,
+        acquisition_status_path=acquisition_status_path,
+        harness_pin_manifest_path=harness_pin_path,
+        provider_baseline_freeze_path=invalid_freeze_path,
+    )
+    assert blocked["status"] == "blocked"
+    assert "provider_baseline_freeze_not_ready" in blocked["formal_cohort_binding_reason_codes"]
 
 
 def test_standalone_benchmark_harness_pin_manifest_is_hash_only(tmp_path):
@@ -27719,6 +27858,10 @@ def _write_fusion_live_readiness_manifest_set(tmp_path, *, ready):
         import_template_path,
         {
             "schema": "axio_fusion_api.official_import_batch_template.v1",
+            "matrix_mode": "formal_top_three_cohort",
+            "formal_top_three_cohort": {"complete": bool(ready)},
+            "provider_baseline_selection": "externally_ranked_top_three_pre_registered",
+            "run_unit_count": 15,
             "suite_count": 6,
             "acquisition_checklist_path_sha256": sha256_text("fixture-acquisition-checklist"),
             "harness_pin_manifest_path_sha256": sha256_text(str(harness_path)),
@@ -27734,6 +27877,12 @@ def _write_fusion_live_readiness_manifest_set(tmp_path, *, ready):
         {
             "schema": "axio_fusion_api.official_harness_execution_plan.v1",
             "status": "ready_to_execute" if ready else "blocked",
+            "execution_authorized": bool(ready),
+            "matrix_mode": "formal_top_three_cohort",
+            "formal_top_three_cohort_complete": bool(ready),
+            "formal_cohort_binding_reason_codes": [],
+            "provider_baseline_freeze_path_sha256": sha256_text("fixture-freeze-path"),
+            "provider_baseline_freeze_content_sha256": sha256_text("fixture-freeze-content"),
             "suite_count": 6,
             "import_batch_template_sha256": sha256_text(import_template_path.read_text(encoding="utf-8")),
             "import_batch_template_path_sha256": sha256_text(str(import_template_path)),

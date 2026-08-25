@@ -1226,6 +1226,7 @@ def build_parser() -> argparse.ArgumentParser:
     harness_execution_plan.add_argument("--import-batch-template", required=True)
     harness_execution_plan.add_argument("--acquisition-status", default=None)
     harness_execution_plan.add_argument("--harness-pin-manifest", default=None)
+    harness_execution_plan.add_argument("--provider-baseline-freeze", default=None)
     harness_execution_plan.add_argument("--output", required=True)
     harness_execution_plan.set_defaults(func=cmd_benchmark_official_harness_execution_plan)
 
@@ -2893,6 +2894,7 @@ def cmd_benchmark_official_harness_execution_plan(args: argparse.Namespace) -> i
         import_batch_template_path=args.import_batch_template,
         acquisition_status_path=args.acquisition_status,
         harness_pin_manifest_path=args.harness_pin_manifest,
+        provider_baseline_freeze_path=args.provider_baseline_freeze,
     )
     _emit_json(payload, output=args.output)
     return 0
