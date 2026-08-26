@@ -7188,6 +7188,46 @@ def test_standalone_public_health_hashes_provider_format_inventory():
     assert model not in serialized
 
 
+def test_standalone_public_health_distinguishes_physical_and_logical_profiles():
+    engine = FusionEngine(
+        [
+            normalize_profile(
+                {
+                    "provider": "replica-a",
+                    "model": "channel-alpha",
+                    "canonical_model_id": "logical-alpha",
+                    "health": "available",
+                }
+            ),
+            normalize_profile(
+                {
+                    "provider": "replica-b",
+                    "model": "channel-alpha-copy",
+                    "canonical_model_id": "logical-alpha",
+                    "health": "available",
+                }
+            ),
+            normalize_profile(
+                {
+                    "provider": "replica-c",
+                    "model": "channel-beta",
+                    "canonical_model_id": "logical-beta",
+                    "health": "unavailable",
+                }
+            ),
+        ]
+    )
+
+    status, _, body = handle_request(method="GET", path="/v1/health", engine=engine)
+    readiness = json.loads(body.decode("utf-8"))["registry_readiness"]
+
+    assert status == 200
+    assert readiness["model_count"] == 3
+    assert readiness["available_model_count"] == 2
+    assert readiness["logical_model_count"] == 2
+    assert readiness["available_logical_model_count"] == 1
+
+
 def test_standalone_http_server_loopback_preserves_four_public_api_surfaces(monkeypatch):
     monkeypatch.delenv("AXIO_FUSION_API_KEYS", raising=False)
     monkeypatch.delenv("AXIO_FUSION_ACCESS_LOG", raising=False)

@@ -70,6 +70,16 @@ transport 根因复核
 plan、恢复 checkpoint、拼接 survivor subset、降低固定 2% transport gate 或提前
 target benchmark。
 
+## 本轮离线增量：健康检查物理/逻辑模型计数（2026-08-26）
+
+公开 `/health` 的 `registry_readiness` 现在同时提供物理 profile 与逻辑模型计数：
+`model_count`/`available_model_count` 统计去重后的 provider profile，
+`logical_model_count`/`available_logical_model_count` 使用与运行时相同的 canonical
+identity 规则统计模型。可用计数排除 disabled、明确 unavailable 或超过 90 秒 provider
+响应上限的 profile。该投影保持 hash-only，不暴露 provider/model 标识，也不改变路由、
+prompt、权重、registry 或任何冻结 screening 输入；计数只用于运维容量和副本/故障转移
+观察，不构成排名、能力或 benchmark 证据。
+
 ## 本轮离线增量：r18 启动前 preflight verifier（2026-08-21）
 
 新增 `scripts/verify_screening_preflight.py` 和专项测试，用于在任何 operator

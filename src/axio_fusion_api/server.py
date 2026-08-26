@@ -50,6 +50,7 @@ from .schemas import (
     FusionRequest,
     FusionResponse,
     PUBLIC_MODELS,
+    logical_model_count,
     safe_provider_error_class,
     safe_provider_error_code,
     safe_provider_http_status,
@@ -4253,15 +4254,23 @@ def _public_registry_readiness(profiles: Sequence[Any]) -> dict[str, Any]:
     api_format_counts: dict[str, int] = {}
     provider_format_hash_counts: dict[str, int] = {}
     profile_hashes = set()
+    available_profile_hashes = set()
+    available_profiles: list[Any] = []
     provider_hashes = set()
     for profile in profiles:
         api_format = normalize_api_format(str(getattr(profile, "api_format", "chat/completions")))
         provider_hash = sha256_text(str(getattr(profile, "provider", "")))
-        profile_hashes.add(sha256_text(str(getattr(profile, "profile_id", ""))))
+        profile_hash = sha256_text(str(getattr(profile, "profile_id", "")))
+        profile_hashes.add(profile_hash)
         provider_hashes.add(provider_hash)
         api_format_counts[api_format] = api_format_counts.get(api_format, 0) + 1
         provider_format_key = f"{provider_hash}::{api_format}"
         provider_format_hash_counts[provider_format_key] = provider_format_hash_counts.get(provider_format_key, 0) + 1
+        if _profile_is_publicly_available(profile):
+            available_profiles.append(profile)
+            available_profile_hashes.add(profile_hash)
+    logical_profile_count = logical_model_count(profiles)
+    available_logical_profile_count = logical_model_count(available_profiles)
     return {
         "schema": "axio_fusion_api.public_registry_readiness.v1",
         "ready": internal.get("ready") is True,
@@ -4269,6 +4278,9 @@ def _public_registry_readiness(profiles: Sequence[Any]) -> dict[str, Any]:
         "blockers": [str(item)[:120] for item in internal.get("blockers", []) if str(item)],
         "warnings": sorted(warnings),
         "model_count": len(profile_hashes),
+        "available_model_count": len(available_profile_hashes),
+        "logical_model_count": logical_profile_count,
+        "available_logical_model_count": available_logical_profile_count,
         "provider_count": len(provider_hashes),
         "provider_hash_count": len(provider_hashes),
         "profile_set_sha256": sha256_text(stable_json(sorted(profile_hashes))),
@@ -4287,6 +4299,15 @@ def _public_registry_readiness(profiles: Sequence[Any]) -> dict[str, Any]:
         "raw_api_keys_persisted": False,
         "secrets_persisted": False,
     }
+
+
+def _profile_is_publicly_available(profile: Any) -> bool:
+    """按服务可用性边界计算健康检查中的 profile 计数。"""
+
+    return bool(getattr(profile, "enabled", True)) and (
+        str(getattr(profile, "health", "")).strip().casefold() != "unavailable"
+        and profile_latency_eligibility(profile).get("eligible") is not False
+    )
 
 
 def _endpoint_api_format(route: str) -> str:

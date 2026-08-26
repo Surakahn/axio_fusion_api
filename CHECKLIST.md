@@ -1,5 +1,14 @@
 # Axio Fusion API Checklist
 
+## 2026-08-26 Health observability contract
+
+- [x] `/health` 的 registry readiness 同时暴露 physical profile 与 logical canonical
+  model 计数；available 计数沿用 enabled/health/90 秒 latency 服务边界。
+- [x] 副本去重与 unavailable profile 的 health 契约测试通过；投影仍只保存 hash-safe
+  计数，不改变 router、prompt、registry 或 benchmark gate。
+- [ ] r18 live screening 仍需明确授权；health 计数不等价于 provider admission、ranking
+  或 21-suite target authorization。
+
 ## 2026-08-26 Formal Harness execution gate
 
 - [x] execution plan 显式绑定 provider baseline freeze、formal top-three cohort 和固定

@@ -37,6 +37,11 @@ provider 能力组合成 `axio-fast`、`axio-terra`、`axio-pro`。Harness 只�
   阶段检查项，不作为当前 r7 serving blocker。
 - 当前工程回归：`1096 passed, 7 skipped`；这是代码契约证据，不是能力或质量证据。
 
+2026-08-26 离线可观测性增量：公开 health projection 已补充物理/逻辑模型计数，使用
+与运行时一致的 canonical identity 去重，并对 disabled/unavailable/超时 profile 应用
+服务可用性边界。该增量只影响 hash-safe 运维投影，不改变 r18 冻结输入、生产路由或
+benchmark gate；r18 live screening 仍未授权。
+
 ## 差距矩阵
 
 | 领域 | 当前状态 | 已完成的可验证内容 | 未完成/阻塞 | 下一条合法动作 |

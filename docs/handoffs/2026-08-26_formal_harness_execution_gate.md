@@ -117,6 +117,17 @@ physical profiles”的检查项属于历史 r43 阶段，不适用于当前 r7 
 
 这些是工程/控制面证据，不是 provider 能力、排序、成本、延迟或 superiority 证据。
 
+## 后续离线增量：健康检查物理/逻辑计数（2026-08-26）
+
+在不改变 r18 frozen plan/source、生产 router、prompt、权重或 serving registry 的前提
+下，`/health` 的 hash-safe `registry_readiness` 增加了
+`available_model_count`、`logical_model_count` 和 `available_logical_model_count`。
+其中 `model_count`/`available_model_count` 是物理 provider profile 计数，逻辑计数使用
+运行时 canonical identity 规则；available 边界排除 disabled、明确 unavailable 和超过
+90 秒 provider latency ceiling 的 profile。新增副本去重和不可用模型测试通过，未发起
+provider/target 请求。该计数只支持运维容量和 failover 观察，不改变 ranking、baseline
+freeze 或 target gate。
+
 ## 下一步
 
 当前不应继续堆叠 benchmark 或静态能力先验。等待 operator 明确授权后，按 r18 原始

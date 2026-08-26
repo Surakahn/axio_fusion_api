@@ -42,6 +42,8 @@
 - ✅ 图像生成/编辑独立模块（gpt-image-2）
 - ✅ 1000+ 自动化测试
 - ✅ 生产工程回归、四协议兼容、图片 lane 隔离和 Harness 控制面已具备可审计证据
+- ✅ `/health` 同时报告物理 provider profile 与 canonical logical model 计数，支持副本和
+  failover 容量观察
 - ⏳ provider baseline screening/ranking/freeze 与完整 21 套 benchmark 仍在门禁流程中
 
 ### 评价证据边界

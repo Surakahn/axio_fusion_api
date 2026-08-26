@@ -14,6 +14,13 @@ The four public protocol surfaces are:
 - Google Gemini GenerateContent: `POST /v1beta/models/{model}:generateContent`
   and `:streamGenerateContent?alt=sse`
 
+`GET /health` and `GET /v1/health` return a hash-safe registry projection.
+`model_count`/`available_model_count` describe physical provider profiles,
+while `logical_model_count`/`available_logical_model_count` describe unique
+canonical models after replica deduplication. The latter counts are useful for
+capacity and failover inspection only; they do not imply model quality or
+benchmark admission.
+
 ## Reading Order
 
 1. [`protocol_matrix.md`](protocol_matrix.md) defines the cross-protocol

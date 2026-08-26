@@ -162,6 +162,15 @@ The following are product invariants:
 - benchmark evaluation is an external client of the HTTP gateway, not an
   input to production routing or prompt tuning.
 
+The public `/health` registry projection keeps the distinction between
+physical provider profiles and logical models visible without exposing
+identifiers. `model_count` and `available_model_count` count deduplicated
+physical profiles; `logical_model_count` and `available_logical_model_count`
+count unique canonical model identities. An available profile must be enabled,
+not explicitly unhealthy, and within the provider latency ceiling. The counts
+are operational observability only and never serve as ranking or quality
+evidence.
+
 ## Independent Evaluation Boundary
 
 Benchmark execution is intentionally separate from the Fusion runtime. The
