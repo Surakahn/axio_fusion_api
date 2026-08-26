@@ -199,6 +199,21 @@ code/tool/pairwise suites, paired case-level statistics, Holm correction,
 practical effect sizes, contamination checks, four-surface parity, and p50/p95
 latency no more than three times the corresponding single-model baseline.
 
+BizBench is an explicit audited-local exception to the six-suite external
+harness queue. Its 4,673 test rows are materialized with the pinned
+`bizbench_task_aware_v2` contract: FinKnow exposes only option text and scores
+choice indices; ConvFinQA/TAT-QA score numeric extraction, while SEC-NUM uses
+numeric tolerance for numeric labels and normalized exact spans for
+open-vocabulary quantities; FinCode, CodeFinQA and CodeTAT-QA execute a
+no-import, no-network candidate program and
+compare its numeric result within 1%; FormulaEval runs candidate and reference
+function bodies against deterministic synthesized inputs. Code execution is
+opt-in through `AXIO_FUSION_ALLOW_BENCHMARK_CODE_EXEC`, isolated by a temporary
+Python process with a minimal builtins allowlist and timeout, and all receipts remain hash/count only. This is an
+audited evaluator contract, not a claim that BizBench has a separate official
+runner; labels, reference programs and raw outputs never enter prompts or safe
+artifacts.
+
 GPQA remains explicitly gated when authorized access is unavailable. A
 replacement is reported by its real identity and never relabeled as GPQA.
 Likewise, downloading a harness repository is not treated as a scored harness

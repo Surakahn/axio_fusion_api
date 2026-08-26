@@ -28,6 +28,20 @@ access. FLORES is currently materialized and ready. A blocked suite must never
 be replaced with an unofficial mirror or silently removed from the declared
 21-suite matrix.
 
+BizBench uses the pinned `bizbench_task_aware_v2` audited-local evaluator. Its
+test split contains eight task families, so one generic exact-match prompt is
+not valid: FinKnow is option-letter/index accuracy; ConvFinQA and TAT-QA are
+numeric extraction, while SEC-NUM uses numeric tolerance for numeric labels and
+normalized exact-span matching for open-vocabulary quantities; FinCode, CodeFinQA
+and CodeTAT-QA are numeric program synthesis; FormulaEval is function-body
+completion. The evaluator keeps task metadata and reference programs out of the
+prompt projection, applies the paper's 1% relative numeric tolerance, and
+compares FormulaEval candidate/reference bodies with deterministic synthesized
+unit tests. Program execution is opt-in, no-import/no-network, timeout-bounded,
+restricted to a minimal builtins allowlist inside a disposable sandbox, and written only to
+hash-safe receipts. This local contract is audited for reproducibility but is
+not labeled as a separate third-party official harness.
+
 ## Frozen Evaluation Policy
 
 The current formal policy records GPQA Diamond as `skipped` because authorized

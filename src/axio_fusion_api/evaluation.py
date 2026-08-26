@@ -7,8 +7,11 @@ import json
 import math
 import os
 import re
+import shutil
 import subprocess
+import sys
 import time
+import textwrap
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -183,6 +186,64 @@ OFFICIAL_HARNESS_REQUIRED_FORMATS = frozenset({"python_code", "tool_call_ast", "
 OFFICIAL_HARNESS_REQUIRED_SUITES = frozenset({"ifeval"})
 IMPORTED_RUN_MODES = frozenset({"imported", "official_import", "external_judge_import", "judge_import", "official_harness_import"})
 BENCHMARK_PROMPT_CONTRACT_SCHEMA = "axio_fusion_api.benchmark_prompt_input_contract.v1"
+BIZBENCH_EVALUATOR_ID = "bizbench_task_aware_v2"
+BIZBENCH_NUMERIC_RELATIVE_TOLERANCE = 0.01
+BIZBENCH_CHOICE_TASKS = frozenset({"FinKnow"})
+BIZBENCH_FORMULA_TASKS = frozenset({"FormulaEval"})
+BIZBENCH_PROGRAM_TASKS = frozenset({"FinCode", "CodeFinQA", "CodeTAT-QA"})
+BIZBENCH_NUMERIC_TASKS = frozenset(
+    {"ConvFinQA", "TAT-QA", "SEC-NUM"}
+)
+# Candidate programs run in a separate namespace with only these builtins.  The
+# list intentionally excludes reflection, dynamic code loading, and I/O while
+# retaining the numeric and container primitives used by BizBench programs.
+_BIZBENCH_SAFE_BUILTIN_NAMES = (
+    "__build_class__",
+    "abs",
+    "all",
+    "any",
+    "bool",
+    "complex",
+    "dict",
+    "divmod",
+    "enumerate",
+    "filter",
+    "float",
+    "frozenset",
+    "int",
+    "isinstance",
+    "issubclass",
+    "len",
+    "list",
+    "map",
+    "max",
+    "min",
+    "object",
+    "pow",
+    "property",
+    "range",
+    "reversed",
+    "round",
+    "set",
+    "slice",
+    "sorted",
+    "staticmethod",
+    "str",
+    "sum",
+    "super",
+    "tuple",
+    "type",
+    "zip",
+    "ArithmeticError",
+    "Exception",
+    "IndexError",
+    "KeyError",
+    "LookupError",
+    "RuntimeError",
+    "TypeError",
+    "ValueError",
+    "ZeroDivisionError",
+)
 # These are the only top-level fields that the built-in runner may project into
 # a model prompt.  Scoring fields stay in the evaluator-owned case object.
 _BENCHMARK_PROMPT_PUBLIC_FIELDS: dict[str, frozenset[str]] = {
@@ -19410,7 +19471,7 @@ def _materialization_adapter_id(suite_id: str) -> str:
         "medqa_usmle": "medqa_us_test_mcq_v1",
         "financebench": "financebench_open_source_oracle_context_v1",
         "legalbench": "legalbench_tsv_exact_v1",
-        "bizbench": "bizbench_test_exact_v1",
+        "bizbench": BIZBENCH_EVALUATOR_ID,
         "policyllm_policybench": "policyllm_multilevel_mcq_v1",
     }.get(suite_id, "")
 
@@ -19967,27 +20028,117 @@ def _materialize_financebench(raw_root: Path) -> list[dict[str, Any]]:
 def _materialize_bizbench(raw_root: Path) -> list[dict[str, Any]]:
     paths = sorted((raw_root / "bizbench/data").glob("test-*.parquet"))
     rows = []
-    for index, raw in enumerate(_read_parquet_rows(paths[0]) if paths else []):
-        context = str(raw.get("context") or "").strip()
-        question = str(raw.get("question") or "").strip()
-        prompt = "\n\n".join(part for part in (f"Context:\n{context}" if context else "", question) if part)
-        case_identity = {
-            "index": index,
-            "task": raw.get("task"),
-            "question": raw.get("question"),
-            "context": raw.get("context"),
-            "context_type": raw.get("context_type"),
-            "options": raw.get("options"),
-        }
-        rows.append(
-            _exact_case(
+    for path in paths:
+        for index, raw in enumerate(_read_parquet_rows(path)):
+            task = _bizbench_text(raw.get("task"))
+            context = _bizbench_text(raw.get("context"))
+            question = _bizbench_text(raw.get("question"))
+            prompt = _bizbench_prompt(raw, task=task)
+            case_identity = {
+                "shard": path.name,
+                "index": index,
+                "task": task,
+                "question": raw.get("question"),
+                "context": raw.get("context"),
+                "context_type": raw.get("context_type"),
+                "options": raw.get("options"),
+            }
+            row = _exact_case(
                 prompt=prompt,
                 answer=raw.get("answer"),
                 case_id=sha256_text(stable_json(case_identity))[:32],
-                category=raw.get("task"),
+                category=task,
             )
-        )
+            row.update(
+                {
+                    "bizbench_task": task,
+                    "bizbench_evaluator": BIZBENCH_EVALUATOR_ID,
+                    "bizbench_output_mode": _bizbench_output_mode(task),
+                    "question": question,
+                    "bizbench_stub": question if task in BIZBENCH_FORMULA_TASKS else "",
+                    "context": context,
+                    "context_type": _bizbench_text(raw.get("context_type")),
+                }
+            )
+            options = raw.get("options")
+            if isinstance(options, Sequence) and not isinstance(options, (str, bytes)):
+                row["options"] = [str(option) for option in options]
+                row["option_labels"] = [
+                    chr(ord("A") + option_index)
+                    for option_index in range(len(row["options"]))
+                ]
+            rows.append(row)
     return _valid_materialized_rows(rows)
+
+
+def _bizbench_output_mode(task: str) -> str:
+    if task in BIZBENCH_CHOICE_TASKS:
+        return "choice"
+    if task in BIZBENCH_FORMULA_TASKS:
+        return "formula_code"
+    if task in BIZBENCH_PROGRAM_TASKS:
+        return "program_numeric"
+    if task == "SEC-NUM":
+        return "numeric_or_span"
+    if task in BIZBENCH_NUMERIC_TASKS:
+        return "numeric"
+    return "unknown"
+
+
+def _bizbench_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, float) and math.isnan(value):
+        return ""
+    return str(value).strip()
+
+
+def _bizbench_prompt(raw: Mapping[str, Any], *, task: str) -> str:
+    """Build the task-aware public prompt while keeping labels and programs private."""
+
+    question = _bizbench_text(raw.get("question"))
+    context = _bizbench_text(raw.get("context"))
+    if task in BIZBENCH_CHOICE_TASKS:
+        options = raw.get("options")
+        option_values = (
+            [str(value).strip() for value in options]
+            if isinstance(options, Sequence) and not isinstance(options, (str, bytes))
+            else []
+        )
+        option_lines = [
+            f"{chr(ord('A') + index)}. {value}"
+            for index, value in enumerate(option_values)
+            if value
+        ]
+        return "\n".join(
+            part
+            for part in (
+                f"Question: {question}",
+                "Options:\n" + "\n".join(option_lines) if option_lines else "",
+                "Return only the single best option letter.",
+            )
+            if part
+        )
+    if task in BIZBENCH_FORMULA_TASKS:
+        return (
+            f"{question}\n\n"
+            "Complete the missing function or method body. Return only Python code "
+            "for the body, without markdown or explanation."
+        )
+    context_block = f"Context:\n{context}" if context else ""
+    instruction = (
+        "Return one Python code block whose final value is the numeric answer. "
+        "Do not import modules, access files, or use the network."
+        if task in BIZBENCH_PROGRAM_TASKS
+        else "Return only the quantity span from the context, preserving its wording."
+        if task == "SEC-NUM"
+        else (
+            "Return only the final numeric answer."
+        )
+    )
+    return "\n\n".join(
+        part for part in (context_block, f"Question: {question}", instruction) if part
+    )
 
 
 def _materialize_legalbench(raw_root: Path) -> list[dict[str, Any]]:
@@ -21295,6 +21446,28 @@ def _decoding_config_sha256_for_suite(
 
 def _local_harness_receipt(suite_id: str, task_format: str) -> dict[str, Any]:
     official_required = _suite_requires_official_harness(suite_id, task_format)
+    evaluator_config = (
+        stable_json(
+            {
+                "suite_id": suite_id,
+                "task_format": task_format,
+                "bizbench_evaluator": BIZBENCH_EVALUATOR_ID,
+                "bizbench_numeric_relative_tolerance": BIZBENCH_NUMERIC_RELATIVE_TOLERANCE,
+                "bizbench_output_modes": {
+                    task: _bizbench_output_mode(task)
+                    for task in sorted(
+                        BIZBENCH_CHOICE_TASKS
+                        | BIZBENCH_FORMULA_TASKS
+                        | BIZBENCH_PROGRAM_TASKS
+                        | BIZBENCH_NUMERIC_TASKS
+                    )
+                },
+                "bizbench_span_normalization": "unicode_dash_whitespace_casefold_v1",
+            }
+        )
+        if suite_id == "bizbench"
+        else task_format
+    )
     return {
         "schema": "axio_fusion_api.harness_receipt.v1",
         "suite_id": suite_id,
@@ -21307,7 +21480,7 @@ def _local_harness_receipt(suite_id: str, task_format: str) -> dict[str, Any]:
         "harness_name_sha256": sha256_text("axio_fusion_api.local_runner"),
         "harness_version_sha256": sha256_text("0.1"),
         "dataset_snapshot_sha256": "",
-        "evaluator_config_sha256": sha256_text(task_format),
+        "evaluator_config_sha256": sha256_text(evaluator_config),
         "prompt_protocol_sha256": _prompt_protocol_sha256_for_suite(suite_id, task_format),
         "decoding_config_sha256": _decoding_config_sha256_for_suite(suite_id, task_format),
         "position_balanced": False,
@@ -21780,8 +21953,11 @@ def _methodology_contract_for_suite(suite: BenchmarkSuite) -> dict[str, Any]:
             "source_type": "official_huggingface_dataset",
             "dataset_slice": "BizBench test split",
             "case_selection": "all 4,673 test rows for final runs unless cost-capped by a deterministic task-balanced sample",
-            "prompt_protocol": "business/finance quantitative question, options/context/program fields as permitted by the official row; answer hidden",
-            "scoring_protocol": "normalized exact match and numeric reasoning accuracy by task",
+            "prompt_protocol": "task-aware zero-shot prompts: FinKnow options, contextual numeric extraction, program synthesis, or FormulaEval body completion; answers and reference programs hidden",
+            "scoring_protocol": "FinKnow option accuracy; ConvFinQA/TAT-QA numeric outputs within 1% relative error; SEC-NUM numeric outputs use 1% tolerance and open-vocabulary quantity spans use normalized exact match; program outputs use 1% tolerance; FormulaEval synthesized unit-test equivalence",
+            "evaluator_contract": BIZBENCH_EVALUATOR_ID,
+            "official_reference_pipeline": "kensho-technologies/benchmarks-pipeline",
+            "execution_protocol": "programs run only when AXIO_FUSION_ALLOW_BENCHMARK_CODE_EXEC is enabled, in an isolated Python process with imports and filesystem/network access denied",
         },
         "policyllm_policybench": {
             "source_type": "official_github_dataset",
@@ -29471,6 +29647,20 @@ def _benchmark_prompt_case_projection(
         for key in sorted(allowed)
         if key in case
     }
+    if selected_format == "exact_match" and str(case.get("bizbench_evaluator") or "") == BIZBENCH_EVALUATOR_ID:
+        for key in (
+            "bizbench_task",
+            "bizbench_evaluator",
+            "bizbench_output_mode",
+            "bizbench_stub",
+            "question",
+            "context",
+            "context_type",
+            "options",
+            "option_labels",
+        ):
+            if key in case:
+                projection[key] = case[key]
     if selected_format == "multiple_choice":
         question = case.get("question") or case.get("prompt") or case.get("input")
         if "question" not in projection and question is not None:
@@ -29583,6 +29773,8 @@ def _benchmark_cost_contract() -> dict[str, Any]:
 
 
 def _generic_case_prompt(case: Mapping[str, Any], task_format: str) -> str:
+    if str(case.get("bizbench_evaluator") or "") == BIZBENCH_EVALUATOR_ID:
+        return _bizbench_prompt(case, task=str(case.get("bizbench_task") or ""))
     if task_format == "translation_chrf":
         source_language = str(case.get("source_language") or case.get("src_lang") or "source")
         target_language = str(case.get("target_language") or case.get("tgt_lang") or "target")
@@ -29670,7 +29862,11 @@ def _score_generic_output(
     code_timeout_seconds: float,
 ) -> dict[str, Any]:
     if task_format == "exact_match":
-        return _score_exact_match_output(output=output, case=case)
+        return _score_exact_match_output(
+            output=output,
+            case=case,
+            code_timeout_seconds=code_timeout_seconds,
+        )
     if task_format == "translation_chrf":
         reference = str(case.get("reference") or case.get("target") or "")
         score = _chrf_score(output, reference)
@@ -29698,7 +29894,18 @@ def _score_row(score: float | None, correct: bool, metric: str, prediction: Any,
     }
 
 
-def _score_exact_match_output(*, output: str, case: Mapping[str, Any]) -> dict[str, Any]:
+def _score_exact_match_output(
+    *,
+    output: str,
+    case: Mapping[str, Any],
+    code_timeout_seconds: float = 5.0,
+) -> dict[str, Any]:
+    if str(case.get("bizbench_evaluator") or "") == BIZBENCH_EVALUATOR_ID:
+        return _score_bizbench_output(
+            output=output,
+            case=case,
+            timeout=code_timeout_seconds,
+        )
     prediction_text = _extract_final_answer_text(output)
     answer_text = _extract_final_answer_text(case.get("answer") or case.get("target") or case.get("reference"))
     prediction = _normalize_freeform_answer(prediction_text)
@@ -29713,6 +29920,546 @@ def _score_exact_match_output(*, output: str, case: Mapping[str, Any]) -> dict[s
         }
     )
     return row
+
+
+def _score_bizbench_output(
+    *,
+    output: str,
+    case: Mapping[str, Any],
+    timeout: float,
+) -> dict[str, Any]:
+    mode = str(case.get("bizbench_output_mode") or "").strip()
+    if mode == "choice":
+        return _score_bizbench_choice(output, case)
+    if mode == "numeric":
+        return _score_bizbench_numeric(output, case)
+    if mode == "numeric_or_span":
+        return _score_bizbench_numeric_or_span(output, case)
+    if mode == "program_numeric":
+        return _score_bizbench_program_numeric(output, case, timeout=timeout)
+    if mode == "formula_code":
+        return _score_bizbench_formula_code(output, case, timeout=timeout)
+    return _score_row(
+        0.0,
+        False,
+        "numeric_reasoning_accuracy",
+        "",
+        status="failed",
+        error_type="unknown_bizbench_output_mode",
+    )
+
+
+def _score_bizbench_choice(output: str, case: Mapping[str, Any]) -> dict[str, Any]:
+    labels = [str(label).upper() for label in case.get("option_labels") or []]
+    answer = str(case.get("answer") or "").strip()
+    expected_index = _bizbench_choice_index(answer, labels)
+    prediction_text = _extract_final_answer_text(output)
+    predicted_index = _bizbench_choice_index(prediction_text, labels)
+    correct = expected_index is not None and predicted_index == expected_index
+    return _score_row(
+        1.0 if correct else 0.0,
+        correct,
+        "choice_accuracy",
+        str(predicted_index) if predicted_index is not None else "",
+    ) | {"answer_parser": "bizbench_choice_v1"}
+
+
+def _bizbench_choice_index(value: Any, labels: Sequence[str]) -> int | None:
+    text = _extract_final_answer_text(value).strip().upper()
+    if not text:
+        return None
+    prefixed_match = re.match(r"^(?:OPTION|CHOICE|ANSWER)\s*[:=\-]?\s*([A-Z])\b", text)
+    if prefixed_match:
+        label = prefixed_match.group(1)
+        return labels.index(label) if label in labels else None
+    label_match = re.match(r"^([A-Z])(?:\b|[.)])", text)
+    if label_match:
+        label = label_match.group(1)
+        return labels.index(label) if label in labels else None
+    number_match = re.match(r"^([0-9]+)(?:\b|[.)])", text)
+    if number_match:
+        index = int(number_match.group(1))
+        return index if 0 <= index < len(labels) else None
+    return None
+
+
+def _score_bizbench_numeric(output: str, case: Mapping[str, Any]) -> dict[str, Any]:
+    prediction = _parse_bizbench_number(_extract_final_answer_text(output))
+    reference = _parse_bizbench_number(case.get("answer"))
+    correct = _within_bizbench_tolerance(prediction, reference)
+    return _score_row(
+        1.0 if correct else 0.0,
+        correct,
+        "numeric_reasoning_accuracy",
+        "" if prediction is None else repr(prediction),
+    ) | {"answer_parser": "bizbench_numeric_1pct_v1"}
+
+
+def _score_bizbench_numeric_or_span(output: str, case: Mapping[str, Any]) -> dict[str, Any]:
+    reference_text = str(case.get("answer") or "").strip()
+    reference_number = _parse_bizbench_number(reference_text)
+    prediction_text = _extract_final_answer_text(output)
+    if reference_number is not None and _bizbench_numeric_reference(reference_text):
+        prediction = _parse_bizbench_number(prediction_text)
+        correct = _within_bizbench_tolerance(prediction, reference_number)
+        return _score_row(
+            1.0 if correct else 0.0,
+            correct,
+            "numeric_reasoning_accuracy",
+            "" if prediction is None else repr(prediction),
+        ) | {"answer_parser": "bizbench_numeric_1pct_v1"}
+    correct = _normalize_bizbench_span(prediction_text) == _normalize_bizbench_span(reference_text)
+    return _score_row(
+        1.0 if correct else 0.0,
+        correct,
+        "span_accuracy",
+        _normalize_bizbench_span(prediction_text),
+    ) | {"answer_parser": "bizbench_span_exact_v1"}
+
+
+def _normalize_bizbench_span(value: Any) -> str:
+    return " ".join(str(value or "").replace("\u2013", "-").replace("\u2014", "-").split()).strip().casefold()
+
+
+def _bizbench_numeric_reference(value: Any) -> bool:
+    return re.fullmatch(
+        r"\s*[-+]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?\s*%?\s*",
+        str(value or ""),
+    ) is not None
+
+
+def _parse_bizbench_number(value: Any) -> float | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.startswith("(") and text.endswith(")"):
+        text = "-" + text[1:-1]
+    matches = re.findall(
+        r"[-+]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?",
+        text,
+    )
+    if not matches:
+        return None
+    try:
+        return float(matches[-1].replace(",", ""))
+    except ValueError:
+        return None
+
+
+def _within_bizbench_tolerance(prediction: float | None, reference: float | None) -> bool:
+    if prediction is None or reference is None:
+        return False
+    if not math.isfinite(prediction) or not math.isfinite(reference):
+        return False
+    if reference == 0:
+        return abs(prediction) <= 1e-9
+    return abs(prediction - reference) / abs(reference) <= BIZBENCH_NUMERIC_RELATIVE_TOLERANCE
+
+
+def _score_bizbench_program_numeric(
+    output: str,
+    case: Mapping[str, Any],
+    *,
+    timeout: float,
+) -> dict[str, Any]:
+    if not _code_execution_enabled():
+        return _score_row(
+            None,
+            False,
+            "numeric_reasoning_accuracy",
+            "",
+            status="blocked",
+            error_type="bizbench_code_execution_disabled",
+        )
+    code = _extract_code(output)
+    reason = _bizbench_code_safety_reason(code)
+    if reason:
+        return _score_row(0.0, False, "numeric_reasoning_accuracy", "", error_type=reason)
+    result, error_type = _execute_bizbench_program(code, case, timeout=timeout)
+    reference = _parse_bizbench_number(case.get("answer"))
+    correct = not error_type and _within_bizbench_tolerance(result, reference)
+    return _score_row(
+        1.0 if correct else 0.0,
+        correct,
+        "numeric_reasoning_accuracy",
+        "" if result is None else repr(result),
+        error_type=error_type,
+    ) | {"answer_parser": "bizbench_program_numeric_1pct_v1"}
+
+
+def _bizbench_code_safety_reason(code: str) -> str:
+    if not str(code or "").strip():
+        return "bizbench_code_empty"
+    if len(code) > 24000:
+        return "bizbench_code_too_large"
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, ValueError, TypeError):
+        return "bizbench_code_syntax_error"
+    dangerous_calls = {
+        "__import__",
+        "compile",
+        "eval",
+        "exec",
+        "getattr",
+        "globals",
+        "locals",
+        "vars",
+        "setattr",
+        "delattr",
+        "input",
+        "open",
+        "print",
+        "breakpoint",
+    }
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            return "bizbench_code_import_forbidden"
+        if isinstance(node, ast.Name) and node.id.startswith("__"):
+            return "bizbench_code_dunder_forbidden"
+        if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
+            return "bizbench_code_dunder_forbidden"
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id in dangerous_calls:
+                return "bizbench_code_dangerous_call"
+            if isinstance(node.func, ast.Attribute) and node.func.attr in {
+                "chmod",
+                "chdir",
+                "kill",
+                "remove",
+                "rename",
+                "rmdir",
+                "system",
+                "unlink",
+            }:
+                return "bizbench_code_dangerous_call"
+    return ""
+
+
+def _execute_bizbench_program(
+    code: str,
+    case: Mapping[str, Any],
+    *,
+    timeout: float,
+) -> tuple[float | None, str]:
+    context_binding = ""
+    context = str(case.get("context") or "").strip()
+    if str(case.get("context_type") or "") == "json" and context:
+        try:
+            context_value = json.loads(context)
+        except json.JSONDecodeError:
+            return None, "bizbench_context_json_invalid"
+        context_binding = (
+            f"_axio_globals['context'] = {repr(context_value)}\n"
+            # CodeTAT-QA's generated programs use ``df[column][row]``.  A
+            # nested mapping implements that access pattern without exposing
+            # third-party imports inside the isolated evaluator.
+            "_axio_globals['df'] = _axio_globals['context']\n"
+        )
+    script = (
+        "import ast\n"
+        f"{_bizbench_safe_builtins_source('_axio_safe_builtins')}"
+        "_axio_globals = {'__builtins__': _axio_safe_builtins}\n"
+        f"{context_binding}"
+        f"_axio_code = {code!r}\n"
+        "exec(compile(_axio_code, '<bizbench>', 'exec'), _axio_globals, _axio_globals)\n"
+        "_axio_result = _axio_globals.get('answer')\n"
+        "if _axio_result is None:\n"
+        "    _axio_tree = ast.parse(_axio_code)\n"
+        "    if _axio_tree.body and isinstance(_axio_tree.body[-1], ast.Expr):\n"
+        "        _axio_expression = ast.Expression(_axio_tree.body[-1].value)\n"
+        "        _axio_result = eval(compile(_axio_expression, '<bizbench>', 'eval'), _axio_globals, _axio_globals)\n"
+        "print('__AXIO_BIZBENCH_RESULT__=' + repr(_axio_result))\n"
+    )
+    try:
+        with tempfile.TemporaryDirectory(prefix="axio_bizbench_") as tmp:
+            path = Path(tmp) / "candidate.py"
+            path.write_text(script, encoding="utf-8")
+            result = subprocess.run(
+                _bizbench_python_command(path),
+                cwd=tmp,
+                env={"PYTHONPATH": ""},
+                capture_output=True,
+                text=True,
+                timeout=max(1.0, float(timeout)),
+                check=False,
+            )
+    except (OSError, subprocess.TimeoutExpired):
+        return None, "bizbench_code_timeout_or_process_error"
+    if result.returncode != 0:
+        return None, "bizbench_code_execution_failed"
+    marker = re.findall(r"__AXIO_BIZBENCH_RESULT__=(.+)", result.stdout)
+    if not marker:
+        return None, "bizbench_code_result_missing"
+    return _parse_bizbench_number(marker[-1]), ""
+
+
+def _score_bizbench_formula_code(
+    output: str,
+    case: Mapping[str, Any],
+    *,
+    timeout: float,
+) -> dict[str, Any]:
+    if not _code_execution_enabled():
+        return _score_row(
+            None,
+            False,
+            "formula_unit_test_accuracy",
+            "",
+            status="blocked",
+            error_type="bizbench_formula_execution_disabled",
+        )
+    body = _extract_bizbench_formula_body(output)
+    safety_reason = _bizbench_formula_safety_reason(body)
+    if safety_reason:
+        return _score_row(0.0, False, "formula_unit_test_accuracy", "", error_type=safety_reason)
+    passed, error_type = _execute_bizbench_formula_pair(
+        str(case.get("bizbench_stub") or case.get("question") or case.get("prompt") or ""),
+        body,
+        str(case.get("answer") or ""),
+        timeout=timeout,
+    )
+    return _score_row(
+        1.0 if passed else 0.0,
+        passed,
+        "formula_unit_test_accuracy",
+        sha256_text(body),
+        error_type=error_type,
+    ) | {"answer_parser": "bizbench_formula_synthesized_tests_v1"}
+
+
+def _bizbench_formula_safety_reason(body: str) -> str:
+    if not body:
+        return "bizbench_formula_body_empty"
+    wrapped = "def __axio_formula_stub__():\n" + textwrap.indent(body, "    ")
+    return _bizbench_code_safety_reason(wrapped)
+
+
+def _extract_bizbench_formula_body(output: str) -> str:
+    raw = str(output or "")
+    match = re.search(r"```(?:python)?\s*(.*?)```", raw, flags=re.DOTALL | re.IGNORECASE)
+    source = match.group(1) if match else raw
+    return textwrap.dedent(source).strip("\n")
+
+
+def _execute_bizbench_formula_pair(
+    stub: str,
+    candidate_body: str,
+    gold_body: str,
+    *,
+    timeout: float,
+) -> tuple[bool, str]:
+    target = _bizbench_formula_target(stub)
+    if target is None:
+        return False, "bizbench_formula_target_unresolved"
+    candidate_source = _compose_bizbench_formula_source(stub, candidate_body, target["indent"])
+    gold_source = _compose_bizbench_formula_source(stub, gold_body, target["indent"])
+    if not candidate_source or not gold_source:
+        return False, "bizbench_formula_source_invalid"
+    calls = _bizbench_formula_call_vectors(target)
+    if not calls:
+        return False, "bizbench_formula_test_vectors_missing"
+    class_name = target.get("class_name") or ""
+    target_name = str(target["name"])
+    invocation = _formula_invocation_script(class_name, target_name, calls)
+    script = (
+        "import math\nfrom dataclasses import dataclass\n"
+        f"{_bizbench_safe_builtins_source('_axio_safe_builtins')}"
+        "_candidate = {\n"
+        "    '__name__': '__bizbench_candidate__',\n"
+        "    '__builtins__': _axio_safe_builtins,\n"
+        "    'dataclass': dataclass,\n"
+        "    'math': math,\n"
+        "}\n"
+        "_gold = {\n"
+        "    '__name__': '__bizbench_gold__',\n"
+        "    '__builtins__': _axio_safe_builtins,\n"
+        "    'dataclass': dataclass,\n"
+        "    'math': math,\n"
+        "}\n"
+        f"exec(compile({candidate_source!r}, '<candidate>', 'exec'), _candidate, _candidate)\n"
+        f"exec(compile({gold_source!r}, '<gold>', 'exec'), _gold, _gold)\n"
+        f"{invocation}"
+    )
+    try:
+        with tempfile.TemporaryDirectory(prefix="axio_bizbench_formula_") as tmp:
+            path = Path(tmp) / "formula.py"
+            path.write_text(script, encoding="utf-8")
+            result = subprocess.run(
+                _bizbench_python_command(path),
+                cwd=tmp,
+                env={"PYTHONPATH": ""},
+                capture_output=True,
+                text=True,
+                timeout=max(1.0, float(timeout)),
+                check=False,
+            )
+    except (OSError, subprocess.TimeoutExpired):
+        return False, "bizbench_formula_timeout_or_process_error"
+    if result.returncode != 0:
+        return False, "bizbench_formula_unit_test_failed"
+    return "__AXIO_FORMULA_PASS__" in result.stdout, ""
+
+
+def _bizbench_python_command(path: Path) -> list[str]:
+    """Run evaluator code in a disposable, network-isolated user namespace."""
+
+    if os.name != "posix" or shutil.which("bwrap") is None:
+        raise OSError("bizbench_sandbox_unavailable")
+    python_path = "/usr/local/bin/python3.11"
+    if not Path(python_path).exists():
+        python_path = str(Path(sys.executable).resolve())
+    sandbox_path = "/tmp/axio_bizbench_candidate.py"
+    return [
+        "bwrap",
+        "--die-with-parent",
+        "--unshare-net",
+        "--ro-bind",
+        "/usr",
+        "/usr",
+        "--ro-bind",
+        "/usr/local",
+        "/usr/local",
+        "--ro-bind",
+        "/bin",
+        "/bin",
+        "--ro-bind",
+        "/lib",
+        "/lib",
+        "--ro-bind",
+        "/lib64",
+        "/lib64",
+        "--ro-bind",
+        "/etc",
+        "/etc",
+        "--proc",
+        "/proc",
+        "--dev",
+        "/dev",
+        "--tmpfs",
+        "/tmp",
+        "--ro-bind",
+        str(path),
+        sandbox_path,
+        python_path,
+        "-I",
+        sandbox_path,
+    ]
+
+
+def _bizbench_safe_builtins_source(variable_name: str) -> str:
+    entries = ", ".join(
+        f"{name!r}: {name}" for name in _BIZBENCH_SAFE_BUILTIN_NAMES
+    )
+    return f"{variable_name} = {{{entries}}}\n"
+
+
+def _bizbench_formula_target(stub: str) -> dict[str, Any] | None:
+    lines = str(stub or "").splitlines()
+    function_rows = [
+        (index, line)
+        for index, line in enumerate(lines)
+        if re.match(r"^\s*(?:async\s+)?def\s+[A-Za-z_]\w*\s*\(", line)
+    ]
+    if not function_rows:
+        return None
+    index, line = function_rows[-1]
+    match = re.match(r"^(\s*)(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\((.*)\)", line)
+    if not match:
+        return None
+    class_rows = [
+        candidate
+        for candidate in lines[:index]
+        if re.match(r"^\s*class\s+[A-Za-z_]\w*", candidate)
+    ]
+    class_name = ""
+    if class_rows:
+        class_match = re.match(r"^\s*class\s+([A-Za-z_]\w*)", class_rows[-1])
+        class_name = class_match.group(1) if class_match else ""
+    return {
+        "name": match.group(2),
+        "args": match.group(3),
+        "indent": len(match.group(1)),
+        "class_name": class_name,
+        "stub_lines": lines,
+        "function_index": index,
+    }
+
+
+def _compose_bizbench_formula_source(stub: str, body: str, indent: int) -> str:
+    normalized = textwrap.dedent(str(body or "")).strip("\n")
+    if not normalized or re.search(r"^\s*(?:async\s+)?def\s+", normalized, flags=re.MULTILINE):
+        return ""
+    body_lines = textwrap.indent(normalized, " " * (int(indent) + 4))
+    return str(stub or "").rstrip() + "\n" + body_lines + "\n"
+
+
+def _bizbench_formula_call_vectors(target: Mapping[str, Any]) -> list[list[float | int]]:
+    args_text = str(target.get("args") or "")
+    names = []
+    for raw in args_text.split(","):
+        token = raw.strip().split(":", 1)[0].strip().split("=", 1)[0].strip()
+        if token and token != "self" and token.isidentifier():
+            names.append(token)
+    class_name = str(target.get("class_name") or "")
+    if class_name:
+        lines = target.get("stub_lines") if isinstance(target.get("stub_lines"), list) else []
+        target_indent = int(target.get("indent") or 0)
+        field_pattern = rf"^({' ' * target_indent})([A-Za-z_]\w*)\s*:\s*(?:float|int)"
+        names = [
+            match.group(2)
+            for line in lines[: int(target.get("function_index") or 0)]
+            if (match := re.match(field_pattern, str(line)))
+        ]
+    return [
+        [_formula_test_value(name, index, variant) for index, name in enumerate(names)]
+        for variant in range(3)
+    ] if names else []
+
+
+def _formula_test_value(name: str, index: int, variant: int) -> float | int:
+    lower = str(name).lower()
+    if any(token in lower for token in ("n_", "n", "period", "time", "life", "year", "compound")) and not any(
+        token in lower for token in ("rate", "price")
+    ):
+        return 2 + variant + (index % 2)
+    if any(token in lower for token in ("rate", "ratio", "tax", "inflation", "growth", "return")):
+        return 0.03 + 0.01 * (variant + index)
+    return 7.0 + 2.0 * variant + float(index)
+
+
+def _formula_invocation_script(
+    class_name: str,
+    target_name: str,
+    vectors: Sequence[Sequence[float | int]],
+) -> str:
+    lines = []
+    for values in vectors:
+        literal = repr(list(values))
+        if class_name:
+            lines.extend(
+                [
+                    f"_candidate_obj = _candidate[{class_name!r}](*{literal})",
+                    f"_gold_obj = _gold[{class_name!r}](*{literal})",
+                    f"_candidate_value = _candidate_obj.{target_name}()",
+                    f"_gold_value = _gold_obj.{target_name}()",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    f"_candidate_value = _candidate[{target_name!r}](*{literal})",
+                    f"_gold_value = _gold[{target_name!r}](*{literal})",
+                ]
+            )
+        lines.extend(
+            [
+                "if not math.isclose(float(_candidate_value), float(_gold_value), rel_tol=0.01, abs_tol=1e-8):",
+                "    raise SystemExit(2)",
+            ]
+        )
+    lines.append("print('__AXIO_FORMULA_PASS__')")
+    return "\n".join(lines) + "\n"
 
 
 def _score_python_code(output: str, case: Mapping[str, Any], *, timeout: float) -> dict[str, Any]:

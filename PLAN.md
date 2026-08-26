@@ -45,6 +45,30 @@ execution plan 已按 provider baseline freeze 和 formal top-three cohort fail-
 harness audit 全部同 cohort 完成，binding/convergence 才能继续到 target gate；
 `target_campaign_authorized` 在 execution plan 中固定为 `false`。
 
+本轮最新交接（2026-08-27）见
+`docs/handoffs/2026-08-27_bizbench_evaluator_hardening.md`：BizBench evaluator 已支持
+多 parquet 分片、SEC-NUM 数字或开放词汇 span 评分，并将程序执行收紧为 AST + 最小
+builtins 白名单 + bwrap 隔离；真实 4,673 行离线审计、专项回归和全量
+`1105 passed, 7 skipped` 均通过。该增量仍不改变 r18 live screening 授权门。
+
+## 本轮离线增量：BizBench 任务感知 audited evaluator（2026-08-26）
+
+只读核对官方 `kensho-technologies/benchmarks-pipeline`、BizBench 论文和本地
+Parquet 后，确认测试集 4,673 行包含 8 个任务族，不能继续使用单一
+`exact_match` 提示/评分。新增 `bizbench_task_aware_v2` 契约：FinKnow 仅向模型展示
+选项并按索引评分；ConvFinQA/TAT-QA 使用数值抽取，SEC-NUM 对数字标签使用数值抽取、
+对开放词汇标签使用规范化 exact span；FinCode、CodeFinQA、
+CodeTAT-QA 在显式 opt-in 后执行无 import、无文件/网络访问的候选程序并按论文 1%
+相对误差比较；FormulaEval 以确定性合成输入同时运行候选与 gold 函数体。reference
+program、answer 和 raw output 仍被 prompt projection 与 safe receipt 隔离；该模块是
+可审计本地 evaluator，不伪造独立第三方 official Harness，也不改变 r18 frozen 输入、
+生产路由或 target 授权。
+
+验证：真实 BizBench 物化 `4673/4673` 行通过数据与 prompt contract 检查；gold
+FormulaEval 自测 `50/50`；BizBench 专项回归 `8 passed`；全量回归
+`1105 passed, 7 skipped`。下一条合法主路径仍是等待 operator 明确授权
+`r18 live screening`，不得因该离线 evaluator 就提前运行 provider 或 21-suite target。
+
 本轮只读复核还确认 18900 当前绑定的是 r7 probe-bound serving registry：21 个 physical
 profiles、15 个 logical models、21 个 live-available profiles、4 个 providers。AGENTS
 中 r43 的 10-profile 检查属于历史阶段，不应覆盖当前 r7 serving 身份；未修改 registry

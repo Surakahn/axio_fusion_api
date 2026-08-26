@@ -1,5 +1,18 @@
 # Axio Fusion API Checklist
 
+# 2026-08-26 BizBench task-aware audited evaluator
+
+- [x] 对照官方 README/论文和 Parquet schema，确认 8 个任务族与 4,673 行 test split。
+- [x] 新增 `bizbench_task_aware_v2` 物化契约：FinKnow 多选、ConvFinQA/TAT-QA 数值抽取、SEC-NUM 数值或开放词汇 span、三类程序合成、FormulaEval。
+- [x] 评分绑定论文 1% 数值相对误差；SEC-NUM 开放词汇标签使用规范化 exact span；FormulaEval 使用确定性合成输入比较 candidate/gold。
+- [x] BizBench 程序执行采用静态 AST 拒绝反射/动态执行入口，并在 bwrap 隔离进程中注入最小 builtins 白名单。
+- [x] 程序执行默认关闭；开启 `AXIO_FUSION_ALLOW_BENCHMARK_CODE_EXEC` 后仅在临时隔离
+  Python 进程中运行，禁止 import、文件和网络访问，超时即失败。
+- [x] 真实 4,673 行物化与数据/prompt contract 检查通过；gold FormulaEval `50/50`；
+  BizBench 专项回归 `8 passed`；全量回归 `1105 passed, 7 skipped`。
+- [ ] 该 evaluator 仍不是 r18 live screening、provider baseline freeze 或 21-suite
+  target 授权；必须先获得明确 `授权 r18 live screening`。
+
 ## 2026-08-26 Health observability contract
 
 - [x] `/health` 的 registry readiness 同时暴露 physical profile 与 logical canonical
