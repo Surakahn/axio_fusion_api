@@ -47,7 +47,9 @@
 - ✅ BizBench 任务感知 audited evaluator：8 个任务按多选、数值/开放词汇抽取、程序合成和
   FormulaEval 分流，使用 1% 数值容差、SEC-NUM exact span 与隔离合成测试；不冒充第三方 official harness
 - ✅ 路由契约回归修复：Fast 普通短请求不会误触发轻量校验；`health=unavailable/failed`
-  的 profile 不再进入候选池；恢复 7 个历史跳过用例后全量回归为 `1113 passed, 0 skipped`
+  的 profile 不再进入候选池；恢复 7 个历史跳过用例后全量回归为 `1114 passed, 0 skipped`
+- ✅ r18 preflight artifact 强绑定：operational-admission 内容 hash 必须匹配 frozen
+  plan，safe/private 混用会 fail-closed 为 `binding_mismatch`
 - ⏳ provider baseline screening/ranking/freeze 与完整 21 套 benchmark 仍在门禁流程中
 
 ### 评价证据边界

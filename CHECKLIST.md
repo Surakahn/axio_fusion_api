@@ -1,5 +1,16 @@
 # Axio Fusion API Checklist
 
+# 2026-08-27 r18 operational-admission hash binding gate
+
+- [x] verifier 强制校验 operational-admission 内容 hash 与 r18 frozen plan 的
+  `content_sha256` 一致；错误 safe/private 混用返回 `binding_mismatch` 并 fail-closed。
+- [x] 真实 r18 双路径验证：canonical private artifact ready；safe 投影 blocked；
+  provider/target 调用均为 `false`。
+- [x] verifier 专项 `6 passed`；全量回归 `1114 passed, 0 skipped`；L1/L2、compileall
+  和 `git diff --check` 通过。
+- [ ] 仍需 operator 明确授权 `r18 live screening`，本修复不构成 provider 或
+  Fusion superiority 证据。
+
 # 2026-08-27 r18 preflight 身份复核
 
 - [x] 使用 canonical private operational-admission artifact 重新运行 verifier，状态为

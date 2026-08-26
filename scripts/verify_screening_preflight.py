@@ -251,7 +251,10 @@ def _validate_source(source: Mapping[str, Any]) -> list[str]:
 
 
 def _validate_admission(
-    admission: Mapping[str, Any], plan: Mapping[str, Any]
+    admission: Mapping[str, Any],
+    plan: Mapping[str, Any],
+    *,
+    admission_sha: str,
 ) -> list[str]:
     reasons: list[str] = []
     _check(admission.get("schema") == ADMISSION_SCHEMA, "schema_mismatch", reasons)
@@ -262,6 +265,11 @@ def _validate_admission(
     plan_admission = plan.get("operational_admission")
     _check(isinstance(plan_admission, Mapping), "binding_mismatch", reasons)
     if isinstance(plan_admission, Mapping):
+        _check(
+            plan_admission.get("content_sha256") == admission_sha,
+            "binding_mismatch",
+            reasons,
+        )
         _check(plan_admission.get("status") == "ready", "admission_not_ready", reasons)
         _check(
             admission.get("formal_baseline_eligible_count")
@@ -403,7 +411,13 @@ def verify_preflight(args: argparse.Namespace) -> dict[str, Any]:
         )
     )
     reasons.extend(_validate_source(source))
-    reasons.extend(_validate_admission(admission, plan))
+    reasons.extend(
+        _validate_admission(
+            admission,
+            plan,
+            admission_sha=hashes[str(args.operational_admission)],
+        )
+    )
     _binding_checks(
         plan=plan,
         state=state,

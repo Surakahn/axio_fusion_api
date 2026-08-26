@@ -60,6 +60,7 @@ def _base_inputs(tmp_path: Path) -> argparse.Namespace:
         "secrets_persisted": False,
         "raw_provider_outputs_persisted": False,
     })
+    admission_sha = _sha(admission)
     plan_payload = {
         "schema": verifier.PLAN_SCHEMA,
         "ready": True,
@@ -72,7 +73,11 @@ def _base_inputs(tmp_path: Path) -> argparse.Namespace:
         "task_count": 2,
         "registry_file_sha256": _sha(registry),
         "source_manifest_content_sha256": _sha(source),
-        "operational_admission": {"status": "ready", "formal_baseline_eligible_count": 3},
+        "operational_admission": {
+            "status": "ready",
+            "formal_baseline_eligible_count": 3,
+            "content_sha256": admission_sha,
+        },
         "fail_fast_policy": {
             "enabled": True,
             "requires_max_workers": 1,
@@ -180,6 +185,30 @@ def test_plan_drift_and_transport_mismatch_fail_closed(monkeypatch, tmp_path: Pa
     assert result["status"] == "blocked"
     assert "plan_contract_invalid" in result["reason_codes"]
     assert "network_transport_mismatch" in result["reason_codes"]
+
+
+def test_operational_admission_content_hash_mismatch_fails_closed(monkeypatch, tmp_path: Path) -> None:
+    args = _base_inputs(tmp_path)
+    admission = json.loads(args.operational_admission.read_text(encoding="utf-8"))
+    args.operational_admission.write_text(
+        json.dumps(admission, indent=2, sort_keys=True), encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        verifier,
+        "_network_summary",
+        lambda: {
+            "mode": "auto",
+            "valid": True,
+            "listener_detected": True,
+            "selected_transport": "proxy",
+            "reason_code": "proxy_listener_detected",
+            "raw_proxy_url_persisted": False,
+            "secrets_persisted": False,
+        },
+    )
+    result = verifier.verify_preflight(args)
+    assert result["status"] == "blocked"
+    assert "binding_mismatch" in result["reason_codes"]
 
 
 def test_unrelated_pid_is_rejected_without_persisting_command(monkeypatch, tmp_path: Path) -> None:

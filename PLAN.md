@@ -80,6 +80,11 @@ profile 资格过滤完成离线修复，恢复历史回归后全量为 `1113 pa
 operational-admission artifact 与历史 verifier receipt 完全一致；safe 投影虽同为
 `ready` 但 hash 不同，不能替代 private 绑定。该复核仍不授权 live screening。
 
+本轮新增 r18 admission hash binding gate，详见
+`docs/handoffs/2026-08-27_r18_admission_binding_gate.md`：verifier 现在强制检查
+`operational_admission.content_sha256`，safe/private 混用会以 `binding_mismatch`
+fail-closed；全量回归更新为 `1114 passed, 0 skipped`。该修复仍不授权 live screening。
+
 ## 本轮离线增量：BizBench 任务感知 audited evaluator（2026-08-26）
 
 只读核对官方 `kensho-technologies/benchmarks-pipeline`、BizBench 论文和本地
