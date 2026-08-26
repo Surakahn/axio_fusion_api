@@ -1,5 +1,13 @@
 # Axio Fusion API Checklist
 
+# 2026-08-27 convergence artifact 敏感字段门禁
+
+- [x] convergence audit 的统一 stage helper 递归检查敏感持久化字段；transport/ranking
+  等 artifact 声明 raw output/prompt/label/URL/path/key/secret 时 fail-closed。
+- [x] 新增顶层与嵌套敏感字段回归；convergence/scaffold 专项 `15 passed`。
+- [x] 全量回归 `1116 passed, 0 skipped`；L1/L2、compileall、`git diff --check` 通过。
+- [ ] r18 live screening 仍需 operator 明确授权；本轮不构成 provider 或 superiority 证据。
+
 # 2026-08-27 r18 operational-admission hash binding gate
 
 - [x] verifier 强制校验 operational-admission 内容 hash 与 r18 frozen plan 的

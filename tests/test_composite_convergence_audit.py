@@ -176,6 +176,32 @@ def test_execution_stage_is_ready_before_post_execution_imports(tmp_path: Path) 
     assert stage["reason_codes"] == []
 
 
+def test_transport_stage_blocks_sensitive_persistence_even_when_ready(tmp_path: Path) -> None:
+    path = tmp_path / "transport.json"
+    _write(path, {"status": "ready", "raw_provider_outputs_persisted": True})
+
+    stage = audit._transport_stage(path)
+
+    assert stage["status"] == "blocked"
+    assert "raw_sensitive_fields_persisted" in stage["reason_codes"]
+
+
+def test_ranking_stage_blocks_nested_sensitive_persistence_even_when_ready(tmp_path: Path) -> None:
+    path = tmp_path / "ranking.json"
+    _write(
+        path,
+        {
+            "screening_conversion_ready": True,
+            "receipt": {"raw_prompts_persisted": True},
+        },
+    )
+
+    stage = audit._ranking_stage(path)
+
+    assert stage["status"] == "blocked"
+    assert "raw_sensitive_fields_persisted" in stage["reason_codes"]
+
+
 def test_all_gates_ready_allows_target_calls(tmp_path: Path) -> None:
     args = _args(tmp_path)
     _write(args.plan, {"ready": True, "plan_digest_sha256": "plan-digest"})

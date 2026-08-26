@@ -35,7 +35,8 @@ provider 能力组合成 `axio-fast`、`axio-terra`、`axio-pro`。Harness 只�
   models、21 个 live-available profiles、4 个 providers，且与 18900 进程的
   `AXIO_FUSION_REGISTRY_PATH` 绑定一致；AGENTS 中 r43 的 10-profile 数字仅是历史
   阶段检查项，不作为当前 r7 serving blocker。
-- 当前工程回归：`1114 passed, 0 skipped`（2026-08-27 路由与 r18 binding 修复后）；这是代码
+- 当前工程回归：`1116 passed, 0 skipped`（2026-08-27 路由、r18 binding 与 convergence
+  artifact 安全修复后）；这是代码
   契约证据，不是能力或质量证据。
 
 2026-08-27 离线路由契约增量：Fast 基础轻量校验阈值已收紧，普通短请求不会因为基础
@@ -50,6 +51,11 @@ superiority 证据。
 内容 hash 与 frozen plan 的 `content_sha256` 一致；safe/private 投影混用会以
 `binding_mismatch` fail-closed。真实双路径复核和全量 `1114 passed, 0 skipped` 通过；
 该修复不改变 r18 frozen plan/source/registry 或 target 授权。
+
+2026-08-27 convergence artifact 安全增量：所有 stage artifact 统一递归检查敏感持久化
+字段；raw provider output/prompt/label/URL/path/key/secret 任一声明为 `true` 即以
+`raw_sensitive_fields_persisted` fail-closed。专项与全量 `1116 passed, 0 skipped` 通过；
+该修复不改变 r18 frozen inputs 或 target 授权。
 
 2026-08-26 离线可观测性增量：公开 health projection 已补充物理/逻辑模型计数，使用
 与运行时一致的 canonical identity 去重，并对 disabled/unavailable/超时 profile 应用

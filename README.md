@@ -50,6 +50,8 @@
   的 profile 不再进入候选池；恢复 7 个历史跳过用例后全量回归为 `1114 passed, 0 skipped`
 - ✅ r18 preflight artifact 强绑定：operational-admission 内容 hash 必须匹配 frozen
   plan，safe/private 混用会 fail-closed 为 `binding_mismatch`
+- ✅ Harness convergence artifact 敏感字段门禁：各 stage 递归拒绝 raw prompt/output、
+  label、URL、路径和 secret 持久化声明
 - ⏳ provider baseline screening/ranking/freeze 与完整 21 套 benchmark 仍在门禁流程中
 
 ### 评价证据边界

@@ -85,6 +85,12 @@ operational-admission artifact 与历史 verifier receipt 完全一致；safe �
 `operational_admission.content_sha256`，safe/private 混用会以 `binding_mismatch`
 fail-closed；全量回归更新为 `1114 passed, 0 skipped`。该修复仍不授权 live screening。
 
+本轮新增 convergence artifact 敏感字段门禁，详见
+`docs/handoffs/2026-08-27_convergence_sensitive_artifact_gate.md`：所有 stage artifact
+统一递归检查 raw prompt/output、label、URL、路径、API key 和 secret 持久化声明；任一
+敏感字段为 `true` 即以 `raw_sensitive_fields_persisted` fail-closed。全量回归更新为
+`1116 passed, 0 skipped`，不改变 r18 frozen inputs 或 target 授权。
+
 ## 本轮离线增量：BizBench 任务感知 audited evaluator（2026-08-26）
 
 只读核对官方 `kensho-technologies/benchmarks-pipeline`、BizBench 论文和本地

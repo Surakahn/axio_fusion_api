@@ -25,6 +25,28 @@ SAFE_REASON_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 OFFICIAL_HARNESS_EXECUTION_AUTHORIZATION_SCOPE = (
     "official_or_audited_harness_work_queue_only"
 )
+_SENSITIVE_PERSISTENCE_FIELDS = frozenset(
+    {
+        "api_keys_persisted",
+        "base_urls_persisted",
+        "raw_api_key_env_names_persisted",
+        "raw_api_keys_persisted",
+        "raw_base_url_env_names_persisted",
+        "raw_base_urls_persisted",
+        "raw_dataset_content_persisted",
+        "raw_dataset_paths_persisted",
+        "raw_import_paths_persisted",
+        "raw_labels_persisted",
+        "raw_local_paths_persisted",
+        "raw_prompts_persisted",
+        "raw_provider_model_ids_persisted",
+        "raw_provider_names_persisted",
+        "raw_provider_outputs_persisted",
+        "raw_provider_urls_persisted",
+        "raw_questions_persisted",
+        "secrets_persisted",
+    }
+)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -95,6 +117,20 @@ def _safe_reasons(value: Mapping[str, Any]) -> list[str]:
     return sorted(reasons)
 
 
+def _sensitive_persistence_is_safe(value: Any) -> bool:
+    """递归检查 artifact 的敏感持久化声明，缺失字段保持向后兼容。"""
+
+    if isinstance(value, Mapping):
+        for key, nested in value.items():
+            if str(key) in _SENSITIVE_PERSISTENCE_FIELDS and nested is True:
+                return False
+            if not _sensitive_persistence_is_safe(nested):
+                return False
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return all(_sensitive_persistence_is_safe(item) for item in value)
+    return True
+
+
 def _artifact_stage(
     name: str,
     path: Path | None,
@@ -110,7 +146,7 @@ def _artifact_stage(
     elif payload is None:
         stage_status = "blocked"
         stage_reasons = ["artifact_invalid"]
-    elif ready:
+    elif ready and _sensitive_persistence_is_safe(payload):
         stage_status = "ready"
         stage_reasons = []
     else:
@@ -118,6 +154,8 @@ def _artifact_stage(
         stage_reasons = sorted(
             str(item) for item in reasons if SAFE_REASON_RE.fullmatch(str(item))
         )
+        if ready and not _sensitive_persistence_is_safe(payload):
+            stage_reasons.append("raw_sensitive_fields_persisted")
         if not stage_reasons:
             stage_reasons = _safe_reasons(payload) or [f"{name}_not_ready"]
     return {
