@@ -174,6 +174,38 @@ def test_missing_harness_roots_produce_safe_blocked_pin(tmp_path, monkeypatch) -
     assert pin["secrets_persisted"] is False
 
 
+def test_execution_stage_is_ready_while_post_execution_imports_are_pending(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "execution_plan.safe.json"
+    payload = {
+        "schema": scaffold.EXECUTION_SCHEMA,
+        "status": "ready_to_execute",
+        "execution_authorized": True,
+        "execution_authorization_scope": "official_or_audited_harness_work_queue_only",
+        "target_campaign_authorized": False,
+        "all_tasks_ready_to_execute": True,
+        "formal_cohort_binding_reason_codes": [],
+        "planning_reason_codes": [],
+        "post_execution_imports_complete": False,
+        "post_execution_reason_codes": ["official_import_acquisition_incomplete"],
+        "raw_provider_outputs_persisted": False,
+        "secrets_persisted": False,
+    }
+    _write(path, payload)
+
+    snapshot = scaffold._stage_snapshot("execution_plan", path, payload)
+
+    assert snapshot["status"] == "ready"
+    assert snapshot["reason_codes"] == []
+    assert snapshot["execution_authorized"] is True
+    assert snapshot["target_campaign_authorized"] is False
+    assert snapshot["post_execution_imports_complete"] is False
+    assert snapshot["post_execution_reason_codes"] == [
+        "official_import_acquisition_incomplete"
+    ]
+
+
 def test_reusable_harness_pin_requires_complete_hash_only_manifest(tmp_path: Path) -> None:
     pin = {
         "schema": scaffold.PIN_SCHEMA,

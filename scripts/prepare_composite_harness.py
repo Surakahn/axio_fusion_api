@@ -276,6 +276,23 @@ def _stage_snapshot(name: str, path: Path, payload: Mapping[str, Any]) -> dict[s
         "artifact_sha256": _sha256_file(path),
         "path_sha256": _sha256_text(str(path)),
         "schema": str(payload.get("schema") or ""),
+        **(
+            {
+                "execution_authorized": payload.get("execution_authorized") is True,
+                "execution_authorization_scope": str(
+                    payload.get("execution_authorization_scope") or ""
+                ),
+                "target_campaign_authorized": payload.get("target_campaign_authorized") is True,
+                "post_execution_imports_complete": payload.get("post_execution_imports_complete") is True,
+                "post_execution_reason_codes": [
+                    _safe_reason(reason)
+                    for reason in payload.get("post_execution_reason_codes", [])
+                    if str(reason)
+                ],
+            }
+            if name == "execution_plan"
+            else {}
+        ),
     }
 
 

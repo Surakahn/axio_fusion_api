@@ -28,6 +28,9 @@ PIN_SCHEMA = "axio_fusion_api.benchmark_harness_pin_manifest.v1"
 EXECUTION_PLAN_SCHEMA = "axio_fusion_api.official_harness_execution_plan.v1"
 ACQUISITION_SCHEMA = "axio_fusion_api.benchmark_acquisition_status.v1"
 IMPORT_AUDIT_SCHEMA = "axio_fusion_api.official_import_audit.v1"
+OFFICIAL_HARNESS_EXECUTION_AUTHORIZATION_SCOPE = (
+    "official_or_audited_harness_work_queue_only"
+)
 
 REQUIRED_ARTIFACTS = (
     "registry",
@@ -280,6 +283,13 @@ def _validate_execution_plan(
         reasons.append("execution_plan_not_ready")
     if payload.get("execution_authorized") is not True:
         reasons.append("execution_plan_not_authorized")
+    if (
+        payload.get("execution_authorization_scope")
+        != OFFICIAL_HARNESS_EXECUTION_AUTHORIZATION_SCOPE
+    ):
+        reasons.append("execution_plan_authorization_scope_invalid")
+    if payload.get("target_campaign_authorized") is not False:
+        reasons.append("execution_plan_target_campaign_scope_invalid")
     if payload.get("matrix_mode") != "formal_top_three_cohort":
         reasons.append("execution_plan_formal_cohort_required")
     if payload.get("formal_top_three_cohort_complete") is not True:
@@ -290,6 +300,10 @@ def _validate_execution_plan(
         reasons.append("execution_plan_tasks_not_ready")
     if payload.get("all_required_outputs_are_hash_only_import_sources") is not True:
         reasons.append("execution_plan_outputs_not_hash_only")
+    if payload.get("post_execution_imports_complete") is not True:
+        reasons.append("execution_plan_post_execution_imports_incomplete")
+    if payload.get("post_execution_reason_codes") not in ([], None):
+        reasons.append("execution_plan_post_execution_blocked")
     if payload.get("harness_pin_manifest_path_sha256") != _sha256_text(str(harness_pin_path)):
         reasons.append("execution_plan_harness_pin_path_binding_mismatch")
     if payload.get("acquisition_status_path_sha256") != _sha256_text(str(acquisition_path)):

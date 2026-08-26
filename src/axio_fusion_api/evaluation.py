@@ -223,6 +223,9 @@ CLAIM_MIN_PAIRED_NET_WIN_RATE_DELTA = 0.05
 EXTERNAL_PROVIDER_RANKING_INPUT_SCHEMA = "axio_fusion_api.external_provider_ranking_input.v3"
 EXTERNAL_PROVIDER_RANKING_RECEIPT_SCHEMA = "axio_fusion_api.external_provider_ranking_receipt.v3"
 EXTERNAL_PROVIDER_RANKING_SELECTION_MODE = "externally_ranked_top_three_pre_registered"
+OFFICIAL_HARNESS_EXECUTION_AUTHORIZATION_SCOPE = (
+    "official_or_audited_harness_work_queue_only"
+)
 EXTERNAL_PROVIDER_RANKING_REQUIRED_RANKS = (1, 2, 3)
 SCREENING_TRANSPORT_ADMISSION_SCHEMA = (
     "axio_fusion_api.non_target_screening_transport_admission.v1"
@@ -1924,6 +1927,7 @@ def build_official_harness_execution_plan(
     pin_by_suite = _harness_pin_rows_by_suite(_load_optional_json_object(harness_pin_manifest_path))
     acquisition = _load_optional_json_object(acquisition_status_path)
     freeze = _load_optional_json_object(provider_baseline_freeze_path)
+    freeze_receipt = _provider_baseline_freeze_receipt(freeze)
     matrix_mode = str(batch.get("matrix_mode") or "diagnostic")
     formal_cohort = batch.get("formal_top_three_cohort")
     formal_cohort = formal_cohort if isinstance(formal_cohort, Mapping) else {}
@@ -1943,6 +1947,8 @@ def build_official_harness_execution_plan(
             formal_binding_reasons.append("formal_top_three_cohort_incomplete")
         if not _looks_like_sha256(freeze.get("freeze_digest_sha256")):
             formal_binding_reasons.append("provider_baseline_freeze_digest_missing")
+        elif freeze_receipt.get("freeze_digest_matches") is not True:
+            formal_binding_reasons.append("provider_baseline_freeze_digest_mismatch")
     if matrix_mode != "formal_top_three_cohort":
         formal_binding_reasons.append("diagnostic_matrix_not_executable")
     if formal_cohort.get("complete") is not True:
@@ -1982,11 +1988,9 @@ def build_official_harness_execution_plan(
         and acquisition_summary.get("official_import_missing_count") == 0
     )
     task_ready = not blocked
-    acquisition_reason = "official_import_acquisition_incomplete" if not acquisition_ready else ""
+    post_execution_reason = "official_import_acquisition_incomplete" if not acquisition_ready else ""
     if formal_binding_reasons or not task_ready:
         status = "blocked"
-    elif not acquisition_ready:
-        status = "planned"
     else:
         status = "ready_to_execute"
     digest_input = {
@@ -1995,8 +1999,10 @@ def build_official_harness_execution_plan(
         "matrix_mode": matrix_mode,
         "formal_top_three_cohort_complete": not formal_binding_reasons,
         "provider_baseline_freeze_content_sha256": _file_content_sha256(provider_baseline_freeze_path),
+        "provider_baseline_freeze_digest_matches": freeze_receipt.get("freeze_digest_matches") is True,
         "formal_cohort_binding_reason_codes": sorted(set(formal_binding_reasons)),
-        "planning_reason_codes": [acquisition_reason] if acquisition_reason else [],
+        "post_execution_imports_complete": acquisition_ready,
+        "post_execution_reason_codes": [post_execution_reason] if post_execution_reason else [],
         "execution_task_count": len(tasks),
         "task_receipts": [
             {
@@ -2026,10 +2032,13 @@ def build_official_harness_execution_plan(
         "harness_pin_manifest_path_sha256": sha256_text(str(harness_pin_manifest_path)) if harness_pin_manifest_path else "",
         "provider_baseline_freeze_path_sha256": sha256_text(str(provider_baseline_freeze_path)) if provider_baseline_freeze_path else "",
         "provider_baseline_freeze_content_sha256": _file_content_sha256(provider_baseline_freeze_path),
+        "provider_baseline_freeze_digest_matches": freeze_receipt.get("freeze_digest_matches") is True,
         "matrix_mode": matrix_mode,
         "formal_top_three_cohort_complete": not formal_binding_reasons,
         "formal_cohort_binding_reason_codes": sorted(set(formal_binding_reasons)),
-        "planning_reason_codes": [acquisition_reason] if acquisition_reason else [],
+        "planning_reason_codes": [],
+        "post_execution_imports_complete": acquisition_ready,
+        "post_execution_reason_codes": [post_execution_reason] if post_execution_reason else [],
         "execution_plan_digest_sha256": sha256_text(stable_json(digest_input)),
         "suite_count": len(by_suite),
         "execution_task_count": len(tasks),
@@ -2043,6 +2052,8 @@ def build_official_harness_execution_plan(
         ),
         "all_tasks_ready_to_execute": not blocked,
         "execution_authorized": status == "ready_to_execute",
+        "execution_authorization_scope": OFFICIAL_HARNESS_EXECUTION_AUTHORIZATION_SCOPE,
+        "target_campaign_authorized": False,
         "all_required_outputs_are_hash_only_import_sources": True,
         "source_template_complete_task_count": sum(1 for task in tasks if task.get("source_template_complete") is True),
         "api_surface_contract": _api_surface_contract(),
@@ -2063,6 +2074,9 @@ def build_official_harness_execution_plan(
             "mt_bench_position_balancing_required": True,
             "candidate_placeholders_must_be_replaced_only_in_private_operator_batch": True,
             "raw_harness_outputs_must_be_imported_through_hash_only_receipts": True,
+            "post_execution_import_validation_required": True,
+            "target_campaign_requires_separate_convergence_authorization": True,
+            "execution_plan_does_not_authorize_remaining_21_suite_campaign": True,
             "raw_provider_outputs_persisted": False,
             "raw_prompts_persisted": False,
             "raw_labels_persisted": False,
@@ -11342,11 +11356,21 @@ def _fusion_artifact_summary(name: str, artifact: Mapping[str, Any]) -> dict[str
         "execution_task_count": _optional_int(payload.get("execution_task_count")) or 0,
         "ready_task_count": _optional_int(payload.get("ready_task_count")) or 0,
         "execution_authorized": payload.get("execution_authorized") is True,
+        "execution_authorization_scope": str(
+            payload.get("execution_authorization_scope") or ""
+        ),
+        "target_campaign_authorized": payload.get("target_campaign_authorized") is True,
         "matrix_mode": str(payload.get("matrix_mode") or ""),
         "formal_top_three_cohort_complete": payload.get("formal_top_three_cohort_complete") is True,
         "formal_cohort_binding_reason_codes": [
             str(reason)
             for reason in payload.get("formal_cohort_binding_reason_codes", [])
+            if str(reason)
+        ],
+        "post_execution_imports_complete": payload.get("post_execution_imports_complete") is True,
+        "post_execution_reason_codes": [
+            str(reason)
+            for reason in payload.get("post_execution_reason_codes", [])
             if str(reason)
         ],
         "harness_pin_complete_task_count": _optional_int(payload.get("harness_pin_complete_task_count")) or 0,
@@ -11395,6 +11419,9 @@ def _fusion_artifact_ready(name: str, payload: Mapping[str, Any], artifact: Mapp
             and source_count == task_count
             and payload.get("status") == "ready_to_execute"
             and payload.get("execution_authorized") is True
+            and payload.get("execution_authorization_scope")
+            == OFFICIAL_HARNESS_EXECUTION_AUTHORIZATION_SCOPE
+            and payload.get("target_campaign_authorized") is False
             and payload.get("matrix_mode") == "formal_top_three_cohort"
             and payload.get("formal_top_three_cohort_complete") is True
             and payload.get("formal_cohort_binding_reason_codes") in ([], None)
@@ -11499,6 +11526,17 @@ def _fusion_official_import_cohort_readiness(
         reasons.append("official_import_execution_plan_formal_cohort_blocked")
     if plan_payload.get("execution_authorized") is not True:
         reasons.append("official_import_execution_plan_not_authorized")
+    if (
+        plan_payload.get("execution_authorization_scope")
+        != OFFICIAL_HARNESS_EXECUTION_AUTHORIZATION_SCOPE
+    ):
+        reasons.append("official_import_execution_plan_authorization_scope_invalid")
+    if plan_payload.get("target_campaign_authorized") is not False:
+        reasons.append("official_import_execution_plan_target_campaign_scope_invalid")
+    if plan_payload.get("post_execution_imports_complete") is not True:
+        reasons.append("official_import_execution_plan_imports_incomplete")
+    if plan_payload.get("post_execution_reason_codes") not in ([], None):
+        reasons.append("official_import_execution_plan_post_execution_blocked")
     for row in (acquisition, official_import_audit):
         if (_optional_int(row.get("candidate_count")) or 0) != required_candidate_count:
             reasons.append("official_import_top_three_run_unit_contract_mismatch")

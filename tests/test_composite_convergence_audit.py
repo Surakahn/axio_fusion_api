@@ -150,6 +150,32 @@ def test_binding_drift_blocks_even_when_state_is_terminal(tmp_path: Path) -> Non
     assert result["next_gate"] == "screening"
 
 
+def test_execution_stage_is_ready_before_post_execution_imports(tmp_path: Path) -> None:
+    path = tmp_path / "execution.json"
+    _write(
+        path,
+        {
+            "status": "ready_to_execute",
+            "execution_authorized": True,
+            "execution_authorization_scope": "official_or_audited_harness_work_queue_only",
+            "target_campaign_authorized": False,
+            "matrix_mode": "formal_top_three_cohort",
+            "formal_top_three_cohort_complete": True,
+            "formal_cohort_binding_reason_codes": [],
+            "post_execution_imports_complete": False,
+            "post_execution_reason_codes": ["official_import_acquisition_incomplete"],
+            "all_tasks_ready_to_execute": True,
+            "all_required_outputs_are_hash_only_import_sources": True,
+            "secrets_persisted": False,
+        },
+    )
+
+    stage = audit._execution_plan_stage(path)
+
+    assert stage["status"] == "ready"
+    assert stage["reason_codes"] == []
+
+
 def test_all_gates_ready_allows_target_calls(tmp_path: Path) -> None:
     args = _args(tmp_path)
     _write(args.plan, {"ready": True, "plan_digest_sha256": "plan-digest"})
@@ -205,9 +231,13 @@ def test_all_gates_ready_allows_target_calls(tmp_path: Path) -> None:
         {
             "status": "ready_to_execute",
             "execution_authorized": True,
+            "execution_authorization_scope": "official_or_audited_harness_work_queue_only",
+            "target_campaign_authorized": False,
             "matrix_mode": "formal_top_three_cohort",
             "formal_top_three_cohort_complete": True,
             "formal_cohort_binding_reason_codes": [],
+            "post_execution_imports_complete": True,
+            "post_execution_reason_codes": [],
             "all_tasks_ready_to_execute": True,
             "all_required_outputs_are_hash_only_import_sources": True,
             "secrets_persisted": False,
@@ -277,7 +307,7 @@ def test_pre_target_gates_authorize_campaign_but_not_final_claim(tmp_path: Path)
     args.harness_pin = tmp_path / "pin.json"
     _write(args.harness_pin, {"suite_count": 1, "ready_suite_count": 1, "blocked_suite_count": 0, "raw_local_paths_persisted": False, "all_paths_hashed_only": True, "raw_dataset_content_persisted": False, "raw_prompts_persisted": False, "raw_labels_persisted": False, "raw_provider_outputs_persisted": False, "secrets_persisted": False})
     args.execution_plan = tmp_path / "execution.json"
-    _write(args.execution_plan, {"status": "ready_to_execute", "execution_authorized": True, "matrix_mode": "formal_top_three_cohort", "formal_top_three_cohort_complete": True, "formal_cohort_binding_reason_codes": [], "all_tasks_ready_to_execute": True, "all_required_outputs_are_hash_only_import_sources": True, "secrets_persisted": False})
+    _write(args.execution_plan, {"status": "ready_to_execute", "execution_authorized": True, "execution_authorization_scope": "official_or_audited_harness_work_queue_only", "target_campaign_authorized": False, "matrix_mode": "formal_top_three_cohort", "formal_top_three_cohort_complete": True, "formal_cohort_binding_reason_codes": [], "post_execution_imports_complete": True, "post_execution_reason_codes": [], "all_tasks_ready_to_execute": True, "all_required_outputs_are_hash_only_import_sources": True, "secrets_persisted": False})
     args.acquisition_status = tmp_path / "acquisition.json"
     _write(args.acquisition_status, {"ready_to_assemble_manifest": True, "official_import_missing_count": 0, "ready_suite_count": 1, "required_suite_count": 1, "secrets_persisted": False, "raw_provider_outputs_persisted": False})
     args.official_import_audit = tmp_path / "import.json"

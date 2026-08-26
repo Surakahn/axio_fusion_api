@@ -18326,7 +18326,7 @@ def test_standalone_official_harness_execution_plan_from_pinned_import_template_
     assert '"raw_provider_outputs_persisted": true' not in serialized
 
 
-def test_standalone_formal_harness_execution_plan_requires_complete_imports(tmp_path):
+def test_standalone_formal_harness_execution_plan_separates_execution_from_import_readiness(tmp_path):
     registry_path = _write_live_runbook_registry_fixture(tmp_path)
     freeze_path, _ = _write_ready_provider_baseline_freeze_for_registry_fixture(
         tmp_path, registry_path
@@ -18393,16 +18393,21 @@ def test_standalone_formal_harness_execution_plan_requires_complete_imports(tmp_
         ),
         encoding="utf-8",
     )
-    planned = build_official_harness_execution_plan(
+    executable = build_official_harness_execution_plan(
         import_batch_template_path=import_template_path,
         acquisition_status_path=acquisition_status_path,
         harness_pin_manifest_path=harness_pin_path,
         provider_baseline_freeze_path=freeze_path,
     )
-    assert planned["status"] == "planned"
-    assert planned["formal_top_three_cohort_complete"] is True
-    assert planned["formal_cohort_binding_reason_codes"] == []
-    assert planned["planning_reason_codes"] == ["official_import_acquisition_incomplete"]
+    assert executable["status"] == "ready_to_execute"
+    assert executable["execution_authorized"] is True
+    assert executable["execution_authorization_scope"] == "official_or_audited_harness_work_queue_only"
+    assert executable["target_campaign_authorized"] is False
+    assert executable["formal_top_three_cohort_complete"] is True
+    assert executable["formal_cohort_binding_reason_codes"] == []
+    assert executable["planning_reason_codes"] == []
+    assert executable["post_execution_imports_complete"] is False
+    assert executable["post_execution_reason_codes"] == ["official_import_acquisition_incomplete"]
 
     acquisition_status_path.write_text(
         json.dumps(
@@ -18427,6 +18432,8 @@ def test_standalone_formal_harness_execution_plan_requires_complete_imports(tmp_
     assert ready["formal_top_three_cohort_complete"] is True
     assert ready["all_tasks_ready_to_execute"] is True
     assert ready["planning_reason_codes"] == []
+    assert ready["post_execution_imports_complete"] is True
+    assert ready["post_execution_reason_codes"] == []
     cli_output_path = tmp_path / "formal_execution_plan_cli.json"
     assert fusion_cli_main(
         [
@@ -18459,6 +18466,21 @@ def test_standalone_formal_harness_execution_plan_requires_complete_imports(tmp_
     )
     assert blocked["status"] == "blocked"
     assert "provider_baseline_freeze_not_ready" in blocked["formal_cohort_binding_reason_codes"]
+
+    tampered_freeze_path = tmp_path / "tampered_freeze.json"
+    tampered_freeze = json.loads(freeze_path.read_text(encoding="utf-8"))
+    tampered_freeze["freeze_digest_sha256"] = "0" * 64
+    tampered_freeze_path.write_text(json.dumps(tampered_freeze), encoding="utf-8")
+    tampered = build_official_harness_execution_plan(
+        import_batch_template_path=import_template_path,
+        acquisition_status_path=acquisition_status_path,
+        harness_pin_manifest_path=harness_pin_path,
+        provider_baseline_freeze_path=tampered_freeze_path,
+    )
+    assert tampered["status"] == "blocked"
+    assert tampered["execution_authorized"] is False
+    assert tampered["provider_baseline_freeze_digest_matches"] is False
+    assert "provider_baseline_freeze_digest_mismatch" in tampered["formal_cohort_binding_reason_codes"]
 
 
 def test_standalone_benchmark_harness_pin_manifest_is_hash_only(tmp_path):
@@ -26589,6 +26611,29 @@ def test_standalone_fusion_live_readiness_requires_top_three_freeze_for_campaign
     assert str(registry_path) not in serialized
 
 
+def test_standalone_fusion_live_readiness_separates_execution_and_import_readiness(tmp_path):
+    manifest_dir = _write_fusion_live_readiness_manifest_set(tmp_path, ready=True)
+    execution_plan_path = next(
+        manifest_dir.glob("official_harness_execution_plan_21_suites_*.safe.json")
+    )
+    execution_plan = json.loads(execution_plan_path.read_text(encoding="utf-8"))
+    execution_plan["post_execution_imports_complete"] = False
+    execution_plan["post_execution_reason_codes"] = [
+        "official_import_acquisition_incomplete"
+    ]
+    execution_plan_path.write_text(json.dumps(execution_plan), encoding="utf-8")
+
+    readiness = build_fusion_live_readiness(benchmark_manifest_dir=manifest_dir)
+    artifacts = readiness["benchmark_artifact_readiness"]
+
+    assert artifacts["official_harness_execution_plan_ready"] is True
+    assert artifacts["artifacts"]["official_harness_execution_plan"]["ready"] is True
+    assert artifacts["official_import_cohort_readiness"]["ready"] is False
+    assert "official_import_execution_plan_imports_incomplete" in artifacts[
+        "official_import_cohort_readiness"
+    ]["reason_codes"]
+
+
 def test_standalone_fusion_live_readiness_blocks_template_execution_plan_digest_drift(tmp_path):
     manifest_dir = _write_fusion_live_readiness_manifest_set(tmp_path, ready=True)
     registry_path = _write_ready_live_registry_fixture(tmp_path)
@@ -27878,9 +27923,13 @@ def _write_fusion_live_readiness_manifest_set(tmp_path, *, ready):
             "schema": "axio_fusion_api.official_harness_execution_plan.v1",
             "status": "ready_to_execute" if ready else "blocked",
             "execution_authorized": bool(ready),
+            "execution_authorization_scope": "official_or_audited_harness_work_queue_only",
+            "target_campaign_authorized": False,
             "matrix_mode": "formal_top_three_cohort",
             "formal_top_three_cohort_complete": bool(ready),
             "formal_cohort_binding_reason_codes": [],
+            "post_execution_imports_complete": bool(ready),
+            "post_execution_reason_codes": [] if ready else ["official_import_acquisition_incomplete"],
             "provider_baseline_freeze_path_sha256": sha256_text("fixture-freeze-path"),
             "provider_baseline_freeze_content_sha256": sha256_text("fixture-freeze-content"),
             "suite_count": 6,

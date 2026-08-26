@@ -22,6 +22,9 @@ from typing import Any, Mapping, Sequence
 
 TERMINAL_SCREENING = frozenset({"completed", "partial", "blocked", "failed"})
 SAFE_REASON_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
+OFFICIAL_HARNESS_EXECUTION_AUTHORIZATION_SCOPE = (
+    "official_or_audited_harness_work_queue_only"
+)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -225,6 +228,9 @@ def _execution_plan_stage(path: Path | None) -> dict[str, Any]:
     ready = bool(value) and (
         value.get("status") == "ready_to_execute"
         and value.get("execution_authorized") is True
+        and value.get("execution_authorization_scope")
+        == OFFICIAL_HARNESS_EXECUTION_AUTHORIZATION_SCOPE
+        and value.get("target_campaign_authorized") is False
         and value.get("matrix_mode") == "formal_top_three_cohort"
         and value.get("formal_top_three_cohort_complete") is True
         and value.get("formal_cohort_binding_reason_codes") in ([], None)

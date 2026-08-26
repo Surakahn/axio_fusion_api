@@ -4,15 +4,19 @@
 
 - [x] execution plan 显式绑定 provider baseline freeze、formal top-three cohort 和固定
   15 run units；无 freeze 的 diagnostic matrix fail-closed 为 `blocked`。
-- [x] formal cohort 合法但 official import/acquisition 未完成时返回 `planned`；只有
-  task、acquisition 和同 cohort binding 全部完成才输出 `ready_to_execute` 与
-  `execution_authorized=true`。
+- [x] formal cohort 合法且 task/pin/template 完整时直接输出
+  `ready_to_execute` 与 `execution_authorized=true`，授权范围固定为官方/审计 Harness
+  work queue；official import/acquisition 未完成只记录在
+  `post_execution_reason_codes`，不会阻塞已准备好的执行队列。
+- [x] post-execution imports/acquisition 仍由 binding、convergence 和最终 benchmark
+  readiness 独立校验；execution plan 的授权不会开放 target campaign。
 - [x] CLI、composite scaffold、binding、convergence 和 artifact readiness 均消费同一
   formal gate；freeze path/content digest 与 execution plan 绑定。
 - [x] 新增离线 successor
   `private/runs/2026-08-26-composite-cohort-r18-harness-formal-gate/`，无 provider/target
   请求，execution plan/convergence 均正确 blocked。
-- [x] L1/L2、专项 `16 passed`、全量 `1093 passed, 7 skipped`、`git diff --check` 通过。
+- [x] L1/L2、专项 `15 passed`（另有 standalone execution/readiness `15 passed`）、
+  全量 `1096 passed, 7 skipped`、`git diff --check` 通过。
 - [ ] 明确授权 r18 live screening；在 screening terminal、transport admission、ranking
   和 provider freeze 之前，不执行 formal Harness imports 或 21-suite target campaign。
 

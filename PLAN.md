@@ -38,6 +38,13 @@ terminal/transport-blocked，r18 仅到 zero-network preflight ready。不得把
 execution plan 已按 provider baseline freeze 和 formal top-three cohort fail-closed，
 不替代 r18 frozen plan/source，也不授权 screening 或 target benchmark。
 
+本轮后续校正了 execution gate 的状态语义：formal freeze/cohort/task/pin/template 完整
+时，execution plan 的 `ready_to_execute` 仅授权官方/审计 Harness work queue；imports
+尚未完成通过 `post_execution_imports_complete=false` 和 reason code 表达，不再伪装成
+`planned` 或阻塞已准备好的执行队列。只有 hash-only imports、acquisition、case/source/
+harness audit 全部同 cohort 完成，binding/convergence 才能继续到 target gate；
+`target_campaign_authorized` 在 execution plan 中固定为 `false`。
+
 最终唯一合法路径：
 
 ```text
@@ -73,7 +80,7 @@ provider 标识、URL、prompt、输出、标签或 secret。
 状态为 `ready_for_operator_authorization`，receipt SHA-256 为
 `9e2fed685743449bd88675bed12ad209691a6059f68e2b70892c641330f6a9d8`。该状态明确
 `authorization_required=true`，不启动进程、不产生 provider/target 请求，也不等价于
-`授权 r18 live screening`。验证专项为 `5 passed`，全量回归为 `1092 passed, 7
+`授权 r18 live screening`。验证专项为 `5 passed`，本轮全量回归为 `1096 passed, 7
 skipped`；r18 plan/source digest 未变。
 
 ## 本轮只读增量：r17 transport 根因计数复核（2026-08-21）

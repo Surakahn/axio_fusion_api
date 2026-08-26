@@ -12,11 +12,13 @@
 diagnostic matrix 或缺少 provider freeze
   -> blocked
 
-formal_top_three_cohort 合法，但 official imports/acquisition 未完成
-  -> planned
-
-formal cohort + freeze + 任务 + acquisition 全部完成
+formal_top_three_cohort + freeze 合法，但 official imports/acquisition 未完成
   -> ready_to_execute + execution_authorized=true
+     （仅官方/审计 Harness work queue；post_execution_imports_complete=false）
+
+Harness 执行并完成 hash-only imports/acquisition
+  -> post_execution_imports_complete=true
+     -> binding/convergence 才可继续向 target gate
 ```
 
 Formal cohort 必须是三个 Axio 公共模型的四种 API surface run unit 加三个外部预注册
@@ -33,10 +35,14 @@ pin hash、freeze path/content hash、matrix/cohort 状态和 reason code。原�
 下游 binding/convergence 还会检查：
 
 - execution plan 的 `execution_authorized=true`；
+- `execution_authorization_scope=official_or_audited_harness_work_queue_only`；
+- `target_campaign_authorized=false`；
 - `matrix_mode=formal_top_three_cohort`；
 - formal cohort reason 列表为空；
 - freeze path/content digest 与当前输入一致；
-- official import acquisition、case/source/harness audit 同 cohort 对齐。
+- execution plan 可以在 imports 缺失时授权执行；但 binding/convergence 还必须确认
+  `post_execution_imports_complete=true`、official import acquisition、case/source/
+  harness audit 同 cohort 对齐。
 
 ## 当前 r18 证据
 
@@ -50,7 +56,6 @@ pin hash、freeze path/content hash、matrix/cohort 状态和 reason code。原�
 
 ## 验证
 
-本轮完整测试为 `1093 passed, 7 skipped`。测试覆盖 diagnostic 无 freeze、formal
-top-three 的 planned/ready 转换、invalid freeze 阻断、freeze path/content binding、
-convergence 和 scaffold 的敏感字段约束。
-
+本轮完整测试为 `1096 passed, 7 skipped`。专项测试覆盖 diagnostic 无
+freeze、formal top-three 的 execution-ready/post-execution 转换、invalid freeze 阻断、
+freeze path/content binding、convergence 和 scaffold 的敏感字段约束。

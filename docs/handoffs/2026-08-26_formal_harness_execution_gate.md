@@ -54,10 +54,14 @@ plan/source/registry、生产 router/prompt/weights 或 serving policy。
   外部预注册 top-three、freeze digest 和固定 15 run units。
 - 无 freeze 或 diagnostic matrix：状态为 `blocked`，reason code 包含
   `provider_baseline_freeze_required`、`diagnostic_matrix_not_executable`。
-- formal cohort 身份合法但 official import 尚未齐全：状态为 `planned`，并通过
-  `planning_reason_codes` 表达 `official_import_acquisition_incomplete`。
-- formal cohort、任务、acquisition 全部完成：状态才为 `ready_to_execute`，并显式
-  输出 `execution_authorized=true`。
+- formal cohort 身份、freeze、task/pin/template 合法时：状态为 `ready_to_execute`，并
+  显式输出 `execution_authorized=true`；授权范围固定为
+  `official_or_audited_harness_work_queue_only`，且 `target_campaign_authorized=false`。
+- official import/acquisition 未齐全时不再把执行计划标成 `planned`；改由
+  `post_execution_imports_complete=false` 和
+  `post_execution_reason_codes=["official_import_acquisition_incomplete"]` 表达后置工作。
+- Harness 执行后的 hash-only imports/acquisition、case/source/harness audit 仍必须
+  完成，binding/convergence 才能继续向 `ready_for_target_campaign`。
 - execution plan digest 绑定 matrix、formal 状态、freeze content digest、任务数和
   reason code；receipt 不保存 provider id、模型 id、原始路径、prompt、输出或 secret。
 
@@ -69,7 +73,8 @@ plan/source/registry、生产 router/prompt/weights 或 serving policy。
   receipt。
 - `build_composite_harness_binding.py`、`audit_composite_convergence.py`、
   `evaluation.py` 的 readiness/cohort audit 均要求 formal cohort、execution
-  authorization 和 freeze path/content digest 绑定。
+  authorization 和 freeze path/content digest 绑定；只有 binding/convergence 额外要求
+  post-execution imports 完成。
 
 ## 新增离线证据
 
@@ -94,8 +99,8 @@ plan/source/registry、生产 router/prompt/weights 或 serving policy。
 - L1：`py_compile` 通过，覆盖 evaluation、CLI、Harness scripts 和相关测试。
 - L2：`axio_fusion_api.evaluation`、CLI 和 Harness 脚本导入通过。
 - L3 专项：formal/diagnostic/invalid freeze、scaffold、binding、convergence 共
-  `13 passed`；execution/readiness 相关 standalone 专项 `3 passed`。
-- L3 全量：`1093 passed, 7 skipped`。
+  `15 passed`；execution/readiness 相关 standalone 专项 `15 passed`。
+- L3 全量：`1096 passed, 7 skipped`。
 - `git diff --check` 通过。
 - r18 frozen plan SHA-256 仍为
   `58c1d7d20f3d064252e5551abdbc10ddf26ed075ca0d97e660e62f20fdc1e504`；source SHA-256
@@ -109,4 +114,3 @@ plan/source/registry、生产 router/prompt/weights 或 serving policy。
 preflight 做一次唯一 live screening；只有 terminal 且 transport admission 通过，才
 进入 ranking、freeze 和同 cohort Harness。若 transport gate 再次失败，保留完整失败
 分母并创建 immutable successor，不恢复旧 partial 结果。
-
