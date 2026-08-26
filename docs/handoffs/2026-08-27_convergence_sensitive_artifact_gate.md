@@ -34,4 +34,3 @@ superiority 证据。
 gate 或运行 21-suite target benchmark。授权后仍按 screening -> transport admission ->
 complete-pool ranking -> provider baseline freeze -> 同 cohort Harness convergence ->
 21-suite campaign -> final audit 顺序执行。
-
