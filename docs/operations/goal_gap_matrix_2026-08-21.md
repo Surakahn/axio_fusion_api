@@ -35,7 +35,7 @@ provider 能力组合成 `axio-fast`、`axio-terra`、`axio-pro`。Harness 只�
   models、21 个 live-available profiles、4 个 providers，且与 18900 进程的
   `AXIO_FUSION_REGISTRY_PATH` 绑定一致；AGENTS 中 r43 的 10-profile 数字仅是历史
   阶段检查项，不作为当前 r7 serving blocker。
-- 当前工程回归：`1096 passed, 7 skipped`；这是代码契约证据，不是能力或质量证据。
+- 当前工程回归：`1097 passed, 7 skipped`；这是代码契约证据，不是能力或质量证据。
 
 2026-08-26 离线可观测性增量：公开 health projection 已补充物理/逻辑模型计数，使用
 与运行时一致的 canonical identity 去重，并对 disabled/unavailable/超时 profile 应用

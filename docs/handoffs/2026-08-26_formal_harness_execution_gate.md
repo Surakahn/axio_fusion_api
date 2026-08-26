@@ -128,6 +128,12 @@ physical profiles”的检查项属于历史 r43 阶段，不适用于当前 r7 
 provider/target 请求。该计数只支持运维容量和 failover 观察，不改变 ranking、baseline
 freeze 或 target gate。
 
+本轮增量后的 Python 3.11 全量回归为 `1097 passed, 7 skipped`；`py_compile`、
+`compileall`、关键模块导入和 `git diff --check` 均通过。18900 长驻服务未重启，仍为
+`ready`；新增字段已在加载同一 r7 registry 的新进程内验证为 `21 physical / 15 logical`
+和 `21 available logical`。由于未执行受控发布，长驻旧进程的 health 响应仍是旧字段集，
+不能将源码验证误报为生产发布完成。
+
 ## 下一步
 
 当前不应继续堆叠 benchmark 或静态能力先验。等待 operator 明确授权后，按 r18 原始

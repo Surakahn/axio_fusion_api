@@ -6,6 +6,8 @@
   model 计数；available 计数沿用 enabled/health/90 秒 latency 服务边界。
 - [x] 副本去重与 unavailable profile 的 health 契约测试通过；投影仍只保存 hash-safe
   计数，不改变 router、prompt、registry 或 benchmark gate。
+- [x] 本轮 L1/L2/L3 回归：全量 `1097 passed, 7 skipped`，`compileall` 和
+  `git diff --check` 通过；r18 frozen plan/source hash 未变化。
 - [ ] r18 live screening 仍需明确授权；health 计数不等价于 provider admission、ranking
   或 21-suite target authorization。
 
