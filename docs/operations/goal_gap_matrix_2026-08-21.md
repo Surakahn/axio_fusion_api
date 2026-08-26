@@ -35,7 +35,16 @@ provider 能力组合成 `axio-fast`、`axio-terra`、`axio-pro`。Harness 只�
   models、21 个 live-available profiles、4 个 providers，且与 18900 进程的
   `AXIO_FUSION_REGISTRY_PATH` 绑定一致；AGENTS 中 r43 的 10-profile 数字仅是历史
   阶段检查项，不作为当前 r7 serving blocker。
-- 当前工程回归：`1097 passed, 7 skipped`；这是代码契约证据，不是能力或质量证据。
+- 当前工程回归：`1113 passed, 0 skipped`（2026-08-27 路由契约修复后）；这是代码
+  契约证据，不是能力或质量证据。
+
+2026-08-27 离线路由契约增量：Fast 基础轻量校验阈值已收紧，普通短请求不会因为基础
+complexity/uncertainty 被误扩展为 Fusion；显式质量、风险、工具、策略和消息特征仍可
+独立触发校验。运行时资格过滤同时排除 `health=failed/unavailable` profile，并记录
+`profile_unavailable` blocker。恢复的历史回归和三档 dry-run 均通过；详见
+`docs/handoffs/2026-08-27_routing_contract_repair.md`。该增量不改变 r18 frozen
+plan/source/registry 或 target 授权，也不构成 provider 能力、排序、成本、延迟或
+superiority 证据。
 
 2026-08-26 离线可观测性增量：公开 health projection 已补充物理/逻辑模型计数，使用
 与运行时一致的 canonical identity 去重，并对 disabled/unavailable/超时 profile 应用

@@ -1,5 +1,14 @@
 # Axio Fusion API Checklist
 
+# 2026-08-27 r18 preflight 身份复核
+
+- [x] 使用 canonical private operational-admission artifact 重新运行 verifier，状态为
+  `ready_for_operator_authorization`，`reason_codes=[]`，与历史 receipt 完全一致。
+- [x] 明确 private 与 safe operational-admission 是不同 hash 投影；r18 历史 verifier
+  绑定 private hash，不能混用；错误路径会按 `artifact_missing` fail-closed。
+- [x] provider/target 调用均为 `false`，未修改 r18 frozen plan/source/registry，未获得
+  live screening 授权。
+
 # 2026-08-27 路由契约与回归门禁修复
 
 - [x] Fast 轻量校验基础触发阈值收紧为 `complexity >= 0.40` 且

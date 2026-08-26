@@ -75,6 +75,11 @@ builtins 白名单 + bwrap 隔离；真实 4,673 行离线审计、专项回归�
 profile 资格过滤完成离线修复，恢复历史回归后全量为 `1113 passed, 0 skipped`；不
 改变 r18 frozen inputs、serving registry 或 target 授权。
 
+本轮同日的 r18 preflight 身份复核见
+`docs/handoffs/2026-08-27_r18_preflight_identity_recheck.md`：确认 canonical private
+operational-admission artifact 与历史 verifier receipt 完全一致；safe 投影虽同为
+`ready` 但 hash 不同，不能替代 private 绑定。该复核仍不授权 live screening。
+
 ## 本轮离线增量：BizBench 任务感知 audited evaluator（2026-08-26）
 
 只读核对官方 `kensho-technologies/benchmarks-pipeline`、BizBench 论文和本地
