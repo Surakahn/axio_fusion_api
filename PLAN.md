@@ -49,7 +49,7 @@ harness audit 全部同 cohort 完成，binding/convergence 才能继续到 targ
 `docs/handoffs/2026-08-27_bizbench_evaluator_hardening.md`：BizBench evaluator 已支持
 多 parquet 分片、SEC-NUM 数字或开放词汇 span 评分，并将程序执行收紧为 AST + 最小
 builtins 白名单 + bwrap 隔离；真实 4,673 行离线审计、专项回归和全量
-`1105 passed, 7 skipped` 均通过。该增量仍不改变 r18 live screening 授权门。
+`1106 passed, 7 skipped` 均通过。该增量仍不改变 r18 live screening 授权门。
 
 ## 本轮离线增量：BizBench 任务感知 audited evaluator（2026-08-26）
 
@@ -65,8 +65,8 @@ program、answer 和 raw output 仍被 prompt projection 与 safe receipt 隔离
 生产路由或 target 授权。
 
 验证：真实 BizBench 物化 `4673/4673` 行通过数据与 prompt contract 检查；gold
-FormulaEval 自测 `50/50`；BizBench 专项回归 `8 passed`；全量回归
-`1105 passed, 7 skipped`。下一条合法主路径仍是等待 operator 明确授权
+FormulaEval 自测 `50/50`；BizBench 专项回归 `9 passed`；全量回归
+`1106 passed, 7 skipped`。下一条合法主路径仍是等待 operator 明确授权
 `r18 live screening`，不得因该离线 evaluator 就提前运行 provider 或 21-suite target。
 
 本轮只读复核还确认 18900 当前绑定的是 r7 probe-bound serving registry：21 个 physical

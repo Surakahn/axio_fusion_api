@@ -9,7 +9,7 @@
 - [x] 程序执行默认关闭；开启 `AXIO_FUSION_ALLOW_BENCHMARK_CODE_EXEC` 后仅在临时隔离
   Python 进程中运行，禁止 import、文件和网络访问，超时即失败。
 - [x] 真实 4,673 行物化与数据/prompt contract 检查通过；gold FormulaEval `50/50`；
-  BizBench 专项回归 `8 passed`；全量回归 `1105 passed, 7 skipped`。
+  BizBench 专项回归 `9 passed`；全量回归 `1106 passed, 7 skipped`。
 - [ ] 该 evaluator 仍不是 r18 live screening、provider baseline freeze 或 21-suite
   target 授权；必须先获得明确 `授权 r18 live screening`。
 

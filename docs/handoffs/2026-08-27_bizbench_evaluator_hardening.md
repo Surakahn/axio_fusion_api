@@ -18,14 +18,16 @@ plan/source、生产路由或 serving registry，也没有获得或假设 `r18 l
   带单位数量等开放词汇标签按规范化 exact span；提示词明确要求返回 quantity span。
 - 程序与 FormulaEval 执行器增加静态 AST 反射/动态执行/I/O 拒绝，并通过 bwrap 隔离
   进程注入最小 builtins 白名单；候选代码不再继承完整 Python builtins。
+- bwrap 或用户命名空间不可用时返回明确的 `bizbench_sandbox_unavailable`，保持
+  fail-closed，不把沙箱缺失误记为模型能力失败。
 - BizBench evaluator receipt 的配置摘要绑定 output mode 与 span 规范化规则，确保
   任务协议变化会产生新的 `evaluator_config_sha256`。
 
 ## 离线证据
 
 - L1/L2：`py_compile`、`compileall`、关键 import 和 `git diff --check` 通过。
-- BizBench 专项回归：`8 passed`。
-- 全量回归（含本轮 NaN 归一化）：`1105 passed, 7 skipped`。
+- BizBench 专项回归：`9 passed`。
+- 全量回归（含本轮 NaN 归一化和沙箱错误分类）：`1106 passed, 7 skipped`。
 - 真实本地 test split：`4,673/4,673`，任务计数为 SEC-NUM 2,000、CodeFinQA 795、
   FinKnow 744、ConvFinQA 629、CodeTAT-QA 288、TAT-QA 120、FormulaEval 50、FinCode 47；
   case id 全部唯一，prompt contract 无标签泄露。

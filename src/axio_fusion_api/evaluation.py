@@ -30184,7 +30184,11 @@ def _execute_bizbench_program(
                 timeout=max(1.0, float(timeout)),
                 check=False,
             )
-    except (OSError, subprocess.TimeoutExpired):
+    except subprocess.TimeoutExpired:
+        return None, "bizbench_code_timeout_or_process_error"
+    except OSError as exc:
+        if str(exc) == "bizbench_sandbox_unavailable":
+            return None, "bizbench_sandbox_unavailable"
         return None, "bizbench_code_timeout_or_process_error"
     if result.returncode != 0:
         return None, "bizbench_code_execution_failed"
@@ -30294,7 +30298,11 @@ def _execute_bizbench_formula_pair(
                 timeout=max(1.0, float(timeout)),
                 check=False,
             )
-    except (OSError, subprocess.TimeoutExpired):
+    except subprocess.TimeoutExpired:
+        return False, "bizbench_formula_timeout_or_process_error"
+    except OSError as exc:
+        if str(exc) == "bizbench_sandbox_unavailable":
+            return False, "bizbench_sandbox_unavailable"
         return False, "bizbench_formula_timeout_or_process_error"
     if result.returncode != 0:
         return False, "bizbench_formula_unit_test_failed"

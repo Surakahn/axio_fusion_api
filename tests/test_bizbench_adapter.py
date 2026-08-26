@@ -173,6 +173,22 @@ def test_bizbench_program_runtime_uses_restricted_builtins(monkeypatch):
     assert scored["error_type"] == "bizbench_code_dangerous_call"
 
 
+def test_bizbench_program_fails_closed_when_sandbox_is_unavailable(monkeypatch):
+    monkeypatch.setenv("AXIO_FUSION_ALLOW_BENCHMARK_CODE_EXEC", "1")
+    monkeypatch.setattr(evaluation.shutil, "which", lambda _name: None)
+    case = _case(
+        bizbench_task="FinCode",
+        bizbench_output_mode="program_numeric",
+    )
+    scored = evaluation._score_bizbench_output(
+        output="answer = 100",
+        case=case,
+        timeout=2,
+    )
+    assert scored["correct"] is False
+    assert scored["error_type"] == "bizbench_sandbox_unavailable"
+
+
 def test_bizbench_formula_executes_candidate_against_gold(monkeypatch):
     monkeypatch.setenv("AXIO_FUSION_ALLOW_BENCHMARK_CODE_EXEC", "1")
     stub = """def simple_interest(principal: float, rate: float, time: float) -> float:
