@@ -42,6 +42,15 @@ provider baseline freeze       未开始
 `--retry-failed`、不拼接 survivor subset、不降低固定 2% gate，也不修改 frozen
 plan/source/registry、生产 router/prompt/weights 或 serving policy。
 
+## Serving registry 身份复核
+
+本轮对 18900 的只读 `/health`、进程环境和 `private/serving_registry.json` 做了身份
+核对：正式进程通过 `AXIO_FUSION_REGISTRY_PATH` 绑定 r7 probe-bound registry，当前为
+21 个 physical profiles、15 个 logical models、21 个 live-available profiles、4 个
+providers；r7 provider probe evidence audit 为 ready。AGENTS 中“r43 当前 10 个文本
+physical profiles”的检查项属于历史 r43 阶段，不适用于当前 r7 serving cohort；本轮未
+修改 registry、未重启服务，也未把该历史计数当作当前 blocker。
+
 ## 本轮实现
 
 ### Execution plan formal cohort gate

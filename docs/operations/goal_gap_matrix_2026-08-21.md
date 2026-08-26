@@ -31,6 +31,10 @@ provider 能力组合成 `axio-fast`、`axio-terra`、`axio-pro`。Harness 只�
   明确为 `blocked`。
 - 当前服务只读健康：`ready`，公共模型为三档，四种协议可用，`auto -> proxy`，
   生产 loopback 为 `127.0.0.1:18900`，当前 serving registry 为 r7 probe-bound。
+- 当前 serving registry 身份已只读复核：21 个 physical profiles、15 个 logical
+  models、21 个 live-available profiles、4 个 providers，且与 18900 进程的
+  `AXIO_FUSION_REGISTRY_PATH` 绑定一致；AGENTS 中 r43 的 10-profile 数字仅是历史
+  阶段检查项，不作为当前 r7 serving blocker。
 - 当前工程回归：`1096 passed, 7 skipped`；这是代码契约证据，不是能力或质量证据。
 
 ## 差距矩阵

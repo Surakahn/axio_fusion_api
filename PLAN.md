@@ -45,6 +45,11 @@ execution plan 已按 provider baseline freeze 和 formal top-three cohort fail-
 harness audit 全部同 cohort 完成，binding/convergence 才能继续到 target gate；
 `target_campaign_authorized` 在 execution plan 中固定为 `false`。
 
+本轮只读复核还确认 18900 当前绑定的是 r7 probe-bound serving registry：21 个 physical
+profiles、15 个 logical models、21 个 live-available profiles、4 个 providers。AGENTS
+中 r43 的 10-profile 检查属于历史阶段，不应覆盖当前 r7 serving 身份；未修改 registry
+或重启服务。
+
 最终唯一合法路径：
 
 ```text
