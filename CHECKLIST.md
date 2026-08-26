@@ -1,5 +1,19 @@
 # Axio Fusion API Checklist
 
+# 2026-08-27 路由契约与回归门禁修复
+
+- [x] Fast 轻量校验基础触发阈值收紧为 `complexity >= 0.40` 且
+  `uncertainty >= 0.40`，普通短请求不再误扩展为 Fusion；显式质量、风险、工具、
+  策略和消息特征仍可独立触发校验。
+- [x] 路由资格过滤排除 `health=failed/unavailable` profile，并记录
+  `profile_unavailable` blocker count，避免失效副本进入候选池。
+- [x] 恢复 7 个历史 skip 并对齐 Fast direct-cascade 契约；专项 `8 passed`，全量
+  `1113 passed, 0 skipped`。
+- [x] L1/L2、`git diff --check` 和三档 dry-run 验证通过；未发起 provider/target 请求，
+  未修改 r18 frozen plan/source、serving registry 或服务进程。
+- [ ] r18 live screening 仍需 operator 明确授权；本轮离线回归不构成 provider 能力、
+  排序、成本、延迟或 Fusion superiority 证据。
+
 # 2026-08-26 BizBench task-aware audited evaluator
 
 - [x] 对照官方 README/论文和 Parquet schema，确认 8 个任务族与 4,673 行 test split。

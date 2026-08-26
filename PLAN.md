@@ -1,5 +1,24 @@
 # Axio Fusion API Plan
 
+## 本轮离线增量：路由契约与回归门禁修复（2026-08-27）
+
+本轮依据现有 PRD 与 remote-only Fusion 边界，只修复运行时路由契约，不触碰任何
+provider、target benchmark 或冻结 screening 输入：
+
+- Fast 轻量校验的基础复杂度/不确定性阈值由 `0.25/0.30` 收紧为 `0.40/0.40`。
+  普通短文本的基础分析值不再被误判为 Fusion；显式质量、风险、工具、策略和消息
+  特征仍可独立触发校验。
+- 路由隐私/资格过滤阶段排除 `health=failed` 或 `health=unavailable` 的 profile，
+  并在 blocker receipt 中记录 `profile_unavailable`，避免校准后的失效副本继续被选中。
+- 恢复并对齐 7 个历史跳过用例（Fast direct cascade/headroom、canonical replica
+  failover、prompt-free trace、registry calibration、cache isolation），全量回归
+  为 `1113 passed, 0 skipped`。
+
+本轮 L1/L2、专项回归和 `git diff --check` 均通过；没有 provider/target 网络调用，未
+恢复 checkpoint、未使用 `--retry-failed`、未拼接 survivor subset、未降低 r18 固定
+2% transport gate，也没有重启服务或改变 serving registry。该增量不构成能力、成本、
+延迟或 superiority 证据；r18 live screening 仍需 operator 明确授权。
+
 ## 用户确认的核心理念与最终收敛（2026-08-21）
 
 Axio 的 Fusion 本质是 remote-only 的模型能力组合服务：不是训练一套本地模型，
@@ -50,6 +69,11 @@ harness audit 全部同 cohort 完成，binding/convergence 才能继续到 targ
 多 parquet 分片、SEC-NUM 数字或开放词汇 span 评分，并将程序执行收紧为 AST + 最小
 builtins 白名单 + bwrap 隔离；真实 4,673 行离线审计、专项回归和全量
 `1106 passed, 7 skipped` 均通过。该增量仍不改变 r18 live screening 授权门。
+
+本轮最新交接（2026-08-27）另见
+`docs/handoffs/2026-08-27_routing_contract_repair.md`：Fast 路由触发条件和不可用
+profile 资格过滤完成离线修复，恢复历史回归后全量为 `1113 passed, 0 skipped`；不
+改变 r18 frozen inputs、serving registry 或 target 授权。
 
 ## 本轮离线增量：BizBench 任务感知 audited evaluator（2026-08-26）
 

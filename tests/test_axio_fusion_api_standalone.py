@@ -4182,13 +4182,13 @@ def test_standalone_fast_runtime_uses_provider_routing_fallback_pool_on_failure(
     assert response.route_plan["budget"]["fallback_call_allowance"] == 1
     assert response.trace["provider_call_count"] == 2
     assert response.trace["budget_lock"]["used_model_call_count"] == 2
-    assert provider_policy["fallback_pool_sorted_by"] == "availability_then_role_fit_then_latency_cost_and_diversity"  # routing-weight v2
-    assert receipt["provider_routing_policy"]["fallback_pool_sorted_by"] == "availability_then_role_fit_then_latency_cost_and_diversity"  # routing-weight v2
+    assert provider_policy["fallback_pool_sorted_by"] == "fast_deadline_feasibility_then_observed_latency_then_availability_and_role_fit"
+    assert receipt["provider_routing_policy"]["fallback_pool_sorted_by"] == "fast_deadline_feasibility_then_observed_latency_then_availability_and_role_fit"
     assert receipt["provider_routing_policy"]["fallback_pool_receipts"][0]["routing_score"] is not None
     assert fallback_rows[0]["fallback_rank"] == 1
     assert fallback_rows[1]["fallback_rank"] == 2
     assert responses_fallback["availability_score"] >= chat_fallback["availability_score"]
-    assert responses_fallback["selected_in_primary_panel"] is True  # routing-weight v2: both models now in primary panel
+    assert responses_fallback["selected_in_primary_panel"] is False
     assert sum(1 for row in receipt["candidate_outputs"] if row["status"] == "completed") == 1
     assert all(row["status"] != "failed" for row in receipt["candidate_outputs"])
     assert "secret-down-provider" not in serialized_receipt
@@ -4198,7 +4198,6 @@ def test_standalone_fast_runtime_uses_provider_routing_fallback_pool_on_failure(
     assert "SECRET_FAST_PRIMARY_FAILURE" not in serialized_receipt
 
 
-@pytest.mark.skip(reason="routing-weight v2: fast_direct behavior shifted, needs test re-alignment")
 def test_standalone_fast_direct_prefers_deadline_feasible_primary_and_reserves_fallback_time():
     class DeadlineAwareFastClient:
         def __init__(self):
@@ -4285,7 +4284,6 @@ def test_standalone_fast_direct_prefers_deadline_feasible_primary_and_reserves_f
     assert response.trace["provider_call_count"] == 2
 
 
-@pytest.mark.skip(reason="routing-weight v2: fast_direct behavior shifted, needs test re-alignment")
 def test_standalone_fast_direct_requires_cascade_headroom_when_selecting_primary():
     profiles = [
         normalize_profile(
@@ -4333,7 +4331,6 @@ def test_standalone_fast_direct_requires_cascade_headroom_when_selecting_primary
     assert route_plan["selected_models"][0]["p50_latency_ms"] == 1_100
 
 
-@pytest.mark.skip(reason="routing-weight v2: fast_direct behavior shifted, needs test re-alignment")
 def test_standalone_fast_timeout_keeps_full_primary_window_when_fallback_cannot_fit():
     class SlowFallbackHeadroomClient:
         def __init__(self):
@@ -8050,7 +8047,6 @@ def test_standalone_gateway_rate_limit_and_feedback_are_prompt_free(monkeypatch,
     assert feedback["secrets_persisted"] is False
 
 
-@pytest.mark.skip(reason="routing-weight v2: trace format shifted")
 def test_standalone_execution_trace_artifact_is_prompt_free(monkeypatch, tmp_path):
     reset_runtime_state_for_tests()
     monkeypatch.setenv("AXIO_FUSION_ARTIFACT_DIR", str(tmp_path))
@@ -8392,7 +8388,6 @@ def test_standalone_tool_execution_blocks_judge_and_unknown_tools():
     assert fusion["results"][0]["error_code"] == "blocked_fusion_plugin_route_only"
 
 
-@pytest.mark.skip(reason="routing-weight v2: calibration model selection shifted")
 def test_standalone_registry_calibration_updates_dynamic_model_profile(tmp_path):
     registry_path = tmp_path / "registry.json"
     registry_path.write_text(
@@ -10879,7 +10874,6 @@ def test_standalone_response_cache_isolated_by_quality_target_policy():
     assert fake.calls == 2
 
 
-@pytest.mark.skip(reason="routing-weight v2: fast-direct behavior shifted, needs re-alignment")
 def test_standalone_response_cache_isolated_by_stop_and_privacy_routing_contracts():
     class CountingClient:
         def __init__(self):

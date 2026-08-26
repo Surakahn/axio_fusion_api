@@ -3857,7 +3857,6 @@ def test_implicit_fusion_deadline_uses_direct_p95_three_x_bound():
     assert receipt["deadline_margin_ms"] == 0
 
 
-@pytest.mark.skip(reason="routing-weight v2: pro_panel returns raw JSON, needs parser fix")
 def test_canonical_replica_failover_precedes_cross_model_fallback_and_stage_failover_is_bounded():
     class FailoverClient:
         def __init__(self):

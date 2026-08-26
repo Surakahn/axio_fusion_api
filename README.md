@@ -32,7 +32,7 @@
 - **评测与基准平台**：作为标准化模型接入层，公平比较不同供应商模型的融合效果
 - **研究机构**：探索模型融合（MoA、Fugu-style）的新算法与策略
 
-## 当前状态（2026-08-26）
+## 当前状态（2026-08-27）
 
 ### 已完成
 - ✅ axio-fast / axio-terra / axio-pro 三档融合模型全部正常响应
@@ -46,6 +46,8 @@
   failover 容量观察
 - ✅ BizBench 任务感知 audited evaluator：8 个任务按多选、数值/开放词汇抽取、程序合成和
   FormulaEval 分流，使用 1% 数值容差、SEC-NUM exact span 与隔离合成测试；不冒充第三方 official harness
+- ✅ 路由契约回归修复：Fast 普通短请求不会误触发轻量校验；`health=unavailable/failed`
+  的 profile 不再进入候选池；恢复 7 个历史跳过用例后全量回归为 `1113 passed, 0 skipped`
 - ⏳ provider baseline screening/ranking/freeze 与完整 21 套 benchmark 仍在门禁流程中
 
 ### 评价证据边界
@@ -57,7 +59,6 @@ binding 和最终统计审计完成前，不声明三档 Fusion 优于对应单�
 
 ### 待推进
 - r18 live screening（仍需 operator 明确授权）以及后续 transport admission、完整池排名和 baseline freeze
-- 测试债务修复（14 个延迟乘数相关 case）
 - 自适应渠道接入元提示词系统
 - provider baseline screening/ranking/freeze
 - 9 类 21 套件完整基准评测与 final audit

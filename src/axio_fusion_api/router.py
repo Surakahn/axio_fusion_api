@@ -4671,8 +4671,12 @@ def _fast_light_verify_requested(request: FusionRequest, analysis: Mapping[str, 
         quality_target >= 0.82
         or bool(analysis.get("routing_policy_fast_light_verify"))
         or risk >= 0.55
+        # 基础请求分析的 complexity 约从 0.18 起步，并由此推导 uncertainty。
+        # 若把这个基线直接当成轻量校验触发条件，普通短 Fast 请求会错误地
+        # 扩展为 Fusion 并耗尽调用方的 fallback 槽位。这里要求出现实质任务
+        # 信号；上面的质量、风险、工具和策略信号仍可独立触发校验。
         or (uncertainty >= 0.58 and complexity >= 0.35)
-        or (complexity >= 0.25 and uncertainty >= 0.30)
+        or (complexity >= 0.40 and uncertainty >= 0.40)
         or _non_fusion_tools_declared(request)
         or _fast_message_heuristic_complexity(request) >= 0.04
     )
@@ -7453,6 +7457,14 @@ def _apply_privacy_filter(
         if profile.enabled is not True:
             blocked_counts["profile_disabled"] = (
                 blocked_counts.get("profile_disabled", 0) + 1
+            )
+            continue
+        if str(profile.health or "unknown").strip().casefold() in {
+            "failed",
+            "unavailable",
+        }:
+            blocked_counts["profile_unavailable"] = (
+                blocked_counts.get("profile_unavailable", 0) + 1
             )
             continue
         if profile_latency_eligibility(profile).get("eligible") is False:
