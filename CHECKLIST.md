@@ -1,5 +1,17 @@
 # Axio Fusion API Checklist
 
+# 2026-09-09 r18 授权后凭据安全门
+
+- [x] operator 已明确授权 r18 live screening；重新执行的 verifier 仍为
+  `ready_for_operator_authorization`、`reason_codes=[]`，frozen 输入 hash 未漂移，
+  provider/target 调用均为 `false`。
+- [ ] 轮换历史诊断中已暴露的 NVIDIA 5-key pool，并更新
+  `private/current_channels.env`；在轮换证据和新的 credential-ready preflight 之前，
+  禁止启动 provider screening。
+- [ ] 凭据轮换后按固定顺序继续：唯一 r18 screening -> transport admission ->
+  complete-pool ranking -> external top-three -> provider freeze -> same-cohort
+  Harness/import -> 21-suite campaign -> final audit。
+
 # 2026-09-09 工程控制面证据刷新
 
 - [x] 固化 `1116 passed in 272.24s` 的 standalone 全量回归 receipt；L1/L2、
@@ -11,8 +23,10 @@
 - [x] 顶层 completion audit 重新绑定当前控制面 artifact，结果为 `9/24 proven`、
   `incomplete`；完整缺口仍从 r18 live screening 及其后续 baseline/Harness/21-suite
   链路开始。
-- [ ] r18 live screening 仍需 operator 明确授权；本轮未产生 provider/target 请求，
+- [x] operator 已明确授权 r18 live screening；本轮仍未产生 provider/target 请求，
   未修改 frozen plan/source/registry。
+- [ ] 历史诊断中已暴露的 NVIDIA key pool 尚未完成轮换；轮换后须重新生成
+  credential-ready preflight 并通过 verifier，才能启动 provider screening。
 - [x] 详细 hash-safe receipt 与下一合法动作记录在
   `docs/handoffs/2026-09-09_engineering_control_refresh.md`。
 - [x] 独立 convergence audit 现在会校验 `binding_digest_input` 的 stage digest 与

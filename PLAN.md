@@ -1,5 +1,19 @@
 # Axio Fusion API Plan
 
+## 2026-09-09 r18 授权后凭据安全门
+
+operator 已明确授权 r18 live screening。本轮重新执行了零 provider 请求的
+preflight verifier，r18 frozen plan/source/registry 与 r7 operational admission
+绑定未漂移，verifier 仍为 `ready_for_operator_authorization`、`reason_codes=[]`，
+且 `network_calls_performed=false`。该状态只证明输入自洽，不代表已经发生 screening。
+
+启动前安全检查发现当前 NVIDIA 5-key pool 与受控凭据文件逐项相同；该 pool 已在
+历史诊断中被视为暴露，当前工作区没有轮换证据。因此在外部密钥管理渠道完成轮换并
+更新 `private/current_channels.env` 前，仍禁止任何 provider I/O。轮换后必须重新生成
+credential-ready preflight、重新运行 verifier 并再次核对 frozen hash，再启动唯一的
+`baseline-screening-run --live`。本轮没有 provider/target 请求、没有恢复 checkpoint、
+没有修改 frozen 输入、没有重启生产服务。
+
 ## 2026-09-09 工程控制面证据刷新
 
 本轮继承既有 remote-only Fusion Goal，只做零 provider/target 网络的工程与证据刷新：
@@ -17,8 +31,9 @@
 - 产物位于 `private/runs/2026-09-09-engineering-control-refresh/`，历史 artifact
   未覆盖；没有修改 r18 frozen 输入、恢复 checkpoint、降低 gate 或启动 live screening。
 
-详细交接见 `docs/handoffs/2026-09-09_engineering_control_refresh.md`。在 operator 明确
-回复 `授权 r18 live screening` 前，唯一合法下一步仍是保持 zero-network 状态并等待授权。
+详细交接见 `docs/handoffs/2026-09-09_engineering_control_refresh.md`。operator 已明确授权
+`r18 live screening`，但在历史暴露的 NVIDIA key pool 完成轮换并重新通过 credential-ready
+preflight 前，唯一合法下一步仍是保持 zero-network 状态。
 
 本轮追加的离线安全修复：独立 convergence audit 不再只信任 binding 的声明 hash，
 而是重新比对 `binding_digest_input.stage_content_sha256` 与 `stage_bindings`，并校验
