@@ -1,5 +1,32 @@
 # Axio Fusion API Plan
 
+## 2026-09-09 工程控制面证据刷新
+
+本轮继承既有 remote-only Fusion Goal，只做零 provider/target 网络的工程与证据刷新：
+
+- 固化 standalone 全量回归 `1116 passed in 272.24s`，并通过 L1/L2、`compileall`、
+  导入和 `git diff --check`。
+- 重新生成四协议 gateway self-test（`12/12`）与 provider input adapter
+  self-test（`4/4`），均为 hash-safe 且 `network_calls_performed=false`。
+- 重新生成 system development readiness，`10/10` requirement proven，状态为
+  `ready_for_benchmark_validation`，仍与 benchmark validation 和 superiority claim
+  分离。
+- 顶层 completion audit 绑定上述当前 artifact 后为 `9/24 proven`、`incomplete`。
+  仍缺 provider baseline freeze、同 cohort Harness/import、21-suite campaign、
+  API parity、统计/污染/failure-analysis 等外部证据。
+- 产物位于 `private/runs/2026-09-09-engineering-control-refresh/`，历史 artifact
+  未覆盖；没有修改 r18 frozen 输入、恢复 checkpoint、降低 gate 或启动 live screening。
+
+详细交接见 `docs/handoffs/2026-09-09_engineering_control_refresh.md`。在 operator 明确
+回复 `授权 r18 live screening` 前，唯一合法下一步仍是保持 zero-network 状态并等待授权。
+
+本轮追加的离线安全修复：独立 convergence audit 不再只信任 binding 的声明 hash，
+而是重新比对 `binding_digest_input.stage_content_sha256` 与 `stage_bindings`，并校验
+digest input 内的 declarations 与顶层声明一致；不一致时返回
+`cohort_binding_digest_stage_bindings_mismatch` 或
+`cohort_binding_digest_declarations_mismatch`，保持 fail-closed。修复后全量回归为
+`1117 passed in 269.73s`；既有工程刷新 receipt 的 `1116 passed` 保持不可变。
+
 ## 本轮离线增量：路由契约与回归门禁修复（2026-08-27）
 
 本轮依据现有 PRD 与 remote-only Fusion 边界，只修复运行时路由契约，不触碰任何

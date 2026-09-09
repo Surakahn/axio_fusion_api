@@ -363,3 +363,67 @@ def test_prior_target_calls_close_every_claim_gate(tmp_path: Path) -> None:
     assert result["target_suite_calls_allowed"] is False
     assert result["final_claim_allowed"] is False
     assert "screening_target_suite_calls_present" in result["reason_codes"]
+
+
+def test_binding_digest_input_must_match_stage_bindings(tmp_path: Path) -> None:
+    args = _args(tmp_path)
+    names = (
+        "registry",
+        "plan",
+        "state",
+        "transport_admission",
+        "ranking",
+        "provider_baseline_freeze",
+        "harness_pin",
+        "execution_plan",
+        "acquisition_status",
+        "official_import_audit",
+    )
+    for name in names:
+        path = tmp_path / f"{name}.json"
+        _write(path, {})
+        setattr(args, name, path)
+
+    bindings = {
+        name: {
+            "content_sha256": audit._sha256_file(getattr(args, name)),
+            "path_sha256": audit._sha256_text(str(getattr(args, name))),
+        }
+        for name in names
+    }
+    declarations = {
+        "screening_plan_digest_sha256": "",
+        "screening_campaign_digest_sha256": "",
+        "provider_baseline_freeze_digest_sha256": "",
+        "execution_plan_digest_sha256": "",
+        "official_import_audit_digest_sha256": "",
+        "target_suite_calls_performed": False,
+    }
+    digest_input = {
+        "stage_content_sha256": {name: "0" * 64 for name in names},
+        "declarations": declarations,
+    }
+    declared_digest = audit._sha256_text(audit._stable_json(digest_input))
+    binding = {
+        "schema": "axio_fusion_api.composite_harness_cohort_binding.v1",
+        "status": "ready",
+        "cohort_binding_digest_sha256": declared_digest,
+        "cohort_id_sha256": declared_digest,
+        "stage_bindings": bindings,
+        "declarations": declarations,
+        "binding_digest_input": digest_input,
+        "target_suite_calls_allowed": True,
+        "target_suite_calls_performed": False,
+        "raw_provider_outputs_persisted": False,
+        "raw_prompts_persisted": False,
+        "raw_labels_persisted": False,
+        "raw_provider_urls_persisted": False,
+        "secrets_persisted": False,
+    }
+    args.cohort_binding = tmp_path / "cohort-binding.json"
+    _write(args.cohort_binding, binding)
+
+    stage = audit._cohort_binding_stage(args.cohort_binding, args=args)
+
+    assert stage["status"] == "blocked"
+    assert "cohort_binding_digest_stage_bindings_mismatch" in stage["reason_codes"]

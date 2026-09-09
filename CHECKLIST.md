@@ -1,5 +1,24 @@
 # Axio Fusion API Checklist
 
+# 2026-09-09 工程控制面证据刷新
+
+- [x] 固化 `1116 passed in 272.24s` 的 standalone 全量回归 receipt；L1/L2、
+  `compileall`、包导入和 `git diff --check` 通过。
+- [x] 四协议 gateway self-test 完成 `12/12`，provider input adapter 完成 `4/4`，
+  两者均为零网络、hash-safe artifact。
+- [x] system development readiness 完成 `10/10 proven`，状态为
+  `ready_for_benchmark_validation`；未宣称 benchmark 或 superiority。
+- [x] 顶层 completion audit 重新绑定当前控制面 artifact，结果为 `9/24 proven`、
+  `incomplete`；完整缺口仍从 r18 live screening 及其后续 baseline/Harness/21-suite
+  链路开始。
+- [ ] r18 live screening 仍需 operator 明确授权；本轮未产生 provider/target 请求，
+  未修改 frozen plan/source/registry。
+- [x] 详细 hash-safe receipt 与下一合法动作记录在
+  `docs/handoffs/2026-09-09_engineering_control_refresh.md`。
+- [x] 独立 convergence audit 现在会校验 `binding_digest_input` 的 stage digest 与
+  `stage_bindings`、declarations 完全一致；新增跨 cohort/digest 漂移回归测试，保持
+  fail-closed；修复后全量回归为 `1117 passed in 269.73s`。
+
 # 2026-08-27 convergence artifact 敏感字段门禁
 
 - [x] convergence audit 的统一 stage helper 递归检查敏感持久化字段；transport/ranking

@@ -371,8 +371,21 @@ def _cohort_binding_stage(
         if declarations.get(name) != expected:
             reasons.append(f"cohort_binding_{name}_mismatch")
     digest_input = payload.get("binding_digest_input")
-    if not isinstance(digest_input, Mapping) or not _sha256_text(_stable_json(digest_input)) == declared_digest:
+    if not isinstance(digest_input, Mapping):
         reasons.append("cohort_binding_digest_invalid")
+    else:
+        bound_stage_digests = {
+            name: str(row.get("content_sha256") or "")
+            for name, row in sorted(bindings.items())
+            if isinstance(row, Mapping)
+        }
+        digest_stage_digests = digest_input.get("stage_content_sha256")
+        if digest_stage_digests != bound_stage_digests:
+            reasons.append("cohort_binding_digest_stage_bindings_mismatch")
+        if digest_input.get("declarations") != dict(declarations):
+            reasons.append("cohort_binding_digest_declarations_mismatch")
+        if _sha256_text(_stable_json(digest_input)) != declared_digest:
+            reasons.append("cohort_binding_digest_invalid")
     for field in (
         "raw_provider_outputs_persisted",
         "raw_prompts_persisted",
