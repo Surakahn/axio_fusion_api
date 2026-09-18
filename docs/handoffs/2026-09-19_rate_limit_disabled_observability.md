@@ -19,3 +19,13 @@ provider screening、target benchmark，也不修改 r18 frozen plan/source/regi
   `21` physical / `15` logical，`4` providers，`auto -> proxy`。
 - 当前生产环境未启用租户预算与 rate limit，runtime snapshot 均报告 `false`。
 - CPA Plus 未停止、未重启、未修改。
+
+## 发布后验证
+
+- 发布 commit：`4d56422`；当前 Axio 18900 PID：`2576971`。
+- `/health`：`ready`；`runtime_routing=healthy`；`21/21` runtime eligible；`0` circuit；
+  `21` physical / `15` logical；`4` providers；`auto -> proxy`。
+- runtime snapshot：`rate_limit_enabled=false`、`tenant_budget_enabled=false`，且无敏感字段持久化。
+- 三档 route-plan dry-run：Fast=`fast_direct_cascade`、Terra=`terra_direct`、
+  Pro=`pro_panel_judge_escalation`；Pro 保留 judge/synthesizer 角色。
+- 全量回归：`1131 passed`；CPA Plus 仍保持原进程与配置。

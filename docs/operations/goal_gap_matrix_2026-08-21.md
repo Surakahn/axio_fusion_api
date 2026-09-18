@@ -73,6 +73,12 @@ provider I/O、r18 frozen inputs、screening、ranking 或 benchmark 授权。
 也不会产生重试等待。本增量只校正运维投影，不改变 provider I/O、r18 frozen inputs、
 screening、ranking 或 benchmark 授权。
 
+发布验证（commit `4d56422`，Axio PID `2576971`）：`/health=ready`、runtime routing
+`healthy`、`21/21` eligible、`0` circuit、`21/15` physical/logical、`4` providers、
+`auto -> proxy`；Fast/Terra/Pro route-plan 分别为 `fast_direct_cascade`、`terra_direct`、
+`pro_panel_judge_escalation`。全量回归 `1131 passed`。CPA Plus 未重启，provider screening、
+ranking、baseline freeze 与 target benchmark 仍按授权门禁保持 withheld。
+
 2026-09-19 rate-limit 多路径错误投影增量：buffered 文本、文本 SSE 与图片 SSE 的
 `rate_limit_exceeded` 现在统一包含 `metadata.rate_limit`、安全持久化标志和
 `Retry-After`，调用方可跨执行路径读取一致的限流窗口与重试信息。专项 parity `2 passed`，
