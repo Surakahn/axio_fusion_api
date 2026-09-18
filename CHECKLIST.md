@@ -1,5 +1,19 @@
 # Axio Fusion API Checklist
 
+# 2026-09-18 租户级并发 admission
+
+- [x] 新增 `AXIO_FUSION_TENANT_MAX_IN_FLIGHT`；默认关闭，启用后按租户原子限制正在
+  执行的 provider/image 请求，超限返回 429 `tenant_concurrency_exhausted`。
+- [x] buffered 文本、文本流、buffered 图片、图片流均使用幂等 lease；provider 异常、
+  客户端断开、首帧写失败和 image 异常释放；`record_runtime=False` 不计入。
+- [x] runtime snapshot 仅输出 in-flight 计数、上限和 tenant SHA-256 投影，
+  `raw_tenant_key_persisted=false`、`raw_api_keys_persisted=false`、`secrets_persisted=false`。
+- [x] 专项测试覆盖原子竞争、幂等 release、429 契约和离线诊断路径；standalone
+  `395 passed`。
+- [x] standalone `395 passed`、全量 `1121 passed`；L1/L2、compileall、`git diff --check`
+  已通过。受控服务发布后的 health/runtime 核对和最终提交待完成；此增量不改变 r18
+  frozen 输入，也不授权 provider screening 或 target benchmark。
+
 # 2026-09-18 运行时渠道降级可观测性
 
 - [x] 新增 `runtime_routing` 健康投影，区分 registry readiness 与当前进程的熔断、

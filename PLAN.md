@@ -1,5 +1,24 @@
 # Axio Fusion API Plan
 
+## 2026-09-18 租户级并发 admission 增量
+
+本轮继续推进产品本体的资源闭环，不依赖新增 provider 能力。新增可配置的
+`AXIO_FUSION_TENANT_MAX_IN_FLIGHT`（默认 `0` 表示关闭），在进入 provider 工作前对
+每个 hash 化租户原子保留 in-flight 槽位；超限统一返回 HTTP 429
+`tenant_concurrency_exhausted` 与受控 `Retry-After`。该控制与已有每分钟速率限制、每日
+成本预算分离，避免把一次性的速率配额误当成正在执行的资源占用。
+
+buffered 文本、文本 SSE、buffered 图片和图片 SSE 四条路径均绑定同一幂等 lease：正常
+完成、provider 异常、首帧写失败、客户端断开和 image lane 异常都会释放；`record_runtime=False`
+的离线诊断不占用槽位。`/v1/axio/runtime` 与 `/health.runtime` 只暴露计数、上限和
+SHA-256 租户投影，不保存 raw tenant/API key/prompt/provider output。该增量只证明网关
+资源控制与故障恢复，不是 provider 能力、排名、成本或 superiority 证据。
+
+实现与专项回归：`runtime.py` 的原子 admission/幂等 release 与安全快照、`server.py`
+的四路径生命周期和 429 契约；standalone 回归 `395 passed`，全量回归 `1121 passed`。
+L1/L2、compileall、`git diff --check` 已通过；发布前 health 核对和最终提交仍待完成。
+r18 live screening 仍受 NVIDIA key pool 轮换安全门约束。
+
 ## 2026-09-18 运行时渠道降级可观测性增量
 
 本轮继续推进 Fusion 产品本体，不因 r18 provider 凭据安全门或历史渠道不可用而暂停

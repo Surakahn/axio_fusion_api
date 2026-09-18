@@ -44,7 +44,7 @@ from .providers import (
     profile_credential_readiness,
 )
 from .registry import load_image_registry, load_registry, registry_readiness
-from .runtime import ResponseContinuation, runtime_state, tenant_key_from_headers
+from .runtime import InFlightLease, ResponseContinuation, runtime_state, tenant_key_from_headers
 from .runtime_activation import AtomicFusionRuntime
 from .schemas import (
     FusionRequest,
@@ -74,6 +74,7 @@ class _PreparedIncrementalStream:
     active_engine: FusionEngine
     tenant_key: str
     live: bool
+    in_flight_lease: InFlightLease
 
 
 @dataclass(frozen=True)
@@ -84,6 +85,7 @@ class _PreparedIncrementalImageStream:
     files: tuple[Any, ...]
     router: ImageRouter
     tenant_key: str
+    in_flight_lease: InFlightLease
 
 
 def handle_request(
@@ -163,15 +165,21 @@ def handle_request(
             budget = runtime_state().check_budget(tenant_key)
             if not budget["allowed"]:
                 return respond(_tenant_budget_exhausted_response(budget))
-        return respond(
-            _handle_image_request(
-                operation=image_operation,
-                headers=headers_lc,
-                body=body,
-                profiles=selected_image_profiles,
-                text_engine=active_engine,
+        lease, admission = _acquire_tenant_in_flight(tenant_key, record_runtime=record_runtime)
+        if admission is not None:
+            return respond(_tenant_concurrency_exhausted_response(admission))
+        try:
+            return respond(
+                _handle_image_request(
+                    operation=image_operation,
+                    headers=headers_lc,
+                    body=body,
+                    profiles=selected_image_profiles,
+                    text_engine=active_engine,
+                )
             )
-        )
+        finally:
+            lease.release()
     try:
         payload = _decode_json(body)
     except ValueError as exc:
@@ -237,9 +245,16 @@ def handle_request(
         )
     if continuation is not None:
         request = _merge_responses_continuation(request, continuation)
+    lease, admission = _acquire_tenant_in_flight(tenant_key, record_runtime=record_runtime)
+    if admission is not None:
+        return respond(_tenant_concurrency_exhausted_response(admission))
     try:
         response = active_engine.complete(request, live=bool(payload.get("live", live)))
+        # Buffered admission protects provider work; response rendering and
+        # receipt assembly happen after the upstream slot is returned.
+        lease.release()
     except FusionExecutionError as exc:
+        lease.release()
         status = 503 if exc.code == "no_eligible_model" else 502
         return respond(
             _json_response(
@@ -287,7 +302,7 @@ def handle_request(
             runtime_state().record_cost(tenant_key, _actual_cost_from_rendered_response(rendered_for_cost))
         if record_trace:
             record_execution_trace(response, tenant_key=tenant_key)
-        return respond(
+        result = respond(
             _stream_response(
                 200,
                 render_stream_events(
@@ -298,12 +313,16 @@ def handle_request(
                 ),
             )
         )
+        lease.release()
+        return result
     rendered = render_response(response, api_format=endpoint, responses_store=responses_store)
     if record_runtime:
         runtime_state().record_cost(tenant_key, _actual_cost_from_rendered_response(rendered))
     if record_trace:
         record_execution_trace(response, tenant_key=tenant_key)
-    return respond(_json_response(200, rendered))
+    result = respond(_json_response(200, rendered))
+    lease.release()
+    return result
 
 
 def _http_request_asks_for_incremental_stream(
@@ -413,17 +432,22 @@ def _prepare_incremental_image_stream_request(
         return None, respond(
             _json_response(exc.status, {"error": {"message": str(exc), "code": exc.code}})
         )
+    router = _build_image_router(
+        engine.profiles if image_profiles is None else image_profiles,
+        text_engine=engine,
+    )
+    lease, admission = _acquire_tenant_in_flight(tenant_key, record_runtime=record_runtime)
+    if admission is not None:
+        return None, respond(_tenant_concurrency_exhausted_response(admission))
     return (
         _PreparedIncrementalImageStream(
             headers_lc=headers_lc,
             operation=operation,
             payload=payload,
             files=files,
-            router=_build_image_router(
-                engine.profiles if image_profiles is None else image_profiles,
-                text_engine=engine,
-            ),
+            router=router,
             tenant_key=tenant_key,
+            in_flight_lease=lease,
         ),
         None,
     )
@@ -541,6 +565,9 @@ def _prepare_incremental_stream_request(
         )
     if continuation is not None:
         request = _merge_responses_continuation(request, continuation)
+    lease, admission = _acquire_tenant_in_flight(tenant_key, record_runtime=record_runtime)
+    if admission is not None:
+        return None, respond(_tenant_concurrency_exhausted_response(admission))
     return (
         _PreparedIncrementalStream(
             headers_lc=headers_lc,
@@ -550,6 +577,7 @@ def _prepare_incremental_stream_request(
             active_engine=active_engine,
             tenant_key=tenant_key,
             live=bool(payload.get("live", live)),
+            in_flight_lease=lease,
         ),
         None,
     )
@@ -803,10 +831,14 @@ def create_http_server(
                     record_runtime=record_runtime,
                 )
                 if prepared is not None:
-                    self._dispatch_incremental_image_stream(
-                        prepared,
-                        record_runtime=record_runtime,
-                    )
+                    try:
+                        self._dispatch_incremental_image_stream(
+                            prepared,
+                            record_runtime=record_runtime,
+                        )
+                    except Exception:
+                        prepared.in_flight_lease.release()
+                        raise
                     return
                 assert immediate is not None
                 self._write_buffered_response(*immediate)
@@ -826,11 +858,15 @@ def create_http_server(
                     record_runtime=record_runtime,
                 )
                 if prepared is not None:
-                    self._dispatch_incremental_stream(
-                        prepared,
-                        record_trace=record_trace,
-                        record_runtime=record_runtime,
-                    )
+                    try:
+                        self._dispatch_incremental_stream(
+                            prepared,
+                            record_trace=record_trace,
+                            record_runtime=record_runtime,
+                        )
+                    except Exception:
+                        prepared.in_flight_lease.release()
+                        raise
                     return
                 assert immediate is not None
                 self._write_buffered_response(*immediate)
@@ -918,6 +954,7 @@ def create_http_server(
                         cancellation_event,
                     )
             finally:
+                prepared.in_flight_lease.release()
                 self._finish_stream(cancellation_event)
 
         def _write_buffered_response(
@@ -961,6 +998,7 @@ def create_http_server(
                 self.send_header(key, value)
             self.end_headers()
             if not self._write_stream_chunk(renderer.start(), cancellation_event):
+                prepared.in_flight_lease.release()
                 return
 
             def on_text_delta(text: str) -> bool:
@@ -1007,6 +1045,7 @@ def create_http_server(
                         cancellation_event,
                     )
             finally:
+                prepared.in_flight_lease.release()
                 self._finish_stream(cancellation_event)
 
         def _write_stream_chunk(
@@ -4624,6 +4663,40 @@ def _tenant_budget_exhausted_response(budget: Mapping[str, Any]) -> tuple[int, d
                 "secrets_persisted": False,
             },
         },
+    )
+
+
+def _acquire_tenant_in_flight(
+    tenant_key: str,
+    *,
+    record_runtime: bool,
+) -> tuple[InFlightLease, Mapping[str, Any] | None]:
+    """Reserve one tenant slot, keeping offline diagnostics unchanged."""
+
+    if not record_runtime:
+        return InFlightLease(runtime_state(), tenant_key, False, None), None
+    lease, admission = runtime_state().acquire_in_flight(tenant_key)
+    return (lease, None) if admission.get("allowed") else (lease, admission)
+
+
+def _tenant_concurrency_exhausted_response(
+    admission: Mapping[str, Any],
+) -> tuple[int, dict[str, str], bytes]:
+    return _json_response(
+        429,
+        {
+            "error": {
+                "message": "Tenant concurrency limit exhausted",
+                "code": "tenant_concurrency_exhausted",
+            },
+            "metadata": {
+                "tenant_concurrency": dict(admission),
+                "raw_prompt_persisted": False,
+                "raw_provider_outputs_persisted": False,
+                "secrets_persisted": False,
+            },
+        },
+        extra_headers={"Retry-After": str(admission.get("retry_after_seconds") or 1)},
     )
 
 

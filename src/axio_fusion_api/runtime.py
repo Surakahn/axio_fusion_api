@@ -34,6 +34,25 @@ class ResponseContinuation:
     context_char_count: int
 
 
+@dataclass
+class InFlightLease:
+    """One idempotent tenant concurrency reservation.
+
+    The lease is deliberately process-local.  A request that reaches a
+    provider holds it until buffered completion or streaming teardown, while
+    rejected and ``record_runtime=False`` requests receive a no-op lease.
+    """
+
+    _state: "RuntimeState"
+    tenant_key: str
+    acquired: bool
+    limit: int | None
+    _released: bool = False
+
+    def release(self) -> None:
+        self._state._release_in_flight_lease(self)
+
+
 class RuntimeState:
     """In-memory gateway controls and safe feedback receipts.
 
@@ -46,6 +65,7 @@ class RuntimeState:
         self._lock = threading.Lock()
         self._rate_windows: dict[str, list[float]] = {}
         self._budget_spend: dict[str, tuple[str, float]] = {}
+        self._in_flight: dict[str, int] = {}
         self._feedback_count = 0
         self._feedback_by_score: dict[str, int] = {}
         self._response_continuations: dict[str, ResponseContinuation] = {}
@@ -106,6 +126,51 @@ class RuntimeState:
             if stored_day != day:
                 spent = 0.0
             self._budget_spend[tenant_key] = (day, spent + amount)
+
+    def acquire_in_flight(self, tenant_key: str) -> tuple[InFlightLease, dict[str, Any]]:
+        """Atomically reserve one tenant request slot before provider work."""
+
+        limit = _bounded_env_int(
+            "AXIO_FUSION_TENANT_MAX_IN_FLIGHT",
+            default=0,
+            minimum=0,
+            maximum=100_000,
+        )
+        if limit <= 0:
+            return InFlightLease(self, tenant_key, False, None), {
+                "allowed": True,
+                "limit": None,
+                "in_flight": 0,
+                "remaining": None,
+                "retry_after_seconds": 0,
+            }
+        with self._lock:
+            current = max(0, int(self._in_flight.get(tenant_key, 0)))
+            allowed = current < limit
+            if allowed:
+                current += 1
+                self._in_flight[tenant_key] = current
+            remaining = max(0, limit - current)
+        return InFlightLease(self, tenant_key, allowed, limit), {
+            "allowed": allowed,
+            "limit": limit,
+            "in_flight": current,
+            "remaining": remaining,
+            "retry_after_seconds": 1 if not allowed else 0,
+        }
+
+    def _release_in_flight_lease(self, lease: InFlightLease) -> None:
+        with self._lock:
+            if lease._released:
+                return
+            lease._released = True
+            if not lease.acquired:
+                return
+            current = max(0, int(self._in_flight.get(lease.tenant_key, 0)))
+            if current <= 1:
+                self._in_flight.pop(lease.tenant_key, None)
+            else:
+                self._in_flight[lease.tenant_key] = current - 1
 
     def get_response_continuation(
         self,
@@ -265,6 +330,7 @@ class RuntimeState:
             self._prune_rate_windows_unlocked(current)
             self._prune_budget_spend_unlocked(_utc_day(current))
             self._prune_response_continuations_unlocked(current)
+            self._prune_in_flight_unlocked()
             active_rate_buckets = len(self._rate_windows)
             budget_tenants = len(self._budget_spend)
             feedback_count = self._feedback_count
@@ -275,6 +341,16 @@ class RuntimeState:
             response_session_tenant_count = len(
                 {entry.tenant_key for entry in self._response_continuations.values()}
             )
+            in_flight_rows = _safe_in_flight_rows(
+                self._in_flight,
+                limit=_bounded_env_int(
+                    "AXIO_FUSION_TENANT_MAX_IN_FLIGHT",
+                    default=0,
+                    minimum=0,
+                    maximum=100_000,
+                ),
+            )
+            in_flight_tenant_count = len(self._in_flight)
         return {
             "schema": "axio_fusion_api.runtime_snapshot.v1",
             "active_rate_limit_buckets": active_rate_buckets,
@@ -283,6 +359,16 @@ class RuntimeState:
             "budget_tenants": budget_rows,
             "feedback_count": feedback_count,
             "feedback_by_score": feedback_by_score,
+            "tenant_concurrency_enabled": bool(
+                _bounded_env_int(
+                    "AXIO_FUSION_TENANT_MAX_IN_FLIGHT",
+                    default=0,
+                    minimum=0,
+                    maximum=100_000,
+                )
+            ),
+            "in_flight_tenant_count": in_flight_tenant_count,
+            "in_flight_tenants": in_flight_rows,
             "rate_limit_enabled": bool(rate_limit),
             "tenant_budget_enabled": daily_budget is not None,
             "feedback_artifact_enabled": bool(_feedback_path()),
@@ -303,6 +389,13 @@ class RuntimeState:
             "raw_tenant_keys_persisted": False,
             "raw_api_keys_persisted": False,
             "secrets_persisted": False,
+        }
+
+    def _prune_in_flight_unlocked(self) -> None:
+        self._in_flight = {
+            tenant_key: max(0, int(count))
+            for tenant_key, count in self._in_flight.items()
+            if int(count) > 0
         }
 
     def _prune_rate_windows_unlocked(self, current: float) -> None:
@@ -488,6 +581,29 @@ def _safe_budget_rows(spend: Mapping[str, tuple[str, float]], *, daily_budget: f
             }
         )
     rows.sort(key=lambda row: (-float(row["spent_usd"]), str(row["tenant_sha256"])))
+    return rows[:20]
+
+
+def _safe_in_flight_rows(
+    counts: Mapping[str, int],
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    rows = []
+    for tenant_key, count in counts.items():
+        current = max(0, int(count or 0))
+        rows.append(
+            {
+                "tenant_sha256": sha256_text(tenant_key),
+                "in_flight": current,
+                "limit": int(limit) if limit > 0 else None,
+                "remaining": max(0, int(limit) - current) if limit > 0 else None,
+                "raw_tenant_key_persisted": False,
+                "raw_api_key_persisted": False,
+                "secrets_persisted": False,
+            }
+        )
+    rows.sort(key=lambda row: (-int(row["in_flight"]), str(row["tenant_sha256"])))
     return rows[:20]
 
 

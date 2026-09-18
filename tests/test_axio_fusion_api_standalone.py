@@ -31157,3 +31157,117 @@ def test_standalone_responses_previous_response_id_preserves_native_tool_call_re
     assert tool_result["output"] == private_tool_output
     assert second["store"] is True
     assert private_tool_output not in serialized_safe
+
+
+def test_tenant_in_flight_admission_is_atomic_idempotent_and_hash_safe(monkeypatch):
+    reset_runtime_state_for_tests()
+    monkeypatch.setenv("AXIO_FUSION_TENANT_MAX_IN_FLIGHT", "1")
+    state = runtime_state()
+    tenant_secret = "TENANT_IN_FLIGHT_SECRET"
+    tenant_key = tenant_key_from_headers({"x-api-key": tenant_secret})
+
+    first, first_status = state.acquire_in_flight(tenant_key)
+    second, second_status = state.acquire_in_flight(tenant_key)
+    assert first_status["allowed"] is True
+    assert first_status["in_flight"] == 1
+    assert second_status["allowed"] is False
+    assert second_status["remaining"] == 0
+
+    first.release()
+    first.release()
+    third, third_status = state.acquire_in_flight(tenant_key)
+    assert third_status["allowed"] is True
+    third.release()
+
+    snapshot = state.snapshot()
+    serialized = json.dumps(snapshot, ensure_ascii=False)
+    assert snapshot["tenant_concurrency_enabled"] is True
+    assert snapshot["in_flight_tenant_count"] == 0
+    assert snapshot["in_flight_tenants"] == []
+    assert tenant_secret not in serialized
+    assert snapshot["raw_tenant_keys_persisted"] is False
+    assert snapshot["secrets_persisted"] is False
+
+
+def test_standalone_gateway_tenant_concurrency_blocks_only_overlapping_work(monkeypatch):
+    reset_runtime_state_for_tests()
+    monkeypatch.setenv("AXIO_FUSION_TENANT_MAX_IN_FLIGHT", "1")
+    started = threading.Event()
+    release = threading.Event()
+    result: dict[str, object] = {}
+
+    class BlockingClient:
+        def complete(self, profile, request, *, prompt, system, timeout=None):
+            del profile, request, prompt, system, timeout
+            started.set()
+            assert release.wait(5.0)
+            return json.dumps({"answer": "concurrency answer", "confidence": 0.9})
+
+    engine = FusionEngine(
+        [normalize_profile({"provider": "unit", "model": "concurrency-model"})],
+        client=BlockingClient(),
+        cache_enabled=False,
+    )
+    body = json.dumps(
+        {
+            "model": "axio-fast",
+            "live": True,
+            "messages": [{"role": "user", "content": "overlap this request"}],
+        }
+    )
+
+    def run_first() -> None:
+        result["first"] = handle_request(
+            method="POST",
+            path="/v1/chat/completions",
+            headers={"x-api-key": "concurrency-tenant"},
+            body=body,
+            engine=engine,
+        )
+
+    worker = threading.Thread(target=run_first)
+    worker.start()
+    assert started.wait(5.0)
+    second_status, second_headers, second_body = handle_request(
+        method="POST",
+        path="/v1/chat/completions",
+        headers={"x-api-key": "concurrency-tenant"},
+        body=body,
+        engine=engine,
+    )
+    second = json.loads(second_body.decode("utf-8"))
+    assert second_status == 429
+    assert second_headers["Retry-After"] == "1"
+    assert second["error"]["code"] == "tenant_concurrency_exhausted"
+    assert second["metadata"]["tenant_concurrency"]["in_flight"] == 1
+
+    release.set()
+    worker.join(timeout=5.0)
+    assert not worker.is_alive()
+    first_status, _, first_body = result["first"]
+    assert first_status == 200
+    assert json.loads(first_body.decode("utf-8"))["choices"][0]["message"]["content"]
+    assert runtime_state().snapshot()["in_flight_tenant_count"] == 0
+
+
+def test_standalone_gateway_record_runtime_false_does_not_consume_tenant_slot(monkeypatch):
+    reset_runtime_state_for_tests()
+    monkeypatch.setenv("AXIO_FUSION_TENANT_MAX_IN_FLIGHT", "1")
+    engine = FusionEngine([normalize_profile({"provider": "unit", "model": "offline-model"})])
+    status, _, body = handle_request(
+        method="POST",
+        path="/v1/chat/completions",
+        headers={"x-api-key": "offline-diagnostic-tenant"},
+        body=json.dumps(
+            {
+                "model": "axio-fast",
+                "messages": [{"role": "user", "content": "offline diagnostic"}],
+            }
+        ),
+        engine=engine,
+        record_runtime=False,
+    )
+    assert status == 200
+    assert json.loads(body.decode("utf-8"))["choices"]
+    snapshot = runtime_state().snapshot()
+    assert snapshot["in_flight_tenant_count"] == 0
