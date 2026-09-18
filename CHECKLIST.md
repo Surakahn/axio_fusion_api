@@ -1,5 +1,12 @@
 # Axio Fusion API Checklist
 
+# 2026-09-19 租户每日预算重置提示一致性
+
+- [x] `tenant_budget_exhausted` 统一返回基于 UTC 日界计算的 `Retry-After`，保持 402、
+  安全 `metadata.budget` 和现有预算累计语义不变。
+- [x] buffered 文本、文本 SSE、图片 SSE 的预算 admission 回归覆盖；专项 `3 passed`，
+  未执行 provider/target 网络请求。
+
 # 2026-09-19 多路径 rate-limit 错误投影一致性
 
 - [x] buffered 文本、文本 SSE、图片 SSE 的 `rate_limit_exceeded` 统一返回

@@ -4644,6 +4644,7 @@ def _tenant_budget_exhausted_response(budget: Mapping[str, Any]) -> tuple[int, d
                 "secrets_persisted": False,
             },
         },
+        extra_headers={"Retry-After": str(budget.get("retry_after_seconds") or 1)},
     )
 
 

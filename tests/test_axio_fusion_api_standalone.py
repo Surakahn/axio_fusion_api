@@ -7954,7 +7954,7 @@ def test_standalone_gateway_daily_budget_uses_public_trace_summary_cost(monkeypa
         body=body,
         engine=engine,
     )
-    second_status, _, second_body = handle_request(
+    second_status, second_headers, second_body = handle_request(
         method="POST",
         path="/v1/chat/completions",
         headers=headers,
@@ -7969,6 +7969,7 @@ def test_standalone_gateway_daily_budget_uses_public_trace_summary_cost(monkeypa
     assert "fusion_trace" not in first["metadata"]
     assert second_status == 402
     assert second["error"]["code"] == "tenant_budget_exhausted"
+    assert int(second_headers["Retry-After"]) >= 1
     assert second["metadata"]["budget"]["spent_usd"] >= first["metadata"]["fusion_trace_summary"]["actual_cost_usd"]
 
 
@@ -8012,7 +8013,7 @@ def test_standalone_gateway_daily_budget_only_blocks_generation_endpoints(monkey
         body=generation_body,
         engine=engine,
     )
-    blocked_status, _, blocked_body = handle_request(
+    blocked_status, blocked_headers, blocked_body = handle_request(
         method="POST",
         path="/v1/chat/completions",
         headers=headers,
@@ -8037,6 +8038,7 @@ def test_standalone_gateway_daily_budget_only_blocks_generation_endpoints(monkey
 
     assert first_status == 200
     assert blocked_status == 402
+    assert int(blocked_headers["Retry-After"]) >= 1
     assert blocked["error"]["code"] == "tenant_budget_exhausted"
     assert health_status == 200
     assert models_status == 200

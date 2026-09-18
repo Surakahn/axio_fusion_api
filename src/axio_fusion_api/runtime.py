@@ -96,19 +96,28 @@ class RuntimeState:
     def check_budget(self, tenant_key: str, *, now: float | None = None) -> dict[str, Any]:
         daily_budget = _env_float("AXIO_FUSION_TENANT_DAILY_BUDGET_USD")
         if daily_budget is None or daily_budget <= 0:
-            return {"allowed": True, "daily_budget_usd": None, "spent_usd": 0.0, "remaining_usd": None}
-        day = _utc_day(now)
+            return {
+                "allowed": True,
+                "daily_budget_usd": None,
+                "spent_usd": 0.0,
+                "remaining_usd": None,
+                "retry_after_seconds": 0,
+            }
+        current = float(now if now is not None else time.time())
+        day = _utc_day(current)
         with self._lock:
             stored_day, spent = self._budget_spend.get(tenant_key, (day, 0.0))
             if stored_day != day:
                 stored_day, spent = day, 0.0
             self._budget_spend[tenant_key] = (stored_day, spent)
         remaining = max(0.0, daily_budget - spent)
+        retry_after = _seconds_until_next_utc_day(current) if spent >= daily_budget else 0
         return {
             "allowed": spent < daily_budget,
             "daily_budget_usd": daily_budget,
             "spent_usd": round(spent, 8),
             "remaining_usd": round(remaining, 8),
+            "retry_after_seconds": retry_after,
         }
 
     def record_cost(self, tenant_key: str, cost_usd: float | None, *, now: float | None = None) -> None:
@@ -854,6 +863,14 @@ def _env_float(name: str) -> float | None:
 
 def _utc_day(now: float | None = None) -> str:
     return time.strftime("%Y-%m-%d", time.gmtime(now if now is not None else time.time()))
+
+
+def _seconds_until_next_utc_day(now: float | None = None) -> int:
+    """Return a bounded client retry hint for the next UTC budget reset."""
+
+    current = time.gmtime(now if now is not None else time.time())
+    elapsed = current.tm_hour * 3600 + current.tm_min * 60 + current.tm_sec
+    return max(1, 86_400 - elapsed)
 
 
 def _score(value: Any) -> float | None:

@@ -1,5 +1,17 @@
 # Axio Fusion API Plan
 
+## 2026-09-19 租户每日预算重置提示一致性增量
+
+审计发现租户每日预算超限虽然返回 HTTP 402 和安全 `metadata.budget`，但没有
+`Retry-After`；调用方无法知道 UTC 日界何时重置额度，容易把可恢复的成本 admission
+失败当成永久失败。本轮在 `RuntimeState.check_budget()` 中计算下一个 UTC 日界的有界秒数，
+并让 buffered 文本、文本 SSE、图片 SSE 的预算超限响应统一携带 `Retry-After`。不改变
+预算金额、成本累计或租户隔离算法。
+
+验证：预算/限流专项 `3 passed`；L1/L2 和 `git diff --check` 通过；全量回归待本轮门禁完成。
+该增量只证明商业级成本 admission 的恢复提示，不构成 provider 能力、排名、成本优势或
+superiority 证据。
+
 ## 2026-09-19 多路径 rate-limit 错误投影一致性增量
 
 审计发现 buffered 文本、文本 SSE 与图片 SSE 在 `rate_limit_exceeded` 时的安全 metadata
