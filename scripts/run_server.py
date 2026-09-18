@@ -27,7 +27,7 @@ from axio_fusion_api.registry import load_registry
 from axio_fusion_api.registry import load_image_registry
 from axio_fusion_api.orchestrator import FusionEngine
 from axio_fusion_api.providers import HTTPProviderClient
-from axio_fusion_api.server import create_http_server
+from axio_fusion_api.server import create_http_server, public_deployment_contract
 
 profiles = load_registry(registry_path, require_prefusion=True)
 print(f'Loaded {len(profiles)} profiles', file=sys.stderr, flush=True)
@@ -37,6 +37,12 @@ print('Engine created', file=sys.stderr, flush=True)
 
 image_registry_path = os.environ.get('AXIO_FUSION_IMAGE_REGISTRY_PATH', '').strip()
 image_profiles = load_image_registry(image_registry_path) if image_registry_path else []
+deployment_contract = public_deployment_contract()
+if deployment_contract['public_mode'] and not deployment_contract['ready']:
+    raise SystemExit(
+        'Public deployment contract is not ready: '
+        + ', '.join(deployment_contract['blockers'])
+    )
 server = create_http_server(
     host='127.0.0.1',
     port=18900,

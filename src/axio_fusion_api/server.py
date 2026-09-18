@@ -50,6 +50,7 @@ from .runtime import (
     InFlightLease,
     ResponseContinuation,
     TenantBudgetLease,
+    _tenant_budget_scope_name,
     runtime_state,
     tenant_key_from_headers,
 )
@@ -4375,6 +4376,7 @@ def _health(
         "image_registry": image_router_summary(ImageRouter(image_profiles)),
         "network": provider_proxy_runtime_summary(),
         "runtime": runtime_state().snapshot(),
+        "deployment_contract": public_deployment_contract(),
         "auth_required": auth_required,
         "auth_mode": "required" if auth_required else "optional",
         "operator_auth_configured": bool(_operator_keys()),
@@ -4672,6 +4674,58 @@ def _authorized(headers: Mapping[str, str]) -> bool:
     if not keys:
         return not _auth_required()
     return _auth_values_match(_presented_auth_values(headers), keys)
+
+
+def public_deployment_contract() -> dict[str, Any]:
+    """Project the safe startup contract for an internet-facing deployment.
+
+    The ordinary loopback service remains compatible when public mode is off.
+    Public mode is intentionally stricter: it must have explicit public and
+    operator credentials, and an enabled tenant budget must use a verified
+    shared-ledger scope rather than the process-local accounting state.
+    """
+
+    public_mode = str(os.getenv("AXIO_FUSION_PUBLIC_DEPLOYMENT", "") or "").strip().casefold() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    auth_required = _auth_required()
+    public_key_configured = bool(_server_keys())
+    operator_key_configured = bool(_operator_keys())
+    budget_enabled = _configured_positive_float("AXIO_FUSION_TENANT_DAILY_BUDGET_USD")
+    scope = _tenant_budget_scope_name()
+    blockers: list[str] = []
+    if public_mode and not auth_required:
+        blockers.append("public_deployment_requires_auth")
+    if public_mode and not public_key_configured:
+        blockers.append("public_deployment_public_key_required")
+    if public_mode and not operator_key_configured:
+        blockers.append("public_deployment_operator_key_required")
+    if public_mode and budget_enabled and scope != "shared_required":
+        blockers.append("public_deployment_shared_budget_required")
+    return {
+        "schema": "axio_fusion_api.public_deployment_contract.v1",
+        "public_mode": public_mode,
+        "ready": not blockers,
+        "blockers": blockers,
+        "auth_required": auth_required,
+        "public_key_configured": public_key_configured,
+        "operator_key_configured": operator_key_configured,
+        "tenant_budget_enabled": budget_enabled,
+        "tenant_budget_scope": scope,
+        "raw_api_keys_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _configured_positive_float(name: str) -> bool:
+    try:
+        value = float(os.getenv(name, "0") or 0)
+    except (TypeError, ValueError):
+        return False
+    return value > 0.0 and value < float("inf")
 
 
 def _server_keys() -> set[str]:

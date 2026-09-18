@@ -159,6 +159,12 @@ runtime 暴露 `tenant_budget_scope_ready=false`，因此不会把不安全的�
 另对已知初始 pricing 的文本请求采用 `max(initial_estimate, route budget.max_cost_usd)`
 作为租户预留上界，覆盖 bounded fallback/repair/escalation；图片 operation 估价也叠加
 可选 prompt composer 的同一请求级 hard cap，未知 composer pricing 继续 fail-closed。
+本轮新增 `public_deployment_contract`：公网模式在启动前强制公共/operator key、显式
+`AXIO_FUSION_REQUIRE_AUTH=true`，以及预算启用时的 shared-required scope；契约缺失时
+`scripts/run_server.py` 不启动服务。当前 loopback 仍保持 optional auth，故该安全门不被
+误报为公网流量已切换。
+同时已固化 `TenantBudgetLedger` 的真实后端协议和测试 fake 的故障语义；fake 未接入生产，
+因此仍不把 shared-required 解释为共享配额已可用。
 
 | 领域 | 当前状态 | 已完成的可验证内容 | 未完成/阻塞 | 下一条合法动作 |
 | --- | --- | --- | --- | --- |

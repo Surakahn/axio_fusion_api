@@ -1,5 +1,22 @@
 # Axio Fusion API Plan
 
+## 2026-09-19 共享租户预算账本契约草案
+
+为后续多副本配额接入新增独立 `TenantBudgetLedger` Protocol 及仅测试用
+`InMemoryTenantBudgetLedger`：协议固定原子 reserve、reservation key 去重、幂等 settle/release、
+不可用与 invariant fail-closed 错误、overcommit 观测和 hash-only snapshot。fake backend 不由
+环境变量自动发现，也未接入生产 `RuntimeState`；在真实 Redis/SQL 等后端完成事务语义、故障
+注入、跨副本一致性和恢复审计前，`shared_required` 仍只作为拒绝不安全流量的部署门。
+
+## 2026-09-19 公网部署契约 fail-closed
+
+新增只读 `public_deployment_contract` 投影和生产启动门：设置
+`AXIO_FUSION_PUBLIC_DEPLOYMENT=true` 后，必须同时配置 `AXIO_FUSION_REQUIRE_AUTH=true`、
+公共 `AXIO_FUSION_API_KEYS`、operator key；若启用租户每日预算，还必须声明
+`AXIO_FUSION_TENANT_BUDGET_SCOPE=shared_required`。任一条件缺失，
+`scripts/run_server.py` 在加载服务前 fail-closed，不启动公网实例；health 同时提供
+hash-safe 契约状态。默认 loopback 模式保持兼容，不改变 provider/r18/benchmark 边界。
+
 ## 2026-09-19 租户预算请求级上界预留
 
 离线审计确认 route 的 `initial_fusion_resource_admission` 只描述初始角色计划，明确不含

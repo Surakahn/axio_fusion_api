@@ -1,5 +1,25 @@
 # Axio Fusion API Checklist
 
+# 2026-09-19 共享租户预算账本契约草案
+
+- [x] 独立 `TenantBudgetLedger` Protocol 固化 reserve、幂等 reservation key、settle/release、
+  unavailable/invariant fail-closed 和 hash-only snapshot 语义。
+- [x] `InMemoryTenantBudgetLedger` 仅用于离线多副本/故障测试，不由环境变量自动启用，未冒充
+  生产共享后端；专项 8 项通过。
+- [ ] 仍需实现并审计真实共享后端后，才能把 `shared_required` 从拒绝门升级为可放行配额。
+
+# 2026-09-19 公网部署契约 fail-closed
+
+- [x] `AXIO_FUSION_PUBLIC_DEPLOYMENT=true` 时强制要求公共鉴权、operator key 和
+  `AXIO_FUSION_REQUIRE_AUTH=true`；缺失任一项，生产启动脚本拒绝启动。
+- [x] 公网模式若启用租户预算，强制 `shared_required` scope；process-local 账本不会被
+  误当作多副本全局配额。
+- [x] `/health` 暴露 hash-safe `deployment_contract`，不包含 key/token；loopback 默认
+  模式保持兼容。
+- [x] 部署契约专项与预算/图片/流式专项通过；未执行 provider/target 网络请求。
+- [ ] 真实公网切换仍需部署方提供真实 key、共享账本实现和外部流量 smoke；本轮只完成
+  启动前安全门，不宣称公网已上线。
+
 # 2026-09-19 租户预算请求级上界预留
 
 - [x] 已知初始 pricing 的文本请求现在按 `max(initial_estimate, route budget.max_cost_usd)`
