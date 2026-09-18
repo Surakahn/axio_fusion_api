@@ -1,5 +1,14 @@
 # Axio Fusion API Plan
 
+## 2026-09-19 rate-limit 窗口恢复可观测性
+
+错误响应已有 `Retry-After`，但 runtime bucket 快照缺少窗口恢复时间。本轮新增
+`retry_after_seconds`，对未超限/关闭配置返回 `0`，对已达限额的 active bucket 按同一
+60 秒窗口计算恢复提示；不改变限流算法、provider 行为或 r18 冻结证据。
+
+验证：专项预算/限流/并发回归 `9 passed`；全量回归 `1133 passed`；提交 `1de8fbf`
+已推送并完成受控发布，当前 Axio PID `2627249`，health/runtime/三档 route-plan 均通过。
+
 ## 2026-09-19 r18 preflight 可复现复核
 
 在加载与生产服务一致的 `private/current_channels.env` 并显式设置 `PYTHONPATH=src` 后，

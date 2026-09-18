@@ -1,5 +1,14 @@
 # Axio Fusion API Checklist
 
+# 2026-09-19 rate-limit 窗口恢复可观测性
+
+- [x] runtime bucket 快照新增 `retry_after_seconds`，与错误响应共享 60 秒窗口语义；未
+  超限或关闭配置返回 `0`。
+- [x] hash-safe tenant projection、raw secret 隔离和窗口过期边界回归通过；专项 `9 passed`，
+  全量回归 `1133 passed`。
+- [x] 代码提交 `1de8fbf` 已受控发布至 Axio 18900（PID `2627249`）；生产
+  health/runtime/三档 route-plan 验证通过；CPA Plus 保持不变。
+
 # 2026-09-19 r18 preflight 可复现复核
 
 - [x] 使用生产一致的环境变量与 `PYTHONPATH=src` 重跑零网络 verifier，状态为

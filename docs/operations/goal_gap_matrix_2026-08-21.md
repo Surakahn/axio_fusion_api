@@ -39,6 +39,13 @@ provider 能力组合成 `axio-fast`、`axio-terra`、`axio-pro`。Harness 只�
   fail-closed 鉴权、租户并发与此前路由/r18 binding/convergence 安全修复均通过）；这是代码
   契约证据，不是能力或质量证据。
 
+2026-09-19 rate-limit 窗口恢复可观测性增量：runtime bucket 快照新增
+`retry_after_seconds`，与错误响应保持同一 60 秒窗口语义；未超限或关闭配置为 `0`，达到
+限额时提供 hash-safe 恢复提示。代码提交 `1de8fbf`，全量回归为 `1133 passed`；发布后
+Axio PID `2627249` 为 `ready/healthy`、`21/21` eligible、`0` circuit、`21/15`
+physical/logical、`4` providers、`auto -> proxy`，三档 route-plan 通过。本增量不改变
+provider I/O、r18 frozen inputs、screening、ranking 或 benchmark 授权。
+
 2026-09-19 r18 preflight 可复现复核：加载生产一致环境并显式设置 `PYTHONPATH=src` 后，
 verifier 保持 `ready_for_operator_authorization`、`reason_codes=[]`，且 provider/target
 调用均为 `false`；重复 receipt 与既有 receipt SHA-256 完全一致。该复核确认 frozen
