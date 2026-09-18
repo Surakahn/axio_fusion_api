@@ -25,9 +25,16 @@
 - L3：全量回归 `1122 passed`；新增无 key fail-closed、配置 key 后授权和敏感值隔离回归通过。
 - L4：health/trace 不保存 key，默认兼容模式保持不变；本增量不触碰 provider I/O 与冻结证据。
 - 本增量不证明 provider 能力、排名、成本、延迟或 superiority。
+- 发布：提交 `77202f6` 已推送到 `origin/main`；Axio 18900 以 `setsid/nohup` 受控重启，当前
+  PID `2363163`。发布后 `/health` 为 `ready`，`runtime_routing=healthy`，21/21 runtime
+  eligible、0 open circuit、21 physical/15 logical、4 providers、`auto -> proxy`，并确认
+  `auth_required=false`、`auth_mode=optional`、`tenant_concurrency_enabled=false`。
+- 发布后 `axio-fast`、`axio-terra`、`axio-pro` 三个 `/route-plan` dry-run 均成功；未执行
+  provider screening、target benchmark 或 CPA Plus 重启。
 
 ## 下一步
 
-1. 受控服务发布前后核对 health/runtime；当前生产不打开 `AXIO_FUSION_REQUIRE_AUTH`。
+1. 公网切换前由部署方配置真实公共/operator key，开启并外部验证 fail-closed 鉴权；当前
+   18900 保持兼容模式，不打开 `AXIO_FUSION_REQUIRE_AUTH`。
 2. 外部凭据轮换后仍严格回到 r18 screening -> transport admission -> ranking -> freeze
    -> Harness/import -> 21-suite campaign 单向证据链。
