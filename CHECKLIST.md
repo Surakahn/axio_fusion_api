@@ -1,12 +1,25 @@
 # Axio Fusion API Checklist
 
+# 2026-09-19 SQLite 共享租户预算账本适配器
+
+- [x] 新增 `SQLiteTenantBudgetLedger`，使用标准库 SQLite 的事务、WAL、busy timeout 和
+  `synchronous=FULL`，支持单主机多进程原子 reserve、幂等 settle/release、定向快照和固定
+  终态回放。
+- [x] `RuntimeState` 仅在显式 `AXIO_FUSION_TENANT_BUDGET_SQLITE_PATH` 且
+  `shared_required` 下接入；缺少路径、初始化失败、后端异常继续 fail-closed，不启动 provider/image。
+- [x] 公网部署合同在每日预算 + `shared_required` 时要求 ledger path；跨实例并发、幂等、
+  hash-only snapshot 专项与全量 `1166 passed` 通过，提交 `67078aa` 已推送并受控发布。
+- [ ] SQLite 仍只覆盖单主机共享文件；进程崩溃恢复、备份/恢复、磁盘/锁故障注入及跨主机
+  fencing/原子后端尚未完成，不能宣称公网多副本配额或全局预算已完成。
+
 # 2026-09-19 共享租户预算账本契约草案
 
 - [x] 独立 `TenantBudgetLedger` Protocol 固化 reserve、幂等 reservation key、settle/release、
   unavailable/invariant fail-closed 和 hash-only snapshot 语义。
 - [x] `InMemoryTenantBudgetLedger` 仅用于离线多副本/故障测试，不由环境变量自动启用，未冒充
   生产共享后端；专项 8 项通过。
-- [ ] 仍需实现并审计真实共享后端后，才能把 `shared_required` 从拒绝门升级为可放行配额。
+- [ ] 仍需完成 SQLite 恢复/备份/故障审计或接入经审计的跨主机共享后端，才能把
+  `shared_required` 升级为完整公网多副本配额能力。
 
 # 2026-09-19 公网部署契约 fail-closed
 

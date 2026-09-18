@@ -1,12 +1,23 @@
 # Axio Fusion API Plan
 
+## 2026-09-19 SQLite 共享租户预算账本适配器
+
+在 `TenantBudgetLedger` Protocol 之上新增标准库 SQLite 适配器，并由
+`AXIO_FUSION_TENANT_BUDGET_SQLITE_PATH` 显式注入 `RuntimeState`。同一主机多进程使用
+`BEGIN IMMEDIATE` 完成原子 reserve、幂等 settle/release、租户定向 hash-only 查询和
+固定终态回放；缺少路径、初始化失败或后端故障继续 fail-closed。公网部署契约在预算和
+`shared_required` 同时启用时要求 ledger path。SQLite 只覆盖单主机共享文件，不等同于
+跨主机 Redis/SQL 集群；仍需进程崩溃恢复、备份/恢复、锁竞争、磁盘故障和跨主机 fencing
+审计后，才能扩大公网预算部署范围。详见
+`docs/handoffs/2026-09-19_shared_sqlite_budget_ledger.md`。
+
 ## 2026-09-19 共享租户预算账本契约草案
 
 为后续多副本配额接入新增独立 `TenantBudgetLedger` Protocol 及仅测试用
 `InMemoryTenantBudgetLedger`：协议固定原子 reserve、reservation key 去重、幂等 settle/release、
 不可用与 invariant fail-closed 错误、overcommit 观测和 hash-only snapshot。fake backend 不由
-环境变量自动发现，也未接入生产 `RuntimeState`；在真实 Redis/SQL 等后端完成事务语义、故障
-注入、跨副本一致性和恢复审计前，`shared_required` 仍只作为拒绝不安全流量的部署门。
+环境变量自动发现，也未冒充生产共享后端。SQLite 适配器现已成为首个显式接入的单主机实现，
+但在完成恢复、备份和跨主机审计前，`shared_required` 仍不能被解释为完整公网多副本配额能力。
 
 ## 2026-09-19 公网部署契约 fail-closed
 
