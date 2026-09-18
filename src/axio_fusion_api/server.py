@@ -121,20 +121,7 @@ def handle_request(
     if record_runtime:
         rate = runtime_state().check_rate_limit(tenant_key)
         if not rate["allowed"]:
-            return respond(
-                _json_response(
-                    429,
-                    {
-                        "error": {"message": "Rate limit exceeded", "code": "rate_limit_exceeded"},
-                        "metadata": {
-                            "rate_limit": rate,
-                            "raw_prompt_persisted": False,
-                            "secrets_persisted": False,
-                        },
-                    },
-                    extra_headers={"Retry-After": str(rate.get("retry_after_seconds") or 1)},
-                )
-            )
+            return respond(_rate_limit_exhausted_response(rate))
     # A live request that does not receive an already-admitted in-memory
     # engine must use the hash-bound pre-Fusion registry.  The non-live path
     # remains available for protocol and route-plan diagnostics.
@@ -405,13 +392,7 @@ def _prepare_incremental_image_stream_request(
     if record_runtime:
         rate = runtime_state().check_rate_limit(tenant_key)
         if not rate["allowed"]:
-            return None, respond(
-                _json_response(
-                    429,
-                    {"error": {"message": "Rate limit exceeded", "code": "rate_limit_exceeded"}},
-                    extra_headers={"Retry-After": str(rate.get("retry_after_seconds") or 1)},
-                )
-            )
+            return None, respond(_rate_limit_exhausted_response(rate))
         budget = runtime_state().check_budget(tenant_key)
         if not budget["allowed"]:
             return None, respond(_tenant_budget_exhausted_response(budget))
@@ -494,20 +475,7 @@ def _prepare_incremental_stream_request(
     if record_runtime:
         rate = runtime_state().check_rate_limit(tenant_key)
         if not rate["allowed"]:
-            return None, respond(
-                _json_response(
-                    429,
-                    {
-                        "error": {"message": "Rate limit exceeded", "code": "rate_limit_exceeded"},
-                        "metadata": {
-                            "rate_limit": rate,
-                            "raw_prompt_persisted": False,
-                            "secrets_persisted": False,
-                        },
-                    },
-                    extra_headers={"Retry-After": str(rate.get("retry_after_seconds") or 1)},
-                )
-            )
+            return None, respond(_rate_limit_exhausted_response(rate))
     active_engine = engine or FusionEngine(load_registry(require_prefusion=bool(live)))
     if method.upper() != "POST":
         return None, respond(
@@ -4676,6 +4644,23 @@ def _tenant_budget_exhausted_response(budget: Mapping[str, Any]) -> tuple[int, d
                 "secrets_persisted": False,
             },
         },
+    )
+
+
+def _rate_limit_exhausted_response(rate: Mapping[str, Any]) -> tuple[int, dict[str, str], bytes]:
+    """Return one safe rate-limit projection for every public request lane."""
+
+    return _json_response(
+        429,
+        {
+            "error": {"message": "Rate limit exceeded", "code": "rate_limit_exceeded"},
+            "metadata": {
+                "rate_limit": dict(rate),
+                "raw_prompt_persisted": False,
+                "secrets_persisted": False,
+            },
+        },
+        extra_headers={"Retry-After": str(rate.get("retry_after_seconds") or 1)},
     )
 
 

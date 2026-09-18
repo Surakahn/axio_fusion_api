@@ -8115,6 +8115,61 @@ def test_standalone_gateway_rate_limit_and_feedback_are_prompt_free(monkeypatch,
     assert feedback["secrets_persisted"] is False
 
 
+def test_standalone_rate_limit_projection_is_consistent_across_buffered_and_stream_lanes(monkeypatch):
+    reset_runtime_state_for_tests()
+    monkeypatch.setenv("AXIO_FUSION_RATE_LIMIT_PER_MINUTE", "1")
+    engine = FusionEngine([normalize_profile({"provider": "unit", "model": "fast-model"})])
+    headers = {"x-api-key": "rate-parity-tenant", "content-type": "application/json"}
+    tenant_key = tenant_key_from_headers(headers)
+    assert runtime_state().check_rate_limit(tenant_key)["allowed"] is True
+
+    buffered_status, _, buffered_body = handle_request(
+        method="GET",
+        path="/v1/health",
+        headers=headers,
+        engine=engine,
+    )
+    stream_prepared, stream_immediate = server_module._prepare_incremental_stream_request(
+        method="POST",
+        path="/v1/chat/completions",
+        headers=headers,
+        body=json.dumps(
+            {
+                "model": "axio-fast",
+                "stream": True,
+                "messages": [{"role": "user", "content": "rate parity"}],
+            }
+        ),
+        engine=engine,
+        live=False,
+        record_runtime=True,
+    )
+    image_prepared, image_immediate = server_module._prepare_incremental_image_stream_request(
+        method="POST",
+        path="/v1/images/generations",
+        headers=headers,
+        body=json.dumps({"model": "axio-fast", "prompt": "rate parity", "stream": True}),
+        engine=engine,
+        image_profiles=(),
+        live=False,
+        record_runtime=True,
+    )
+
+    assert buffered_status == 429
+    buffered = json.loads(buffered_body.decode("utf-8"))
+    assert stream_prepared is None
+    assert image_prepared is None
+    assert stream_immediate is not None
+    assert image_immediate is not None
+    stream_payload = json.loads(stream_immediate[2].decode("utf-8"))
+    image_payload = json.loads(image_immediate[2].decode("utf-8"))
+    for payload in (buffered, stream_payload, image_payload):
+        assert payload["error"]["code"] == "rate_limit_exceeded"
+        assert payload["metadata"]["rate_limit"]["allowed"] is False
+        assert payload["metadata"]["raw_prompt_persisted"] is False
+        assert payload["metadata"]["secrets_persisted"] is False
+
+
 def test_standalone_execution_trace_artifact_is_prompt_free(monkeypatch, tmp_path):
     reset_runtime_state_for_tests()
     monkeypatch.setenv("AXIO_FUSION_ARTIFACT_DIR", str(tmp_path))

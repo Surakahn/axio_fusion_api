@@ -1,5 +1,12 @@
 # Axio Fusion API Checklist
 
+# 2026-09-19 多路径 rate-limit 错误投影一致性
+
+- [x] buffered 文本、文本 SSE、图片 SSE 的 `rate_limit_exceeded` 统一返回
+  `metadata.rate_limit`、安全持久化标志和 `Retry-After`。
+- [x] parity 专项 `2 passed`，全量回归 `1128 passed`；未改变限流窗口或 provider/target
+  网络行为。
+
 # 2026-09-19 四协议流式错误码一致性
 
 - [x] Chat/Responses/Anthropic/Gemini 流式失败均保留 bounded Axio machine code；不改变

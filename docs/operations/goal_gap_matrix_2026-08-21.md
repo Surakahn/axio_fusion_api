@@ -35,8 +35,8 @@ provider 能力组合成 `axio-fast`、`axio-terra`、`axio-pro`。Harness 只�
   models、21 个 live-available profiles、4 个 providers，且与 18900 进程的
   `AXIO_FUSION_REGISTRY_PATH` 绑定一致；AGENTS 中 r43 的 10-profile 数字仅是历史
   阶段检查项，不作为当前 r7 serving blocker。
-- 当前工程回归：`1127 passed, 0 skipped`（2026-09-19 四协议错误码一致性增量、流式断开资源释放、显式 fail-closed 鉴权、租户并发与此前
-  路由/r18 binding/convergence 安全修复均通过）；这是代码
+- 当前工程回归：`1128 passed, 0 skipped`（2026-09-19 rate-limit 多路径错误投影一致性、四协议错误码一致性、流式断开资源释放、显式
+  fail-closed 鉴权、租户并发与此前路由/r18 binding/convergence 安全修复均通过）；这是代码
   契约证据，不是能力或质量证据。
 
 2026-09-19 商业运维增量：新增显式 `AXIO_FUSION_REQUIRE_AUTH=true` fail-closed 模式。开启
@@ -56,6 +56,13 @@ ranking 或 benchmark 授权。
 均保留 bounded Axio machine code；Anthropic 放在 `error.code`，Gemini 放在固定 namespace
 的 `error.details[].code`，同时保留原生 framing 和 Gemini 数值 HTTP code。专项 `27 passed`，
 不改变 provider I/O、r18 frozen inputs、screening、ranking 或 benchmark 授权。
+
+2026-09-19 rate-limit 多路径错误投影增量：buffered 文本、文本 SSE 与图片 SSE 的
+`rate_limit_exceeded` 现在统一包含 `metadata.rate_limit`、安全持久化标志和
+`Retry-After`，调用方可跨执行路径读取一致的限流窗口与重试信息。专项 parity `2 passed`，
+全量工程回归更新为 `1128 passed`。本增量只证明网关 admission/error contract 一致性，
+不改变限流计数、租户身份 hash、budget、in-flight admission、provider I/O、r18 frozen
+inputs、screening、ranking 或 benchmark 授权。
 
 此前工程回归：`1116 passed, 0 skipped`（2026-08-27 路由、r18 binding 与 convergence
   artifact 安全修复后）；这是代码

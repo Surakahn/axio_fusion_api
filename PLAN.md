@@ -1,5 +1,16 @@
 # Axio Fusion API Plan
 
+## 2026-09-19 多路径 rate-limit 错误投影一致性增量
+
+审计发现 buffered 文本、文本 SSE 与图片 SSE 在 `rate_limit_exceeded` 时的安全 metadata
+不一致：图片流缺少 `metadata.rate_limit`，调用方无法获得统一的剩余窗口和重试信息。本轮
+抽取统一 `_rate_limit_exhausted_response()`，覆盖三条公共执行路径，保留 `Retry-After`、
+rate-limit 状态及 `raw_*` 安全标志，不改变限流计数和窗口算法。
+
+验证：专项 parity `2 passed`，全量回归 `1128 passed`；L1/L2、compileall、
+`git diff --check` 通过。该增量只证明网关 admission/error contract 一致性，不构成 provider
+能力、排名、成本、延迟或 superiority 证据。
+
 ## 2026-09-19 四协议流式错误码一致性增量
 
 审计公共流式错误契约时发现 Chat/Responses 已输出 bounded machine code，而 Anthropic
