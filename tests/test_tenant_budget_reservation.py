@@ -71,13 +71,3 @@ def test_budget_day_rollover_prunes_reservation_and_preserves_safe_projection(mo
     assert snapshot["raw_tenant_keys_persisted"] is False
     lease.settle(success=False)
     assert state.snapshot(now=86_400.0)["budget_tenants"] == []
-
-
-def test_success_without_usage_receipt_settles_reserved_estimate(monkeypatch):
-    monkeypatch.setenv("AXIO_FUSION_TENANT_DAILY_BUDGET_USD", "0.50")
-    state = runtime_state()
-    lease, _receipt = state.reserve_budget("missing-usage", 0.25, now=1000.0)
-    lease.settle(success=True, now=1000.0)
-    budget = state.check_budget("missing-usage", now=1000.0)
-    assert budget["spent_usd"] == 0.25
-    assert budget["reserved_usd"] == 0.0

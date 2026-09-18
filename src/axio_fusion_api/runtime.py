@@ -500,6 +500,7 @@ class RuntimeState:
             active_rate_buckets = len(self._rate_windows)
             budget_tenants = len(self._budget_spend)
             budget_reservation_tenants = len(self._budget_reservations)
+            budget_overcommit_count = self._budget_overcommit_count
             feedback_count = self._feedback_count
             feedback_by_score = dict(self._feedback_by_score)
             rate_bucket_rows = _safe_rate_bucket_rows(
@@ -532,7 +533,7 @@ class RuntimeState:
             "active_rate_limit_buckets": active_rate_buckets,
             "budget_tenant_count": budget_tenants,
             "budget_reservation_tenant_count": budget_reservation_tenants,
-            "budget_overcommit_count": self._budget_overcommit_count,
+            "budget_overcommit_count": budget_overcommit_count,
             "rate_limit_buckets": rate_bucket_rows,
             "budget_tenants": budget_rows,
             "feedback_count": feedback_count,
