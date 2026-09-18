@@ -1477,16 +1477,48 @@ def render_image_event(event: Mapping[str, Any], *, public_model: str) -> bytes:
     )
 
 
+def _image_pricing_known(profile: ModelProfile, *, operation: str) -> bool:
+    """仅在价格来源和数值都经过同一边界校验时报告可计量。"""
+
+    capabilities = profile.image_capabilities if isinstance(profile.image_capabilities, Mapping) else {}
+    pricing = capabilities.get("pricing") if isinstance(capabilities.get("pricing"), Mapping) else {}
+    source = str(pricing.get("source") or "unknown")
+    if source not in {"provider_documented", "registry"}:
+        return False
+    try:
+        value = float(pricing.get(f"{operation}_usd"))
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(value) and 0.0 <= value <= MAX_IMAGE_OPERATION_COST_USD
+
+
 def image_router_summary(router: ImageRouter) -> dict[str, Any]:
     generation = [profile for profile in router.profiles if profile.image_generation_eligible]
     editing = [profile for profile in router.profiles if profile.image_editing_eligible]
+    generation_pricing_known_count = sum(
+        _image_pricing_known(profile, operation="generation") for profile in generation
+    )
+    editing_pricing_known_count = sum(
+        _image_pricing_known(profile, operation="editing") for profile in editing
+    )
+    has_image_profiles = bool(generation or editing)
+    pricing_ready = has_image_profiles and (
+        generation_pricing_known_count == len(generation)
+        and editing_pricing_known_count == len(editing)
+    )
     return {
         "schema": "axio_fusion_api.image_router_summary.v1",
         "generation_profile_count": len(generation),
         "editing_profile_count": len(editing),
+        "generation_pricing_known_count": generation_pricing_known_count,
+        "editing_pricing_known_count": editing_pricing_known_count,
+        "generation_pricing_ready": bool(generation) and generation_pricing_known_count == len(generation),
+        "editing_pricing_ready": bool(editing) and editing_pricing_known_count == len(editing),
+        "pricing_status": "ready" if pricing_ready else ("unknown" if has_image_profiles else "unavailable"),
         "generation_profile_hashes": sorted(sha256_text(profile.profile_id) for profile in generation),
         "editing_profile_hashes": sorted(sha256_text(profile.profile_id) for profile in editing),
         "text_fusion_isolated": True,
+        "raw_pricing_persisted": False,
         "raw_provider_model_ids_persisted": False,
         "secrets_persisted": False,
     }

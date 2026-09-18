@@ -364,6 +364,52 @@ def test_health_reports_image_registry_separately_from_text_registry():
     assert payload["image_registry"]["generation_profile_count"] == 1
     assert payload["image_registry"]["editing_profile_count"] == 1
     assert payload["image_registry"]["text_fusion_isolated"] is True
+    assert payload["image_registry"]["generation_pricing_known_count"] == 0
+    assert payload["image_registry"]["editing_pricing_known_count"] == 0
+    assert payload["image_registry"]["pricing_status"] == "unknown"
+    assert payload["image_registry"]["raw_pricing_persisted"] is False
+
+
+def test_health_image_pricing_status_requires_both_operations_and_trusted_source():
+    priced = _image_profile(
+        pricing={
+            "generation_usd": 0.04,
+            "editing_usd": 0.06,
+            "source": "provider_documented",
+        }
+    )
+    status, _headers, body = server.handle_request(
+        method="GET",
+        path="/v1/health",
+        engine=FusionEngine([ModelProfile(provider="text-provider", model="text-model")]),
+        image_profiles=[priced],
+        record_runtime=False,
+        record_trace=False,
+    )
+    payload = json.loads(body)
+    assert status == 200
+    image_registry = payload["image_registry"]
+    assert image_registry["generation_pricing_known_count"] == 1
+    assert image_registry["editing_pricing_known_count"] == 1
+    assert image_registry["generation_pricing_ready"] is True
+    assert image_registry["editing_pricing_ready"] is True
+    assert image_registry["pricing_status"] == "ready"
+    assert "generation_usd" not in json.dumps(image_registry)
+    assert "editing_usd" not in json.dumps(image_registry)
+
+    partial = _image_profile(
+        pricing={
+            "generation_usd": 0.04,
+            "editing_usd": 0.06,
+            "source": "unknown",
+        }
+    )
+    partial.image_capabilities["pricing"]["source"] = "provider_documented"
+    partial.image_capabilities["pricing"]["editing_usd"] = None
+    summary = image_router_summary(ImageRouter([partial]))
+    assert summary["generation_pricing_known_count"] == 1
+    assert summary["editing_pricing_known_count"] == 0
+    assert summary["pricing_status"] == "unknown"
 
 
 def test_generation_parser_allowlists_fields_and_parses_boolean():
