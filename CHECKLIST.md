@@ -1,5 +1,16 @@
 # Axio Fusion API Checklist
 
+# 2026-09-19 显式 fail-closed 鉴权模式
+
+- [x] 新增 `AXIO_FUSION_REQUIRE_AUTH=true`；无公共 key 时所有公共请求统一返回 401，避免
+  把 key 漏配误当成安全状态。
+- [x] 配置 key 后 health 只报告 `auth_required`/`auth_mode`，不暴露 key；operator 与
+  inventory 的既有隔离契约保持不变。
+- [x] 默认关闭，保持当前 loopback/fixture 兼容行为；专项回归覆盖无 key fail-closed、
+  配置 key 后授权与敏感值隔离。
+- [ ] 生产公网切换前仍需由部署方配置真实公共/operator key 并执行外部流量验证；当前
+  18900 不打开该开关。
+
 # 2026-09-18 租户级并发 admission
 
 - [x] 新增 `AXIO_FUSION_TENANT_MAX_IN_FLIGHT`；默认关闭，启用后按租户原子限制正在

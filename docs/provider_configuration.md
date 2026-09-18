@@ -21,6 +21,20 @@ described through environment variable *names*, never through copied endpoint
 or credential values. Supported upstream input protocols are `chat`,
 `responses`, `anthropic`, and `gemini`.
 
+## Public Gateway Authentication
+
+`AXIO_FUSION_API_KEYS` 配置一个或多个以逗号、分号或换行分隔的公共网关 key；值只在
+进程内用于 constant-time 比较，不会写入 health、trace、receipt 或 benchmark artifact。
+`AXIO_FUSION_OPERATOR_API_KEYS` 独立保护 route-plan、feedback、runtime 和工具控制面，
+inventory 还要求显式 operator key。默认没有配置 key 时保留 loopback/fixture 的兼容模式。
+
+商业部署可设置 `AXIO_FUSION_REQUIRE_AUTH=true` 开启 fail-closed 模式：若公共 key 尚未
+配置，所有公共请求（包括 health）都会返回统一的 `401 unauthorized`，不会把“没有配置
+鉴权”误当成安全状态。配置 key 后，`/health` 安全投影会报告
+`auth_required=true`、`auth_mode=required`，但不会暴露 key 或其原文。当前本地生产
+实例没有打开该开关，以保持既有客户端兼容；正式公网部署应在切换流量前配置并验证
+公共与 operator key。
+
 ## Image Capability Isolation
 
 Image models are registered beside text models but use a separate capability

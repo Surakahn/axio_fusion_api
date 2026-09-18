@@ -6811,6 +6811,39 @@ def test_standalone_gateway_auth_matching_is_exact_and_constant_time_compatible(
     assert len(compare_calls) == 6
 
 
+def test_standalone_gateway_explicit_auth_required_mode_fails_closed_without_keys(monkeypatch):
+    reset_runtime_state_for_tests()
+    monkeypatch.delenv("AXIO_FUSION_API_KEYS", raising=False)
+    monkeypatch.delenv("AXIO_FUSION_OPERATOR_API_KEYS", raising=False)
+    monkeypatch.setenv("AXIO_FUSION_REQUIRE_AUTH", "true")
+    engine = FusionEngine([normalize_profile({"provider": "unit", "model": "auth-model"})])
+
+    status, _, body = handle_request(
+        method="GET",
+        path="/v1/health",
+        headers={},
+        engine=engine,
+    )
+    payload = json.loads(body.decode("utf-8"))
+    assert status == 401
+    assert payload["error"]["code"] == "unauthorized"
+    assert server_module._authorized({}) is False
+    assert server_module._authorized({"x-api-key": "unconfigured-key"}) is False
+
+    monkeypatch.setenv("AXIO_FUSION_API_KEYS", "configured-public-key")
+    authorized_status, _, authorized_body = handle_request(
+        method="GET",
+        path="/v1/health",
+        headers={"x-api-key": "configured-public-key"},
+        engine=engine,
+    )
+    health = json.loads(authorized_body.decode("utf-8"))
+    assert authorized_status == 200
+    assert health["auth_required"] is True
+    assert health["auth_mode"] == "required"
+    assert "configured-public-key" not in json.dumps(health, ensure_ascii=False)
+
+
 def test_standalone_gateway_cors_rejects_disallowed_origin_without_echo(monkeypatch):
     monkeypatch.setenv("AXIO_FUSION_CORS_ALLOW_ORIGINS", "https://studio.example")
 

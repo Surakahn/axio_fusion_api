@@ -35,7 +35,18 @@ provider 能力组合成 `axio-fast`、`axio-terra`、`axio-pro`。Harness 只�
   models、21 个 live-available profiles、4 个 providers，且与 18900 进程的
   `AXIO_FUSION_REGISTRY_PATH` 绑定一致；AGENTS 中 r43 的 10-profile 数字仅是历史
   阶段检查项，不作为当前 r7 serving blocker。
-- 当前工程回归：`1116 passed, 0 skipped`（2026-08-27 路由、r18 binding 与 convergence
+- 当前工程回归：`1122 passed, 0 skipped`（2026-09-19 显式 fail-closed 鉴权、租户并发与此前
+  路由/r18 binding/convergence 安全修复均通过）；这是代码
+  契约证据，不是能力或质量证据。
+
+2026-09-19 商业运维增量：新增显式 `AXIO_FUSION_REQUIRE_AUTH=true` fail-closed 模式。开启
+后若没有公共 key，包含 health 在内的公共请求统一返回 401；配置 key 后继续使用
+constant-time 精确匹配，health 只输出 `auth_required`/`auth_mode` 等安全投影。当前
+18900 保持关闭以兼容既有 loopback 客户端；正式公网切换仍需部署方配置真实公共/operator
+key 并完成外部流量验证。本增量不改变 provider I/O、r18 frozen inputs、screening、
+ranking 或 benchmark 授权。
+
+此前工程回归：`1116 passed, 0 skipped`（2026-08-27 路由、r18 binding 与 convergence
   artifact 安全修复后）；这是代码
   契约证据，不是能力或质量证据。
 
@@ -80,7 +91,7 @@ benchmark gate；r18 live screening 仍未授权。
 | Harness 控制面 | **partial/ready offline** | hash-only pin、formal cohort gate、execution plan 状态机（blocked/execution-ready/post-execution-import-ready）、持久化状态、可恢复 supervisor、import audit、convergence gate | r18 provider freeze 尚未完成；新 successor 已正确将 diagnostic execution plan 标为 `blocked`，当前 `next_gate=screening`；即使 formal execution ready，也不会绕过 post-execution imports 或 target gate | freeze 后以同 cohort 15-unit/90-import 形态重建，先执行官方/审计 Harness 并导入，再审计放行 target |
 | 21-suite 资产 | **partial/blocked** | 9 类 21 套 matrix、case/source/decoding/统计合同；14 套可直接 materialize，6 套需 official import，GPQA 受授权门禁 | 没有完整同 cohort run；GPQA/官方 harness/import 仍不能冒充 ready | 先完成 baseline freeze 和官方/audited imports，再启动 target |
 | Benchmark campaign | **blocked** | 独立 evaluator、四面 API、paired statistics、Holm、effect size、3x latency、污染审计的代码/合同已具备 | `target_suite_calls_allowed=false`，无 provider baseline freeze，无 campaign 证据 | convergence 返回 `ready_for_target_campaign` 后再按锁定矩阵运行 |
-| 商业级运维 | **partial** | 生产 health ready；PID `759644` 已通过 setsid 受控发布加载最新代码；proxy auto；atomic/safe receipts；secret/raw output 隔离；公开 capability warnings 已实际返回；public/operator key 比较使用 constant-time 语义；`current_channels.env` registry identity 已对齐 r7 serving identity | auth 未启用；pricing/context/tool 能力字段为 unknown；跨 provider diversity 不足 | 按部署策略决定 auth；baseline 后补齐 admission metadata，并以 non-target/shadow 证据校准跨 provider 组合 |
+| 商业级运维 | **partial** | 生产 health ready；PID `759644` 已通过 setsid 受控发布加载最新代码；proxy auto；atomic/safe receipts；secret/raw output 隔离；公开 capability warnings 已实际返回；public/operator key 比较使用 constant-time 语义；`current_channels.env` registry identity 已对齐 r7 serving identity；新增显式 `AXIO_FUSION_REQUIRE_AUTH=true` fail-closed 模式，key 漏配时统一 401 且 health 仅输出安全投影 | 当前 18900 未启用 auth；正式公网仍需配置真实公共/operator key 并完成外部流量验证；pricing/context/tool 能力字段为 unknown；跨 provider diversity 不足 | 按部署策略在公网切换前启用并验证 auth；baseline 后补齐 admission metadata，并以 non-target/shadow 证据校准跨 provider 组合 |
 | 代码质量与冗余 | **partial** | 核心 `src`、测试和控制面回归绿；关键边界有类型/异常/receipt | 历史 benchmark scripts 有重复 runner 与裸 `except`；不能在 baseline gate 前混入重构 | baseline freeze 后拆独立 legacy cleanup，逐文件 L1-L4 验证 |
 
 ## 当前必须保持不变的边界

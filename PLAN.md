@@ -1,5 +1,14 @@
 # Axio Fusion API Plan
 
+## 2026-09-19 显式 fail-closed 鉴权模式增量
+
+依据当前商业运维差距矩阵，公共 gateway 原先只有“配置 key 才鉴权”的可选行为；在公网
+部署中若 key 漏配，容易把兼容模式误当成安全状态。本轮新增 `AXIO_FUSION_REQUIRE_AUTH`
+显式开关：开启后没有 `AXIO_FUSION_API_KEYS` 时所有公共请求统一 401，配置完成后 health
+安全投影报告 `auth_required=true`、`auth_mode=required`，不暴露 key。默认仍为关闭，当前
+18900 不改变现有客户端行为。该增量属于安全/部署控制，不涉及 provider I/O、screening、
+ranking 或 benchmark 证据。
+
 ## 2026-09-18 租户级并发 admission 增量
 
 本轮继续推进产品本体的资源闭环，不依赖新增 provider 能力。新增可配置的

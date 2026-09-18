@@ -4257,6 +4257,7 @@ def _health(
     image_profiles: Sequence[Any] = (),
 ) -> dict[str, Any]:
     readiness = _public_registry_readiness(engine.profiles)
+    auth_required = _auth_required()
     return {
         "schema": "axio_fusion_api.health.v1",
         "status": readiness["status"],
@@ -4269,7 +4270,8 @@ def _health(
         "image_registry": image_router_summary(ImageRouter(image_profiles)),
         "network": provider_proxy_runtime_summary(),
         "runtime": runtime_state().snapshot(),
-        "auth_required": bool(_server_keys()),
+        "auth_required": auth_required,
+        "auth_mode": "required" if auth_required else "optional",
         "operator_auth_configured": bool(_operator_keys()),
         "raw_prompt_persisted": False,
         "secrets_persisted": False,
@@ -4554,13 +4556,24 @@ def _render_image_stream_error(code: str) -> bytes:
 def _authorized(headers: Mapping[str, str]) -> bool:
     keys = _server_keys()
     if not keys:
-        return True
+        return not _auth_required()
     return _auth_values_match(_presented_auth_values(headers), keys)
 
 
 def _server_keys() -> set[str]:
     raw = os.getenv("AXIO_FUSION_API_KEYS", "")
     return {item.strip() for item in raw.replace(";", ",").replace("\n", ",").split(",") if item.strip()}
+
+
+def _auth_required() -> bool:
+    """Return the explicit fail-closed deployment mode without exposing keys."""
+
+    return str(os.getenv("AXIO_FUSION_REQUIRE_AUTH", "")).strip().casefold() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def _operator_authorized(
