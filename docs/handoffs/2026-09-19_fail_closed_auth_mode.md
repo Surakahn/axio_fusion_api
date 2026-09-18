@@ -31,6 +31,9 @@
   `auth_required=false`、`auth_mode=optional`、`tenant_concurrency_enabled=false`。
 - 发布后 `axio-fast`、`axio-terra`、`axio-pro` 三个 `/route-plan` dry-run 均成功；未执行
   provider screening、target benchmark 或 CPA Plus 重启。
+- 后续流式客户端断开资源生命周期增量见
+  `docs/handoffs/2026-09-19_stream_disconnect_resource_lifecycle.md`；全量回归更新为
+  `1123 passed`，不改变本轮鉴权发布事实。
 
 ## 下一步
 

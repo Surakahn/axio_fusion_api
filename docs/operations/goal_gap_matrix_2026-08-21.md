@@ -35,7 +35,7 @@ provider 能力组合成 `axio-fast`、`axio-terra`、`axio-pro`。Harness 只�
   models、21 个 live-available profiles、4 个 providers，且与 18900 进程的
   `AXIO_FUSION_REGISTRY_PATH` 绑定一致；AGENTS 中 r43 的 10-profile 数字仅是历史
   阶段检查项，不作为当前 r7 serving blocker。
-- 当前工程回归：`1122 passed, 0 skipped`（2026-09-19 显式 fail-closed 鉴权、租户并发与此前
+- 当前工程回归：`1123 passed, 0 skipped`（2026-09-19 流式断开资源释放、显式 fail-closed 鉴权、租户并发与此前
   路由/r18 binding/convergence 安全修复均通过）；这是代码
   契约证据，不是能力或质量证据。
 
@@ -44,6 +44,12 @@ provider 能力组合成 `axio-fast`、`axio-terra`、`axio-pro`。Harness 只�
 constant-time 精确匹配，health 只输出 `auth_required`/`auth_mode` 等安全投影。当前
 18900 保持关闭以兼容既有 loopback 客户端；正式公网切换仍需部署方配置真实公共/operator
 key 并完成外部流量验证。本增量不改变 provider I/O、r18 frozen inputs、screening、
+ranking 或 benchmark 授权。
+
+2026-09-19 流式资源生命周期增量：新增真实 HTTP 客户端在首个 SSE delta 后断开的端到端
+回归。测试确认 cancellation 传播到 fake provider，后续 delta 不再写入已断开的客户端，
+且租户 in-flight lease 在 handler 收尾后归零。流式专项 `23 passed`、全量 `1123 passed`；
+这是运行时资源与故障恢复证据，不改变 provider I/O、r18 frozen inputs、screening、
 ranking 或 benchmark 授权。
 
 此前工程回归：`1116 passed, 0 skipped`（2026-08-27 路由、r18 binding 与 convergence

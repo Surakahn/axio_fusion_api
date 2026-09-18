@@ -31,6 +31,7 @@ from axio_fusion_api.providers import (
     ProviderStreamObserver,
 )
 from axio_fusion_api.registry import normalize_profile
+from axio_fusion_api.runtime import reset_runtime_state_for_tests, runtime_state
 from axio_fusion_api.schemas import FusionResponse
 from axio_fusion_api.server import create_http_server
 
@@ -406,6 +407,111 @@ def test_http_server_delivers_a_public_delta_before_the_provider_finishes(
         connection.close()
         server.shutdown()
         server.server_close()
+        worker.join(timeout=5)
+
+    assert worker.is_alive() is False
+
+
+def test_http_server_disconnect_releases_stream_tenant_lease(monkeypatch) -> None:
+    """A downstream disconnect must cancel the provider and release admission."""
+
+    reset_runtime_state_for_tests()
+    monkeypatch.setenv("AXIO_FUSION_TENANT_MAX_IN_FLIGHT", "1")
+
+    class DisconnectAwareClient:
+        def __init__(self) -> None:
+            self.first_delta = threading.Event()
+            self.release_second_delta = threading.Event()
+            self.cancelled = threading.Event()
+            self.finished = threading.Event()
+
+        def complete_turn(
+            self,
+            profile,
+            request,
+            *,
+            prompt,
+            system,
+            timeout=None,
+            stream_observer=None,
+            cancellation_event=None,
+        ):
+            del profile, request, prompt, system, timeout
+            assert stream_observer is not None
+            assert cancellation_event is not None
+            assert stream_observer.emit_text_delta("first") is True
+            self.first_delta.set()
+            assert self.release_second_delta.wait(timeout=3)
+            stream_observer.emit_text_delta("second")
+            if cancellation_event.is_set():
+                self.cancelled.set()
+            self.finished.set()
+            return ProviderCompletion("firstsecond")
+
+    client = DisconnectAwareClient()
+    engine = FusionEngine(
+        [normalize_profile({"provider": "disconnect-fixture", "model": "fast-model"})],
+        client=client,
+        cache_enabled=False,
+    )
+    gateway = create_http_server(
+        host="127.0.0.1",
+        port=0,
+        live=True,
+        engine=engine,
+        record_trace=False,
+        record_runtime=True,
+    )
+    worker = threading.Thread(target=gateway.serve_forever, daemon=True)
+    worker.start()
+    connection = http.client.HTTPConnection(
+        "127.0.0.1",
+        gateway.server_address[1],
+        timeout=5,
+    )
+    observed = bytearray()
+    try:
+        connection.request(
+            "POST",
+            "/v1/chat/completions",
+            body=json.dumps(
+                {
+                    "model": "axio-fast",
+                    "stream": True,
+                    "messages": [{"role": "user", "content": "disconnect"}],
+                }
+            ),
+            headers={
+                "Content-Type": "application/json",
+                "X-Axio-Tenant": "disconnect-tenant",
+            },
+        )
+        response = connection.getresponse()
+        assert response.status == 200
+        while b'"content":"first"' not in observed:
+            chunk = response.read(1)
+            if not chunk:
+                break
+            observed.extend(chunk)
+        assert b'"content":"first"' in observed
+        assert runtime_state().snapshot()["in_flight_tenant_count"] == 1
+
+        connection.close()
+        client.release_second_delta.set()
+        assert client.cancelled.wait(timeout=3)
+        assert client.finished.wait(timeout=3)
+        release_deadline = time.monotonic() + 3
+        while (
+            runtime_state().snapshot()["in_flight_tenant_count"]
+            and time.monotonic() < release_deadline
+        ):
+            time.sleep(0.01)
+        assert runtime_state().snapshot()["in_flight_tenant_count"] == 0
+    finally:
+        client.release_second_delta.set()
+        connection.close()
+        gateway.shutdown()
+        gateway.server_close()
         worker.join(timeout=5)
 
     assert worker.is_alive() is False

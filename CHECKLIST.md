@@ -1,5 +1,14 @@
 # Axio Fusion API Checklist
 
+# 2026-09-19 流式客户端断开资源生命周期
+
+- [x] 新增真实 HTTP 客户端断开回归：首个公开 SSE delta 已发送后断开，provider 收到
+  cancellation，后续输出不再写入客户端。
+- [x] 验证断开后的租户 in-flight lease 最终归零，覆盖并发 admission 资源不会泄漏；
+  回归使用本地 fake provider，无 provider/target 网络请求。
+- [x] 流式专项 `23 passed`，全量 `1123 passed`；compileall、关键导入和 `git diff --check`
+  通过。该项是运行时资源与故障恢复证据，不是 provider 能力或 superiority 证据。
+
 # 2026-09-19 显式 fail-closed 鉴权模式
 
 - [x] 新增 `AXIO_FUSION_REQUIRE_AUTH=true`；无公共 key 时所有公共请求统一返回 401，避免

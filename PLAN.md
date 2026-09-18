@@ -1,5 +1,17 @@
 # Axio Fusion API Plan
 
+## 2026-09-19 流式客户端断开与租户资源释放增量
+
+继续补齐产品运行时闭环，不依赖 provider 网络能力。新增端到端回归覆盖真实 HTTP
+客户端在收到首个公开 SSE delta 后断开连接的生命周期：下游断开必须传播为 provider
+cancellation，禁止继续向已断开的客户端写数据，并最终释放租户 in-flight lease，避免
+并发 admission 槽位泄漏。测试使用本地 fake provider，不读取或改变 r18 frozen
+plan/source/registry，也不启动 screening 或 target benchmark。
+
+验证：专项流式文件 `23 passed`，全量回归 `1123 passed`；`compileall`、关键导入与
+`git diff --check` 通过。该增量证明网关流式资源安全，不构成 provider 能力、排名、成本、
+延迟或 superiority 证据。
+
 ## 2026-09-19 显式 fail-closed 鉴权模式增量
 
 依据当前商业运维差距矩阵，公共 gateway 原先只有“配置 key 才鉴权”的可选行为；在公网
