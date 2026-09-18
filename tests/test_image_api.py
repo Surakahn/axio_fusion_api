@@ -20,6 +20,7 @@ from axio_fusion_api.image_api import (
     ImagePromptTransformer,
     ImageRouter,
     image_cost_estimate,
+    image_router_summary,
     _encode_multipart,
     parse_edit_payload,
     parse_generation_payload,
@@ -400,12 +401,10 @@ def test_health_image_pricing_status_requires_both_operations_and_trusted_source
     partial = _image_profile(
         pricing={
             "generation_usd": 0.04,
-            "editing_usd": 0.06,
-            "source": "unknown",
+            "editing_usd": None,
+            "source": "provider_documented",
         }
     )
-    partial.image_capabilities["pricing"]["source"] = "provider_documented"
-    partial.image_capabilities["pricing"]["editing_usd"] = None
     summary = image_router_summary(ImageRouter([partial]))
     assert summary["generation_pricing_known_count"] == 1
     assert summary["editing_pricing_known_count"] == 0

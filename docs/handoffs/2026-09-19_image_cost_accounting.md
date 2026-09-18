@@ -26,9 +26,9 @@ provider screening、target benchmark，不修改 r18 frozen plan/source/registr
 
 - L1：修改后的 `schemas.py`、`image_api.py`、`server.py` 和测试 `py_compile` 通过。
 - L2：关键导入通过。
-- L3：图片专项 `41 passed`，覆盖 generation/editing、buffered/streaming、profile-bound
+- L3：图片专项 `42 passed`，覆盖 generation/editing、buffered/streaming、profile-bound
   pricing、unknown pricing、composer cost 和 HTTP 增量流预算累计。
-- L4：`git diff --check` 通过；全量回归 `1140 passed, 0 skipped`；所有异常仍在公共边界被安全收敛；没有 provider/target
+- L4：`git diff --check` 通过；全量回归 `1141 passed, 0 skipped`；所有异常仍在公共边界被安全收敛；没有 provider/target
   网络请求，没有改变 frozen screening 输入。
 
 ## 当前限制与下一步
@@ -38,3 +38,19 @@ pricing，因此生产图片成本会明确保持 unknown，不会错误增加�
 租户预算前，必须先补齐并审查 generation/editing 价格 metadata，再执行同一 fake-provider
 回归和受控发布。该限制不影响图片服务本身，也不构成 provider 能力、排名、成本优势或
 superiority 证据。
+
+## 受控发布
+
+- 运行时代码提交：`9125ff2`；边界与流式取消加固提交：`048dfab`，均已推送至
+  `origin/main`。
+- Axio 18900 使用生产一致 `private/current_channels.env` 和 r7 probe-bound registry
+  以 `setsid/nohup` 恢复，当前 PID `2719176`。
+- 发布后 `/health=status: ready`、`runtime_routing=healthy`、21/21 runtime eligible、
+  0 open circuit、4 providers、`auto -> proxy`、`auth_mode=optional`；image registry
+  显示 generation/editing pricing known `0`、`pricing_status=unknown`，与当前 registry
+  事实一致。
+- Fast/Terra/Pro route-plan 分别为 `fast_direct_cascade`、`terra_direct`、
+  `pro_panel_judge_escalation`；Pro roles 保留 primary/independent/critic/domain/judge/
+  synthesizer。
+- 当前唯一 Axio 回滚日志为 `private/axio_server.18900.console.log.pre-048dfab`；旧的
+  pre-update Axio console backups 已在新服务验证后清理。CPA Plus 未停止、未重启、未修改。

@@ -16,7 +16,7 @@ composer 现在通过同一 tenant observer 计入其真实 Fusion `actual_cost_
 还会叠加可选 text composer 成本，不将其伪装成图片价格），不保存 provider URL、
 模型标识、原始 prompt 或图片内容。
 
-验证：图片专项 `41 passed`，L1/L2 和 `git diff --check` 通过；当前 serving registry
+验证：图片专项 `42 passed`，全量回归 `1141 passed, 0 skipped`，L1/L2 和 `git diff --check` 通过；当前 serving registry
 未声明图片价格，因此生产图片成本会明确保持 unknown，不会错误累计。该增量不改变
 r18 frozen plan/source/registry、provider screening 或 21-suite target 授权。
 
@@ -3438,3 +3438,6 @@ Latency superiority is also claim-gated on two distribution points: both p50 and
   import 和 target campaign 均不可宣告。`next_gate=screening`、
   `target_suite_calls_allowed=false` 保持不变；本次未恢复 checkpoint、未重试 case、未修改
   frozen plan、未启动第二套 screening。
+发布：`9125ff2` 与 `048dfab` 已推送；Axio 18900 当前 PID `2719176`，health/runtime/三档
+route-plan 通过，image pricing status 明确为 `unknown`。唯一回滚日志为
+`private/axio_server.18900.console.log.pre-048dfab`；CPA Plus 未改变。

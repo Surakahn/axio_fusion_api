@@ -8,8 +8,11 @@
   profile 的同一成本估算；failover、provider 失败和客户端取消不记录成功图片成本。
 - [x] 可选 text prompt composer 的真实 Fusion 成本通过同一租户 observer 记录；响应只含
   bounded cost metadata，不持久化 raw provider/prompt/image/secret。
-- [x] 图片专项 `41 passed`；L1/L2、compileall、`git diff --check` 通过；当前生产 registry
+- [x] 图片专项 `42 passed`；L1/L2、compileall、`git diff --check` 通过；当前生产 registry
   无显式 image pricing，故 unknown 成本不会伪造为 `0.0`，待价格证据补齐后再累计预算。
+- [x] 全量回归 `1140 passed, 0 skipped`；提交 `9125ff2`、`048dfab` 已推送并受控发布至
+  Axio 18900（PID `2719176`），health/runtime/三档 route-plan 通过；唯一回滚日志为
+  `private/axio_server.18900.console.log.pre-048dfab`，CPA Plus 未停止或修改。
 - [ ] 生产公网启用租户预算前，为 verified image profiles 补齐 provider-documented 或
   registry-approved generation/editing 价格，并用同一 fake-provider 回归后再发布。
 
