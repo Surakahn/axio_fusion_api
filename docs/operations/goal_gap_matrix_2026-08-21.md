@@ -29,13 +29,13 @@ provider 能力组合成 `axio-fast`、`axio-terra`、`axio-pro`。Harness 只�
   `private/runs/2026-08-26-composite-cohort-r18-harness-formal-gate/`。它只验证控制面
   语义，不覆盖 2026-08-21 旧 artifact；当前 execution plan 因缺少 provider freeze
   明确为 `blocked`。
-- 当前服务只读健康：`ready`（提交 `aea56c0` 发布后 PID `2524992`），公共模型为三档，四种协议可用，`auto -> proxy`，
+- 当前服务只读健康：`ready`（提交 `5609b81` 发布后 PID `2553994`），公共模型为三档，四种协议可用，`auto -> proxy`，
   生产 loopback 为 `127.0.0.1:18900`，当前 serving registry 为 r7 probe-bound。
 - 当前 serving registry 身份已只读复核：21 个 physical profiles、15 个 logical
   models、21 个 live-available profiles、4 个 providers，且与 18900 进程的
   `AXIO_FUSION_REGISTRY_PATH` 绑定一致；AGENTS 中 r43 的 10-profile 数字仅是历史
   阶段检查项，不作为当前 r7 serving blocker。
-- 当前工程回归：`1128 passed, 0 skipped`（2026-09-19 rate-limit 多路径错误投影一致性、四协议错误码一致性、流式断开资源释放、显式
+- 当前工程回归：`1129 passed, 0 skipped`（2026-09-19 每日预算关闭状态可观测性、rate-limit 多路径错误投影一致性、四协议错误码一致性、流式断开资源释放、显式
   fail-closed 鉴权、租户并发与此前路由/r18 binding/convergence 安全修复均通过）；这是代码
   契约证据，不是能力或质量证据。
 

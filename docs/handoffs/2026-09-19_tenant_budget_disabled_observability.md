@@ -12,3 +12,14 @@ target benchmark，也不修改 r18 frozen plan/source/registry。
 - 零值配置仍允许请求，`check_budget()` 返回无预算、`Retry-After=0`。
 - 专项预算/限流回归：`4 passed`。
 - L1/L2、`git diff --check` 通过；全量回归待本轮门禁完成。
+
+## 发布验证
+
+- 提交 `5609b81` 已推送到 `origin/main`；仅受控重启 Axio 18900，保留旧 console log
+  备份 `private/axio_server.18900.console.log.pre-5609b81`，未停止或重启 CPA Plus。
+- 新进程 PID `2553994` 通过 `/health`：`status=ready`、`runtime_routing=healthy`、
+  `21/21` runtime eligible、`0` open circuit、`21` physical/`15` logical、`4` providers、
+  `auto -> proxy`、`tenant_budget_enabled=false`、`auth_mode=optional`。
+- 三档 route-plan dry-run 分别返回 `fast_direct_cascade`、`terra_direct`、
+  `pro_panel_judge_escalation`。
+- 全量回归：`1129 passed`。
