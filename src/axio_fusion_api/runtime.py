@@ -349,7 +349,11 @@ class RuntimeState:
                 limit=rate_limit,
                 now=current,
             )
-            budget_rows = _safe_budget_rows(self._budget_spend, daily_budget=daily_budget)
+            budget_rows = _safe_budget_rows(
+                self._budget_spend,
+                daily_budget=daily_budget,
+                now=current,
+            )
             response_session_count = len(self._response_continuations)
             response_session_tenant_count = len(
                 {entry.tenant_key for entry in self._response_continuations.values()}
@@ -585,11 +589,19 @@ def _safe_rate_bucket_rows(
     return rows[:20]
 
 
-def _safe_budget_rows(spend: Mapping[str, tuple[str, float]], *, daily_budget: float | None) -> list[dict[str, Any]]:
+def _safe_budget_rows(
+    spend: Mapping[str, tuple[str, float]],
+    *,
+    daily_budget: float | None,
+    now: float,
+) -> list[dict[str, Any]]:
     rows = []
     for tenant_key, (day, amount) in spend.items():
         spent = max(0.0, float(amount or 0.0))
         remaining = None if daily_budget is None or daily_budget <= 0 else max(0.0, float(daily_budget) - spent)
+        retry_after = 0
+        if daily_budget is not None and daily_budget > 0 and spent >= daily_budget:
+            retry_after = _seconds_until_next_utc_day(now)
         rows.append(
             {
                 "tenant_sha256": sha256_text(tenant_key),
@@ -597,6 +609,7 @@ def _safe_budget_rows(spend: Mapping[str, tuple[str, float]], *, daily_budget: f
                 "spent_usd": round(spent, 8),
                 "daily_budget_usd": round(float(daily_budget), 8) if daily_budget is not None else None,
                 "remaining_usd": round(remaining, 8) if remaining is not None else None,
+                "retry_after_seconds": retry_after,
                 "raw_tenant_key_persisted": False,
                 "raw_api_key_persisted": False,
                 "secrets_persisted": False,

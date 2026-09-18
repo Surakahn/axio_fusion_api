@@ -7894,6 +7894,7 @@ def test_standalone_runtime_snapshot_has_hash_only_rate_and_budget_tenant_rows(m
     assert [row["request_count_last_minute"] for row in rate_rows] == [2, 1]
     assert [row["retry_after_seconds"] for row in rate_rows] == [0, 0]
     assert [row["spent_usd"] for row in budget_rows] == [0.2, 0.12]
+    assert [row["retry_after_seconds"] for row in budget_rows] == [0, 0]
     assert all(len(row["tenant_sha256"]) == 64 for row in rate_rows)
     assert all(len(row["tenant_sha256"]) == 64 and len(row["day_sha256"]) == 64 for row in budget_rows)
     assert all(row["raw_tenant_key_persisted"] is False for row in rate_rows + budget_rows)
@@ -7932,6 +7933,32 @@ def test_standalone_runtime_disabled_rate_bucket_has_no_retry_hint(monkeypatch):
     tenant_key = tenant_key_from_headers({"x-api-key": "disabled-rate-tenant"})
     assert state.check_rate_limit(tenant_key, now=1000.0)["allowed"] is True
     assert state.snapshot(now=1000.0)["rate_limit_buckets"] == []
+
+
+def test_standalone_runtime_budget_snapshot_exposes_utc_reset_hint(monkeypatch):
+    reset_runtime_state_for_tests()
+    monkeypatch.setenv("AXIO_FUSION_TENANT_DAILY_BUDGET_USD", "0.5")
+    state = runtime_state()
+    tenant_key = tenant_key_from_headers({"x-api-key": "budget-window-tenant"})
+    state.record_cost(tenant_key, 0.5, now=86_399.0)
+
+    row = state.snapshot(now=86_399.0)["budget_tenants"][0]
+    assert row["spent_usd"] == 0.5
+    assert row["remaining_usd"] == 0.0
+    assert row["retry_after_seconds"] == 1
+
+    next_day = state.snapshot(now=86_400.0)["budget_tenants"]
+    assert next_day == []
+
+
+def test_standalone_runtime_disabled_budget_snapshot_has_no_retry_hint(monkeypatch):
+    reset_runtime_state_for_tests()
+    monkeypatch.setenv("AXIO_FUSION_TENANT_DAILY_BUDGET_USD", "0")
+    state = runtime_state()
+    tenant_key = tenant_key_from_headers({"x-api-key": "disabled-budget-tenant"})
+    state.record_cost(tenant_key, 1.0, now=1000.0)
+    row = state.snapshot(now=1000.0)["budget_tenants"][0]
+    assert row["retry_after_seconds"] == 0
 
 
 def test_standalone_gateway_daily_budget_uses_public_trace_summary_cost(monkeypatch):
