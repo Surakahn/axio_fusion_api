@@ -379,7 +379,7 @@ class RuntimeState:
             "in_flight_tenant_count": in_flight_tenant_count,
             "in_flight_tenants": in_flight_rows,
             "rate_limit_enabled": bool(rate_limit),
-            "tenant_budget_enabled": daily_budget is not None,
+            "tenant_budget_enabled": bool(daily_budget is not None and daily_budget > 0),
             "feedback_artifact_enabled": bool(_feedback_path()),
             "response_continuations": {
                 "active_session_count": response_session_count,

@@ -7973,6 +7973,18 @@ def test_standalone_gateway_daily_budget_uses_public_trace_summary_cost(monkeypa
     assert second["metadata"]["budget"]["spent_usd"] >= first["metadata"]["fusion_trace_summary"]["actual_cost_usd"]
 
 
+def test_standalone_runtime_snapshot_reports_zero_daily_budget_as_disabled(monkeypatch):
+    reset_runtime_state_for_tests()
+    monkeypatch.setenv("AXIO_FUSION_TENANT_DAILY_BUDGET_USD", "0")
+    snapshot = runtime_state().snapshot()
+    budget = runtime_state().check_budget("zero-budget-tenant")
+
+    assert snapshot["tenant_budget_enabled"] is False
+    assert budget["allowed"] is True
+    assert budget["daily_budget_usd"] is None
+    assert budget["retry_after_seconds"] == 0
+
+
 def test_standalone_gateway_daily_budget_only_blocks_generation_endpoints(monkeypatch):
     reset_runtime_state_for_tests()
     monkeypatch.setenv("AXIO_FUSION_TENANT_DAILY_BUDGET_USD", "0.00000001")

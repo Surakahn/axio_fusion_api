@@ -1,5 +1,11 @@
 # Axio Fusion API Checklist
 
+# 2026-09-19 每日预算关闭状态可观测性
+
+- [x] `AXIO_FUSION_TENANT_DAILY_BUDGET_USD=0` 时 runtime snapshot 报告 disabled，与实际
+  admission 保持一致；请求仍允许，`Retry-After=0`。
+- [x] 新增零值配置回归；专项预算/限流测试提升至 `4 passed`。
+
 # 2026-09-19 租户每日预算重置提示一致性
 
 - [x] `tenant_budget_exhausted` 统一返回基于 UTC 日界计算的 `Retry-After`，保持 402、

@@ -62,6 +62,11 @@ ranking 或 benchmark 授权。
 预算金额、成本累计、租户隔离或 admission 阈值。本增量只证明商业级成本 admission 的
 错误恢复契约，不构成 provider 能力、排名、成本优势或 superiority 证据。
 
+2026-09-19 每日预算关闭状态可观测性修复：当 `AXIO_FUSION_TENANT_DAILY_BUDGET_USD=0`
+时，runtime snapshot 现在报告 `tenant_budget_enabled=false`，与实际“不限制预算”语义
+一致；零值不会触发预算 admission，也不会产生重试等待。本增量只校正运维投影，不改变
+provider I/O、r18 frozen inputs、screening、ranking 或 benchmark 授权。
+
 2026-09-19 rate-limit 多路径错误投影增量：buffered 文本、文本 SSE 与图片 SSE 的
 `rate_limit_exceeded` 现在统一包含 `metadata.rate_limit`、安全持久化标志和
 `Retry-After`，调用方可跨执行路径读取一致的限流窗口与重试信息。专项 parity `2 passed`，

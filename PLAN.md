@@ -1,5 +1,14 @@
 # Axio Fusion API Plan
 
+## 2026-09-19 每日预算关闭状态可观测性修复
+
+离线审计发现 `AXIO_FUSION_TENANT_DAILY_BUDGET_USD=0` 时 admission 实际关闭，但 runtime
+snapshot 仍报告 `tenant_budget_enabled=true`，会误导商业运维判断。本轮统一状态投影与
+实际阈值：只有正数预算才报告启用；零值仍保持允许请求、无预算累计和 `Retry-After=0`。
+
+验证：专项 `4 passed`（含预算重置提示与限流 parity）；本轮继续执行全量 L1-L4 门禁。
+该修复只校正可观测性，不改变预算或 provider 行为。
+
 ## 2026-09-19 租户每日预算重置提示一致性增量
 
 审计发现租户每日预算超限虽然返回 HTTP 402 和安全 `metadata.budget`，但没有
