@@ -1,5 +1,15 @@
 # Axio Fusion API Plan
 
+## 2026-09-19 r18 preflight 再次零网络复核
+
+使用生产一致 `private/current_channels.env`、r7 probe-bound registry、r18 frozen
+plan/source、r7 operational admission 以及原始/credential-ready preflight，再次执行
+`verify_screening_preflight.py`。结果保持 `ready_for_operator_authorization`、空
+`reason_codes`，`network_calls_performed=false`、`provider_calls_performed=false`、
+`target_suite_calls_performed=false`；重复 verifier 文件 SHA-256 与既有 receipt 同为
+`9e2fed685743449bd88675bed12ad209691a6059f68e2b70892c641330f6a9d8`。本轮只确认控制面
+输入没有漂移，不恢复 checkpoint、不修改 frozen 输入、不启动 provider 或 target 请求。
+
 ## 2026-09-19 图片 lane 成本计量闭环
 
 审计发现图片 SSE 完成后曾以 `0.0` 写入租户预算，buffered generation/editing 也没有

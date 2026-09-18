@@ -27,6 +27,12 @@ hash-only 复核。该动作不启动 provider/target 请求，不修改 frozen 
   `9e2fed685743449bd88675bed12ad209691a6059f68e2b70892c641330f6a9d8`，与既有
   `screening_preflight_verifier.r18.safe.json` 完全一致。
 
+本轮继续以生产一致环境重跑 verifier，输出
+`screening_preflight_verifier.r18.repeat-20260919b.safe.json`；其文件 SHA-256 仍为
+`9e2fed685743449bd88675bed12ad209691a6059f68e2b70892c641330f6a9d8`，状态仍为
+`ready_for_operator_authorization`、`reason_codes=[]`，且 provider/target/network calls
+均为 `false`。该重复证据确认 frozen 输入和网络策略没有漂移，不构成 live screening 授权。
+
 ## 结论与下一动作
 
 控制面输入当前自洽，但该状态仍不等同于 live screening 授权。唯一合法下一步仍是外部

@@ -1,5 +1,14 @@
 # Axio Fusion API Checklist
 
+# 2026-09-19 r18 preflight 再次零网络复核
+
+- [x] 使用生产一致环境和 `PYTHONPATH=src` 重跑 verifier，状态仍为
+  `ready_for_operator_authorization`、`reason_codes=[]`。
+- [x] 新输出 `screening_preflight_verifier.r18.repeat-20260919b.safe.json` 与既有 verifier
+  SHA-256 均为 `9e2fed685743449bd88675bed12ad209691a6059f68e2b70892c641330f6a9d8`。
+- [x] 确认 provider/target/network calls 均为 `false`；不修改 frozen 输入，不把 verifier
+  ready 解释为 live screening 授权。
+
 # 2026-09-19 图片 lane 成本计量闭环
 
 - [x] `image_capabilities.pricing` 采用闭合 schema，支持 generation/editing、request/image
@@ -10,7 +19,7 @@
   bounded cost metadata，不持久化 raw provider/prompt/image/secret。
 - [x] 图片专项 `43 passed`；L1/L2、compileall、`git diff --check` 通过；当前生产 registry
   无显式 image pricing，故 unknown 成本不会伪造为 `0.0`，待价格证据补齐后再累计预算。
-- [x] 全量回归 `1140 passed, 0 skipped`；提交 `9125ff2`、`048dfab` 已推送并受控发布至
+- [x] 全量回归 `1142 passed, 0 skipped`；提交 `9125ff2`、`048dfab` 已推送并受控发布至
   Axio 18900（PID `2719176`），health/runtime/三档 route-plan 通过；唯一回滚日志为
   `private/axio_server.18900.console.log.pre-048dfab`，CPA Plus 未停止或修改。
 - [ ] 生产公网启用租户预算前，为 verified image profiles 补齐 provider-documented 或
