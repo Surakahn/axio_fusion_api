@@ -6,8 +6,9 @@
 配置仍可能让 runtime snapshot 报告 `rate_limit_enabled=true`。本轮统一实际阈值和状态投影：
 只有正数限流窗口才报告启用；零值/负值均保持允许请求和 `Retry-After=0`。
 
-验证：预算/限流专项 `6 passed`；全量回归待本轮门禁完成。本修复只校正运维投影，不改变
-限流窗口算法或 provider 行为。
+验证：预算/限流专项 `6 passed`；全量回归 `1131 passed`，发布提交为 `4d56422`，发布
+后 Axio 18900 PID `2576971` 已通过 health/runtime/三档 route-plan 核验。本修复只校正
+运维投影，不改变限流窗口算法或 provider 行为。
 
 ## 2026-09-19 每日预算关闭状态可观测性修复
 
