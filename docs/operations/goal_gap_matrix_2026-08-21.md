@@ -29,7 +29,7 @@ provider 能力组合成 `axio-fast`、`axio-terra`、`axio-pro`。Harness 只�
   `private/runs/2026-08-26-composite-cohort-r18-harness-formal-gate/`。它只验证控制面
   语义，不覆盖 2026-08-21 旧 artifact；当前 execution plan 因缺少 provider freeze
   明确为 `blocked`。
-- 当前服务只读健康：`ready`（PID `2420815`，2026-09-19 错误码契约发布后），公共模型为三档，四种协议可用，`auto -> proxy`，
+- 当前服务只读健康：`ready`（提交 `4830ce2` 发布后 PID `2471734`），公共模型为三档，四种协议可用，`auto -> proxy`，
   生产 loopback 为 `127.0.0.1:18900`，当前 serving registry 为 r7 probe-bound。
 - 当前 serving registry 身份已只读复核：21 个 physical profiles、15 个 logical
   models、21 个 live-available profiles、4 个 providers，且与 18900 进程的

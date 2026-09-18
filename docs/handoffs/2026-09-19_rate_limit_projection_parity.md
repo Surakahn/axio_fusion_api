@@ -22,6 +22,16 @@
 - L2：关键 server 导入通过。
 - L4：`git diff --check` 通过；本轮没有 provider/target 网络请求。
 
+## 发布验证
+
+- 提交 `4830ce2` 已推送到 `origin/main`；仅受控重启 Axio 18900，保留旧 console log
+  备份 `private/axio_server.18900.console.log.pre-4830ce2`，未停止或重启 CPA Plus。
+- 新进程 PID `2471734` 通过 `/health`：`status=ready`、`runtime_routing=healthy`、
+  `21/21` runtime eligible、`0` open circuit、`21` physical/`15` logical、`4` providers、
+  `auto -> proxy`、`auth_required=false`、`auth_mode=optional`。
+- `axio-fast`、`axio-terra`、`axio-pro` 三个 `/v1/axio/route-plan` dry-run 分别返回
+  `fast_direct_cascade`、`terra_direct`、`pro_panel_judge_escalation`。
+
 ## 下一步
 
 发布后继续核对 health/runtime/route-plan；外部凭据轮换完成后严格回到
