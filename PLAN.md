@@ -16,7 +16,7 @@ composer 现在通过同一 tenant observer 计入其真实 Fusion `actual_cost_
 还会叠加可选 text composer 成本，不将其伪装成图片价格），不保存 provider URL、
 模型标识、原始 prompt 或图片内容。
 
-验证：图片专项 `42 passed`，全量回归 `1141 passed, 0 skipped`，L1/L2 和 `git diff --check` 通过；当前 serving registry
+验证：图片专项 `43 passed`，全量回归 `1142 passed, 0 skipped`，L1/L2 和 `git diff --check` 通过；当前 serving registry
 未声明图片价格，因此生产图片成本会明确保持 unknown，不会错误累计。该增量不改变
 r18 frozen plan/source/registry、provider screening 或 21-suite target 授权。
 

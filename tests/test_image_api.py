@@ -1020,6 +1020,54 @@ def test_http_image_stream_records_profile_bound_cost(monkeypatch):
     assert snapshot["budget_tenants"][0]["spent_usd"] == 0.04
 
 
+def test_http_image_edit_stream_records_profile_bound_cost(monkeypatch):
+    reset_runtime_state_for_tests()
+    monkeypatch.setenv("AXIO_FUSION_TENANT_DAILY_BUDGET_USD", "1")
+    profile = _image_profile(
+        pricing={"generation_usd": 0.04, "editing_usd": 0.06, "source": "registry"}
+    )
+    fake = _FakeImageClient()
+    monkeypatch.setattr(server, "ImageRouter", lambda profiles: ImageRouter(profiles, client=fake))
+    body, content_type = _encode_multipart(
+        {"model": "axio-fast", "prompt": "stream edit", "stream": True},
+        [ImagePart("image", "source.png", "image/png", b"png")],
+    )
+    gateway = server.create_http_server(
+        host="127.0.0.1",
+        port=0,
+        live=False,
+        engine=FusionEngine([profile]),
+        record_trace=False,
+        record_runtime=True,
+    )
+    worker = threading.Thread(target=gateway.serve_forever, daemon=True)
+    worker.start()
+    connection = http.client.HTTPConnection("127.0.0.1", gateway.server_address[1], timeout=5)
+    try:
+        connection.request(
+            "POST",
+            "/v1/images/edits",
+            body=body,
+            headers={
+                "Content-Type": content_type,
+                "x-api-key": "stream-edit-cost-tenant",
+            },
+        )
+        response = connection.getresponse()
+        assert response.status == 200
+        stream = response.read()
+        assert b"event: image_edit.completed" in stream
+        assert b"data: [DONE]" in stream
+    finally:
+        connection.close()
+        gateway.shutdown()
+        gateway.server_close()
+        worker.join(timeout=5)
+    snapshot = runtime_state().snapshot()
+    assert snapshot["budget_tenants"]
+    assert snapshot["budget_tenants"][0]["spent_usd"] == 0.06
+
+
 def test_server_returns_image_sse_with_allowlisted_event_types(monkeypatch):
     profile = _image_profile()
     fake = _FakeImageClient()

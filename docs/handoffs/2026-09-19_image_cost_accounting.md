@@ -26,9 +26,9 @@ provider screening、target benchmark，不修改 r18 frozen plan/source/registr
 
 - L1：修改后的 `schemas.py`、`image_api.py`、`server.py` 和测试 `py_compile` 通过。
 - L2：关键导入通过。
-- L3：图片专项 `42 passed`，覆盖 generation/editing、buffered/streaming、profile-bound
+- L3：图片专项 `43 passed`，覆盖 generation/editing、buffered/streaming、profile-bound
   pricing、unknown pricing、composer cost 和 HTTP 增量流预算累计。
-- L4：`git diff --check` 通过；全量回归 `1141 passed, 0 skipped`；所有异常仍在公共边界被安全收敛；没有 provider/target
+- L4：`git diff --check` 通过；全量回归 `1142 passed, 0 skipped`；所有异常仍在公共边界被安全收敛；没有 provider/target
   网络请求，没有改变 frozen screening 输入。
 
 ## 当前限制与下一步
