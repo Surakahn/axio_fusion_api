@@ -190,7 +190,13 @@ def handle_request(
                         else None
                     ),
                 )
-            budget_lease.settle(success=True)
+            # Only a successful public image response commits the reserved
+            # image operation.  A provider/capability error releases that
+            # reservation while retaining any observed prompt-composer cost.
+            if 200 <= int(result[0]) < 300:
+                budget_lease.settle(success=True)
+            else:
+                budget_lease.settle(0.0, success=True)
             return respond(result)
         except Exception:
             budget_lease.settle(success=False)
