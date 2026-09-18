@@ -6,7 +6,7 @@ import math
 import os
 import threading
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -54,6 +54,66 @@ class InFlightLease:
         self._state._release_in_flight_lease(self)
 
 
+@dataclass
+class TenantBudgetLease:
+    """幂等的租户成本预留。
+
+    预留在 provider/image 工作开始前占用每日预算；``settle`` 只在最终成功
+    交付时提交已知成本，失败、取消或客户端断开均释放预留。该对象只存在于
+    进程内，不会进入 trace 或 runtime snapshot。
+    """
+
+    _state: "RuntimeState"
+    tenant_key: str
+    reserved_usd: float
+    day: str
+    allowed: bool
+    _settled: bool = False
+    _observed_usd: float = 0.0
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    def observe(self, cost_usd: float | None) -> None:
+        if not self.allowed:
+            return
+        amount = _finite_nonnegative(cost_usd)
+        if amount is None:
+            return
+        with self._lock:
+            if not self._settled:
+                self._observed_usd += amount
+
+    def settle(
+        self,
+        cost_usd: float | None = None,
+        *,
+        success: bool = True,
+        now: float | None = None,
+    ) -> None:
+        if not self.allowed:
+            return
+        with self._lock:
+            if self._settled:
+                return
+            self._settled = True
+            explicit = _finite_nonnegative(cost_usd)
+            actual = None
+            if success:
+                observed = self._observed_usd
+                if explicit is not None or observed > 0.0:
+                    actual = (explicit or 0.0) + observed
+                elif self.reserved_usd > 0.0:
+                    # The admission estimate is a trusted upper bound.  If a
+                    # successful call returns no usable usage receipt, keep
+                    # that reservation committed instead of turning it into
+                    # unmetered/free traffic.
+                    actual = self.reserved_usd
+                elif self.reserved_usd > 0.0:
+                    # 成功但 usage receipt 缺失时按已批准的保守估价结算，
+                    # 防止已知成本请求静默变成免费；显式 cost=0 仍保留零成本。
+                    actual = self.reserved_usd
+        self._state._settle_budget_lease(self, actual if success else None, now=now)
+
+
 class RuntimeState:
     """In-memory gateway controls and safe feedback receipts.
 
@@ -66,6 +126,8 @@ class RuntimeState:
         self._lock = threading.Lock()
         self._rate_windows: dict[str, list[float]] = {}
         self._budget_spend: dict[str, tuple[str, float]] = {}
+        self._budget_reservations: dict[str, tuple[str, float]] = {}
+        self._budget_overcommit_count = 0
         self._in_flight: dict[str, int] = {}
         self._feedback_count = 0
         self._feedback_by_score: dict[str, int] = {}
@@ -111,15 +173,112 @@ class RuntimeState:
             if stored_day != day:
                 stored_day, spent = day, 0.0
             self._budget_spend[tenant_key] = (stored_day, spent)
-        remaining = max(0.0, daily_budget - spent)
-        retry_after = _seconds_until_next_utc_day(current) if spent >= daily_budget else 0
+            reserved_day, reserved = self._budget_reservations.get(tenant_key, (day, 0.0))
+            if reserved_day != day:
+                reserved = 0.0
+                self._budget_reservations.pop(tenant_key, None)
+        remaining = max(0.0, daily_budget - spent - reserved)
+        retry_after = _seconds_until_next_utc_day(current) if spent + reserved >= daily_budget else 0
         return {
-            "allowed": spent < daily_budget,
+            "allowed": spent + reserved < daily_budget,
             "daily_budget_usd": daily_budget,
             "spent_usd": round(spent, 8),
+            "reserved_usd": round(reserved, 8),
+            "committed_plus_reserved_usd": round(spent + reserved, 8),
             "remaining_usd": round(remaining, 8),
             "retry_after_seconds": retry_after,
         }
+
+    def reserve_budget(
+        self,
+        tenant_key: str,
+        estimated_cost_usd: float | None,
+        *,
+        now: float | None = None,
+    ) -> tuple[TenantBudgetLease, dict[str, Any]]:
+        """在同一锁内原子检查并预留已知成本。
+
+        unknown pricing 不伪造为零；预算启用时默认 fail-closed，可由显式
+        ``AXIO_FUSION_TENANT_BUDGET_UNKNOWN_PRICING=allow`` 改为观测模式。
+        调用方必须对返回 lease 做 settle。
+        """
+
+        daily_budget = _env_float("AXIO_FUSION_TENANT_DAILY_BUDGET_USD")
+        current = float(now if now is not None else time.time())
+        day = _utc_day(current)
+        estimate = _finite_nonnegative(estimated_cost_usd)
+        with self._lock:
+            stored_day, spent = self._budget_spend.get(tenant_key, (day, 0.0))
+            if stored_day != day:
+                spent = 0.0
+                self._budget_spend.pop(tenant_key, None)
+            reserved_day, reserved = self._budget_reservations.get(tenant_key, (day, 0.0))
+            if reserved_day != day:
+                reserved = 0.0
+                self._budget_reservations.pop(tenant_key, None)
+            enabled = daily_budget is not None and daily_budget > 0
+            requested = estimate or 0.0
+            unknown_allowed = estimate is not None or _unknown_pricing_allowed()
+            allowed = (
+                not enabled
+                or (
+                    unknown_allowed
+                    and spent + reserved + requested <= float(daily_budget)
+                    and (requested > 0.0 or spent + reserved < float(daily_budget))
+                )
+            )
+            if allowed and requested > 0.0:
+                self._budget_reservations[tenant_key] = (day, reserved + requested)
+                reserved += requested
+            retry_after = (
+                _seconds_until_next_utc_day(current)
+                if enabled and spent + reserved >= float(daily_budget)
+                else 0
+            )
+        lease = TenantBudgetLease(self, tenant_key, requested if allowed else 0.0, day, allowed)
+        return lease, {
+            "allowed": allowed,
+            "daily_budget_usd": daily_budget if enabled else None,
+            "spent_usd": round(spent, 8),
+            "reserved_usd": round(reserved, 8),
+            "estimated_cost_usd": round(requested, 8) if estimate is not None else None,
+            "pricing_known": estimate is not None,
+            "unknown_pricing_policy": _unknown_pricing_policy_name(),
+            "committed_plus_reserved_usd": round(spent + reserved, 8),
+            "remaining_usd": (
+                round(max(0.0, float(daily_budget) - spent - reserved), 8)
+                if enabled
+                else None
+            ),
+            "retry_after_seconds": retry_after,
+        }
+
+    def _settle_budget_lease(
+        self,
+        lease: TenantBudgetLease,
+        actual_cost_usd: float | None,
+        *,
+        now: float | None = None,
+    ) -> None:
+        current_day = _utc_day(float(now if now is not None else time.time()))
+        with self._lock:
+            stored_day, reserved = self._budget_reservations.get(lease.tenant_key, (lease.day, 0.0))
+            if stored_day == lease.day:
+                remaining_reserved = max(0.0, float(reserved) - float(lease.reserved_usd))
+                if remaining_reserved > 0:
+                    self._budget_reservations[lease.tenant_key] = (stored_day, remaining_reserved)
+                else:
+                    self._budget_reservations.pop(lease.tenant_key, None)
+            if actual_cost_usd is None:
+                return
+            stored_spend_day, spent = self._budget_spend.get(lease.tenant_key, (current_day, 0.0))
+            if stored_spend_day != current_day:
+                spent = 0.0
+            daily_budget = _env_float("AXIO_FUSION_TENANT_DAILY_BUDGET_USD")
+            updated = float(spent) + float(actual_cost_usd)
+            if daily_budget is not None and daily_budget > 0 and updated > daily_budget:
+                self._budget_overcommit_count += 1
+            self._budget_spend[lease.tenant_key] = (current_day, updated)
 
     def record_cost(self, tenant_key: str, cost_usd: float | None, *, now: float | None = None) -> None:
         if cost_usd is None:
@@ -339,10 +498,12 @@ class RuntimeState:
         with self._lock:
             self._prune_rate_windows_unlocked(current)
             self._prune_budget_spend_unlocked(_utc_day(current))
+            self._prune_budget_reservations_unlocked(_utc_day(current))
             self._prune_response_continuations_unlocked(current)
             self._prune_in_flight_unlocked()
             active_rate_buckets = len(self._rate_windows)
             budget_tenants = len(self._budget_spend)
+            budget_reservation_tenants = len(self._budget_reservations)
             feedback_count = self._feedback_count
             feedback_by_score = dict(self._feedback_by_score)
             rate_bucket_rows = _safe_rate_bucket_rows(
@@ -352,6 +513,7 @@ class RuntimeState:
             )
             budget_rows = _safe_budget_rows(
                 self._budget_spend,
+                reservations=self._budget_reservations,
                 daily_budget=daily_budget,
                 now=current,
             )
@@ -373,6 +535,8 @@ class RuntimeState:
             "schema": "axio_fusion_api.runtime_snapshot.v1",
             "active_rate_limit_buckets": active_rate_buckets,
             "budget_tenant_count": budget_tenants,
+            "budget_reservation_tenant_count": budget_reservation_tenants,
+            "budget_overcommit_count": self._budget_overcommit_count,
             "rate_limit_buckets": rate_bucket_rows,
             "budget_tenants": budget_rows,
             "feedback_count": feedback_count,
@@ -389,6 +553,7 @@ class RuntimeState:
             "in_flight_tenants": in_flight_rows,
             "rate_limit_enabled": bool(rate_limit is not None and rate_limit > 0),
             "tenant_budget_enabled": bool(daily_budget is not None and daily_budget > 0),
+            "tenant_budget_unknown_pricing_policy": _unknown_pricing_policy_name(),
             "feedback_artifact_enabled": bool(_feedback_path()),
             "response_continuations": {
                 "active_session_count": response_session_count,
@@ -429,6 +594,13 @@ class RuntimeState:
             tenant_key: (day, spent)
             for tenant_key, (day, spent) in self._budget_spend.items()
             if day == current_day and float(spent or 0.0) > 0.0
+        }
+
+    def _prune_budget_reservations_unlocked(self, current_day: str) -> None:
+        self._budget_reservations = {
+            tenant_key: (day, reserved)
+            for tenant_key, (day, reserved) in self._budget_reservations.items()
+            if day == current_day and float(reserved or 0.0) > 0.0
         }
 
     def _prune_response_continuations_unlocked(self, current: float) -> None:
@@ -562,6 +734,15 @@ def _bounded_env_int(name: str, *, default: int, minimum: int, maximum: int) -> 
     return max(minimum, min(maximum, int(configured)))
 
 
+def _unknown_pricing_policy_name() -> str:
+    value = str(os.getenv("AXIO_FUSION_TENANT_BUDGET_UNKNOWN_PRICING", "deny") or "deny").strip().lower()
+    return "allow" if value in {"allow", "true", "1", "yes"} else "deny"
+
+
+def _unknown_pricing_allowed() -> bool:
+    return _unknown_pricing_policy_name() == "allow"
+
+
 def _safe_rate_bucket_rows(
     windows: Mapping[str, list[float]],
     *,
@@ -593,21 +774,32 @@ def _safe_rate_bucket_rows(
 def _safe_budget_rows(
     spend: Mapping[str, tuple[str, float]],
     *,
+    reservations: Mapping[str, tuple[str, float]],
     daily_budget: float | None,
     now: float,
 ) -> list[dict[str, Any]]:
     rows = []
-    for tenant_key, (day, amount) in spend.items():
+    tenant_keys = set(spend) | set(reservations)
+    for tenant_key in tenant_keys:
+        day, amount = spend.get(tenant_key, (_utc_day(now), 0.0))
         spent = max(0.0, float(amount or 0.0))
-        remaining = None if daily_budget is None or daily_budget <= 0 else max(0.0, float(daily_budget) - spent)
+        reserved_day, reserved_amount = reservations.get(tenant_key, (day, 0.0))
+        reserved = max(0.0, float(reserved_amount or 0.0)) if reserved_day == day else 0.0
+        remaining = (
+            None
+            if daily_budget is None or daily_budget <= 0
+            else max(0.0, float(daily_budget) - spent - reserved)
+        )
         retry_after = 0
-        if daily_budget is not None and daily_budget > 0 and spent >= daily_budget:
+        if daily_budget is not None and daily_budget > 0 and spent + reserved >= daily_budget:
             retry_after = _seconds_until_next_utc_day(now)
         rows.append(
             {
                 "tenant_sha256": sha256_text(tenant_key),
                 "day_sha256": sha256_text(day),
                 "spent_usd": round(spent, 8),
+                "reserved_usd": round(reserved, 8),
+                "committed_plus_reserved_usd": round(spent + reserved, 8),
                 "daily_budget_usd": round(float(daily_budget), 8) if daily_budget is not None else None,
                 "remaining_usd": round(remaining, 8) if remaining is not None else None,
                 "retry_after_seconds": retry_after,
@@ -618,6 +810,16 @@ def _safe_budget_rows(
         )
     rows.sort(key=lambda row: (-float(row["spent_usd"]), str(row["tenant_sha256"])))
     return rows[:20]
+
+
+def _finite_nonnegative(value: Any) -> float | None:
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(amount) or amount < 0.0:
+        return None
+    return amount
 
 
 def _safe_in_flight_rows(

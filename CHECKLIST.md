@@ -1,5 +1,17 @@
 # Axio Fusion API Checklist
 
+# 2026-09-19 租户预算并发预留与结算
+
+- [x] 已知成本在 provider/image 工作前以租户+UTC day 原子预留；成功交付结算实际成本，
+  失败、取消、客户端断开、并发拒绝和重复收尾幂等释放。
+- [x] 覆盖文本 buffered/SSE、图片 buffered/SSE、prompt composer 与图片最终成本合并；
+  unknown pricing 不伪造为 `0.0`，预算启用时默认 fail-closed，可显式切换观测模式。
+- [x] runtime snapshot 暴露 reserved/committed+reserved/retry-after/overcommit 的安全投影；
+  并发、幂等、日界 rollover、敏感字段隔离回归通过。
+- [x] 修复单请求 `_CostBudget.acquire()` 死代码；L1/L2、专项 73 项、全量 `1145 passed`、
+  `git diff --check` 通过；无 provider/target 网络请求，r18 frozen 输入未改变。
+- [ ] 多副本部署前仍需设计共享预算账本或明确单实例配额边界；当前生产预算未启用。
+
 # 2026-09-19 r18 preflight 再次零网络复核
 
 - [x] 使用生产一致环境和 `PYTHONPATH=src` 重跑 verifier，状态仍为

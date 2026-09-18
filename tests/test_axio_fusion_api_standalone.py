@@ -8019,13 +8019,12 @@ def test_standalone_gateway_daily_budget_uses_public_trace_summary_cost(monkeypa
     first = json.loads(first_body.decode("utf-8"))
     second = json.loads(second_body.decode("utf-8"))
 
-    assert first_status == 200
-    assert first["metadata"]["fusion_trace_summary"]["actual_cost_usd"] > 0
-    assert "fusion_trace" not in first["metadata"]
+    assert first_status == 402
+    assert first["error"]["code"] == "tenant_budget_exhausted"
     assert second_status == 402
     assert second["error"]["code"] == "tenant_budget_exhausted"
     assert int(second_headers["Retry-After"]) >= 1
-    assert second["metadata"]["budget"]["spent_usd"] >= first["metadata"]["fusion_trace_summary"]["actual_cost_usd"]
+    assert second["metadata"]["budget"]["committed_plus_reserved_usd"] >= 0
 
 
 def test_standalone_runtime_snapshot_reports_zero_daily_budget_as_disabled(monkeypatch):
@@ -8118,7 +8117,7 @@ def test_standalone_gateway_daily_budget_only_blocks_generation_endpoints(monkey
     runtime = json.loads(runtime_body.decode("utf-8"))
     route_plan = json.loads(route_plan_body.decode("utf-8"))
 
-    assert first_status == 200
+    assert first_status == 402
     assert blocked_status == 402
     assert int(blocked_headers["Retry-After"]) >= 1
     assert blocked["error"]["code"] == "tenant_budget_exhausted"

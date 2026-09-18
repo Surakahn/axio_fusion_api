@@ -148,6 +148,12 @@ benchmark gate；r18 live screening 仍未授权。
 
 ## 差距矩阵
 
+2026-09-19 成本 admission 增量：租户每日预算现支持已知成本的原子 in-flight 预留、成功
+结算和失败/取消释放，覆盖文本/图片四条执行路径，并将 prompt composer 成本合并到同一
+lease。unknown pricing 在预算启用时默认 fail-closed，runtime snapshot 公开 reserved 与
+committed+reserved 的 hash-safe 投影；全量工程回归为 `1145 passed`。该控制仍是单进程账本，
+多副本公网部署前必须接入共享原子账本或明确单实例配额，不把本地 snapshot 当作全局预算证据。
+
 | 领域 | 当前状态 | 已完成的可验证内容 | 未完成/阻塞 | 下一条合法动作 |
 | --- | --- | --- | --- | --- |
 | 产品边界 | **done** | 独立 remote-only 服务；三档公共模型；不加载本地权重；图片 lane 与文本 Fusion 隔离 | 尚未以完整 baseline/target 证据证明质量、成本、延迟目标 | 保持公共合同不变，等待 baseline freeze 后做校准 successor |

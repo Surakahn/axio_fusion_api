@@ -1254,6 +1254,48 @@ class ImageRouter:
                 failures.append(exc)
         raise ImageRequestError("All eligible image providers failed.", code="image_provider_unavailable", status=502) from (failures[-1] if failures else None)
 
+    def estimated_cost_usd(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        operation: str,
+    ) -> float | None:
+        """Return a conservative preflight cost for all possible replicas.
+
+        A reservation is emitted only when every compatible failover replica
+        has the same explicit trusted pricing contract.  This prevents an
+        unknown fallback price from being treated as free.
+        """
+
+        normalized_operation = "editing" if operation in {"edits", "editing"} else "generation"
+        public_model = canonical_public_model(str(payload.get("model") or "axio-terra"))
+        selected = self._select(
+            public_model,
+            operation=normalized_operation,
+            stream_requested=bool(payload.get("stream")),
+        )
+        selected = self._filter_request_compatible(selected, payload, operation=normalized_operation)
+        if not selected:
+            return None
+        values: list[float] = []
+        output_count = _requested_image_count(payload)
+        for profile in selected:
+            capabilities = profile.image_capabilities if isinstance(profile.image_capabilities, Mapping) else {}
+            pricing = capabilities.get("pricing") if isinstance(capabilities.get("pricing"), Mapping) else {}
+            source = str(pricing.get("source") or "unknown")
+            if source not in {"provider_documented", "registry"}:
+                return None
+            try:
+                unit_cost = float(pricing.get(f"{normalized_operation}_usd"))
+            except (TypeError, ValueError):
+                return None
+            if not math.isfinite(unit_cost) or unit_cost < 0.0 or unit_cost > MAX_IMAGE_OPERATION_COST_USD:
+                return None
+            unit = str(pricing.get("unit") or "request")
+            values.append(unit_cost * output_count if unit == "image" else unit_cost)
+        estimate = max(values)
+        return round(estimate, 8) if math.isfinite(estimate) and estimate <= MAX_IMAGE_OPERATION_COST_USD else None
+
     def edit(
         self,
         payload: Mapping[str, Any],
@@ -1441,6 +1483,13 @@ def _public_image_response(
             "secrets_persisted": False,
         },
     }
+
+
+def _requested_image_count(payload: Mapping[str, Any]) -> int:
+    try:
+        return max(1, min(16, int(payload.get("n") or 1)))
+    except (TypeError, ValueError):
+        return 1
 
 
 def render_image_stream(

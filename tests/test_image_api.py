@@ -831,6 +831,7 @@ def test_server_records_priced_image_cost_for_buffered_and_streaming(monkeypatch
 def test_server_does_not_record_unknown_or_failed_image_cost(monkeypatch):
     reset_runtime_state_for_tests()
     monkeypatch.setenv("AXIO_FUSION_TENANT_DAILY_BUDGET_USD", "1")
+    monkeypatch.setenv("AXIO_FUSION_TENANT_BUDGET_UNKNOWN_PRICING", "allow")
     profile = _image_profile()
     fake = _FakeImageClient()
     monkeypatch.setattr(server, "ImageRouter", lambda profiles: ImageRouter(profiles, client=fake))

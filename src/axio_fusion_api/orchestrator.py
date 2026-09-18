@@ -1559,7 +1559,7 @@ class _CostBudget:
                     }
                 )
                 return None
-                self.reserved_cost_usd += reservation.estimated_cost_usd
+            self.reserved_cost_usd += reservation.estimated_cost_usd
             return reservation
 
     def would_exceed(

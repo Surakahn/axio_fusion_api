@@ -45,7 +45,13 @@ from .providers import (
     profile_credential_readiness,
 )
 from .registry import load_image_registry, load_registry, registry_readiness
-from .runtime import InFlightLease, ResponseContinuation, runtime_state, tenant_key_from_headers
+from .runtime import (
+    InFlightLease,
+    ResponseContinuation,
+    TenantBudgetLease,
+    runtime_state,
+    tenant_key_from_headers,
+)
 from .runtime_activation import AtomicFusionRuntime
 from .schemas import (
     FusionRequest,
@@ -76,6 +82,7 @@ class _PreparedIncrementalStream:
     tenant_key: str
     live: bool
     in_flight_lease: InFlightLease
+    budget_lease: TenantBudgetLease
 
 
 @dataclass(frozen=True)
@@ -87,6 +94,7 @@ class _PreparedIncrementalImageStream:
     router: ImageRouter
     tenant_key: str
     in_flight_lease: InFlightLease
+    budget_lease: TenantBudgetLease
 
 
 def handle_request(
@@ -153,27 +161,40 @@ def handle_request(
             budget = runtime_state().check_budget(tenant_key)
             if not budget["allowed"]:
                 return respond(_tenant_budget_exhausted_response(budget))
+        budget_lease, budget_admission = _reserve_tenant_budget(
+            tenant_key,
+            estimated_cost_usd=_estimate_image_request_cost(
+                selected_image_profiles,
+                operation=image_operation,
+                body=body,
+                headers=headers_lc,
+            ),
+            record_runtime=record_runtime,
+        )
+        if budget_admission is not None:
+            return respond(_tenant_budget_admission_response(budget_admission))
         lease, admission = _acquire_tenant_in_flight(tenant_key, record_runtime=record_runtime)
         if admission is not None:
+            budget_lease.settle(success=False)
             return respond(_tenant_concurrency_exhausted_response(admission))
         try:
-            return respond(
-                _handle_image_request(
+            result = _handle_image_request(
                     operation=image_operation,
                     headers=headers_lc,
                     body=body,
                     profiles=selected_image_profiles,
                     text_engine=active_engine,
                     cost_observer=(
-                        (lambda observation: runtime_state().record_cost(
-                            tenant_key,
-                            observation.get("cost_usd"),
-                        ))
+                        (lambda observation: budget_lease.observe(observation.get("cost_usd")))
                         if record_runtime
                         else None
                     ),
                 )
-            )
+            budget_lease.settle(success=True)
+            return respond(result)
+        except Exception:
+            budget_lease.settle(success=False)
+            raise
         finally:
             lease.release()
     try:
@@ -241,8 +262,16 @@ def handle_request(
         )
     if continuation is not None:
         request = _merge_responses_continuation(request, continuation)
+    budget_lease, budget_admission = _reserve_tenant_budget(
+        tenant_key,
+        estimated_cost_usd=_estimate_request_cost(active_engine, request),
+        record_runtime=record_runtime,
+    )
+    if budget_admission is not None:
+        return respond(_tenant_budget_admission_response(budget_admission))
     lease, admission = _acquire_tenant_in_flight(tenant_key, record_runtime=record_runtime)
     if admission is not None:
+        budget_lease.settle(success=False)
         return respond(_tenant_concurrency_exhausted_response(admission))
     try:
         response = active_engine.complete(request, live=bool(payload.get("live", live)))
@@ -250,6 +279,7 @@ def handle_request(
         # receipt assembly happen after the upstream slot is returned.
         lease.release()
     except FusionExecutionError as exc:
+        budget_lease.settle(success=False)
         lease.release()
         status = 503 if exc.code == "no_eligible_model" else 502
         return respond(
@@ -271,54 +301,76 @@ def handle_request(
                 },
             )
         )
+    except Exception:
+        budget_lease.settle(success=False)
+        lease.release()
+        raise
     responses_store: bool | None = None
-    if endpoint == "responses":
-        # Fusion's response cache intentionally reuses compute, not public
-        # response identities. Every HTTP Responses result needs an ID that
-        # belongs only to this caller's continuation scope.
-        response = _fresh_responses_response(response)
-        responses_store = False
-        if record_response_continuations and _responses_store_requested(payload):
-            responses_store = runtime_state().store_response_continuation(
-                tenant_key=tenant_key,
-                response_id=response.response_id,
-                history=_response_continuation_history(request, response),
-                model=request.model,
-                instructions=request.system,
-                tools=request.tools,
-            )
+    try:
+        if endpoint == "responses":
+            # Fusion's response cache intentionally reuses compute, not public
+            # response identities. Every HTTP Responses result needs an ID that
+            # belongs only to this caller's continuation scope.
+            response = _fresh_responses_response(response)
+            responses_store = False
+            if record_response_continuations and _responses_store_requested(payload):
+                responses_store = runtime_state().store_response_continuation(
+                    tenant_key=tenant_key,
+                    response_id=response.response_id,
+                    history=_response_continuation_history(request, response),
+                    model=request.model,
+                    instructions=request.system,
+                    tools=request.tools,
+                )
+    except Exception:
+        budget_lease.settle(success=False)
+        raise
     if _stream_requested(route, payload, endpoint):
-        include_usage = _stream_usage_requested(payload, endpoint)
-        rendered_for_cost = render_response(
-            response,
-            api_format=endpoint,
-            responses_store=responses_store,
-        )
+        try:
+            include_usage = _stream_usage_requested(payload, endpoint)
+            rendered_for_cost = render_response(
+                response,
+                api_format=endpoint,
+                responses_store=responses_store,
+            )
+            if record_runtime:
+                budget_lease.settle(_actual_cost_from_rendered_response(rendered_for_cost), success=True)
+            else:
+                budget_lease.settle(success=False)
+            if record_trace:
+                record_execution_trace(response, tenant_key=tenant_key)
+            result = respond(
+                _stream_response(
+                    200,
+                    render_stream_events(
+                        response,
+                        api_format=endpoint,
+                        responses_store=responses_store,
+                        include_usage=include_usage,
+                    ),
+                )
+            )
+            lease.release()
+            return result
+        except Exception:
+            budget_lease.settle(success=False)
+            lease.release()
+            raise
+    try:
+        rendered = render_response(response, api_format=endpoint, responses_store=responses_store)
         if record_runtime:
-            runtime_state().record_cost(tenant_key, _actual_cost_from_rendered_response(rendered_for_cost))
+            budget_lease.settle(_actual_cost_from_rendered_response(rendered), success=True)
+        else:
+            budget_lease.settle(success=False)
         if record_trace:
             record_execution_trace(response, tenant_key=tenant_key)
-        result = respond(
-            _stream_response(
-                200,
-                render_stream_events(
-                    response,
-                    api_format=endpoint,
-                    responses_store=responses_store,
-                    include_usage=include_usage,
-                ),
-            )
-        )
+        result = respond(_json_response(200, rendered))
         lease.release()
         return result
-    rendered = render_response(response, api_format=endpoint, responses_store=responses_store)
-    if record_runtime:
-        runtime_state().record_cost(tenant_key, _actual_cost_from_rendered_response(rendered))
-    if record_trace:
-        record_execution_trace(response, tenant_key=tenant_key)
-    result = respond(_json_response(200, rendered))
-    lease.release()
-    return result
+    except Exception:
+        budget_lease.settle(success=False)
+        lease.release()
+        raise
 
 
 def _http_request_asks_for_incremental_stream(
@@ -422,20 +474,33 @@ def _prepare_incremental_image_stream_request(
         return None, respond(
             _json_response(exc.status, {"error": {"message": str(exc), "code": exc.code}})
         )
-    router = _build_image_router(
-        engine.profiles if image_profiles is None else image_profiles,
-        text_engine=engine,
-        cost_observer=(
-            (lambda observation: runtime_state().record_cost(
-                tenant_key,
-                observation.get("cost_usd"),
-            ))
-            if record_runtime
-            else None
+    budget_lease, budget_admission = _reserve_tenant_budget(
+        tenant_key,
+        estimated_cost_usd=_estimate_image_payload_cost(
+            engine.profiles if image_profiles is None else image_profiles,
+            payload,
+            operation=operation,
         ),
+        record_runtime=record_runtime,
     )
+    if budget_admission is not None:
+        return None, respond(_tenant_budget_admission_response(budget_admission))
+    try:
+        router = _build_image_router(
+            engine.profiles if image_profiles is None else image_profiles,
+            text_engine=engine,
+            cost_observer=(
+                (lambda observation: budget_lease.observe(observation.get("cost_usd")))
+                if record_runtime
+                else None
+            ),
+        )
+    except Exception:
+        budget_lease.settle(success=False)
+        raise
     lease, admission = _acquire_tenant_in_flight(tenant_key, record_runtime=record_runtime)
     if admission is not None:
+        budget_lease.settle(success=False)
         return None, respond(_tenant_concurrency_exhausted_response(admission))
     return (
         _PreparedIncrementalImageStream(
@@ -446,6 +511,7 @@ def _prepare_incremental_image_stream_request(
             router=router,
             tenant_key=tenant_key,
             in_flight_lease=lease,
+            budget_lease=budget_lease,
         ),
         None,
     )
@@ -550,8 +616,16 @@ def _prepare_incremental_stream_request(
         )
     if continuation is not None:
         request = _merge_responses_continuation(request, continuation)
+    budget_lease, budget_admission = _reserve_tenant_budget(
+        tenant_key,
+        estimated_cost_usd=_estimate_request_cost(active_engine, request),
+        record_runtime=record_runtime,
+    )
+    if budget_admission is not None:
+        return None, respond(_tenant_budget_admission_response(budget_admission))
     lease, admission = _acquire_tenant_in_flight(tenant_key, record_runtime=record_runtime)
     if admission is not None:
+        budget_lease.settle(success=False)
         return None, respond(_tenant_concurrency_exhausted_response(admission))
     return (
         _PreparedIncrementalStream(
@@ -563,6 +637,7 @@ def _prepare_incremental_stream_request(
             tenant_key=tenant_key,
             live=bool(payload.get("live", live)),
             in_flight_lease=lease,
+            budget_lease=budget_lease,
         ),
         None,
     )
@@ -595,11 +670,6 @@ def _finalize_incremental_stream_response(
         api_format=prepared.endpoint,
         responses_store=responses_store,
     )
-    if record_runtime:
-        runtime_state().record_cost(
-            prepared.tenant_key,
-            _actual_cost_from_rendered_response(rendered),
-        )
     if record_trace:
         record_execution_trace(response, tenant_key=prepared.tenant_key)
     return response, responses_store
@@ -822,6 +892,7 @@ def create_http_server(
                             record_runtime=record_runtime,
                         )
                     except Exception:
+                        prepared.budget_lease.settle(success=False)
                         prepared.in_flight_lease.release()
                         raise
                     return
@@ -850,6 +921,7 @@ def create_http_server(
                             record_runtime=record_runtime,
                         )
                     except Exception:
+                        prepared.budget_lease.settle(success=False)
                         prepared.in_flight_lease.release()
                         raise
                     return
@@ -940,23 +1012,31 @@ def create_http_server(
                             result,
                             operation=prepared.operation,
                         )
-                        runtime_state().record_cost(
-                            prepared.tenant_key,
+                        prepared.budget_lease.settle(
                             observation.get("cost_usd"),
+                            success=True,
                         )
+                    else:
+                        prepared.budget_lease.settle(success=False)
             except ImageRequestError as exc:
+                # A failed image delivery must release the image reservation,
+                # but any prompt-composer provider call that already completed
+                # remains billable through the observed lease cost.
+                prepared.budget_lease.settle(0.0, success=True)
                 if not cancellation_event.is_set():
                     self._write_stream_chunk(
                         _render_image_stream_error(exc.code),
                         cancellation_event,
                     )
             except Exception:  # noqa: BLE001 - streaming HTTP boundary
+                prepared.budget_lease.settle(0.0, success=True)
                 if not cancellation_event.is_set():
                     self._write_stream_chunk(
                         _render_image_stream_error("image_provider_unavailable"),
                         cancellation_event,
                     )
             finally:
+                prepared.budget_lease.settle(success=False)
                 prepared.in_flight_lease.release()
                 self._finish_stream(cancellation_event)
 
@@ -1001,6 +1081,7 @@ def create_http_server(
                 self.send_header(key, value)
             self.end_headers()
             if not self._write_stream_chunk(renderer.start(), cancellation_event):
+                prepared.budget_lease.settle(success=False)
                 prepared.in_flight_lease.release()
                 return
 
@@ -1028,7 +1109,17 @@ def create_http_server(
                         record_response_continuations=True,
                     )
                     renderer.responses_store = responses_store
-                    self._write_stream_chunk(renderer.complete(response), cancellation_event)
+                    delivered = self._write_stream_chunk(renderer.complete(response), cancellation_event)
+                    if record_runtime and delivered:
+                        rendered = render_response(
+                            response,
+                            api_format=prepared.endpoint,
+                            responses_store=responses_store,
+                        )
+                        prepared.budget_lease.settle(
+                            _actual_cost_from_rendered_response(rendered),
+                            success=True,
+                        )
             except PublicStreamInterruptedError as exc:
                 if not cancellation_event.is_set() and not exc.client_cancelled:
                     self._write_stream_chunk(
@@ -1048,6 +1139,7 @@ def create_http_server(
                         cancellation_event,
                     )
             finally:
+                prepared.budget_lease.settle(success=False)
                 prepared.in_flight_lease.release()
                 self._finish_stream(cancellation_event)
 
@@ -4692,6 +4784,20 @@ def _tenant_budget_exhausted_response(budget: Mapping[str, Any]) -> tuple[int, d
     )
 
 
+def _tenant_budget_admission_response(budget: Mapping[str, Any]) -> tuple[int, dict[str, str], bytes]:
+    """Map preflight rejection to a stable public budget or pricing error."""
+
+    if budget.get("pricing_known") is False and budget.get("unknown_pricing_policy") == "deny":
+        return _json_response(
+            402,
+            {
+                "error": {"message": "Tenant budget pricing is unavailable.", "code": "tenant_budget_pricing_unknown"},
+                "metadata": {"budget": dict(budget), "raw_prompt_persisted": False, "secrets_persisted": False},
+            },
+        )
+    return _tenant_budget_exhausted_response(budget)
+
+
 def _rate_limit_exhausted_response(rate: Mapping[str, Any]) -> tuple[int, dict[str, str], bytes]:
     """Return one safe rate-limit projection for every public request lane."""
 
@@ -4720,6 +4826,89 @@ def _acquire_tenant_in_flight(
         return InFlightLease(runtime_state(), tenant_key, False, None), None
     lease, admission = runtime_state().acquire_in_flight(tenant_key)
     return (lease, None) if admission.get("allowed") else (lease, admission)
+
+
+def _reserve_tenant_budget(
+    tenant_key: str,
+    *,
+    estimated_cost_usd: float | None,
+    record_runtime: bool,
+) -> tuple[TenantBudgetLease, Mapping[str, Any] | None]:
+    """Reserve known request cost before any provider/image call."""
+
+    if not record_runtime:
+        return TenantBudgetLease(runtime_state(), tenant_key, 0.0, "", True), None
+    lease, admission = runtime_state().reserve_budget(tenant_key, estimated_cost_usd)
+    return (lease, None) if admission.get("allowed") else (lease, admission)
+
+
+def _estimate_request_cost(engine: FusionEngine, request: FusionRequest) -> float | None:
+    """Read only the hash-safe dry route estimate; never performs provider I/O."""
+
+    try:
+        route_plan = engine.complete(request, live=False).route_plan
+    except Exception:
+        return None
+    candidates: list[Mapping[str, Any]] = []
+    for container in (route_plan, route_plan.get("budget", {}), route_plan.get("fusion_admission", {})):
+        if not isinstance(container, Mapping):
+            continue
+        admission = container.get("initial_fusion_resource_admission")
+        if isinstance(admission, Mapping):
+            candidates.append(admission)
+    for admission in candidates:
+        cost = admission.get("cost") if isinstance(admission.get("cost"), Mapping) else admission
+        if not isinstance(cost, Mapping) or cost.get("known") is not True:
+            continue
+        execution = cost.get("execution") if isinstance(cost.get("execution"), Mapping) else {}
+        if execution.get("pricing_known") is False:
+            continue
+        try:
+            value = float(cost.get("estimated_total_cost_usd"))
+        except (TypeError, ValueError):
+            continue
+        if value >= 0.0 and value < float("inf"):
+            return round(value, 8)
+    direct = route_plan.get("fusion_admission", {}).get("direct_candidate")
+    if isinstance(direct, Mapping):
+        try:
+            value = float(direct.get("estimated_cost_usd"))
+        except (TypeError, ValueError):
+            value = -1.0
+        if value >= 0.0 and value < float("inf"):
+            return round(value, 8)
+    return None
+
+
+def _estimate_image_request_cost(
+    profiles: Sequence[Any],
+    *,
+    operation: str,
+    body: bytes | str | None,
+    headers: Mapping[str, str],
+) -> float | None:
+    """Parse an image request and obtain a conservative replica-bound estimate."""
+
+    try:
+        if operation == "generations":
+            payload = parse_generation_payload(body)
+        else:
+            payload, _files = parse_edit_payload(body, headers.get("content-type", ""))
+        return ImageRouter(profiles).estimated_cost_usd(payload, operation=operation)
+    except (ImageRequestError, TypeError, ValueError):
+        return None
+
+
+def _estimate_image_payload_cost(
+    profiles: Sequence[Any],
+    payload: Mapping[str, Any],
+    *,
+    operation: str,
+) -> float | None:
+    try:
+        return ImageRouter(profiles).estimated_cost_usd(payload, operation=operation)
+    except (ImageRequestError, TypeError, ValueError):
+        return None
 
 
 def _tenant_concurrency_exhausted_response(

@@ -3451,3 +3451,11 @@ Latency superiority is also claim-gated on two distribution points: both p50 and
 发布：`9125ff2` 与 `048dfab` 已推送；Axio 18900 当前 PID `2719176`，health/runtime/三档
 route-plan 通过，image pricing status 明确为 `unknown`。唯一回滚日志为
 `private/axio_server.18900.console.log.pre-048dfab`；CPA Plus 未改变。
+# 2026-09-19 商业预算并发预留增量
+
+租户预算控制已从“完成后累计”收敛为 provider/image 前的原子已知成本预留、成功结算与
+失败/取消释放，覆盖四条文本/图片执行路径；unknown pricing 默认 fail-closed，图片和
+prompt-composer 成本使用同一租户 lease。该工程增量已通过 `1145 passed`，仍不改变 r18
+frozen plan/source/registry，不产生 provider/target 证据。多副本部署前必须设计共享预算
+账本或明确单实例配额边界。下一主线仍为凭据轮换后唯一 r18 screening -> transport
+admission -> ranking -> freeze -> Harness/import -> 21-suite campaign。
