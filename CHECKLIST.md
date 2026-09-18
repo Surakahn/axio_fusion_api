@@ -1,5 +1,11 @@
 # Axio Fusion API Checklist
 
+# 2026-09-19 非正 rate-limit 配置状态可观测性
+
+- [x] `AXIO_FUSION_RATE_LIMIT_PER_MINUTE<=0` 时 runtime snapshot 报告 disabled，与实际
+  admission 一致；请求仍允许且 `Retry-After=0`。
+- [x] 零值/负值配置回归通过；预算/限流专项提升至 `6 passed`。
+
 # 2026-09-19 每日预算关闭状态可观测性
 
 - [x] `AXIO_FUSION_TENANT_DAILY_BUDGET_USD=0` 时 runtime snapshot 报告 disabled，与实际

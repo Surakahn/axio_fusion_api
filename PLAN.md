@@ -1,5 +1,14 @@
 # Axio Fusion API Plan
 
+## 2026-09-19 非正 rate-limit 配置状态可观测性修复
+
+离线审计发现 `AXIO_FUSION_RATE_LIMIT_PER_MINUTE<=0` 时实际限流 admission 已关闭，但负值
+配置仍可能让 runtime snapshot 报告 `rate_limit_enabled=true`。本轮统一实际阈值和状态投影：
+只有正数限流窗口才报告启用；零值/负值均保持允许请求和 `Retry-After=0`。
+
+验证：预算/限流专项 `6 passed`；全量回归待本轮门禁完成。本修复只校正运维投影，不改变
+限流窗口算法或 provider 行为。
+
 ## 2026-09-19 每日预算关闭状态可观测性修复
 
 离线审计发现 `AXIO_FUSION_TENANT_DAILY_BUDGET_USD=0` 时 admission 实际关闭，但 runtime

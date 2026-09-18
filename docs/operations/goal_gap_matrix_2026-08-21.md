@@ -67,6 +67,12 @@ ranking 或 benchmark 授权。
 一致；零值不会触发预算 admission，也不会产生重试等待。本增量只校正运维投影，不改变
 provider I/O、r18 frozen inputs、screening、ranking 或 benchmark 授权。
 
+2026-09-19 非正 rate-limit 配置状态可观测性修复：当
+`AXIO_FUSION_RATE_LIMIT_PER_MINUTE<=0` 时，runtime snapshot 现在报告
+`rate_limit_enabled=false`，与实际不限流语义一致；零值/负值不会触发 rate-limit admission，
+也不会产生重试等待。本增量只校正运维投影，不改变 provider I/O、r18 frozen inputs、
+screening、ranking 或 benchmark 授权。
+
 2026-09-19 rate-limit 多路径错误投影增量：buffered 文本、文本 SSE 与图片 SSE 的
 `rate_limit_exceeded` 现在统一包含 `metadata.rate_limit`、安全持久化标志和
 `Retry-After`，调用方可跨执行路径读取一致的限流窗口与重试信息。专项 parity `2 passed`，

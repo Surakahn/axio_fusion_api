@@ -7985,6 +7985,21 @@ def test_standalone_runtime_snapshot_reports_zero_daily_budget_as_disabled(monke
     assert budget["retry_after_seconds"] == 0
 
 
+@pytest.mark.parametrize("configured_limit", ["0", "-1"])
+def test_standalone_runtime_snapshot_reports_nonpositive_rate_limit_as_disabled(
+    monkeypatch,
+    configured_limit,
+):
+    reset_runtime_state_for_tests()
+    monkeypatch.setenv("AXIO_FUSION_RATE_LIMIT_PER_MINUTE", configured_limit)
+    snapshot = runtime_state().snapshot()
+    rate = runtime_state().check_rate_limit("nonpositive-rate-tenant")
+
+    assert snapshot["rate_limit_enabled"] is False
+    assert rate["allowed"] is True
+    assert rate["retry_after_seconds"] == 0
+
+
 def test_standalone_gateway_daily_budget_only_blocks_generation_endpoints(monkeypatch):
     reset_runtime_state_for_tests()
     monkeypatch.setenv("AXIO_FUSION_TENANT_DAILY_BUDGET_USD", "0.00000001")
