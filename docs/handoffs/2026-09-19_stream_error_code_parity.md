@@ -25,6 +25,12 @@ r18 frozen plan/source/registry。
 - L1：`python3.11 -m compileall -q src scripts tests` 通过。
 - L2：关键 `compat` 导入通过。
 - L4：`git diff --check` 通过；本轮零 provider 网络请求。
+- 发布：提交 `d088760` 已推送到 `origin/main`；Axio 18900 以 `setsid/nohup` 受控重启，当前
+  PID `2420815`。发布后 `/health` 为 `ready`，`runtime_routing=healthy`，21/21 runtime
+  eligible、0 open circuit、21 physical/15 logical、4 providers、`auto -> proxy`，
+  `auth_required=false`、`auth_mode=optional`；三档 `/route-plan` dry-run 均成功。
+- 本次仅重启 Axio 18900，没有停止或重启 CPA Plus，也没有执行 provider screening 或
+  target benchmark。
 
 ## 下一步
 

@@ -20,7 +20,8 @@ screening、target benchmark，也不修改 r18 frozen plan/source/registry。
 
 ## 当前发布边界
 
-本轮没有生产代码行为变更，因此不需要重启 Axio 18900；当前 PID `2363163` 继续运行。
+本轮没有生产代码行为变更，因此当时不需要重启 Axio 18900；随后错误码契约发布使用同一
+受控服务流程，当前 PID 已更新为 `2420815`，health/runtime 与三档 dry-run 均通过。
 没有停止或重启 CPA Plus，没有执行 provider screening、target benchmark 或任何新的
 provider 网络请求。
 
