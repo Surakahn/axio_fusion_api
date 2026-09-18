@@ -1,5 +1,14 @@
 # Axio Fusion API Plan
 
+## 2026-09-19 r18 preflight 可复现复核
+
+在加载与生产服务一致的 `private/current_channels.env` 并显式设置 `PYTHONPATH=src` 后，
+对 r18 frozen plan/source/r7 probe-bound registry、operational admission、原始与
+credential-ready preflight 重新运行零网络 verifier。结果为
+`ready_for_operator_authorization`、`reason_codes=[]`、`network_calls_performed=false`、
+`target_suite_calls_performed=false`；重复 receipt SHA-256 与既有 receipt 完全一致，
+确认当前输入没有漂移。本轮不构成 live screening 授权。
+
 ## 2026-09-19 非正 rate-limit 配置状态可观测性修复
 
 离线审计发现 `AXIO_FUSION_RATE_LIMIT_PER_MINUTE<=0` 时实际限流 admission 已关闭，但负值

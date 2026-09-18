@@ -1,5 +1,14 @@
 # Axio Fusion API Checklist
 
+# 2026-09-19 r18 preflight 可复现复核
+
+- [x] 使用生产一致的环境变量与 `PYTHONPATH=src` 重跑零网络 verifier，状态为
+  `ready_for_operator_authorization`，`reason_codes=[]`。
+- [x] 确认 `network_calls_performed=false`、`provider_calls_performed=false`、
+  `target_suite_calls_performed=false`，且重复 receipt SHA-256 与既有 artifact 一致。
+- [ ] 该状态不等同 live screening 授权；凭据轮换与 operator 明确授权前保持 provider
+  I/O withheld。
+
 # 2026-09-19 非正 rate-limit 配置状态可观测性
 
 - [x] `AXIO_FUSION_RATE_LIMIT_PER_MINUTE<=0` 时 runtime snapshot 报告 disabled，与实际

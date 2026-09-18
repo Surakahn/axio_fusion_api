@@ -39,6 +39,12 @@ provider 能力组合成 `axio-fast`、`axio-terra`、`axio-pro`。Harness 只�
   fail-closed 鉴权、租户并发与此前路由/r18 binding/convergence 安全修复均通过）；这是代码
   契约证据，不是能力或质量证据。
 
+2026-09-19 r18 preflight 可复现复核：加载生产一致环境并显式设置 `PYTHONPATH=src` 后，
+verifier 保持 `ready_for_operator_authorization`、`reason_codes=[]`，且 provider/target
+调用均为 `false`；重复 receipt 与既有 receipt SHA-256 完全一致。该复核确认 frozen
+plan/source/registry 与 credential-ready preflight 未漂移，但不授予 live screening
+授权，外部凭据轮换和 operator 授权门仍保持不变。
+
 2026-09-19 商业运维增量：新增显式 `AXIO_FUSION_REQUIRE_AUTH=true` fail-closed 模式。开启
 后若没有公共 key，包含 health 在内的公共请求统一返回 401；配置 key 后继续使用
 constant-time 精确匹配，health 只输出 `auth_required`/`auth_mode` 等安全投影。当前
