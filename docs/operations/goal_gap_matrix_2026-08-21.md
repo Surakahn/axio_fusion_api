@@ -59,6 +59,11 @@ verifier 保持 `ready_for_operator_authorization`、`reason_codes=[]`，且 pro
 plan/source/registry 与 credential-ready preflight 未漂移，但不授予 live screening
 授权，外部凭据轮换和 operator 授权门仍保持不变。
 
+本轮再次执行同一零网络 verifier，生成 `repeat-20260919b` safe receipt；SHA-256 仍为
+`9e2fed685743449bd88675bed12ad209691a6059f68e2b70892c641330f6a9d8`，控制面状态和
+provider/target/network call flags 均未漂移。该证据只强化前置可复现性，不改变 screening
+授权条件。
+
 2026-09-19 商业运维增量：新增显式 `AXIO_FUSION_REQUIRE_AUTH=true` fail-closed 模式。开启
 后若没有公共 key，包含 health 在内的公共请求统一返回 401；配置 key 后继续使用
 constant-time 精确匹配，health 只输出 `auth_required`/`auth_mode` 等安全投影。当前
