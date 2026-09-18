@@ -6151,12 +6151,18 @@ class FusionEngine:
         effective_profiles, circuit_filter = self._profiles_for_routing()
         circuit = self._circuit_snapshot()
         configured_count = len(self.profiles)
-        runtime_eligible_count = len(effective_profiles)
-        unavailable_count = sum(
-            1
-            for profile in effective_profiles
-            if str(profile.health or "").strip().casefold() == "unavailable"
-        )
+        runtime_eligible_count = 0
+        unavailable_count = 0
+        for profile in effective_profiles:
+            eligible = (
+                bool(profile.enabled)
+                and str(profile.health or "").strip().casefold() != "unavailable"
+                and profile_latency_eligibility(profile).get("eligible") is not False
+            )
+            if eligible:
+                runtime_eligible_count += 1
+            else:
+                unavailable_count += 1
         open_count = _safe_int(circuit.get("open_profile_count"), default=0)
         observed = circuit_filter.get("runtime_provider_telemetry")
         observed = observed if isinstance(observed, Mapping) else {}
