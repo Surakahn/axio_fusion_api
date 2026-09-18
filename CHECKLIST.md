@@ -11,8 +11,10 @@
 - [x] 专项测试覆盖原子竞争、幂等 release、429 契约和离线诊断路径；standalone
   `395 passed`。
 - [x] standalone `395 passed`、全量 `1121 passed`；L1/L2、compileall、`git diff --check`
-  已通过。受控服务发布后的 health/runtime 核对和最终提交待完成；此增量不改变 r18
-  frozen 输入，也不授权 provider screening 或 target benchmark。
+  已通过。提交 `769b977` 已推送；Axio 18900 受控恢复后 `health=ready`、runtime routing
+  `healthy`、21/21 eligible、0 circuit、4 providers、`auto -> proxy`，三档 route-plan
+  dry-run 通过。当前生产并发上限未配置（feature disabled，保持兼容）；此增量不改变
+  r18 frozen 输入，也不授权 provider screening 或 target benchmark。
 
 # 2026-09-18 运行时渠道降级可观测性
 

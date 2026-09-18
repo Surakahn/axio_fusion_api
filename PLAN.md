@@ -16,8 +16,12 @@ SHA-256 租户投影，不保存 raw tenant/API key/prompt/provider output。该
 
 实现与专项回归：`runtime.py` 的原子 admission/幂等 release 与安全快照、`server.py`
 的四路径生命周期和 429 契约；standalone 回归 `395 passed`，全量回归 `1121 passed`。
-L1/L2、compileall、`git diff --check` 已通过；发布前 health 核对和最终提交仍待完成。
-r18 live screening 仍受 NVIDIA key pool 轮换安全门约束。
+L1/L2、compileall、`git diff --check` 已通过。提交 `769b977` 已推送；Axio 18900 已以
+同一显式 r7 probe-bound serving registry 受控恢复，`health=ready`、runtime routing
+`healthy`、21/21 eligible、0 circuit、4 providers、`auto -> proxy`，三档 route-plan
+dry-run 通过。生产当前未设置并发上限，因此 `tenant_concurrency_enabled=false`，保持
+既有行为；启用时只需设置 `AXIO_FUSION_TENANT_MAX_IN_FLIGHT`。r18 live screening 仍受
+NVIDIA key pool 轮换安全门约束。
 
 ## 2026-09-18 运行时渠道降级可观测性增量
 

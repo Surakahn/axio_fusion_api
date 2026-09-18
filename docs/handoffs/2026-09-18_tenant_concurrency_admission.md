@@ -23,7 +23,12 @@
 - L1：`py_compile` 通过；L2：`axio_fusion_api.runtime`、`server` 导入通过。
 - L3：专项并发回归 3/3 通过；standalone 全量 `395 passed`。
 - L4：standalone `395 passed`、全量 `1121 passed`；`compileall`、`git diff --check`
-  和关键导入均通过。受控服务发布后的 health/runtime 核对与最终 review 尚待完成。
+  和关键导入均通过。提交 `769b977` 已推送到 `origin/main`。
+- 受控恢复 Axio 18900 后只读核对：PID `2328231`，`health=ready`、runtime routing
+  `healthy`、21/21 runtime eligible、0 open circuit、21 physical/15 logical profiles、
+  4 providers、`auto -> proxy`；`axio-fast`/`axio-terra`/`axio-pro` route-plan dry-run
+  全部成功。当前生产没有设置 `AXIO_FUSION_TENANT_MAX_IN_FLIGHT`，runtime snapshot
+  明确为 `tenant_concurrency_enabled=false`，所以本次发布不改变现有吞吐语义。
 
 ## 当前未完成
 
@@ -41,3 +46,10 @@ superiority 证据。
 2. 继续从产品闭环寻找离线可验证的缺口（尤其流式生命周期、fallback 资源释放和公开
    错误契约），并保持每轮同步 Goal/PRD/PLAN/CHECKLIST/handoff。
 3. 外部凭据轮换完成后，回到冻结的 r18 单向证据链，不复用历史 partial 结果。
+
+## 发布边界
+
+本轮只重启了 Axio 18900 进程以载入产品代码；没有停止或重启 CPA Plus，没有执行
+provider screening、benchmark target 请求或修改任何 r18 frozen artifact。旧 Axio 控制台
+日志已保留为 `private/axio_server.18900.console.log.pre-769b977`，当前日志继续写入
+`private/axio_server.18900.console.log`。
