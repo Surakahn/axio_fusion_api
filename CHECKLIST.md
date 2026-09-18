@@ -7,10 +7,12 @@
   终态回放。
 - [x] `RuntimeState` 仅在显式 `AXIO_FUSION_TENANT_BUDGET_SQLITE_PATH` 且
   `shared_required` 下接入；缺少路径、初始化失败、后端异常继续 fail-closed，不启动 provider/image。
+- [x] 增加显式 operator `recover`：真实子进程退出后 reservation 默认保持 active，携带
+  recovery key/原因才释放，并以固定 reason code 幂等回放；避免 TTL 误释放仍在运行的请求。
 - [x] 公网部署合同在每日预算 + `shared_required` 时要求 ledger path；跨实例并发、幂等、
   hash-only snapshot 专项与全量 `1166 passed` 通过，提交 `67078aa` 已推送并受控发布
   至 Axio 18900（PID `2960979`）；文档收敛提交 `ccbfbf2` 已推送。
-- [ ] SQLite 仍只覆盖单主机共享文件；进程崩溃恢复、备份/恢复、磁盘/锁故障注入及跨主机
+- [ ] SQLite 仍只覆盖单主机共享文件；自动 fencing/租约恢复、备份/恢复、磁盘/锁故障注入及跨主机
   fencing/原子后端尚未完成，不能宣称公网多副本配额或全局预算已完成。
 
 # 2026-09-19 共享租户预算账本契约草案

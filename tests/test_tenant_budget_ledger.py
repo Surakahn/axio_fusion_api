@@ -1,4 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
+import os
+import subprocess
+import sys
 import threading
 
 import pytest
@@ -98,6 +101,47 @@ def test_sqlite_ledger_releases_failed_request_and_keeps_safe_snapshot(tmp_path)
     assert released.status == "released"
     assert ledger.snapshot(day="2026-09-19")["rows"][0]["reserved_usd"] == 0.0
     assert ledger.snapshot(day="2026-09-19")["raw_api_keys_persisted"] is False
+
+
+def test_sqlite_ledger_requires_explicit_recovery_after_process_exit(tmp_path):
+    path = tmp_path / "crashed-budget.db"
+    child_code = (
+        "import os, sys; "
+        "from axio_fusion_api.tenant_budget_ledger import SQLiteTenantBudgetLedger; "
+        "ledger=SQLiteTenantBudgetLedger(sys.argv[1]); "
+        "row=ledger.reserve(tenant_hash='tenant-hash', day='2026-09-19', amount_usd=0.40, "
+        "budget_usd=0.50, reservation_key='crashed-request'); "
+        "print(row.reservation_id, flush=True); os._exit(0)"
+    )
+    environment = dict(os.environ)
+    environment["PYTHONPATH"] = os.pathsep.join(
+        [str(os.path.join(os.getcwd(), "src")), environment.get("PYTHONPATH", "")]
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", child_code, str(path)],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    reservation_id = completed.stdout.strip()
+    ledger = SQLiteTenantBudgetLedger(str(path))
+    assert ledger.snapshot(day="2026-09-19")["rows"][0]["reserved_usd"] == 0.40
+    recovered = ledger.recover(
+        reservation_id=reservation_id,
+        recovery_key="operator-recovery-20260919",
+        reason="worker process exited before settlement",
+    )
+    assert recovered.status == "released"
+    assert recovered.reason_code == "tenant_budget_reservation_recovered"
+    replay = ledger.recover(
+        reservation_id=reservation_id,
+        recovery_key="operator-recovery-replay",
+        reason="repeated operator review after process exit",
+    )
+    assert replay.idempotent_replay is True
+    assert replay.reason_code == recovered.reason_code
+    assert ledger.snapshot(day="2026-09-19")["rows"][0]["reserved_usd"] == 0.0
 
 
 def test_atomic_reservation_is_shared_across_concurrent_workers():

@@ -87,6 +87,7 @@ class LedgerSettlement:
     actual_cost_usd: float | None
     overcommit: bool = False
     idempotent_replay: bool = False
+    reason_code: str = ""
 
 
 class TenantBudgetLedger(Protocol):
@@ -121,6 +122,15 @@ class TenantBudgetLedger(Protocol):
 
     def release(self, *, reservation_id: str) -> LedgerSettlement:
         """显式释放 active reservation；重复调用必须返回相同终态。"""
+
+    def recover(
+        self,
+        *,
+        reservation_id: str,
+        recovery_key: str,
+        reason: str,
+    ) -> LedgerSettlement:
+        """由 operator 明确回收疑似崩溃遗留的 active reservation。"""
 
     def snapshot(
         self,
@@ -272,6 +282,25 @@ class InMemoryTenantBudgetLedger:
                 return _replayed_settlement(record.settlement)
             return self._release_unlocked(record, idempotent_replay=False)
 
+    def recover(
+        self,
+        *,
+        reservation_id: str,
+        recovery_key: str,
+        reason: str,
+    ) -> LedgerSettlement:
+        _validate_recovery_inputs(reservation_id, recovery_key, reason)
+        with self._lock:
+            self._ensure_available_unlocked("release")
+            record = self._get_record_unlocked(reservation_id)
+            if record.settlement is not None:
+                return _replayed_settlement(record.settlement)
+            return self._release_unlocked(
+                record,
+                idempotent_replay=False,
+                reason_code="tenant_budget_reservation_recovered",
+            )
+
     def snapshot(
         self,
         *,
@@ -319,7 +348,13 @@ class InMemoryTenantBudgetLedger:
                 "secrets_persisted": False,
             }
 
-    def _release_unlocked(self, record: _ReservationRecord, *, idempotent_replay: bool) -> LedgerSettlement:
+    def _release_unlocked(
+        self,
+        record: _ReservationRecord,
+        *,
+        idempotent_replay: bool,
+        reason_code: str = "",
+    ) -> LedgerSettlement:
         account = (record.tenant_hash, record.day)
         reserved = max(0.0, self._reserved.get(account, 0.0) - record.amount_usd)
         self._reserved[account] = reserved
@@ -331,6 +366,7 @@ class InMemoryTenantBudgetLedger:
             reserved_usd=_rounded(reserved),
             actual_cost_usd=None,
             idempotent_replay=idempotent_replay,
+            reason_code=reason_code,
         )
         record.settlement = result
         return result
@@ -522,6 +558,30 @@ class SQLiteTenantBudgetLedger:
         except sqlite3.Error as error:
             raise TenantBudgetLedgerUnavailable("sqlite ledger release failed") from error
 
+    def recover(
+        self,
+        *,
+        reservation_id: str,
+        recovery_key: str,
+        reason: str,
+    ) -> LedgerSettlement:
+        _validate_recovery_inputs(reservation_id, recovery_key, reason)
+        try:
+            with self._transaction() as connection:
+                row = self._reservation(connection, reservation_id)
+                if row["status"] != "active":
+                    return self._settlement_result(connection, row, idempotent_replay=True)
+                return self._release_row(
+                    connection,
+                    row,
+                    idempotent_replay=False,
+                    reason_code="tenant_budget_reservation_recovered",
+                )
+        except TenantBudgetLedgerError:
+            raise
+        except sqlite3.Error as error:
+            raise TenantBudgetLedgerUnavailable("sqlite ledger recovery failed") from error
+
     def snapshot(
         self,
         *,
@@ -589,15 +649,21 @@ class SQLiteTenantBudgetLedger:
                     "reservation_key TEXT NOT NULL, amount_usd REAL NOT NULL, budget_usd REAL NOT NULL, "
                     "status TEXT NOT NULL, actual_cost_usd REAL, overcommit INTEGER NOT NULL DEFAULT 0, "
                     "created_at REAL NOT NULL, settled_at REAL, settled_committed_usd REAL, "
-                    "settled_reserved_usd REAL, UNIQUE (tenant_hash, day, reservation_key));"
+                    "settled_reserved_usd REAL, settlement_reason_code TEXT NOT NULL DEFAULT '', "
+                    "UNIQUE (tenant_hash, day, reservation_key));"
                     "CREATE INDEX IF NOT EXISTS reservations_status_idx ON reservations(status, day);"
                 )
                 columns = {
                     str(row[1]) for row in connection.execute("PRAGMA table_info(reservations)").fetchall()
                 }
-                for column in ("settled_committed_usd", "settled_reserved_usd"):
+                for column in (
+                    "settled_committed_usd",
+                    "settled_reserved_usd",
+                    "settlement_reason_code",
+                ):
                     if column not in columns:
-                        connection.execute(f"ALTER TABLE reservations ADD COLUMN {column} REAL")
+                        column_type = "TEXT NOT NULL DEFAULT ''" if column == "settlement_reason_code" else "REAL"
+                        connection.execute(f"ALTER TABLE reservations ADD COLUMN {column} {column_type}")
         except sqlite3.Error as error:
             raise TenantBudgetLedgerUnavailable("sqlite ledger initialization failed") from error
 
@@ -685,11 +751,16 @@ class SQLiteTenantBudgetLedger:
             ),
             overcommit=bool(row["overcommit"]),
             idempotent_replay=idempotent_replay,
+            reason_code=str(row["settlement_reason_code"] or ""),
         )
 
     @staticmethod
     def _release_row(
-        connection: sqlite3.Connection, row: sqlite3.Row, *, idempotent_replay: bool
+        connection: sqlite3.Connection,
+        row: sqlite3.Row,
+        *,
+        idempotent_replay: bool,
+        reason_code: str = "",
     ) -> LedgerSettlement:
         account = SQLiteTenantBudgetLedger._account(connection, row["tenant_hash"], row["day"], row["budget_usd"])
         reserved = max(0.0, float(account["reserved_usd"]) - float(row["amount_usd"]))
@@ -699,8 +770,14 @@ class SQLiteTenantBudgetLedger:
         )
         connection.execute(
             "UPDATE reservations SET status='released', settled_at=?, settled_committed_usd=?, "
-            "settled_reserved_usd=? WHERE reservation_id=?",
-            (time.time(), float(account["committed_usd"]), reserved, row["reservation_id"]),
+            "settled_reserved_usd=?, settlement_reason_code=? WHERE reservation_id=?",
+            (
+                time.time(),
+                float(account["committed_usd"]),
+                reserved,
+                reason_code,
+                row["reservation_id"],
+            ),
         )
         updated = SQLiteTenantBudgetLedger._reservation(connection, row["reservation_id"])
         account = SQLiteTenantBudgetLedger._account(connection, row["tenant_hash"], row["day"], row["budget_usd"])
@@ -712,6 +789,7 @@ class SQLiteTenantBudgetLedger:
             actual_cost_usd=None,
             overcommit=False,
             idempotent_replay=idempotent_replay,
+            reason_code=reason_code,
         )
 
 
@@ -724,6 +802,7 @@ def _replayed_settlement(value: LedgerSettlement) -> LedgerSettlement:
         actual_cost_usd=value.actual_cost_usd,
         overcommit=value.overcommit,
         idempotent_replay=True,
+        reason_code=value.reason_code,
     )
 
 
@@ -746,6 +825,13 @@ def _validate_ledger_inputs(
         raise TenantBudgetLedgerInvariantError("tenant hash, day and reservation key are required")
     if _finite_nonnegative(amount_usd) is None or _finite_nonnegative(budget_usd) is None:
         raise TenantBudgetLedgerInvariantError("budget values must be finite and non-negative")
+
+
+def _validate_recovery_inputs(reservation_id: str, recovery_key: str, reason: str) -> None:
+    if not str(reservation_id).strip() or not str(recovery_key).strip():
+        raise TenantBudgetLedgerInvariantError("recovery reservation id and key are required")
+    if len(str(reason).strip()) < 8:
+        raise TenantBudgetLedgerInvariantError("recovery reason must contain at least 8 characters")
 
 
 def _rounded(value: float) -> float:

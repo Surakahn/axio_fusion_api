@@ -167,7 +167,9 @@ runtime 暴露 `tenant_budget_scope_ready=false`，因此不会把不安全的�
 `AXIO_FUSION_TENANT_BUDGET_SQLITE_PATH` 配置后，RuntimeState 会通过同一文件执行
 `BEGIN IMMEDIATE` 原子预留、幂等结算/释放和租户定向快照；未配置、初始化失败或后端异常
 仍 fail-closed。该适配器只覆盖单主机多进程，不冒充跨主机 Redis/SQL 集群；公网启用前仍需
-完成文件卷可靠性、锁竞争、进程崩溃恢复和运维备份审计。
+完成文件卷可靠性、锁竞争、进程崩溃恢复和运维备份审计。当前已增加显式 operator
+recovery：疑似崩溃 reservation 不按 TTL 自动释放，必须提供 recovery key/原因并留下固定
+reason code；这仍不是自动 fencing/租约恢复。
 
 | 领域 | 当前状态 | 已完成的可验证内容 | 未完成/阻塞 | 下一条合法动作 |
 | --- | --- | --- | --- | --- |

@@ -15,6 +15,10 @@ CPA Plus。
 - `(tenant_hash, day, reservation_key)` 唯一约束提供网络重试幂等；settle/release 对
   已终结 reservation 返回固定终态快照，不因后续消费改变历史结果。
 - WAL、`busy_timeout` 和 `synchronous=FULL` 用于同一主机多进程的锁竞争与落盘安全。
+- 增加显式 `recover` operator 操作：进程退出后 active reservation 默认继续占用预算，只有
+  提供 recovery key 和不少于 8 个字符的原因才允许释放；恢复结果带固定
+  `tenant_budget_reservation_recovered` reason code 且可幂等回放，避免 TTL 猜测式释放仍在
+  执行的请求。
 - RuntimeState 在显式 `AXIO_FUSION_TENANT_BUDGET_SQLITE_PATH` 下接入该账本；预算 scope
   为 `shared_required` 且未配置/不可用时仍返回 503 对应错误，不启动 provider/image 工作。
 - 共享路径使用 tenant hash 定向查询，避免 snapshot 受租户数量排序/截断影响。
@@ -26,17 +30,18 @@ CPA Plus。
 
 - L1：`tenant_budget_ledger.py`、`runtime.py`、`server.py` 及测试通过 `py_compile`。
 - L2：关键模块导入通过。
-- L3：账本、预算、部署契约、图片和真实增量流专项共 `94 passed`；账本/预算专项
-  `21 passed`。覆盖两个 RuntimeState 共享同一文件的并发预留、幂等结算/释放、跨实例
-  预算耗尽和 hash-only snapshot。
+- L3：账本/预算专项 `22 passed`；覆盖两个 RuntimeState 共享同一文件的并发预留、幂等
+  结算/释放、跨实例预算耗尽、hash-only snapshot，以及真实子进程退出后重新打开数据库
+  再执行显式 recovery。此前相关部署契约、图片和真实增量流专项共 `94 passed`。
 - L4：`git diff --check` 通过；没有新增 provider/target 网络调用，r18 frozen 输入与
   serving registry 未改动。
 
 ## 当前边界
 
 SQLite 适用于单主机多进程共享文件，不等同于跨主机 Redis/SQL 集群。活动 reservation
-在进程崩溃后不会自动猜测释放，避免把仍在执行的请求误判为失效；后续必须设计并审计
-租约恢复、备份/恢复、文件卷可靠性、锁超时告警和跨主机原子后端，再扩大公网部署范围。
+在进程崩溃后不会自动猜测释放，避免把仍在执行的请求误判为失效；当前通过显式 operator
+recovery 提供安全人工恢复路径，但还没有自动 fencing/租约恢复。后续必须审计备份/恢复、
+文件卷可靠性、锁超时告警和跨主机原子后端，再扩大公网部署范围。
 当前生产 18900 仍是 loopback、预算未启用；本轮代码提交 `67078aa` 已推送并以
 `setsid/nohup` 受控发布至 PID `2960979`。发布后 `/health=ready`、runtime routing
 `healthy`、21/15 physical/logical、4 providers、`auto -> proxy`，Fast/Terra/Pro

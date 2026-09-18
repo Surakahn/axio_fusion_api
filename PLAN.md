@@ -11,6 +11,11 @@
 审计后，才能扩大公网预算部署范围。详见
 `docs/handoffs/2026-09-19_shared_sqlite_budget_ledger.md`。
 
+本轮继续补齐恢复边界：新增显式 `recover` operator 操作和固定
+`tenant_budget_reservation_recovered` reason code。真实子进程退出后 reservation 仍保持
+active，只有携带 recovery key 与原因才释放；不使用未经证明的 TTL 自动释放。该路径是
+安全人工恢复，不等同于自动 fencing/租约恢复。
+
 ## 2026-09-19 共享租户预算账本契约草案
 
 为后续多副本配额接入新增独立 `TenantBudgetLedger` Protocol 及仅测试用
