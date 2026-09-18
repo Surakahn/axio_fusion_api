@@ -107,10 +107,6 @@ class TenantBudgetLease:
                     # that reservation committed instead of turning it into
                     # unmetered/free traffic.
                     actual = self.reserved_usd
-                elif self.reserved_usd > 0.0:
-                    # 成功但 usage receipt 缺失时按已批准的保守估价结算，
-                    # 防止已知成本请求静默变成免费；显式 cost=0 仍保留零成本。
-                    actual = self.reserved_usd
         self._state._settle_budget_lease(self, actual if success else None, now=now)
 
 
