@@ -344,7 +344,11 @@ class RuntimeState:
             budget_tenants = len(self._budget_spend)
             feedback_count = self._feedback_count
             feedback_by_score = dict(self._feedback_by_score)
-            rate_bucket_rows = _safe_rate_bucket_rows(self._rate_windows, limit=rate_limit)
+            rate_bucket_rows = _safe_rate_bucket_rows(
+                self._rate_windows,
+                limit=rate_limit,
+                now=current,
+            )
             budget_rows = _safe_budget_rows(self._budget_spend, daily_budget=daily_budget)
             response_session_count = len(self._response_continuations)
             response_session_tenant_count = len(
@@ -553,16 +557,25 @@ def _bounded_env_int(name: str, *, default: int, minimum: int, maximum: int) -> 
     return max(minimum, min(maximum, int(configured)))
 
 
-def _safe_rate_bucket_rows(windows: Mapping[str, list[float]], *, limit: int | None) -> list[dict[str, Any]]:
+def _safe_rate_bucket_rows(
+    windows: Mapping[str, list[float]],
+    *,
+    limit: int | None,
+    now: float,
+) -> list[dict[str, Any]]:
     rows = []
     for tenant_key, stamps in windows.items():
         request_count = len(stamps)
+        retry_after = 0
+        if limit and request_count >= limit and stamps:
+            retry_after = max(1, int(60 - (float(now) - float(stamps[0]))))
         rows.append(
             {
                 "tenant_sha256": sha256_text(tenant_key),
                 "request_count_last_minute": request_count,
                 "limit": int(limit) if limit else None,
                 "remaining": max(0, int(limit) - request_count) if limit else None,
+                "retry_after_seconds": retry_after,
                 "raw_tenant_key_persisted": False,
                 "raw_api_key_persisted": False,
                 "secrets_persisted": False,

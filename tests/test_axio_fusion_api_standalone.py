@@ -7892,6 +7892,7 @@ def test_standalone_runtime_snapshot_has_hash_only_rate_and_budget_tenant_rows(m
     assert snapshot["raw_tenant_keys_persisted"] is False
     assert snapshot["raw_api_keys_persisted"] is False
     assert [row["request_count_last_minute"] for row in rate_rows] == [2, 1]
+    assert [row["retry_after_seconds"] for row in rate_rows] == [0, 0]
     assert [row["spent_usd"] for row in budget_rows] == [0.2, 0.12]
     assert all(len(row["tenant_sha256"]) == 64 for row in rate_rows)
     assert all(len(row["tenant_sha256"]) == 64 and len(row["day_sha256"]) == 64 for row in budget_rows)
@@ -7904,6 +7905,33 @@ def test_standalone_runtime_snapshot_has_hash_only_rate_and_budget_tenant_rows(m
     stale = state.snapshot(now=1100.0)
     assert stale["active_rate_limit_buckets"] == 0
     assert stale["budget_tenant_count"] == 2
+
+
+def test_standalone_runtime_rate_bucket_retry_hint_tracks_window_reset(monkeypatch):
+    reset_runtime_state_for_tests()
+    monkeypatch.setenv("AXIO_FUSION_RATE_LIMIT_PER_MINUTE", "1")
+    state = runtime_state()
+    tenant_key = tenant_key_from_headers({"x-api-key": "rate-window-tenant"})
+
+    first = state.check_rate_limit(tenant_key, now=1000.0)
+    assert first["allowed"] is True
+    snapshot = state.snapshot(now=1059.0)
+    row = snapshot["rate_limit_buckets"][0]
+    assert row["request_count_last_minute"] == 1
+    assert row["remaining"] == 0
+    assert row["retry_after_seconds"] == 1
+
+    recovered = state.snapshot(now=1061.0)
+    assert recovered["rate_limit_buckets"] == []
+
+
+def test_standalone_runtime_disabled_rate_bucket_has_no_retry_hint(monkeypatch):
+    reset_runtime_state_for_tests()
+    monkeypatch.setenv("AXIO_FUSION_RATE_LIMIT_PER_MINUTE", "0")
+    state = runtime_state()
+    tenant_key = tenant_key_from_headers({"x-api-key": "disabled-rate-tenant"})
+    assert state.check_rate_limit(tenant_key, now=1000.0)["allowed"] is True
+    assert state.snapshot(now=1000.0)["rate_limit_buckets"] == []
 
 
 def test_standalone_gateway_daily_budget_uses_public_trace_summary_cost(monkeypatch):
