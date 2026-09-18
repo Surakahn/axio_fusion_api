@@ -37,7 +37,11 @@ CPA Plus。
 SQLite 适用于单主机多进程共享文件，不等同于跨主机 Redis/SQL 集群。活动 reservation
 在进程崩溃后不会自动猜测释放，避免把仍在执行的请求误判为失效；后续必须设计并审计
 租约恢复、备份/恢复、文件卷可靠性、锁超时告警和跨主机原子后端，再扩大公网部署范围。
-当前生产 18900 仍是 loopback、预算未启用，未因本轮变更重启服务。
+当前生产 18900 仍是 loopback、预算未启用；本轮代码提交 `67078aa` 已推送并以
+`setsid/nohup` 受控发布至 PID `2960979`。发布后 `/health=ready`、runtime routing
+`healthy`、21/15 physical/logical、4 providers、`auto -> proxy`，Fast/Terra/Pro
+dry-run 均通过。CPA Plus 8317 监听保持不变且未重启；旧 Axio 回滚日志已清理，只保留
+`private/axio_server.18900.console.log.pre-67078aa`。
 
 ## 下一步
 
