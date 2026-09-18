@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import time
 import uuid
@@ -65,6 +66,7 @@ IMAGE_PARAMETER_SUPPORT_KEYS = (
     "input_fidelity",
     "background_transparent",
 )
+MAX_IMAGE_OPERATION_COST_USD = 1_000.0
 _IMAGE_DEFAULT_GENERATION_PATH = "/images/generations"
 _IMAGE_DEFAULT_EDIT_PATH = "/images/edits"
 
@@ -801,6 +803,32 @@ def _normalize_image_capabilities(value: Any) -> dict[str, Any]:
     parameter_support = _normalize_image_parameter_support(
         raw.get("parameter_support", raw.get("parameterSupport", {}))
     )
+    pricing_raw = raw.get("pricing", raw.get("price", {}))
+    pricing_raw = pricing_raw if isinstance(pricing_raw, Mapping) else {}
+    pricing_unit = str(pricing_raw.get("unit") or "request").strip().casefold()
+    if pricing_unit not in {"request", "image"}:
+        pricing_unit = "request"
+    pricing_source = str(pricing_raw.get("source") or "unknown").strip().casefold()
+    if pricing_source not in {"provider_documented", "registry", "unknown"}:
+        pricing_source = "unknown"
+
+    def _image_price(name: str) -> float | None:
+        candidate = pricing_raw.get(name)
+        try:
+            parsed = float(candidate)
+        except (TypeError, ValueError):
+            return None
+        if parsed < 0 or not math.isfinite(parsed) or parsed > MAX_IMAGE_OPERATION_COST_USD:
+            return None
+        return round(parsed, 8)
+
+    pricing = {
+        "unit": pricing_unit,
+        "generation_usd": _image_price("generation_usd"),
+        "editing_usd": _image_price("editing_usd"),
+        "source": pricing_source,
+        "raw_pricing_persisted": False,
+    }
     generation_default = (
         "/responses"
         if transport == "responses_image_generation"
@@ -821,6 +849,7 @@ def _normalize_image_capabilities(value: Any) -> dict[str, Any]:
         "max_input_images": max_input_images,
         "streaming": streaming,
         "parameter_support": parameter_support,
+        "pricing": pricing,
         "raw_payload_paths_persisted": False,
     }
 

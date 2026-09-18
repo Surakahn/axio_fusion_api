@@ -1,5 +1,18 @@
 # Axio Fusion API Checklist
 
+# 2026-09-19 图片 lane 成本计量闭环
+
+- [x] `image_capabilities.pricing` 采用闭合 schema，支持 generation/editing、request/image
+  单位及 registry/provider_documented 来源；非法、缺失或未核验价格保持 unknown。
+- [x] buffered generation/editing、direct stream fallback 与 HTTP 增量 SSE 使用最终成功
+  profile 的同一成本估算；failover、provider 失败和客户端取消不记录成功图片成本。
+- [x] 可选 text prompt composer 的真实 Fusion 成本通过同一租户 observer 记录；响应只含
+  bounded cost metadata，不持久化 raw provider/prompt/image/secret。
+- [x] 图片专项 `41 passed`；L1/L2、compileall、`git diff --check` 通过；当前生产 registry
+  无显式 image pricing，故 unknown 成本不会伪造为 `0.0`，待价格证据补齐后再累计预算。
+- [ ] 生产公网启用租户预算前，为 verified image profiles 补齐 provider-documented 或
+  registry-approved generation/editing 价格，并用同一 fake-provider 回归后再发布。
+
 # 2026-09-19 每日预算窗口恢复可观测性
 
 - [x] `budget_tenants[].retry_after_seconds` 与预算错误响应共享 UTC 日界语义；未超限或

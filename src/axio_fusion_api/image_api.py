@@ -10,6 +10,7 @@ providers commonly accept multipart bodies and large binary responses.
 from __future__ import annotations
 
 import json
+import math
 import os
 import socket
 import time
@@ -54,6 +55,7 @@ from .schemas import (
     FusionPolicy,
     FusionRequest,
     ModelProfile,
+    MAX_IMAGE_OPERATION_COST_USD,
     canonical_public_model,
     sha256_text,
 )
@@ -107,6 +109,64 @@ class ImageProviderResult:
     stream_events: tuple[Mapping[str, Any], ...] = ()
     stream_protocol: str = ""
     event_prefix: str = "image_generation"
+
+
+def image_cost_estimate(
+    profile: ModelProfile,
+    result: ImageProviderResult,
+    *,
+    operation: str,
+) -> dict[str, Any]:
+    """Return a bounded image cost observation tied to the final profile.
+
+    Image providers generally price by operation/size rather than text tokens.
+    The registry therefore has to opt in with an explicit fixed estimate.  A
+    missing or invalid value remains ``pricing_known=false``; it is never
+    silently converted to zero and cannot inflate a tenant budget.
+    """
+
+    normalized_operation = "editing" if operation in {"editing", "edits"} else "generation"
+    capabilities = profile.image_capabilities if isinstance(profile.image_capabilities, Mapping) else {}
+    pricing = capabilities.get("pricing") if isinstance(capabilities.get("pricing"), Mapping) else {}
+    value = pricing.get(f"{normalized_operation}_usd")
+    try:
+        unit_cost = float(value)
+    except (TypeError, ValueError):
+        unit_cost = -1.0
+    source = str(pricing.get("source") or "unknown")
+    if (
+        unit_cost < 0
+        or not math.isfinite(unit_cost)
+        or unit_cost > MAX_IMAGE_OPERATION_COST_USD
+        or source not in {"provider_documented", "registry"}
+    ):
+        return {
+            "pricing_known": False,
+            "cost_usd": None,
+            "operation": normalized_operation,
+            "unit": str(pricing.get("unit") or "request"),
+            "source": "unknown",
+            "scope": "image_provider",
+        }
+    count = max(1, len(result.data)) if str(pricing.get("unit") or "request") == "image" else 1
+    cost = round(unit_cost * count, 8)
+    if not math.isfinite(cost) or cost > MAX_IMAGE_OPERATION_COST_USD:
+        return {
+            "pricing_known": False,
+            "cost_usd": None,
+            "operation": normalized_operation,
+            "unit": str(pricing.get("unit") or "request"),
+            "source": "unknown",
+            "scope": "image_provider",
+        }
+    return {
+        "pricing_known": True,
+        "cost_usd": cost,
+        "operation": normalized_operation,
+        "unit": str(pricing.get("unit") or "request"),
+        "source": source,
+        "scope": "image_provider",
+    }
 
 
 def image_route_kind(route: str) -> str:
@@ -440,9 +500,11 @@ class ImagePromptTransformer:
         text_engine: Any | None,
         *,
         model: str = "axio-fast",
+        cost_observer: Callable[[Mapping[str, Any]], None] | None = None,
     ) -> None:
         self.text_engine = text_engine
         self.model = str(model or "axio-fast")
+        self.cost_observer = cost_observer
 
     def transform(
         self,
@@ -479,6 +541,34 @@ class ImagePromptTransformer:
                 ),
                 live=True,
             )
+            if self.cost_observer is not None:
+                trace = getattr(response, "trace", {})
+                trace = trace if isinstance(trace, Mapping) else {}
+                cost = trace.get("actual_cost_usd")
+                cost_budget = trace.get("cost_budget")
+                cost_budget = cost_budget if isinstance(cost_budget, Mapping) else {}
+                try:
+                    unpriced_calls = int(cost_budget.get("unpriced_call_count") or 0)
+                except (TypeError, ValueError):
+                    unpriced_calls = 1
+                try:
+                    candidate_cost = float(cost) if cost is not None else None
+                    normalized_cost = (
+                        max(0.0, candidate_cost)
+                        if candidate_cost is not None and math.isfinite(candidate_cost)
+                        else None
+                    )
+                except (TypeError, ValueError):
+                    normalized_cost = None
+                pricing_known = normalized_cost is not None and unpriced_calls == 0
+                self.cost_observer(
+                    {
+                        "cost_usd": normalized_cost if pricing_known else None,
+                        "pricing_known": pricing_known,
+                        "source": "text_fusion_composer" if pricing_known else "unknown",
+                        "scope": "text_prompt_composer",
+                    }
+                )
         except Exception:
             return (
                 dict(payload),
@@ -1152,6 +1242,7 @@ class ImageRouter:
                         public_model,
                         result,
                         profile,
+                        operation="generation",
                         prompt_transform=transform,
                     ),
                     result,
@@ -1228,6 +1319,7 @@ class ImageRouter:
                         public_model,
                         result,
                         profile,
+                        operation="editing",
                         prompt_transform=transform,
                     ),
                     result,
@@ -1325,6 +1417,7 @@ def _public_image_response(
     result: ImageProviderResult,
     profile: ModelProfile,
     *,
+    operation: str,
     prompt_transform: ImagePromptTransform | None = None,
 ) -> dict[str, Any]:
     transform = prompt_transform or ImagePromptTransform(
@@ -1344,6 +1437,7 @@ def _public_image_response(
             "raw_provider_response_persisted": False,
             "raw_image_prompt_persisted": False,
             "prompt_transform": transform.safe_dict(),
+            "cost": image_cost_estimate(profile, result, operation=operation),
             "secrets_persisted": False,
         },
     }

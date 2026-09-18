@@ -19,6 +19,7 @@ from axio_fusion_api.image_api import (
     ImageRequestError,
     ImagePromptTransformer,
     ImageRouter,
+    image_cost_estimate,
     _encode_multipart,
     parse_edit_payload,
     parse_generation_payload,
@@ -33,6 +34,7 @@ from axio_fusion_api.orchestrator import FusionEngine
 from axio_fusion_api.providers import ProviderExecutionError
 from axio_fusion_api.registry import load_image_probe_candidates, load_image_registry
 from axio_fusion_api.schemas import ModelProfile
+from axio_fusion_api.runtime import reset_runtime_state_for_tests, runtime_state
 
 
 def _image_profile(
@@ -46,6 +48,7 @@ def _image_profile(
     transport: str = "images_api",
     api_format: str = "chat/completions",
     parameter_support: dict[str, object] | None = None,
+    pricing: dict[str, object] | None = None,
 ) -> ModelProfile:
     image_capabilities = {
         "status": capability_status,
@@ -56,6 +59,8 @@ def _image_profile(
     }
     if parameter_support is not None:
         image_capabilities["parameter_support"] = parameter_support
+    if pricing is not None:
+        image_capabilities["pricing"] = pricing
     return ModelProfile(
         provider="image-provider",
         model="gpt-image-2",
@@ -74,24 +79,38 @@ class _FakeImageClient:
         self.generate_calls: list[dict] = []
         self.edit_calls: list[tuple[dict, list[ImagePart]]] = []
 
-    def generate(self, profile, payload, *, timeout=None):
+    def generate(self, profile, payload, *, timeout=None, stream_observer=None):
         self.generate_calls.append(dict(payload))
+        events = (
+            {"type": "image_generation.partial_image", "b64_json": "partial"},
+            {"type": "image_generation.completed", "b64_json": "encoded-image"},
+        ) if payload.get("stream") else ()
+        if stream_observer is not None:
+            for event in events:
+                if not stream_observer(event):
+                    raise ProviderExecutionError("stream cancelled", error_code="public_stream_cancelled")
         return ImageProviderResult(
             data=({"b64_json": "encoded-image"},),
             created=123,
-            stream_events=(
-                {"type": "image_generation.partial_image", "b64_json": "partial"},
-                {"type": "image_generation.completed", "b64_json": "encoded-image"},
-            ) if payload.get("stream") else (),
+            stream_events=events,
             stream_protocol="sse" if payload.get("stream") else "",
             event_prefix="image_generation",
         )
 
-    def edit(self, profile, fields, files, *, timeout=None):
+    def edit(self, profile, fields, files, *, timeout=None, stream_observer=None):
         self.edit_calls.append((dict(fields), list(files)))
+        events = (
+            {"type": "image_edit.partial_image", "b64_json": "partial-edit"},
+            {"type": "image_edit.completed", "url": "https://images.invalid/result.png"},
+        ) if fields.get("stream") else ()
+        if stream_observer is not None:
+            for event in events:
+                if not stream_observer(event):
+                    raise ProviderExecutionError("stream cancelled", error_code="public_stream_cancelled")
         return ImageProviderResult(
             data=({"url": "https://images.invalid/result.png"},),
             created=456,
+            stream_events=events,
             event_prefix="image_edit",
         )
 
@@ -104,6 +123,31 @@ def test_image_profiles_are_excluded_from_text_and_text_profiles_from_images():
     assert text.text_model_eligible is True
     assert image.image_generation_eligible is True
     assert text.image_generation_eligible is False
+
+
+def test_image_cost_estimate_is_explicit_and_unknown_is_not_zero():
+    result = ImageProviderResult(
+        data=({"b64_json": "one"}, {"b64_json": "two"}),
+        created=1,
+    )
+    priced = _image_profile(pricing={"unit": "image", "generation_usd": 0.04, "source": "registry"})
+    assert image_cost_estimate(priced, result, operation="generation") == {
+        "pricing_known": True,
+        "cost_usd": 0.08,
+        "operation": "generation",
+        "unit": "image",
+        "source": "registry",
+        "scope": "image_provider",
+    }
+    unknown = image_cost_estimate(_image_profile(), result, operation="generation")
+    assert unknown["pricing_known"] is False
+    assert unknown["cost_usd"] is None
+    unverified = _image_profile(pricing={"generation_usd": 0.04})
+    assert image_cost_estimate(unverified, result, operation="generation")["pricing_known"] is False
+    oversized = _image_profile(
+        pricing={"generation_usd": 10_000_000, "source": "registry"}
+    )
+    assert image_cost_estimate(oversized, result, operation="generation")["pricing_known"] is False
 
 
 def test_discovered_gpt_image_names_enter_unverified_image_lane_only():
@@ -439,6 +483,74 @@ def test_image_prompt_transformer_falls_back_on_non_json_model_output():
     assert receipt.reason == "text_prompt_composer_invalid"
 
 
+def test_image_prompt_transformer_reports_text_composer_cost():
+    class PricedComposer:
+        profiles = (
+            ModelProfile(
+                provider="text-provider",
+                model="text-model",
+                capabilities={"daily_work": 0.9},
+            ),
+        )
+
+        def complete(self, request, *, live):
+            del request, live
+            return type(
+                "Response",
+                (),
+                {
+                    "text": '{"prompt":"composed"}',
+                    "trace": {"actual_cost_usd": 0.003},
+                },
+            )()
+
+    observations: list[dict[str, object]] = []
+    transformer = ImagePromptTransformer(
+        PricedComposer(),
+        cost_observer=observations.append,
+    )
+    payload, receipt = transformer.transform(
+        {"model": "axio-terra", "prompt": "compose this"},
+        operation="generation",
+    )
+    assert payload["prompt"] == "composed"
+    assert receipt.applied is True
+    assert observations == [
+        {
+            "cost_usd": 0.003,
+            "pricing_known": True,
+            "source": "text_fusion_composer",
+            "scope": "text_prompt_composer",
+        }
+    ]
+
+    class UnpricedComposer(PricedComposer):
+        def complete(self, request, *, live):
+            del request, live
+            return type(
+                "Response",
+                (),
+                {
+                    "text": '{"prompt":"composed"}',
+                    "trace": {
+                        "actual_cost_usd": 0.0,
+                        "cost_budget": {"unpriced_call_count": 1},
+                    },
+                },
+            )()
+
+    unknown_observations: list[dict[str, object]] = []
+    ImagePromptTransformer(
+        UnpricedComposer(),
+        cost_observer=unknown_observations.append,
+    ).transform(
+        {"model": "axio-terra", "prompt": "compose this"},
+        operation="generation",
+    )
+    assert unknown_observations[0]["pricing_known"] is False
+    assert unknown_observations[0]["cost_usd"] is None
+
+
 def test_edit_parser_supports_mask_and_multiple_image_parts():
     body, content_type = _encode_multipart(
         {"model": "axio-terra", "prompt": "replace the sky", "stream": "false"},
@@ -627,6 +739,68 @@ def test_server_dispatches_images_without_invoking_text_fusion(monkeypatch):
     assert len(fake.generate_calls) == 1
 
 
+def test_server_records_priced_image_cost_for_buffered_and_streaming(monkeypatch):
+    reset_runtime_state_for_tests()
+    monkeypatch.setenv("AXIO_FUSION_TENANT_DAILY_BUDGET_USD", "1")
+    profile = _image_profile(
+        pricing={"generation_usd": 0.04, "editing_usd": 0.06, "source": "registry"}
+    )
+    fake = _FakeImageClient()
+    monkeypatch.setattr(server, "ImageRouter", lambda profiles: ImageRouter(profiles, client=fake))
+    headers = {"Content-Type": "application/json", "x-api-key": "image-cost-tenant"}
+
+    status, _, _ = server.handle_request(
+        method="POST",
+        path="/v1/images/generations",
+        headers=headers,
+        body=json.dumps({"model": "axio-fast", "prompt": "buffered"}),
+        engine=FusionEngine([profile]),
+    )
+    stream_status, _, _ = server.handle_request(
+        method="POST",
+        path="/v1/images/generations",
+        headers=headers,
+        body=json.dumps({"model": "axio-fast", "prompt": "stream", "stream": True}),
+        engine=FusionEngine([profile]),
+    )
+    edit_body, edit_content_type = _encode_multipart(
+        {"model": "axio-fast", "prompt": "edit"},
+        [ImagePart("image", "source.png", "image/png", b"png")],
+    )
+    edit_status, _, _ = server.handle_request(
+        method="POST",
+        path="/v1/images/edits",
+        headers={"Content-Type": edit_content_type, "x-api-key": "image-cost-tenant"},
+        body=edit_body,
+        engine=FusionEngine([profile]),
+    )
+    tenant_key = server.tenant_key_from_headers({key.lower(): value for key, value in headers.items()})
+    snapshot = runtime_state().snapshot()
+    row = next(item for item in snapshot["budget_tenants"] if item["tenant_sha256"] == server.sha256_text(tenant_key))
+    assert status == 200
+    assert stream_status == 200
+    assert edit_status == 200
+    assert row["spent_usd"] == 0.14
+
+
+def test_server_does_not_record_unknown_or_failed_image_cost(monkeypatch):
+    reset_runtime_state_for_tests()
+    monkeypatch.setenv("AXIO_FUSION_TENANT_DAILY_BUDGET_USD", "1")
+    profile = _image_profile()
+    fake = _FakeImageClient()
+    monkeypatch.setattr(server, "ImageRouter", lambda profiles: ImageRouter(profiles, client=fake))
+    headers = {"Content-Type": "application/json", "x-api-key": "unknown-image-cost"}
+    status, _, _ = server.handle_request(
+        method="POST",
+        path="/v1/images/generations",
+        headers=headers,
+        body=json.dumps({"model": "axio-fast", "prompt": "unknown"}),
+        engine=FusionEngine([profile]),
+    )
+    assert status == 200
+    assert runtime_state().snapshot()["budget_tenants"] == []
+
+
 def test_server_dispatches_multipart_image_edit(monkeypatch):
     profile = _image_profile()
     fake = _FakeImageClient()
@@ -760,6 +934,45 @@ def test_http_server_delivers_image_event_before_provider_finishes(monkeypatch):
         worker.join(timeout=5)
 
     assert worker.is_alive() is False
+
+
+def test_http_image_stream_records_profile_bound_cost(monkeypatch):
+    reset_runtime_state_for_tests()
+    monkeypatch.setenv("AXIO_FUSION_TENANT_DAILY_BUDGET_USD", "1")
+    profile = _image_profile(
+        pricing={"generation_usd": 0.04, "source": "registry"}
+    )
+    fake = _FakeImageClient()
+    monkeypatch.setattr(server, "ImageRouter", lambda profiles: ImageRouter(profiles, client=fake))
+    gateway = server.create_http_server(
+        host="127.0.0.1",
+        port=0,
+        live=False,
+        engine=FusionEngine([profile]),
+        record_trace=False,
+        record_runtime=True,
+    )
+    worker = threading.Thread(target=gateway.serve_forever, daemon=True)
+    worker.start()
+    connection = http.client.HTTPConnection("127.0.0.1", gateway.server_address[1], timeout=5)
+    try:
+        connection.request(
+            "POST",
+            "/v1/images/generations",
+            body=json.dumps({"model": "axio-fast", "prompt": "priced", "stream": True}),
+            headers={"Content-Type": "application/json", "x-api-key": "stream-cost-tenant"},
+        )
+        response = connection.getresponse()
+        assert response.status == 200
+        assert b"data: [DONE]" in response.read()
+    finally:
+        connection.close()
+        gateway.shutdown()
+        gateway.server_close()
+        worker.join(timeout=5)
+    snapshot = runtime_state().snapshot()
+    assert snapshot["budget_tenants"]
+    assert snapshot["budget_tenants"][0]["spent_usd"] == 0.04
 
 
 def test_server_returns_image_sse_with_allowlisted_event_types(monkeypatch):

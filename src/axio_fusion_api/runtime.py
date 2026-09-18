@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import os
 import threading
 import time
@@ -127,7 +128,7 @@ class RuntimeState:
             amount = max(0.0, float(cost_usd))
         except (TypeError, ValueError):
             return
-        if amount <= 0:
+        if amount <= 0 or not math.isfinite(amount):
             return
         day = _utc_day(now)
         with self._lock:

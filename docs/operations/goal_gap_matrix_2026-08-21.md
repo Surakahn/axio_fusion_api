@@ -35,7 +35,7 @@ provider 能力组合成 `axio-fast`、`axio-terra`、`axio-pro`。Harness 只�
   models、21 个 live-available profiles、4 个 providers，且与 18900 进程的
   `AXIO_FUSION_REGISTRY_PATH` 绑定一致；AGENTS 中 r43 的 10-profile 数字仅是历史
   阶段检查项，不作为当前 r7 serving blocker。
-- 当前工程回归：`1135 passed, 0 skipped`（2026-09-19 每日预算关闭状态投影、预算窗口恢复可观测性、非正 rate-limit 状态投影、rate-limit 窗口恢复可观测性、多路径错误投影一致性、四协议错误码一致性、流式断开资源释放、显式
+- 当前工程回归：`1140 passed, 0 skipped`（本轮图片成本计量专项与此前每日预算关闭状态投影、预算窗口恢复可观测性、非正 rate-limit 状态投影、rate-limit 窗口恢复可观测性、多路径错误投影一致性、四协议错误码一致性、流式断开资源释放、显式
   fail-closed 鉴权、租户并发与此前路由/r18 binding/convergence 安全修复均通过）；这是代码
   契约证据，不是能力或质量证据。
 
@@ -64,7 +64,14 @@ plan/source/registry 与 credential-ready preflight 未漂移，但不授予 liv
 constant-time 精确匹配，health 只输出 `auth_required`/`auth_mode` 等安全投影。当前
 18900 保持关闭以兼容既有 loopback 客户端；正式公网切换仍需部署方配置真实公共/operator
 key 并完成外部流量验证。本增量不改变 provider I/O、r18 frozen inputs、screening、
-ranking 或 benchmark 授权。
+ ranking 或 benchmark 授权。
+
+2026-09-19 图片 lane 成本计量增量：修复图片 SSE 成功后硬编码 `0.0`、buffered 图片无
+成本观察及 text prompt composer 成本遗漏。新增 profile-bound generation/editing 价格
+metadata 与 bounded estimator；可信价格才累计，unknown 保持 `cost_usd=null`，失败/取消
+不计成功图片成本。图片专项 `41 passed`；当前 verified image registry 未声明价格，故
+生产图片预算仍明确为 unknown，不构成成本优势证据。详见
+`docs/handoffs/2026-09-19_image_cost_accounting.md`。
 
 2026-09-19 流式资源生命周期增量：新增真实 HTTP 客户端在首个 SSE delta 后断开的端到端
 回归。测试确认 cancellation 传播到 fake provider，后续 delta 不再写入已断开的客户端，
@@ -139,7 +146,7 @@ benchmark gate；r18 live screening 仍未授权。
 | --- | --- | --- | --- | --- |
 | 产品边界 | **done** | 独立 remote-only 服务；三档公共模型；不加载本地权重；图片 lane 与文本 Fusion 隔离 | 尚未以完整 baseline/target 证据证明质量、成本、延迟目标 | 保持公共合同不变，等待 baseline freeze 后做校准 successor |
 | 四协议公共 API | **done/partial** | Chat Completions、Responses、Anthropic Messages、Gemini 的规范化输入、流式输出、错误和 reasoning 公共边界已有回归 | 必须在正式 campaign 对 12 个 tier/surface 单元做同 cohort parity | campaign 放行后运行四面配对 parity 和失败审计 |
-| 图片能力 | **done** | verified image registry、generation/editing 探针、multipart/90 秒门禁、text/image 隔离 | 不是文本 Fusion 能力，不得混入 21-suite 文本 claim | 仅按独立 image registry 维护和回归 |
+| 图片能力 | **done** | verified image registry、generation/editing 探针、multipart/90 秒门禁、text/image 隔离；buffered/streaming 成本观察和 composer cost observer | 不是文本 Fusion 能力，不得混入 21-suite 文本 claim；当前 verified image profiles 未声明价格，预算成本保持 unknown | 仅按独立 image registry 维护和回归；公网预算启用前补齐价格证据 |
 | Fast 工作流 | **partial** | bounded direct cascade、轻量验证开关、replica failover、3x/预算 guard、fail-closed | 当前 r7 role/capability admission 使多数复杂请求退回 direct；实际 pricing/tool metadata 未校准 | baseline freeze 后用 non-target shadow 校准 light-verify 的 VOI/成本阈值 |
 | Terra 工作流 | **blocked/partial** | selective fusion、独立性检查、Judge/Synth reservation、正确的 direct fallback；零网络 fake-provider 回归已证明完整 role pool 下 panel phase 可配置并执行全部已准入 expert | 当前 registry 没有同时满足 `independent_solver + judge` 的准入容量；不能用弱模型冒充；fake-provider 结果不构成 live 能力证据 | 完整 screening/ranking/freeze 后做 endpoint-bound role successor，再 shadow replay；若 live 再出现 partial panel，按 safe cause taxonomy 分诊 |
 | Pro 工作流 | **partial** | panel -> Judge -> targeted escalation -> acting Synthesizer；角色上下文隔离；公共 reasoning 清理 | 当前 dry-run 只有一个 provider hash，跨 provider 互补不足；质量/成本尚未实测 | baseline freeze 后做 provider diversity/error-correlation/quality shadow 优化 |

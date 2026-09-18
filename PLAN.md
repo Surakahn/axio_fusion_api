@@ -1,5 +1,25 @@
 # Axio Fusion API Plan
 
+## 2026-09-19 图片 lane 成本计量闭环
+
+审计发现图片 SSE 完成后曾以 `0.0` 写入租户预算，buffered generation/editing 也没有
+等价的成本观察；这会把图片成功请求错误地当成免费调用。本轮在
+`image_capabilities.pricing` 增加受限的 operation 价格元数据（generation/editing，按
+request 或 image 计价），并新增 profile-bound `image_cost_estimate()`：只有显式
+`registry`/`provider_documented` 来源且数值通过边界校验时才报告 `pricing_known=true`，
+未知价格保持 `cost_usd=null`，绝不伪造零成本。
+
+buffered、direct stream fallback 和 HTTP 增量 SSE 均只对最终成功 profile 计价；provider
+failover 只计最终成功副本；失败或客户端取消不计图片成功成本。可选的 text prompt
+composer 现在通过同一 tenant observer 计入其真实 Fusion `actual_cost_usd`，避免图片
+请求的隐式文本编排费用丢失。响应仅暴露 bounded image-provider cost metadata（租户预算
+还会叠加可选 text composer 成本，不将其伪装成图片价格），不保存 provider URL、
+模型标识、原始 prompt 或图片内容。
+
+验证：图片专项 `41 passed`，L1/L2 和 `git diff --check` 通过；当前 serving registry
+未声明图片价格，因此生产图片成本会明确保持 unknown，不会错误累计。该增量不改变
+r18 frozen plan/source/registry、provider screening 或 21-suite target 授权。
+
 ## 2026-09-19 每日预算窗口恢复可观测性
 
 预算超限错误已有 UTC 日界 `Retry-After`，但 runtime budget tenant 快照没有恢复时间。

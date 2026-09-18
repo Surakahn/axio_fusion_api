@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 from urllib.parse import unquote, urlparse
 
 from .compat import (
@@ -26,6 +26,7 @@ from .image_api import (
     ImagePromptTransformer,
     ImageRequestError,
     ImageRouter,
+    image_cost_estimate,
     image_request_timeout,
     image_route_kind,
     image_router_summary,
@@ -163,6 +164,14 @@ def handle_request(
                     body=body,
                     profiles=selected_image_profiles,
                     text_engine=active_engine,
+                    cost_observer=(
+                        (lambda observation: runtime_state().record_cost(
+                            tenant_key,
+                            observation.get("cost_usd"),
+                        ))
+                        if record_runtime
+                        else None
+                    ),
                 )
             )
         finally:
@@ -416,6 +425,14 @@ def _prepare_incremental_image_stream_request(
     router = _build_image_router(
         engine.profiles if image_profiles is None else image_profiles,
         text_engine=engine,
+        cost_observer=(
+            (lambda observation: runtime_state().record_cost(
+                tenant_key,
+                observation.get("cost_usd"),
+            ))
+            if record_runtime
+            else None
+        ),
     )
     lease, admission = _acquire_tenant_in_flight(tenant_key, record_runtime=record_runtime)
     if admission is not None:
@@ -865,6 +882,7 @@ def create_http_server(
             cancellation_event = threading.Event()
             public_model = str(prepared.payload.get("model") or "axio-terra")
             emitted_events = 0
+            completed_event_emitted = False
             response_headers = _apply_cors_headers(
                 (200, _incremental_stream_headers(), b""),
                 prepared.headers_lc,
@@ -875,12 +893,15 @@ def create_http_server(
             self.end_headers()
 
             def on_event(event: Mapping[str, Any]) -> bool:
-                nonlocal emitted_events
+                nonlocal completed_event_emitted, emitted_events
                 chunk = render_image_event(event, public_model=public_model)
                 if not chunk:
                     return True
                 emitted_events += 1
-                return self._write_stream_chunk(chunk, cancellation_event)
+                delivered = self._write_stream_chunk(chunk, cancellation_event)
+                if delivered and str(event.get("type") or "").endswith(".completed"):
+                    completed_event_emitted = True
+                return delivered
 
             try:
                 if prepared.operation == "generations":
@@ -897,18 +918,32 @@ def create_http_server(
                         stream_observer=on_event,
                     )
                 if not cancellation_event.is_set():
+                    terminal_write_succeeded = False
                     if emitted_events == 0:
-                        self._write_stream_chunk(
+                        terminal_write_succeeded = self._write_stream_chunk(
                             render_image_stream(result, public_model=public_model),
                             cancellation_event,
                         )
                     else:
-                        self._write_stream_chunk(
+                        terminal_write_succeeded = self._write_stream_chunk(
                             b"event: done\ndata: [DONE]\n\n",
                             cancellation_event,
                         )
-                    if record_runtime:
-                        runtime_state().record_cost(prepared.tenant_key, 0.0)
+                    delivered_image = (
+                        terminal_write_succeeded
+                        if emitted_events == 0
+                        else completed_event_emitted
+                    )
+                    if record_runtime and delivered_image:
+                        observation = image_cost_estimate(
+                            _profile,
+                            result,
+                            operation=prepared.operation,
+                        )
+                        runtime_state().record_cost(
+                            prepared.tenant_key,
+                            observation.get("cost_usd"),
+                        )
             except ImageRequestError as exc:
                 if not cancellation_event.is_set():
                     self._write_stream_chunk(
@@ -4336,11 +4371,12 @@ def _build_image_router(
     profiles: Sequence[Any],
     *,
     text_engine: FusionEngine | None,
+    cost_observer: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> ImageRouter:
     """Construct the isolated image router with optional prompt composition."""
 
     transformer = (
-        ImagePromptTransformer(text_engine)
+        ImagePromptTransformer(text_engine, cost_observer=cost_observer)
         if text_engine is not None
         and any(
             getattr(profile, "enabled", False)
@@ -4361,20 +4397,26 @@ def _handle_image_request(
     body: bytes | str | None,
     profiles: Sequence[Any],
     text_engine: FusionEngine | None = None,
+    cost_observer: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> tuple[int, dict[str, str], bytes]:
     """Dispatch the Images API outside the text Fusion protocol adapters.
 
     Image outputs are opaque binary/base64 artifacts, so they do not pass
-    through ``FusionResponse``, text cost accounting, or any of the four text
-    renderers.  Only the request parser and the verified image capability
-    router are shared with the public gateway boundary.
+    through ``FusionResponse`` or any of the four text renderers.  The final
+    image profile's explicit operation price is observed separately; an
+    optional text prompt-composer call reports its own Fusion cost through the
+    same tenant observer.
     """
 
     try:
-        router = _build_image_router(profiles, text_engine=text_engine)
+        router = _build_image_router(
+            profiles,
+            text_engine=text_engine,
+            cost_observer=cost_observer,
+        )
         if operation == "generations":
             payload = parse_generation_payload(body)
-            response, result, _profile = router.generate(
+            response, result, profile = router.generate(
                 payload,
                 timeout=image_request_timeout(),
             )
@@ -4383,11 +4425,13 @@ def _handle_image_request(
                 body,
                 headers.get("content-type", ""),
             )
-            response, result, _profile = router.edit(
+            response, result, profile = router.edit(
                 payload,
                 files,
                 timeout=image_request_timeout(),
             )
+        if cost_observer is not None:
+            cost_observer(image_cost_estimate(profile, result, operation=operation))
         if payload.get("stream") is True:
             return _stream_response(
                 200,
