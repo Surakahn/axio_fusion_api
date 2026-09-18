@@ -153,6 +153,12 @@ benchmark gate；r18 live screening 仍未授权。
 lease。unknown pricing 在预算启用时默认 fail-closed，runtime snapshot 公开 reserved 与
 committed+reserved 的 hash-safe 投影；全量工程回归为 `1145 passed`。该控制仍是单进程账本，
 多副本公网部署前必须接入共享原子账本或明确单实例配额，不把本地 snapshot 当作全局预算证据。
+本轮新增 `AXIO_FUSION_TENANT_BUDGET_SCOPE=shared_required` fail-closed 部署合同；预算
+启用且共享账本未配置时，预留请求返回 `tenant_budget_shared_backend_required`/503，并由
+runtime 暴露 `tenant_budget_scope_ready=false`，因此不会把不安全的多副本配置误当作可用。
+另对已知初始 pricing 的文本请求采用 `max(initial_estimate, route budget.max_cost_usd)`
+作为租户预留上界，覆盖 bounded fallback/repair/escalation；图片 operation 估价也叠加
+可选 prompt composer 的同一请求级 hard cap，未知 composer pricing 继续 fail-closed。
 
 | 领域 | 当前状态 | 已完成的可验证内容 | 未完成/阻塞 | 下一条合法动作 |
 | --- | --- | --- | --- | --- |

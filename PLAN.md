@@ -1,5 +1,25 @@
 # Axio Fusion API Plan
 
+## 2026-09-19 租户预算请求级上界预留
+
+离线审计确认 route 的 `initial_fusion_resource_admission` 只描述初始角色计划，明确不含
+bounded retry、repair、escalation；仅预留该初始值会让租户预算在并发下先放行、完成后才
+发现超额。本轮在已知初始 pricing 时将租户预留提升为
+`max(initial_estimate, route budget.max_cost_usd)`，使用同一请求级 `_CostBudget` 硬上限
+覆盖可发生的可选分支；未知初始 pricing 仍 fail-closed。该增量会保守占用更多预算，但不
+改变请求自身的成本 guard，也不触碰 r18/provider/target 证据。
+
+## 2026-09-19 多副本租户预算安全部署边界
+
+租户预算预留与结算仍由进程内账本提供原子并发语义；在没有经过验证的共享账本后端时，
+不能把多副本部署误当作全局配额。本轮新增 `AXIO_FUSION_TENANT_BUDGET_SCOPE=shared_required`
+合同：预算启用且该模式生效时，所有新预算预留 fail-closed，返回
+`tenant_budget_shared_backend_required`/503，不触发 provider 或 image 调用；health/runtime
+暴露 `tenant_budget_scope` 与 `tenant_budget_scope_ready`，便于部署门禁识别不安全配置。
+默认 `process_local` 保持现有单实例兼容行为。该增量没有伪造共享后端，不改变 r18 frozen
+输入、provider screening 或 21-suite target 授权。图片请求的可选 text prompt composer 也
+复用同一请求级上界估价，图片 operation 与 composer 成本在同一 lease 中结算。
+
 ## 2026-09-19 r18 preflight 再次零网络复核
 
 使用生产一致 `private/current_channels.env`、r7 probe-bound registry、r18 frozen

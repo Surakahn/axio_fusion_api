@@ -1,5 +1,26 @@
 # Axio Fusion API Checklist
 
+# 2026-09-19 租户预算请求级上界预留
+
+- [x] 已知初始 pricing 的文本请求现在按 `max(initial_estimate, route budget.max_cost_usd)`
+  预留，覆盖 bounded retry/repair/escalation 的请求级硬上限，避免后置结算才发现租户超额。
+- [x] unknown initial pricing 仍保持原有 fail-closed；不伪造零成本，不改变 `_CostBudget`
+  的请求内执行语义。
+- [x] 添加初始估价低于/高于 hard cap 的回归；L1/L2 与预算/图片/流式专项保持通过。
+- [x] 图片 generation/editing 的预估现在叠加可选 text prompt composer 的请求级 hard cap；
+  若 composer pricing unknown 则保持预算 fail-closed，不把隐式调用当作免费。
+
+# 2026-09-19 多副本租户预算安全部署边界
+
+- [x] 新增 `AXIO_FUSION_TENANT_BUDGET_SCOPE=shared_required` fail-closed 合同；无共享
+  账本时预算预留返回 `tenant_budget_shared_backend_required`/503，provider/image 不会启动。
+- [x] 默认 `process_local` 保持兼容；runtime snapshot 安全暴露 scope 与 ready 状态，明确
+  进程内账本不能作为多副本全局配额证据。
+- [x] 专项预算/图片/真实增量流回归通过；未执行 provider/target 网络请求，r18 frozen
+  输入未改变。
+- [ ] 仍需在未来选定并审计真实共享账本实现后，才允许把 scope 切换为 shared；当前不
+  把 fail-closed 合同误报为共享配额已完成。
+
 # 2026-09-19 租户预算并发预留与结算
 
 - [x] 已知成本在 provider/image 工作前以租户+UTC day 原子预留；成功交付结算实际成本，

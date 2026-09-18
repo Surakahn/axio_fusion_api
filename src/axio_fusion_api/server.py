@@ -26,6 +26,7 @@ from .image_api import (
     ImagePromptTransformer,
     ImageRequestError,
     ImageRouter,
+    image_prompt_timeout_ms,
     image_cost_estimate,
     image_request_timeout,
     image_route_kind,
@@ -56,6 +57,7 @@ from .runtime_activation import AtomicFusionRuntime
 from .schemas import (
     FusionRequest,
     FusionResponse,
+    FusionPolicy,
     PUBLIC_MODELS,
     logical_model_count,
     safe_provider_error_class,
@@ -168,6 +170,7 @@ def handle_request(
                 operation=image_operation,
                 body=body,
                 headers=headers_lc,
+                text_engine=active_engine,
             ),
             record_runtime=record_runtime,
         )
@@ -486,6 +489,7 @@ def _prepare_incremental_image_stream_request(
             engine.profiles if image_profiles is None else image_profiles,
             payload,
             operation=operation,
+            text_engine=engine,
         ),
         record_runtime=record_runtime,
     )
@@ -4793,6 +4797,22 @@ def _tenant_budget_exhausted_response(budget: Mapping[str, Any]) -> tuple[int, d
 def _tenant_budget_admission_response(budget: Mapping[str, Any]) -> tuple[int, dict[str, str], bytes]:
     """Map preflight rejection to a stable public budget or pricing error."""
 
+    if budget.get("reason_code") == "tenant_budget_shared_backend_required":
+        return _json_response(
+            503,
+            {
+                "error": {
+                    "message": "Tenant budget requires a configured shared ledger.",
+                    "code": "tenant_budget_shared_backend_required",
+                },
+                "metadata": {
+                    "budget": dict(budget),
+                    "raw_prompt_persisted": False,
+                    "secrets_persisted": False,
+                },
+            },
+        )
+
     if budget.get("pricing_known") is False and budget.get("unknown_pricing_policy") == "deny":
         return _json_response(
             402,
@@ -4874,7 +4894,7 @@ def _estimate_request_cost(engine: FusionEngine, request: FusionRequest) -> floa
         except (TypeError, ValueError):
             continue
         if value >= 0.0 and value < float("inf"):
-            return round(value, 8)
+            return _conservative_tenant_budget_cost(route_plan, value)
     direct = route_plan.get("fusion_admission", {}).get("direct_candidate")
     if isinstance(direct, Mapping):
         try:
@@ -4882,8 +4902,28 @@ def _estimate_request_cost(engine: FusionEngine, request: FusionRequest) -> floa
         except (TypeError, ValueError):
             value = -1.0
         if value >= 0.0 and value < float("inf"):
-            return round(value, 8)
+            return _conservative_tenant_budget_cost(route_plan, value)
     return None
+
+
+def _conservative_tenant_budget_cost(route_plan: Mapping[str, Any], estimate: float) -> float:
+    """Reserve the request-local hard cost cap for optional runtime fallbacks.
+
+    The route admission estimate describes only the initial role schedule.  The
+    orchestrator can still spend bounded retry, repair, or escalation calls
+    under ``budget.max_cost_usd``.  Reserving that cap prevents a tenant-level
+    admission race from being accepted on the initial estimate and exceeding
+    the daily budget later.  Unknown initial pricing never reaches this helper.
+    """
+
+    budget = route_plan.get("budget") if isinstance(route_plan.get("budget"), Mapping) else {}
+    try:
+        hard_cap = float(budget.get("max_cost_usd") or 0.0)
+    except (TypeError, ValueError):
+        hard_cap = 0.0
+    if hard_cap < 0.0 or hard_cap >= float("inf"):
+        hard_cap = 0.0
+    return round(max(float(estimate), hard_cap), 8)
 
 
 def _estimate_image_request_cost(
@@ -4892,6 +4932,7 @@ def _estimate_image_request_cost(
     operation: str,
     body: bytes | str | None,
     headers: Mapping[str, str],
+    text_engine: FusionEngine | None = None,
 ) -> float | None:
     """Parse an image request and obtain a conservative replica-bound estimate."""
 
@@ -4900,7 +4941,10 @@ def _estimate_image_request_cost(
             payload = parse_generation_payload(body)
         else:
             payload, _files = parse_edit_payload(body, headers.get("content-type", ""))
-        return ImageRouter(profiles).estimated_cost_usd(payload, operation=operation)
+        return _add_image_composer_cost(
+            ImageRouter(profiles).estimated_cost_usd(payload, operation=operation),
+            _estimate_image_composer_cost(text_engine),
+        )
     except (ImageRequestError, TypeError, ValueError):
         return None
 
@@ -4910,11 +4954,55 @@ def _estimate_image_payload_cost(
     payload: Mapping[str, Any],
     *,
     operation: str,
+    text_engine: FusionEngine | None = None,
 ) -> float | None:
     try:
-        return ImageRouter(profiles).estimated_cost_usd(payload, operation=operation)
+        return _add_image_composer_cost(
+            ImageRouter(profiles).estimated_cost_usd(payload, operation=operation),
+            _estimate_image_composer_cost(text_engine),
+        )
     except (ImageRequestError, TypeError, ValueError):
         return None
+
+
+def _add_image_composer_cost(
+    image_cost: float | None,
+    composer_cost: float | None,
+) -> float | None:
+    if image_cost is None or composer_cost is None:
+        return None
+    return round(float(image_cost) + float(composer_cost), 8)
+
+
+def _estimate_image_composer_cost(engine: FusionEngine | None) -> float | None:
+    """Reserve the text Fusion hard cap used by the optional image composer."""
+
+    if engine is None:
+        return 0.0
+    if not any(
+        getattr(profile, "enabled", False)
+        and getattr(profile, "text_model_eligible", False)
+        for profile in getattr(engine, "profiles", ())
+    ):
+        return 0.0
+    try:
+        estimate = _estimate_request_cost(
+            engine,
+            FusionRequest(
+                model="axio-fast",
+                prompt="image prompt composition",
+                system="Compose one bounded image prompt.",
+                max_output_tokens=900,
+                policy=FusionPolicy(
+                    max_latency_ms=image_prompt_timeout_ms(),
+                    max_total_model_calls=2,
+                    live=False,
+                ),
+            ),
+        )
+    except (TypeError, ValueError, RuntimeError):
+        return None
+    return estimate
 
 
 def _tenant_concurrency_exhausted_response(

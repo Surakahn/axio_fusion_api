@@ -215,10 +215,12 @@ class RuntimeState:
             enabled = daily_budget is not None and daily_budget > 0
             requested = estimate or 0.0
             unknown_allowed = estimate is not None or _unknown_pricing_allowed()
+            scope_ready = _tenant_budget_scope_ready(enabled=enabled)
             allowed = (
                 not enabled
                 or (
-                    unknown_allowed
+                    scope_ready
+                    and unknown_allowed
                     and spent + reserved + requested <= float(daily_budget)
                     and (requested > 0.0 or spent + reserved < float(daily_budget))
                 )
@@ -239,6 +241,13 @@ class RuntimeState:
             "reserved_usd": round(reserved, 8),
             "estimated_cost_usd": round(requested, 8) if estimate is not None else None,
             "pricing_known": estimate is not None,
+            "scope": _tenant_budget_scope_name(),
+            "scope_ready": scope_ready,
+            "reason_code": (
+                "tenant_budget_shared_backend_required"
+                if enabled and not scope_ready
+                else ""
+            ),
             "unknown_pricing_policy": _unknown_pricing_policy_name(),
             "committed_plus_reserved_usd": round(spent + reserved, 8),
             "remaining_usd": (
@@ -550,6 +559,10 @@ class RuntimeState:
             "in_flight_tenants": in_flight_rows,
             "rate_limit_enabled": bool(rate_limit is not None and rate_limit > 0),
             "tenant_budget_enabled": bool(daily_budget is not None and daily_budget > 0),
+            "tenant_budget_scope": _tenant_budget_scope_name(),
+            "tenant_budget_scope_ready": _tenant_budget_scope_ready(
+                enabled=bool(daily_budget is not None and daily_budget > 0)
+            ),
             "tenant_budget_unknown_pricing_policy": _unknown_pricing_policy_name(),
             "feedback_artifact_enabled": bool(_feedback_path()),
             "response_continuations": {
@@ -734,6 +747,19 @@ def _bounded_env_int(name: str, *, default: int, minimum: int, maximum: int) -> 
 def _unknown_pricing_policy_name() -> str:
     value = str(os.getenv("AXIO_FUSION_TENANT_BUDGET_UNKNOWN_PRICING", "deny") or "deny").strip().lower()
     return "allow" if value in {"allow", "true", "1", "yes"} else "deny"
+
+
+def _tenant_budget_scope_name() -> str:
+    """Return the declared quota scope without implying a shared backend."""
+
+    value = str(os.getenv("AXIO_FUSION_TENANT_BUDGET_SCOPE", "process_local") or "process_local")
+    return "shared_required" if value.strip().lower() in {"shared", "shared_required"} else "process_local"
+
+
+def _tenant_budget_scope_ready(*, enabled: bool) -> bool:
+    """Fail closed when deployment asks for shared quotas without a ledger."""
+
+    return not enabled or _tenant_budget_scope_name() != "shared_required"
 
 
 def _unknown_pricing_allowed() -> bool:
