@@ -4696,6 +4696,9 @@ def public_deployment_contract() -> dict[str, Any]:
     operator_key_configured = bool(_operator_keys())
     budget_enabled = _configured_positive_float("AXIO_FUSION_TENANT_DAILY_BUDGET_USD")
     scope = _tenant_budget_scope_name()
+    shared_ledger_configured = bool(
+        str(os.getenv("AXIO_FUSION_TENANT_BUDGET_SQLITE_PATH", "") or "").strip()
+    )
     blockers: list[str] = []
     if public_mode and not auth_required:
         blockers.append("public_deployment_requires_auth")
@@ -4705,6 +4708,8 @@ def public_deployment_contract() -> dict[str, Any]:
         blockers.append("public_deployment_operator_key_required")
     if public_mode and budget_enabled and scope != "shared_required":
         blockers.append("public_deployment_shared_budget_required")
+    if public_mode and budget_enabled and scope == "shared_required" and not shared_ledger_configured:
+        blockers.append("public_deployment_shared_ledger_required")
     return {
         "schema": "axio_fusion_api.public_deployment_contract.v1",
         "public_mode": public_mode,
@@ -4715,6 +4720,7 @@ def public_deployment_contract() -> dict[str, Any]:
         "operator_key_configured": operator_key_configured,
         "tenant_budget_enabled": budget_enabled,
         "tenant_budget_scope": scope,
+        "tenant_budget_ledger_configured": shared_ledger_configured,
         "raw_api_keys_persisted": False,
         "secrets_persisted": False,
     }
@@ -4918,7 +4924,11 @@ def _reserve_tenant_budget(
 
     if not record_runtime:
         return TenantBudgetLease(runtime_state(), tenant_key, 0.0, "", True), None
-    lease, admission = runtime_state().reserve_budget(tenant_key, estimated_cost_usd)
+    lease, admission = runtime_state().reserve_budget(
+        tenant_key,
+        estimated_cost_usd,
+        reservation_key=uuid.uuid4().hex,
+    )
     return (lease, None) if admission.get("allowed") else (lease, admission)
 
 

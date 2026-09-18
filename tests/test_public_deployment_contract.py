@@ -32,7 +32,7 @@ def test_public_deployment_requires_auth_and_operator_key(monkeypatch):
     assert "operator-key" not in serialized
 
 
-def test_public_budget_requires_shared_scope(monkeypatch):
+def test_public_budget_requires_shared_scope_and_backend(monkeypatch, tmp_path):
     monkeypatch.setenv("AXIO_FUSION_PUBLIC_DEPLOYMENT", "true")
     monkeypatch.setenv("AXIO_FUSION_REQUIRE_AUTH", "true")
     monkeypatch.setenv("AXIO_FUSION_API_KEYS", "public-key")
@@ -43,4 +43,7 @@ def test_public_budget_requires_shared_scope(monkeypatch):
     assert contract["ready"] is False
     assert contract["blockers"] == ["public_deployment_shared_budget_required"]
     monkeypatch.setenv("AXIO_FUSION_TENANT_BUDGET_SCOPE", "shared_required")
+    assert public_deployment_contract()["ready"] is False
+    assert public_deployment_contract()["blockers"] == ["public_deployment_shared_ledger_required"]
+    monkeypatch.setenv("AXIO_FUSION_TENANT_BUDGET_SQLITE_PATH", str(tmp_path / "budget.db"))
     assert public_deployment_contract()["ready"] is True

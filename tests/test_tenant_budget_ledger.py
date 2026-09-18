@@ -5,9 +5,99 @@ import pytest
 
 from axio_fusion_api.tenant_budget_ledger import (
     InMemoryTenantBudgetLedger,
+    SQLiteTenantBudgetLedger,
     TenantBudgetLedgerInvariantError,
     TenantBudgetLedgerUnavailable,
 )
+
+
+def test_sqlite_ledger_is_idempotent_across_two_instances(tmp_path):
+    path = tmp_path / "tenant-budget.db"
+    first = SQLiteTenantBudgetLedger(str(path))
+    second = SQLiteTenantBudgetLedger(str(path))
+    reservation = first.reserve(
+        tenant_hash="tenant-hash",
+        day="2026-09-19",
+        amount_usd=0.40,
+        budget_usd=0.50,
+        reservation_key="same-request",
+    )
+    replay = second.reserve(
+        tenant_hash="tenant-hash",
+        day="2026-09-19",
+        amount_usd=0.40,
+        budget_usd=0.50,
+        reservation_key="same-request",
+    )
+    assert replay.reservation_id == reservation.reservation_id
+    assert replay.idempotent_replay is True
+    settled = second.settle(
+        reservation_id=reservation.reservation_id,
+        actual_cost_usd=0.30,
+        success=True,
+    )
+    assert settled.committed_usd == 0.30
+    follow_up = first.reserve(
+        tenant_hash="tenant-hash",
+        day="2026-09-19",
+        amount_usd=0.10,
+        budget_usd=0.50,
+        reservation_key="follow-up",
+    )
+    first.settle(reservation_id=follow_up.reservation_id, actual_cost_usd=0.10, success=True)
+    assert first.settle(
+        reservation_id=reservation.reservation_id,
+        actual_cost_usd=0.90,
+        success=True,
+    ) == settled.__class__(
+        reservation_id=settled.reservation_id,
+        status="settled",
+        committed_usd=0.30,
+        reserved_usd=0.0,
+        actual_cost_usd=0.30,
+        overcommit=False,
+        idempotent_replay=True,
+    )
+
+
+def test_sqlite_ledger_serializes_cross_instance_reservations(tmp_path):
+    path = tmp_path / "tenant-budget.db"
+    ledgers = [SQLiteTenantBudgetLedger(str(path)), SQLiteTenantBudgetLedger(str(path))]
+    barrier = threading.Barrier(8)
+
+    def reserve(index: int):
+        barrier.wait()
+        return ledgers[index % 2].reserve(
+            tenant_hash="tenant-hash",
+            day="2026-09-19",
+            amount_usd=0.20,
+            budget_usd=1.00,
+            reservation_key=f"request-{index}",
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        rows = list(pool.map(reserve, range(8)))
+    assert sum(row.allowed for row in rows) == 5
+    assert ledgers[0].snapshot(day="2026-09-19")["rows"][0]["reserved_usd"] == 1.0
+
+
+def test_sqlite_ledger_releases_failed_request_and_keeps_safe_snapshot(tmp_path):
+    ledger = SQLiteTenantBudgetLedger(str(tmp_path / "tenant-budget.db"))
+    reservation = ledger.reserve(
+        tenant_hash="tenant-hash",
+        day="2026-09-19",
+        amount_usd=0.20,
+        budget_usd=1.00,
+        reservation_key="failed-request",
+    )
+    released = ledger.settle(
+        reservation_id=reservation.reservation_id,
+        actual_cost_usd=None,
+        success=False,
+    )
+    assert released.status == "released"
+    assert ledger.snapshot(day="2026-09-19")["rows"][0]["reserved_usd"] == 0.0
+    assert ledger.snapshot(day="2026-09-19")["raw_api_keys_persisted"] is False
 
 
 def test_atomic_reservation_is_shared_across_concurrent_workers():

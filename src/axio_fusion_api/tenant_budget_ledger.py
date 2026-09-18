@@ -12,8 +12,12 @@ fake backend 不会被环境变量自动发现，也不提供持久化或跨进�
 from __future__ import annotations
 
 import math
+import os
+import sqlite3
 import threading
+import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
@@ -118,7 +122,13 @@ class TenantBudgetLedger(Protocol):
     def release(self, *, reservation_id: str) -> LedgerSettlement:
         """显式释放 active reservation；重复调用必须返回相同终态。"""
 
-    def snapshot(self, *, day: str, limit: int = 20) -> dict[str, Any]:
+    def snapshot(
+        self,
+        *,
+        day: str,
+        limit: int = 20,
+        tenant_hash: str | None = None,
+    ) -> dict[str, Any]:
         """返回 hash-only 运维投影，不得包含原始 tenant、prompt 或 secret。"""
 
 
@@ -262,7 +272,13 @@ class InMemoryTenantBudgetLedger:
                 return _replayed_settlement(record.settlement)
             return self._release_unlocked(record, idempotent_replay=False)
 
-    def snapshot(self, *, day: str, limit: int = 20) -> dict[str, Any]:
+    def snapshot(
+        self,
+        *,
+        day: str,
+        limit: int = 20,
+        tenant_hash: str | None = None,
+    ) -> dict[str, Any]:
         if int(limit) <= 0:
             limit = 1
         with self._lock:
@@ -272,6 +288,7 @@ class InMemoryTenantBudgetLedger:
                 account
                 for account in set(self._committed) | set(self._reserved)
                 if account[1] == str(day)
+                and (tenant_hash is None or account[0] == str(tenant_hash))
             }
             for tenant_hash, account_day in accounts:
                 if account_day != str(day):
@@ -367,6 +384,337 @@ class InMemoryTenantBudgetLedger:
             raise TenantBudgetLedgerInvariantError("budget values must be finite and non-negative")
 
 
+class SQLiteTenantBudgetLedger:
+    """基于 SQLite 的跨进程账本适配器。
+
+    SQLite 适合单主机多进程部署：每次写操作使用 ``BEGIN IMMEDIATE``，把预算
+    检查、预留/结算和幂等状态变更放在同一个事务中。它不是跨主机分布式账本，
+    因此生产部署必须把数据库文件放在可靠的共享本地卷，并继续由部署合同明确
+    该边界；不能把本适配器宣传成 Redis/SQL 集群的替代品。
+    """
+
+    backend_name = "sqlite_shared_file"
+
+    def __init__(self, path: str, *, timeout_seconds: float = 5.0) -> None:
+        normalized = os.path.abspath(os.path.expanduser(str(path or "").strip()))
+        if not normalized or normalized == os.path.abspath(os.sep):
+            raise ValueError("a dedicated sqlite ledger path is required")
+        timeout = _finite_nonnegative(timeout_seconds)
+        if timeout is None or timeout <= 0.0:
+            raise ValueError("sqlite timeout must be finite and positive")
+        parent = os.path.dirname(normalized)
+        if not parent or not os.path.isdir(parent):
+            raise ValueError("sqlite ledger parent directory must already exist")
+        self.path = normalized
+        self._timeout_seconds = float(timeout)
+        self._initialize()
+
+    def reserve(
+        self,
+        *,
+        tenant_hash: str,
+        day: str,
+        amount_usd: float,
+        budget_usd: float,
+        reservation_key: str,
+    ) -> LedgerReservation:
+        _validate_ledger_inputs(tenant_hash, day, reservation_key, amount_usd, budget_usd)
+        amount = float(amount_usd)
+        budget = float(budget_usd)
+        try:
+            with self._transaction() as connection:
+                existing = connection.execute(
+                    "SELECT * FROM reservations WHERE tenant_hash=? AND day=? AND reservation_key=?",
+                    (str(tenant_hash), str(day), str(reservation_key)),
+                ).fetchone()
+                if existing is not None:
+                    return self._reservation_result(connection, existing, idempotent_replay=True)
+                account = self._account(connection, str(tenant_hash), str(day), budget)
+                committed = float(account["committed_usd"])
+                reserved = float(account["reserved_usd"])
+                if committed + reserved + amount > budget + 1e-12:
+                    return LedgerReservation(
+                        reservation_id="",
+                        tenant_hash=str(tenant_hash),
+                        day=str(day),
+                        amount_usd=_rounded(amount),
+                        budget_usd=_rounded(budget),
+                        committed_usd=_rounded(committed),
+                        reserved_usd=_rounded(reserved),
+                        allowed=False,
+                        reason_code="tenant_budget_exhausted",
+                    )
+                reservation_id = uuid.uuid4().hex
+                connection.execute(
+                    "INSERT INTO reservations "
+                    "(reservation_id, tenant_hash, day, reservation_key, amount_usd, budget_usd, status, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 'active', ?)",
+                    (reservation_id, str(tenant_hash), str(day), str(reservation_key), amount, budget, time.time()),
+                )
+                connection.execute(
+                    "UPDATE accounts SET reserved_usd=?, updated_at=? WHERE tenant_hash=? AND day=?",
+                    (reserved + amount, time.time(), str(tenant_hash), str(day)),
+                )
+                row = connection.execute(
+                    "SELECT * FROM reservations WHERE reservation_id=?", (reservation_id,)
+                ).fetchone()
+                return self._reservation_result(connection, row)
+        except TenantBudgetLedgerError:
+            raise
+        except sqlite3.IntegrityError as error:
+            raise TenantBudgetLedgerInvariantError("sqlite ledger reservation invariant failed") from error
+        except sqlite3.Error as error:
+            raise TenantBudgetLedgerUnavailable("sqlite ledger reserve failed") from error
+
+    def settle(
+        self,
+        *,
+        reservation_id: str,
+        actual_cost_usd: float | None,
+        success: bool,
+    ) -> LedgerSettlement:
+        try:
+            with self._transaction() as connection:
+                row = self._reservation(connection, reservation_id)
+                if row["status"] != "active":
+                    return self._settlement_result(connection, row, idempotent_replay=True)
+                if not success:
+                    return self._release_row(connection, row, idempotent_replay=False)
+                actual = row["amount_usd"] if actual_cost_usd is None else _finite_nonnegative(actual_cost_usd)
+                if actual is None:
+                    raise TenantBudgetLedgerInvariantError("actual cost must be finite and non-negative")
+                account = self._account(connection, row["tenant_hash"], row["day"], row["budget_usd"])
+                committed = float(account["committed_usd"])
+                reserved = max(0.0, float(account["reserved_usd"]) - float(row["amount_usd"]))
+                overcommit = committed + float(actual) > float(row["budget_usd"]) + 1e-12
+                connection.execute(
+                    "UPDATE accounts SET committed_usd=?, reserved_usd=?, updated_at=? WHERE tenant_hash=? AND day=?",
+                    (committed + float(actual), reserved, time.time(), row["tenant_hash"], row["day"]),
+                )
+                connection.execute(
+                    "UPDATE reservations SET status='settled', actual_cost_usd=?, overcommit=?, settled_at=? "
+                    " , settled_committed_usd=?, settled_reserved_usd=? WHERE reservation_id=?",
+                    (
+                        float(actual),
+                        int(overcommit),
+                        time.time(),
+                        committed + float(actual),
+                        reserved,
+                        row["reservation_id"],
+                    ),
+                )
+                updated = self._reservation(connection, row["reservation_id"])
+                return self._settlement_result(connection, updated)
+        except TenantBudgetLedgerError:
+            raise
+        except sqlite3.Error as error:
+            raise TenantBudgetLedgerUnavailable("sqlite ledger settle failed") from error
+
+    def release(self, *, reservation_id: str) -> LedgerSettlement:
+        try:
+            with self._transaction() as connection:
+                row = self._reservation(connection, reservation_id)
+                if row["status"] != "active":
+                    return self._settlement_result(connection, row, idempotent_replay=True)
+                return self._release_row(connection, row, idempotent_replay=False)
+        except TenantBudgetLedgerError:
+            raise
+        except sqlite3.Error as error:
+            raise TenantBudgetLedgerUnavailable("sqlite ledger release failed") from error
+
+    def snapshot(
+        self,
+        *,
+        day: str,
+        limit: int = 20,
+        tenant_hash: str | None = None,
+    ) -> dict[str, Any]:
+        if not str(day).strip():
+            raise TenantBudgetLedgerInvariantError("day is required")
+        bounded_limit = max(1, min(int(limit), 1000))
+        try:
+            with self._connect() as connection:
+                if tenant_hash is None:
+                    rows = connection.execute(
+                        "SELECT tenant_hash, day, committed_usd, reserved_usd, budget_usd "
+                        "FROM accounts WHERE day=? ORDER BY (committed_usd + reserved_usd) DESC, tenant_hash LIMIT ?",
+                        (str(day), bounded_limit),
+                    ).fetchall()
+                else:
+                    rows = connection.execute(
+                        "SELECT tenant_hash, day, committed_usd, reserved_usd, budget_usd "
+                        "FROM accounts WHERE day=? AND tenant_hash=? LIMIT 1",
+                        (str(day), str(tenant_hash)),
+                    ).fetchall()
+                safe_rows = [
+                    {
+                        "tenant_sha256": str(row["tenant_hash"]),
+                        "day": str(row["day"]),
+                        "budget_usd": _rounded(row["budget_usd"]),
+                        "committed_usd": _rounded(row["committed_usd"]),
+                        "reserved_usd": _rounded(row["reserved_usd"]),
+                        "committed_plus_reserved_usd": _rounded(
+                            float(row["committed_usd"]) + float(row["reserved_usd"])
+                        ),
+                        "raw_tenant_key_persisted": False,
+                        "raw_api_key_persisted": False,
+                        "secrets_persisted": False,
+                    }
+                    for row in rows
+                ]
+                return {
+                    "schema": "axio_fusion_api.tenant_budget_ledger_snapshot.v1",
+                    "backend": self.backend_name,
+                    "available": True,
+                    "tenant_count": len(safe_rows),
+                    "rows": safe_rows,
+                    "raw_tenant_keys_persisted": False,
+                    "raw_api_keys_persisted": False,
+                    "secrets_persisted": False,
+                }
+        except sqlite3.Error as error:
+            raise TenantBudgetLedgerUnavailable("sqlite ledger snapshot failed") from error
+
+    def _initialize(self) -> None:
+        try:
+            with self._connect() as connection:
+                connection.execute("PRAGMA journal_mode = WAL")
+                connection.executescript(
+                    "CREATE TABLE IF NOT EXISTS accounts ("
+                    "tenant_hash TEXT NOT NULL, day TEXT NOT NULL, budget_usd REAL NOT NULL, "
+                    "committed_usd REAL NOT NULL DEFAULT 0, reserved_usd REAL NOT NULL DEFAULT 0, "
+                    "updated_at REAL NOT NULL, PRIMARY KEY (tenant_hash, day));"
+                    "CREATE TABLE IF NOT EXISTS reservations ("
+                    "reservation_id TEXT PRIMARY KEY, tenant_hash TEXT NOT NULL, day TEXT NOT NULL, "
+                    "reservation_key TEXT NOT NULL, amount_usd REAL NOT NULL, budget_usd REAL NOT NULL, "
+                    "status TEXT NOT NULL, actual_cost_usd REAL, overcommit INTEGER NOT NULL DEFAULT 0, "
+                    "created_at REAL NOT NULL, settled_at REAL, settled_committed_usd REAL, "
+                    "settled_reserved_usd REAL, UNIQUE (tenant_hash, day, reservation_key));"
+                    "CREATE INDEX IF NOT EXISTS reservations_status_idx ON reservations(status, day);"
+                )
+                columns = {
+                    str(row[1]) for row in connection.execute("PRAGMA table_info(reservations)").fetchall()
+                }
+                for column in ("settled_committed_usd", "settled_reserved_usd"):
+                    if column not in columns:
+                        connection.execute(f"ALTER TABLE reservations ADD COLUMN {column} REAL")
+        except sqlite3.Error as error:
+            raise TenantBudgetLedgerUnavailable("sqlite ledger initialization failed") from error
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.path, timeout=self._timeout_seconds, isolation_level=None)
+        connection.row_factory = sqlite3.Row
+        connection.execute(f"PRAGMA busy_timeout = {int(self._timeout_seconds * 1000)}")
+        connection.execute("PRAGMA synchronous = FULL")
+        return connection
+
+    @contextmanager
+    def _transaction(self):
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            yield connection
+            connection.execute("COMMIT")
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
+        finally:
+            connection.close()
+
+    @staticmethod
+    def _account(connection: sqlite3.Connection, tenant_hash: str, day: str, budget: float) -> sqlite3.Row:
+        connection.execute(
+            "INSERT INTO accounts (tenant_hash, day, budget_usd, updated_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(tenant_hash, day) DO UPDATE SET budget_usd=excluded.budget_usd, updated_at=excluded.updated_at",
+            (tenant_hash, day, budget, time.time()),
+        )
+        return connection.execute(
+            "SELECT * FROM accounts WHERE tenant_hash=? AND day=?", (tenant_hash, day)
+        ).fetchone()
+
+    @staticmethod
+    def _reservation(connection: sqlite3.Connection, reservation_id: str) -> sqlite3.Row:
+        identifier = str(reservation_id or "").strip()
+        if not identifier:
+            raise TenantBudgetLedgerInvariantError("reservation id is required")
+        row = connection.execute(
+            "SELECT * FROM reservations WHERE reservation_id=?", (identifier,)
+        ).fetchone()
+        if row is None:
+            raise TenantBudgetLedgerInvariantError("unknown reservation id")
+        return row
+
+    @staticmethod
+    def _reservation_result(
+        connection: sqlite3.Connection, row: sqlite3.Row, *, idempotent_replay: bool = False
+    ) -> LedgerReservation:
+        account = SQLiteTenantBudgetLedger._account(connection, row["tenant_hash"], row["day"], row["budget_usd"])
+        return LedgerReservation(
+            reservation_id=str(row["reservation_id"]),
+            tenant_hash=str(row["tenant_hash"]),
+            day=str(row["day"]),
+            amount_usd=_rounded(row["amount_usd"]),
+            budget_usd=_rounded(row["budget_usd"]),
+            committed_usd=_rounded(account["committed_usd"]),
+            reserved_usd=_rounded(account["reserved_usd"]),
+            allowed=row["status"] == "active",
+            reason_code="" if row["status"] == "active" else "reservation_already_finalized",
+            idempotent_replay=idempotent_replay,
+        )
+
+    @staticmethod
+    def _settlement_result(
+        connection: sqlite3.Connection,
+        row: sqlite3.Row,
+        *,
+        idempotent_replay: bool = False,
+    ) -> LedgerSettlement:
+        account = SQLiteTenantBudgetLedger._account(connection, row["tenant_hash"], row["day"], row["budget_usd"])
+        committed_value = row["settled_committed_usd"]
+        reserved_value = row["settled_reserved_usd"]
+        if committed_value is None or reserved_value is None:
+            committed_value = account["committed_usd"]
+            reserved_value = account["reserved_usd"]
+        return LedgerSettlement(
+            reservation_id=str(row["reservation_id"]),
+            status=str(row["status"]),
+            committed_usd=_rounded(committed_value),
+            reserved_usd=_rounded(reserved_value),
+            actual_cost_usd=(
+                None if row["actual_cost_usd"] is None else _rounded(row["actual_cost_usd"])
+            ),
+            overcommit=bool(row["overcommit"]),
+            idempotent_replay=idempotent_replay,
+        )
+
+    @staticmethod
+    def _release_row(
+        connection: sqlite3.Connection, row: sqlite3.Row, *, idempotent_replay: bool
+    ) -> LedgerSettlement:
+        account = SQLiteTenantBudgetLedger._account(connection, row["tenant_hash"], row["day"], row["budget_usd"])
+        reserved = max(0.0, float(account["reserved_usd"]) - float(row["amount_usd"]))
+        connection.execute(
+            "UPDATE accounts SET reserved_usd=?, updated_at=? WHERE tenant_hash=? AND day=?",
+            (reserved, time.time(), row["tenant_hash"], row["day"]),
+        )
+        connection.execute(
+            "UPDATE reservations SET status='released', settled_at=?, settled_committed_usd=?, "
+            "settled_reserved_usd=? WHERE reservation_id=?",
+            (time.time(), float(account["committed_usd"]), reserved, row["reservation_id"]),
+        )
+        updated = SQLiteTenantBudgetLedger._reservation(connection, row["reservation_id"])
+        account = SQLiteTenantBudgetLedger._account(connection, row["tenant_hash"], row["day"], row["budget_usd"])
+        return LedgerSettlement(
+            reservation_id=str(updated["reservation_id"]),
+            status="released",
+            committed_usd=_rounded(account["committed_usd"]),
+            reserved_usd=_rounded(account["reserved_usd"]),
+            actual_cost_usd=None,
+            overcommit=False,
+            idempotent_replay=idempotent_replay,
+        )
+
+
 def _replayed_settlement(value: LedgerSettlement) -> LedgerSettlement:
     return LedgerSettlement(
         reservation_id=value.reservation_id,
@@ -387,6 +735,19 @@ def _finite_nonnegative(value: Any) -> float | None:
     return number if math.isfinite(number) and number >= 0.0 else None
 
 
+def _validate_ledger_inputs(
+    tenant_hash: str,
+    day: str,
+    reservation_key: str,
+    amount_usd: float,
+    budget_usd: float,
+) -> None:
+    if not str(tenant_hash).strip() or not str(day).strip() or not str(reservation_key).strip():
+        raise TenantBudgetLedgerInvariantError("tenant hash, day and reservation key are required")
+    if _finite_nonnegative(amount_usd) is None or _finite_nonnegative(budget_usd) is None:
+        raise TenantBudgetLedgerInvariantError("budget values must be finite and non-negative")
+
+
 def _rounded(value: float) -> float:
     return round(float(value), 8)
 
@@ -400,4 +761,5 @@ __all__ = [
     "TenantBudgetLedgerError",
     "TenantBudgetLedgerInvariantError",
     "TenantBudgetLedgerUnavailable",
+    "SQLiteTenantBudgetLedger",
 ]

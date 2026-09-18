@@ -8,7 +8,8 @@ from axio_fusion_api.server import (
     _estimate_request_cost,
     _tenant_budget_admission_response,
 )
-from axio_fusion_api.runtime import reset_runtime_state_for_tests, runtime_state
+from axio_fusion_api.runtime import RuntimeState, reset_runtime_state_for_tests, runtime_state
+from axio_fusion_api.tenant_budget_ledger import SQLiteTenantBudgetLedger
 
 
 def setup_function() -> None:
@@ -108,6 +109,24 @@ def test_shared_budget_scope_has_stable_service_unavailable_error():
     assert status == 503
     assert "Retry-After" not in headers
     assert b"tenant_budget_shared_backend_required" in body
+
+
+def test_shared_budget_scope_uses_explicit_sqlite_ledger_across_runtime_states(monkeypatch, tmp_path):
+    monkeypatch.setenv("AXIO_FUSION_TENANT_DAILY_BUDGET_USD", "0.50")
+    monkeypatch.setenv("AXIO_FUSION_TENANT_BUDGET_SCOPE", "shared_required")
+    path = tmp_path / "shared-budget.db"
+    first = RuntimeState(ledger=SQLiteTenantBudgetLedger(str(path)))
+    second = RuntimeState(ledger=SQLiteTenantBudgetLedger(str(path)))
+    first_lease, first_receipt = first.reserve_budget("shared-tenant", 0.30, now=1000.0)
+    second_lease, second_receipt = second.reserve_budget("shared-tenant", 0.30, now=1000.0)
+    assert first_receipt["allowed"] is True
+    assert second_receipt["allowed"] is False
+    assert second_receipt["reason_code"] == "tenant_budget_exhausted"
+    first_lease.settle(success=True, now=1000.0)
+    assert second.check_budget("shared-tenant", now=1000.0)["spent_usd"] == 0.30
+    assert second.snapshot(now=1000.0)["tenant_budget_scope_ready"] is True
+    assert second.snapshot(now=1000.0)["tenant_budget_ledger_backend"] == "sqlite_shared_file"
+    second_lease.settle(success=False, now=1000.0)
 
 
 def test_request_budget_reservation_covers_bounded_optional_fallbacks():

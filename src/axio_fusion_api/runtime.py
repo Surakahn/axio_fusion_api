@@ -6,11 +6,24 @@ import math
 import os
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Mapping
 
 from .schemas import sha256_text
+from .tenant_budget_ledger import (
+    SQLiteTenantBudgetLedger,
+    TenantBudgetLedger,
+    TenantBudgetLedgerError,
+)
+
+
+def _configured_shared_ledger() -> TenantBudgetLedger | None:
+    path = str(os.getenv("AXIO_FUSION_TENANT_BUDGET_SQLITE_PATH", "") or "").strip()
+    if not path:
+        return None
+    return SQLiteTenantBudgetLedger(path)
 
 
 @dataclass(frozen=True)
@@ -70,6 +83,8 @@ class TenantBudgetLease:
     allowed: bool
     _settled: bool = False
     _observed_usd: float = 0.0
+    _ledger: TenantBudgetLedger | None = None
+    _ledger_reservation_id: str = ""
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def observe(self, cost_usd: float | None) -> None:
@@ -107,7 +122,15 @@ class TenantBudgetLease:
                     # that reservation committed instead of turning it into
                     # unmetered/free traffic.
                     actual = self.reserved_usd
-        self._state._settle_budget_lease(self, actual if success else None, now=now)
+        settled = self._state._settle_budget_lease(
+            self,
+            actual if success else None,
+            success=success,
+            now=now,
+        )
+        if not settled:
+            with self._lock:
+                self._settled = False
 
 
 class RuntimeState:
@@ -118,7 +141,7 @@ class RuntimeState:
     free-form user notes, provider outputs, or API keys.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, ledger: TenantBudgetLedger | None = None) -> None:
         self._lock = threading.Lock()
         self._rate_windows: dict[str, list[float]] = {}
         self._budget_spend: dict[str, tuple[str, float]] = {}
@@ -128,6 +151,8 @@ class RuntimeState:
         self._feedback_count = 0
         self._feedback_by_score: dict[str, int] = {}
         self._response_continuations: dict[str, ResponseContinuation] = {}
+        self._budget_ledger = ledger if ledger is not None else _configured_shared_ledger()
+        self._budget_ledger_error_count = 0
 
     def check_rate_limit(self, tenant_key: str, *, now: float | None = None) -> dict[str, Any]:
         limit = _env_int("AXIO_FUSION_RATE_LIMIT_PER_MINUTE")
@@ -164,6 +189,8 @@ class RuntimeState:
             }
         current = float(now if now is not None else time.time())
         day = _utc_day(current)
+        if _tenant_budget_scope_name() == "shared_required":
+            return self._check_shared_budget(tenant_key, day=day, current=current, daily_budget=daily_budget)
         with self._lock:
             stored_day, spent = self._budget_spend.get(tenant_key, (day, 0.0))
             if stored_day != day:
@@ -185,12 +212,59 @@ class RuntimeState:
             "retry_after_seconds": retry_after,
         }
 
+    def _check_shared_budget(
+        self,
+        tenant_key: str,
+        *,
+        day: str,
+        current: float,
+        daily_budget: float | None,
+    ) -> dict[str, Any]:
+        if daily_budget is None or daily_budget <= 0:
+            return {
+                "allowed": True,
+                "daily_budget_usd": None,
+                "spent_usd": 0.0,
+                "reserved_usd": 0.0,
+                "remaining_usd": None,
+                "retry_after_seconds": 0,
+            }
+        if self._budget_ledger is None:
+            return _shared_budget_unavailable_receipt(daily_budget)
+        try:
+            snapshot = self._budget_ledger.snapshot(
+                day=day,
+                limit=1,
+                tenant_hash=sha256_text(tenant_key),
+            )
+        except TenantBudgetLedgerError:
+            with self._lock:
+                self._budget_ledger_error_count += 1
+            return _shared_budget_unavailable_receipt(daily_budget)
+        row = next(iter(snapshot.get("rows", [])), None)
+        spent = float((row or {}).get("committed_usd") or 0.0)
+        reserved = float((row or {}).get("reserved_usd") or 0.0)
+        exhausted = spent + reserved >= float(daily_budget)
+        return {
+            "allowed": not exhausted,
+            "daily_budget_usd": float(daily_budget),
+            "spent_usd": round(spent, 8),
+            "reserved_usd": round(reserved, 8),
+            "committed_plus_reserved_usd": round(spent + reserved, 8),
+            "remaining_usd": round(max(0.0, float(daily_budget) - spent - reserved), 8),
+            "retry_after_seconds": _seconds_until_next_utc_day(current) if exhausted else 0,
+            "scope": "shared_required",
+            "scope_ready": True,
+            "reason_code": "tenant_budget_exhausted" if exhausted else "",
+        }
+
     def reserve_budget(
         self,
         tenant_key: str,
         estimated_cost_usd: float | None,
         *,
         now: float | None = None,
+        reservation_key: str | None = None,
     ) -> tuple[TenantBudgetLease, dict[str, Any]]:
         """在同一锁内原子检查并预留已知成本。
 
@@ -203,6 +277,19 @@ class RuntimeState:
         current = float(now if now is not None else time.time())
         day = _utc_day(current)
         estimate = _finite_nonnegative(estimated_cost_usd)
+        shared_scope = (
+            daily_budget is not None
+            and daily_budget > 0
+            and _tenant_budget_scope_name() == "shared_required"
+        )
+        if shared_scope:
+            return self._reserve_shared_budget(
+                tenant_key,
+                estimate=estimate,
+                daily_budget=float(daily_budget),
+                day=day,
+                reservation_key=reservation_key,
+            )
         with self._lock:
             stored_day, spent = self._budget_spend.get(tenant_key, (day, 0.0))
             if stored_day != day:
@@ -258,13 +345,92 @@ class RuntimeState:
             "retry_after_seconds": retry_after,
         }
 
+    def _reserve_shared_budget(
+        self,
+        tenant_key: str,
+        *,
+        estimate: float | None,
+        daily_budget: float,
+        day: str,
+        reservation_key: str | None,
+    ) -> tuple[TenantBudgetLease, dict[str, Any]]:
+        if self._budget_ledger is None:
+            return _shared_budget_rejected_lease(self, tenant_key, daily_budget)
+        if estimate is None and not _unknown_pricing_allowed():
+            return _unknown_budget_rejected_lease(self, tenant_key, daily_budget)
+        amount = estimate or 0.0
+        try:
+            reservation = self._budget_ledger.reserve(
+                tenant_hash=sha256_text(tenant_key),
+                day=day,
+                amount_usd=amount,
+                budget_usd=daily_budget,
+                reservation_key=str(reservation_key or uuid.uuid4().hex),
+            )
+        except TenantBudgetLedgerError as error:
+            with self._lock:
+                self._budget_ledger_error_count += 1
+            lease = TenantBudgetLease(self, tenant_key, 0.0, day, False)
+            return lease, {
+                "allowed": False,
+                "daily_budget_usd": daily_budget,
+                "spent_usd": 0.0,
+                "reserved_usd": 0.0,
+                "estimated_cost_usd": round(amount, 8) if estimate is not None else None,
+                "pricing_known": estimate is not None,
+                "scope": "shared_required",
+                "scope_ready": False,
+                "reason_code": error.reason_code,
+                "unknown_pricing_policy": _unknown_pricing_policy_name(),
+            }
+        lease = TenantBudgetLease(
+            self,
+            tenant_key,
+            reservation.amount_usd if reservation.allowed else 0.0,
+            day,
+            reservation.allowed,
+            _ledger=self._budget_ledger,
+            _ledger_reservation_id=reservation.reservation_id,
+        )
+        return lease, {
+            "allowed": reservation.allowed,
+            "daily_budget_usd": daily_budget,
+            "spent_usd": reservation.committed_usd,
+            "reserved_usd": reservation.reserved_usd,
+            "estimated_cost_usd": round(amount, 8) if estimate is not None else None,
+            "pricing_known": estimate is not None,
+            "scope": "shared_required",
+            "scope_ready": True,
+            "reason_code": reservation.reason_code,
+            "unknown_pricing_policy": _unknown_pricing_policy_name(),
+            "committed_plus_reserved_usd": round(
+                reservation.committed_usd + reservation.reserved_usd, 8
+            ),
+            "remaining_usd": round(
+                max(0.0, daily_budget - reservation.committed_usd - reservation.reserved_usd), 8
+            ),
+        }
+
     def _settle_budget_lease(
         self,
         lease: TenantBudgetLease,
         actual_cost_usd: float | None,
         *,
+        success: bool,
         now: float | None = None,
-    ) -> None:
+    ) -> bool:
+        if lease._ledger is not None and lease._ledger_reservation_id:
+            try:
+                lease._ledger.settle(
+                    reservation_id=lease._ledger_reservation_id,
+                    actual_cost_usd=actual_cost_usd,
+                    success=success,
+                )
+            except TenantBudgetLedgerError:
+                with self._lock:
+                    self._budget_ledger_error_count += 1
+                return False
+            return True
         current_day = _utc_day(float(now if now is not None else time.time()))
         with self._lock:
             stored_day, reserved = self._budget_reservations.get(lease.tenant_key, (lease.day, 0.0))
@@ -275,7 +441,7 @@ class RuntimeState:
                 else:
                     self._budget_reservations.pop(lease.tenant_key, None)
             if actual_cost_usd is None:
-                return
+                return True
             stored_spend_day, spent = self._budget_spend.get(lease.tenant_key, (current_day, 0.0))
             if stored_spend_day != current_day:
                 spent = 0.0
@@ -284,6 +450,7 @@ class RuntimeState:
             if daily_budget is not None and daily_budget > 0 and updated > daily_budget:
                 self._budget_overcommit_count += 1
             self._budget_spend[lease.tenant_key] = (current_day, updated)
+        return True
 
     def record_cost(self, tenant_key: str, cost_usd: float | None, *, now: float | None = None) -> None:
         if cost_usd is None:
@@ -537,12 +704,29 @@ class RuntimeState:
                 ),
             )
             in_flight_tenant_count = len(self._in_flight)
+            budget_ledger_error_count = self._budget_ledger_error_count
+        shared_budget_snapshot = None
+        if daily_budget is not None and daily_budget > 0 and _tenant_budget_scope_name() == "shared_required":
+            if self._budget_ledger is not None:
+                try:
+                    shared_budget_snapshot = self._budget_ledger.snapshot(day=_utc_day(current), limit=1000)
+                except TenantBudgetLedgerError:
+                    shared_budget_snapshot = None
+                    with self._lock:
+                        self._budget_ledger_error_count += 1
+            budget_rows = (shared_budget_snapshot or {}).get("rows", [])
+            budget_tenants = int((shared_budget_snapshot or {}).get("tenant_count", 0))
+            budget_reservation_tenants = sum(1 for row in budget_rows if float(row.get("reserved_usd") or 0.0) > 0.0)
         return {
             "schema": "axio_fusion_api.runtime_snapshot.v1",
             "active_rate_limit_buckets": active_rate_buckets,
             "budget_tenant_count": budget_tenants,
             "budget_reservation_tenant_count": budget_reservation_tenants,
             "budget_overcommit_count": budget_overcommit_count,
+            "tenant_budget_ledger_backend": (
+                self._budget_ledger.backend_name if self._budget_ledger is not None else None
+            ),
+            "tenant_budget_ledger_error_count": budget_ledger_error_count,
             "rate_limit_buckets": rate_bucket_rows,
             "budget_tenants": budget_rows,
             "feedback_count": feedback_count,
@@ -561,7 +745,8 @@ class RuntimeState:
             "tenant_budget_enabled": bool(daily_budget is not None and daily_budget > 0),
             "tenant_budget_scope": _tenant_budget_scope_name(),
             "tenant_budget_scope_ready": _tenant_budget_scope_ready(
-                enabled=bool(daily_budget is not None and daily_budget > 0)
+                enabled=bool(daily_budget is not None and daily_budget > 0),
+                ledger=self._budget_ledger,
             ),
             "tenant_budget_unknown_pricing_policy": _unknown_pricing_policy_name(),
             "feedback_artifact_enabled": bool(_feedback_path()),
@@ -756,10 +941,67 @@ def _tenant_budget_scope_name() -> str:
     return "shared_required" if value.strip().lower() in {"shared", "shared_required"} else "process_local"
 
 
-def _tenant_budget_scope_ready(*, enabled: bool) -> bool:
+def _tenant_budget_scope_ready(
+    *,
+    enabled: bool,
+    ledger: TenantBudgetLedger | None = None,
+) -> bool:
     """Fail closed when deployment asks for shared quotas without a ledger."""
 
-    return not enabled or _tenant_budget_scope_name() != "shared_required"
+    if not enabled or _tenant_budget_scope_name() != "shared_required":
+        return True
+    return ledger is not None
+
+
+def _shared_budget_unavailable_receipt(daily_budget: float) -> dict[str, Any]:
+    return {
+        "allowed": False,
+        "daily_budget_usd": daily_budget,
+        "spent_usd": 0.0,
+        "reserved_usd": 0.0,
+        "committed_plus_reserved_usd": 0.0,
+        "remaining_usd": 0.0,
+        "retry_after_seconds": 1,
+        "scope": "shared_required",
+        "scope_ready": False,
+        "reason_code": "tenant_budget_shared_backend_unavailable",
+    }
+
+
+def _shared_budget_rejected_lease(
+    state: RuntimeState,
+    tenant_key: str,
+    daily_budget: float,
+) -> tuple[TenantBudgetLease, dict[str, Any]]:
+    return (
+        TenantBudgetLease(state, tenant_key, 0.0, _utc_day(), False),
+        {
+            **_shared_budget_unavailable_receipt(daily_budget),
+            "reason_code": "tenant_budget_shared_backend_required",
+        },
+    )
+
+
+def _unknown_budget_rejected_lease(
+    state: RuntimeState,
+    tenant_key: str,
+    daily_budget: float,
+) -> tuple[TenantBudgetLease, dict[str, Any]]:
+    return (
+        TenantBudgetLease(state, tenant_key, 0.0, _utc_day(), False),
+        {
+            "allowed": False,
+            "daily_budget_usd": daily_budget,
+            "spent_usd": 0.0,
+            "reserved_usd": 0.0,
+            "remaining_usd": daily_budget,
+            "retry_after_seconds": 0,
+            "scope": "shared_required",
+            "scope_ready": True,
+            "reason_code": "tenant_budget_pricing_unknown",
+            "pricing_known": False,
+        },
+    )
 
 
 def _unknown_pricing_allowed() -> bool:
