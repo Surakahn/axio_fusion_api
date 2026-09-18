@@ -8,7 +8,8 @@
 并让 buffered 文本、文本 SSE、图片 SSE 的预算超限响应统一携带 `Retry-After`。不改变
 预算金额、成本累计或租户隔离算法。
 
-验证：预算/限流专项 `3 passed`；L1/L2 和 `git diff --check` 通过；全量回归待本轮门禁完成。
+验证：预算/限流专项 `3 passed`；全量回归 `1128 passed`；L1/L2、compileall 和
+`git diff --check` 通过。
 该增量只证明商业级成本 admission 的恢复提示，不构成 provider 能力、排名、成本优势或
 superiority 证据。
 
