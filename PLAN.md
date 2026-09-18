@@ -19,7 +19,7 @@ profile 被熔断仍为 degraded 且无标识符泄露”。
 
 验证与发布：L1/L2、compileall、`git diff --check` 通过；standalone 回归 `392 passed`，
 全量回归 `1118 passed`。原生产 Axio 18900 进程在发布前已自然退出，本轮使用既有显式
-r7 probe-bound registry 以 `setsid/nohup` 恢复，当前 `/health` 为 `ready`，
+r7 probe-bound registry 以 `setsid/nohup` 恢复，最终进程 PID `2250370`，当前 `/health` 为 `ready`，
 `runtime_routing.status=healthy`、21/21 runtime eligible、0 open circuit、4 providers、
 `auto -> proxy`；三档 `/route-plan` 均通过。该发布没有执行 provider 或 target 请求，
 没有修改 r18 frozen plan/source/registry，也没有启动 screening/benchmark 后台任务。

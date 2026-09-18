@@ -39,7 +39,7 @@
 - L3：standalone `392 passed`；全量 `1118 passed in 285.65s`；
 - L4：`compileall -q src scripts`、`git diff --check` 通过，代码仅涉及产品健康投影和
   对应回归。
-- 受控 Axio 18900 发布 PID `2233733`，日志确认加载 21 profiles、创建 Engine；
+- 受控 Axio 18900 最终发布 PID `2250370`，日志确认加载 21 profiles、创建 Engine；
   `/health` 返回 `status=ready`、`runtime_routing.status=healthy`、21/21 runtime
   eligible、0 open circuit、4 providers、`auto -> proxy`。
 - `axio-fast`、`axio-terra`、`axio-pro` 三个 `/route-plan` 离线 dry-run 通过；期间没有
