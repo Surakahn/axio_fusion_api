@@ -1,5 +1,14 @@
 # Axio Fusion API Checklist
 
+# 2026-09-19 每日预算窗口恢复可观测性
+
+- [x] `budget_tenants[].retry_after_seconds` 与预算错误响应共享 UTC 日界语义；未超限或
+  关闭配置返回 `0`，日界切换清理旧预算行。
+- [x] hash-safe tenant/day projection 和预算窗口边界回归通过；专项 `9 passed`，全量
+  回归 `1135 passed`。
+- [x] 代码提交 `5047e76` 已受控发布至 Axio 18900（PID `2645665`）；生产
+  health/runtime/三档 route-plan 验证通过；CPA Plus 保持不变。
+
 # 2026-09-19 rate-limit 窗口恢复可观测性
 
 - [x] runtime bucket 快照新增 `retry_after_seconds`，与错误响应共享 60 秒窗口语义；未

@@ -1,5 +1,15 @@
 # Axio Fusion API Plan
 
+## 2026-09-19 每日预算窗口恢复可观测性
+
+预算超限错误已有 UTC 日界 `Retry-After`，但 runtime budget tenant 快照没有恢复时间。
+本轮新增 `budget_tenants[].retry_after_seconds`：未超限或预算关闭为 `0`，达到每日预算时
+返回下一个 UTC 日界的恢复秒数；日界切换继续按既有 prune 规则清理旧行。不改变预算累计、
+租户隔离、provider 行为或 r18 冻结证据。
+
+验证：专项预算/限流/并发 `9 passed`；全量回归 `1135 passed`；代码提交 `5047e76`
+已推送并完成受控发布，当前 Axio PID `2645665`，health/runtime/三档 route-plan 均通过。
+
 ## 2026-09-19 rate-limit 窗口恢复可观测性
 
 错误响应已有 `Retry-After`，但 runtime bucket 快照缺少窗口恢复时间。本轮新增

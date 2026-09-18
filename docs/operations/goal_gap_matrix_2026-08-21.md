@@ -39,6 +39,13 @@ provider 能力组合成 `axio-fast`、`axio-terra`、`axio-pro`。Harness 只�
   fail-closed 鉴权、租户并发与此前路由/r18 binding/convergence 安全修复均通过）；这是代码
   契约证据，不是能力或质量证据。
 
+2026-09-19 每日预算窗口恢复可观测性增量：runtime budget tenant 快照新增
+`retry_after_seconds`，与预算错误响应共享 UTC 日界语义；未超限或关闭配置为 `0`，达到
+预算时提供 hash-safe 恢复提示，日界切换清理旧预算行。代码提交 `5047e76`，全量回归
+为 `1135 passed`；发布后 Axio PID `2645665` 为 `ready/healthy`、`21/21` eligible、
+`0` circuit、`21/15` physical/logical、`4` providers、`auto -> proxy`，三档 route-plan
+通过。本增量不改变 provider I/O、r18 frozen inputs、screening、ranking 或 benchmark 授权。
+
 2026-09-19 rate-limit 窗口恢复可观测性增量：runtime bucket 快照新增
 `retry_after_seconds`，与错误响应保持同一 60 秒窗口语义；未超限或关闭配置为 `0`，达到
 限额时提供 hash-safe 恢复提示。代码提交 `1de8fbf`，全量回归为 `1133 passed`；发布后
