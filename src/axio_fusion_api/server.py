@@ -4226,6 +4226,7 @@ def _health(
         "public_models": list(PUBLIC_MODELS),
         "supported_api_formats": ["chat/completions", "responses", "anthropic", "gemini"],
         "registry_readiness": readiness,
+        "runtime_routing": engine.public_runtime_routing_snapshot(),
         "image_registry": image_router_summary(ImageRouter(image_profiles)),
         "network": provider_proxy_runtime_summary(),
         "runtime": runtime_state().snapshot(),

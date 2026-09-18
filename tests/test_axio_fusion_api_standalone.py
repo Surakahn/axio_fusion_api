@@ -7225,6 +7225,41 @@ def test_standalone_public_health_distinguishes_physical_and_logical_profiles():
     assert readiness["available_logical_model_count"] == 1
 
 
+def test_standalone_public_health_exposes_runtime_routing_degradation_safely():
+    provider = "secret-runtime-health-provider"
+    model = "secret-runtime-health-model"
+    profile = normalize_profile(
+        {
+            "provider": provider,
+            "model": model,
+            "health": "available",
+            "capabilities": {"daily_work": 0.9, "structured_output": 0.9},
+        }
+    )
+    engine = FusionEngine([profile], circuit_breaker_threshold=1)
+    # 不执行 I/O，只模拟进程内已达到熔断阈值的 provider 失败。
+    with engine._lock:
+        engine._failure_counts[profile.profile_id] = 1
+
+    status, _, body = handle_request(method="GET", path="/v1/health", engine=engine)
+    health = json.loads(body.decode("utf-8"))
+    routing = health["runtime_routing"]
+    serialized = json.dumps(health, ensure_ascii=False)
+
+    assert status == 200
+    assert routing["schema"] == "axio_fusion_api.public_runtime_routing.v1"
+    assert routing["status"] == "degraded"
+    assert routing["configured_profile_count"] == 1
+    assert routing["runtime_eligible_profile_count"] == 0
+    assert routing["circuit_open_profile_count"] == 1
+    assert routing["fallback_policy_enabled"] is True
+    assert routing["raw_provider_names_persisted"] is False
+    assert routing["secrets_persisted"] is False
+    assert provider not in serialized
+    assert model not in serialized
+    assert profile.profile_id not in serialized
+
+
 def test_standalone_http_server_loopback_preserves_four_public_api_surfaces(monkeypatch):
     monkeypatch.delenv("AXIO_FUSION_API_KEYS", raising=False)
     monkeypatch.delenv("AXIO_FUSION_ACCESS_LOG", raising=False)

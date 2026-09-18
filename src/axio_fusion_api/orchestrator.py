@@ -6139,6 +6139,62 @@ class FusionEngine:
             "raw_provider_error_persisted": False,
         }
 
+    def public_runtime_routing_snapshot(self) -> dict[str, Any]:
+        """返回不含标识符的运行时路由健康状态。
+
+        registry readiness 描述已登记的模型池，本投影描述熔断器和运行时
+        telemetry 生效后的当前进程。两者分开后，运维可以区分“某个渠道暂时
+        不可用”和“产品没有可服务模型池”，同时不暴露 provider、模型、提示词
+        或输出内容。
+        """
+
+        effective_profiles, circuit_filter = self._profiles_for_routing()
+        circuit = self._circuit_snapshot()
+        configured_count = len(self.profiles)
+        runtime_eligible_count = len(effective_profiles)
+        unavailable_count = sum(
+            1
+            for profile in effective_profiles
+            if str(profile.health or "").strip().casefold() == "unavailable"
+        )
+        open_count = _safe_int(circuit.get("open_profile_count"), default=0)
+        observed = circuit_filter.get("runtime_provider_telemetry")
+        observed = observed if isinstance(observed, Mapping) else {}
+        if configured_count <= 0:
+            status = "blocked"
+        elif runtime_eligible_count <= 0 and not open_count:
+            status = "blocked"
+        elif open_count or unavailable_count:
+            status = "degraded"
+        else:
+            status = "healthy"
+        return {
+            "schema": "axio_fusion_api.public_runtime_routing.v1",
+            "status": status,
+            "configured_profile_count": configured_count,
+            "runtime_eligible_profile_count": runtime_eligible_count,
+            "circuit_open_profile_count": open_count,
+            "circuit_recovery_ready_profile_count": _safe_int(
+                circuit.get("recovery_ready_profile_count"), default=0
+            ),
+            "runtime_unavailable_profile_count": unavailable_count,
+            "observed_profile_count": _safe_int(
+                observed.get("observed_profile_count"), default=0
+            ),
+            "observed_provider_hash_count": _safe_int(
+                observed.get("observed_provider_hash_count"), default=0
+            ),
+            "circuit_breaker_enabled": circuit.get("enabled") is True,
+            "runtime_telemetry_enabled": observed.get("enabled") is True,
+            "fallback_policy_enabled": True,
+            "raw_provider_names_persisted": False,
+            "raw_provider_model_ids_persisted": False,
+            "raw_provider_urls_persisted": False,
+            "raw_prompts_persisted": False,
+            "raw_provider_outputs_persisted": False,
+            "secrets_persisted": False,
+        }
+
     def _admit_hermes_feedback_stages(
         self,
         request: FusionRequest,

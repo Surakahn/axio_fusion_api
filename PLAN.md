@@ -1,5 +1,35 @@
 # Axio Fusion API Plan
 
+## 2026-09-18 运行时渠道降级可观测性增量
+
+本轮继续推进 Fusion 产品本体，不因 r18 provider 凭据安全门或历史渠道不可用而暂停
+运行时迭代。新增 `FusionEngine.public_runtime_routing_snapshot()`，并把它纳入公开
+`/health` 的 `runtime_routing` 投影。该投影把已登记的 registry readiness 与当前进程
+经过熔断器、运行时 telemetry 和 fallback 过滤后的路由状态分离，安全报告：
+
+- `healthy`：注册池和当前运行时均有可用 profile；
+- `degraded`：已有产品池，但一个或多个 profile 被熔断/标为不可用，仍保留产品级
+  fallback 可观测性；
+- `blocked`：没有登记 profile，或没有可用 profile 且不存在可恢复熔断状态。
+
+只返回 profile/provider 数量、熔断与观测计数及固定安全布尔值，不返回 provider/model
+标识、URL、提示词、原始输出或 secret。这样单个渠道故障不会被误报成整个产品放弃，
+运维也能在不读取敏感数据的情况下判断是否需要轮换或补充渠道。新增回归覆盖“全部
+profile 被熔断仍为 degraded 且无标识符泄露”。
+
+验证与发布：L1/L2、compileall、`git diff --check` 通过；standalone 回归 `392 passed`，
+全量回归 `1118 passed`。原生产 Axio 18900 进程在发布前已自然退出，本轮使用既有显式
+r7 probe-bound registry 以 `setsid/nohup` 恢复，当前 `/health` 为 `ready`，
+`runtime_routing.status=healthy`、21/21 runtime eligible、0 open circuit、4 providers、
+`auto -> proxy`；三档 `/route-plan` 均通过。该发布没有执行 provider 或 target 请求，
+没有修改 r18 frozen plan/source/registry，也没有启动 screening/benchmark 后台任务。
+
+本轮仍不改变 r18 的凭据轮换安全门：受控文件中的 NVIDIA 5-key pool 尚无轮换证据，
+因此 live screening 继续保持 withheld。下一条主路径仍为外部轮换后重新生成
+credential-ready preflight、重跑 verifier，再按 screening -> admission -> ranking ->
+baseline freeze -> same-cohort Harness -> 21-suite campaign 收敛；产品运行时将继续
+在 provider 缺失时依靠安全 fallback 和可观测状态工作。
+
 ## 2026-09-09 r18 授权后凭据安全门
 
 operator 已明确授权 r18 live screening。本轮重新执行了零 provider 请求的

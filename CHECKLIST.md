@@ -1,5 +1,18 @@
 # Axio Fusion API Checklist
 
+# 2026-09-18 运行时渠道降级可观测性
+
+- [x] 新增 `runtime_routing` 健康投影，区分 registry readiness 与当前进程的熔断、
+  telemetry、fallback 状态；`healthy/degraded/blocked` 语义 fail-closed 且不泄露
+  provider/model/URL/prompt/output/secret。
+- [x] 新增“全部 profile 被熔断仍报告 degraded”安全回归；standalone `392 passed`，
+  全量 `1118 passed`，L1/L2、compileall、`git diff --check` 通过。
+- [x] 受控恢复 Axio 18900：显式 r7 probe-bound registry、`setsid/nohup`、health ready、
+  21/21 runtime eligible、0 open circuit、4 providers、`auto -> proxy`；三档 route-plan
+  dry-run 通过。
+- [ ] 不把运行时健康投影当成 provider 能力、排名或 superiority 证据；r18 live screening
+  仍等待 NVIDIA key pool 轮换及新的 credential-ready preflight/verifier。
+
 # 2026-09-09 r18 授权后凭据安全门
 
 - [x] operator 已明确授权 r18 live screening；重新执行的 verifier 仍为
