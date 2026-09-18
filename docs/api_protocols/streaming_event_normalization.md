@@ -53,8 +53,9 @@ message_start
   -> message_stop
 ```
 
-Errors use a typed `error` event. A public Anthropic stream is not converted
-into Chat-style `[DONE]` framing.
+Errors use a typed `error` event whose bounded Axio failure code is carried in
+`error.code`. A public Anthropic stream is not converted into Chat-style
+`[DONE]` framing.
 
 ### Gemini
 
@@ -64,7 +65,10 @@ SSE JSON candidate fragments
 ```
 
 Gemini does not use named Anthropic/Responses events. Axio preserves JSON SSE
-objects with the Gemini candidate shape.
+objects with the Gemini candidate shape. Stream failures retain Gemini's
+numeric HTTP `error.code` and carry the bounded Axio failure code in
+`error.details[].code` under the namespaced `@type`
+`type.googleapis.com/axio.fusion.v1.Error`.
 
 ## Framing Rules
 

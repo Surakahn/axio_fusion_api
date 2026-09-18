@@ -1,5 +1,18 @@
 # Axio Fusion API Plan
 
+## 2026-09-19 四协议流式错误码一致性增量
+
+审计公共流式错误契约时发现 Chat/Responses 已输出 bounded machine code，而 Anthropic
+错误事件只有 `type/message`、Gemini 错误只有数值 HTTP code，调用方无法跨协议稳定识别
+同一 Axio failure class。本轮在不改变各协议原生 framing 的前提下补齐安全错误码：
+Anthropic `error.code`；Gemini `error.details[].code`，并使用固定
+`type.googleapis.com/axio.fusion.v1.Error` namespace。错误消息、provider body、prompt 和
+secret 仍不外泄。
+
+验证：流式专项 `27 passed`，四协议 standalone streaming 回归通过；全量回归 `1127 passed`；
+L1/L2、compileall、`git diff --check` 通过。该增量只证明公共错误契约一致性，不构成 provider 能力、排名、
+成本、延迟或 superiority 证据。
+
 ## 2026-09-19 流式客户端断开与租户资源释放增量
 
 继续补齐产品运行时闭环，不依赖 provider 网络能力。新增端到端回归覆盖真实 HTTP

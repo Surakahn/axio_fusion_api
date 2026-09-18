@@ -738,7 +738,11 @@ class IncrementalStreamRenderer:
                         "error",
                         {
                             "type": "error",
-                            "error": {"type": "api_error", "message": safe_message},
+                            "error": {
+                                "type": "api_error",
+                                "message": safe_message,
+                                "code": safe_code,
+                            },
                         },
                     )
                 ]
@@ -753,6 +757,12 @@ class IncrementalStreamRenderer:
                                 "code": 502,
                                 "status": "UNKNOWN",
                                 "message": safe_message,
+                                "details": [
+                                    {
+                                        "@type": "type.googleapis.com/axio.fusion.v1.Error",
+                                        "code": safe_code,
+                                    }
+                                ],
                             }
                         },
                     )

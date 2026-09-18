@@ -35,7 +35,7 @@ provider 能力组合成 `axio-fast`、`axio-terra`、`axio-pro`。Harness 只�
   models、21 个 live-available profiles、4 个 providers，且与 18900 进程的
   `AXIO_FUSION_REGISTRY_PATH` 绑定一致；AGENTS 中 r43 的 10-profile 数字仅是历史
   阶段检查项，不作为当前 r7 serving blocker。
-- 当前工程回归：`1123 passed, 0 skipped`（2026-09-19 流式断开资源释放、显式 fail-closed 鉴权、租户并发与此前
+- 当前工程回归：`1127 passed, 0 skipped`（2026-09-19 四协议错误码一致性增量、流式断开资源释放、显式 fail-closed 鉴权、租户并发与此前
   路由/r18 binding/convergence 安全修复均通过）；这是代码
   契约证据，不是能力或质量证据。
 
@@ -51,6 +51,11 @@ ranking 或 benchmark 授权。
 且租户 in-flight lease 在 handler 收尾后归零。流式专项 `23 passed`、全量 `1123 passed`；
 这是运行时资源与故障恢复证据，不改变 provider I/O、r18 frozen inputs、screening、
 ranking 或 benchmark 授权。
+
+2026-09-19 四协议错误码一致性增量：公共流式错误现在在 Chat/Responses/Anthropic/Gemini
+均保留 bounded Axio machine code；Anthropic 放在 `error.code`，Gemini 放在固定 namespace
+的 `error.details[].code`，同时保留原生 framing 和 Gemini 数值 HTTP code。专项 `27 passed`，
+不改变 provider I/O、r18 frozen inputs、screening、ranking 或 benchmark 授权。
 
 此前工程回归：`1116 passed, 0 skipped`（2026-08-27 路由、r18 binding 与 convergence
   artifact 安全修复后）；这是代码

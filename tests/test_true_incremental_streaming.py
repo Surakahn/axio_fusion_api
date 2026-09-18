@@ -83,6 +83,36 @@ def test_incremental_renderer_preserves_native_terminal_shapes(
     assert "private request text" not in start + delta + terminal
 
 
+@pytest.mark.parametrize("api_format", ["chat/completions", "responses", "anthropic", "gemini"])
+def test_incremental_renderer_projects_bounded_error_code_for_all_protocols(api_format: str) -> None:
+    request = canonicalize_payload(
+        {
+            "model": "axio-fast",
+            "messages": [{"role": "user", "content": "error contract"}],
+        },
+        api_format=api_format,
+    )
+    renderer = IncrementalStreamRenderer(
+        request,
+        api_format=api_format,
+        response_id="fusion-error-contract-test",
+        created=1_700_000_000,
+    )
+
+    stream = renderer.error(
+        code="public_stream_interrupted",
+        message="The response stream ended before completion.",
+    ).decode("utf-8")
+
+    assert "public_stream_interrupted" in stream
+    assert "error contract" not in stream
+    if api_format == "gemini":
+        assert '"@type":"type.googleapis.com/axio.fusion.v1.Error"' in stream
+        assert '"code":"public_stream_interrupted"' in stream
+    else:
+        assert '"code":"public_stream_interrupted"' in stream
+
+
 def test_public_output_normalization_extracts_internal_answer_envelope():
     internal = json.dumps(
         {

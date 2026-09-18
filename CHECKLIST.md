@@ -1,5 +1,14 @@
 # Axio Fusion API Checklist
 
+# 2026-09-19 四协议流式错误码一致性
+
+- [x] Chat/Responses/Anthropic/Gemini 流式失败均保留 bounded Axio machine code；不改变
+  各协议原生事件 framing。
+- [x] Anthropic 使用 `error.code`；Gemini 使用 namespaced `error.details[].code`，并
+  保留 Gemini 原生数值 HTTP code。
+- [x] 流式专项 `27 passed`，四协议 standalone streaming 回归通过；无 provider 网络请求，
+  无 raw error/provider body/prompt/secret 泄露。
+
 # 2026-09-19 流式客户端断开资源生命周期
 
 - [x] 新增真实 HTTP 客户端断开回归：首个公开 SSE delta 已发送后断开，provider 收到
