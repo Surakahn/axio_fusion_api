@@ -21,8 +21,8 @@ cancellation，禁止继续向已断开的客户端写数据，并最终释放�
 并发 admission 槽位泄漏。测试使用本地 fake provider，不读取或改变 r18 frozen
 plan/source/registry，也不启动 screening 或 target benchmark。
 
-验证：专项流式文件 `23 passed`，全量回归 `1123 passed`；`compileall`、关键导入与
-`git diff --check` 通过。该增量证明网关流式资源安全，不构成 provider 能力、排名、成本、
+验证：专项流式文件 `23 passed`；本轮后综合全量回归已提升至 `1127 passed`；`compileall`、
+关键导入与 `git diff --check` 通过。该增量证明网关流式资源安全，不构成 provider 能力、排名、成本、
 延迟或 superiority 证据。
 
 ## 2026-09-19 显式 fail-closed 鉴权模式增量

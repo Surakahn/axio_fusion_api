@@ -15,7 +15,7 @@
   cancellation，后续输出不再写入客户端。
 - [x] 验证断开后的租户 in-flight lease 最终归零，覆盖并发 admission 资源不会泄漏；
   回归使用本地 fake provider，无 provider/target 网络请求。
-- [x] 流式专项 `23 passed`，全量 `1123 passed`；compileall、关键导入和 `git diff --check`
+- [x] 流式专项 `23 passed`；本轮后综合全量回归已提升至 `1127 passed`；compileall、关键导入和 `git diff --check`
   通过。该项是运行时资源与故障恢复证据，不是 provider 能力或 superiority 证据。
 
 # 2026-09-19 显式 fail-closed 鉴权模式

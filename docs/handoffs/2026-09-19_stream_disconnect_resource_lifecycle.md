@@ -12,7 +12,8 @@ screening、target benchmark，也不修改 r18 frozen plan/source/registry。
   SSE delta 后断开，fake provider 观察到 cancellation，第二个 delta 不再发送给客户端。
 - 断开后 handler 的 `finally` 必须释放租户 in-flight lease；测试以有界等待确认
   `in_flight_tenant_count` 最终归零，防止真实生产连接断开造成租户槽位泄漏。
-- 流式专项：`23 passed`；全量回归：`1123 passed`。
+- 流式专项：`23 passed`；当时全量回归：`1123 passed`；随后四协议错误码增量完成综合
+  全量回归 `1127 passed`。
 - L1：`python3.11 -m compileall -q src scripts tests` 通过。
 - L2：关键导入通过；`git diff --check` 通过。
 - 本轮仅新增测试与证据文档，不改变 serving registry、router、prompt、weights 或
