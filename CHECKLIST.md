@@ -5,6 +5,10 @@
 - [x] `AXIO_FUSION_RATE_LIMIT_PER_MINUTE<=0` 时 runtime snapshot 报告 disabled，与实际
   admission 一致；请求仍允许且 `Retry-After=0`。
 - [x] 零值/负值配置回归通过；预算/限流专项提升至 `6 passed`。
+- [x] 全量回归 `1131 passed`；发布 commit `4d56422`/文档收敛 commit `bfae5ac`、`c2b7664`
+  已推送；Axio 18900 发布后 health、runtime routing 和三档 route-plan 均通过。
+- [x] 发布过程未停止或重启 CPA Plus；r18 frozen inputs、provider screening 和 target
+  benchmark 授权边界保持不变。
 
 # 2026-09-19 每日预算关闭状态可观测性
 
