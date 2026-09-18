@@ -12,8 +12,8 @@ hash-only 复核。该动作不启动 provider/target 请求，不修改 frozen 
   原始 preflight 与 credential-ready preflight。
 - 复用生产启动所需的 `private/current_channels.env`，并显式设置 `PYTHONPATH=src`，
   确保 verifier 使用与服务相同的网络策略实现。
-- 输出写入私有 ignored artifact：
-  `private/runs/2026-08-21-composite-cohort-r18/screening_preflight_verifier.r18.repeat-20260919.safe.json`。
+- 输出写入私有 ignored artifact（本轮最新）：
+  `private/runs/2026-08-21-composite-cohort-r18/screening_preflight_verifier.r18.repeat-20260919b.safe.json`。
 
 ## 结果
 
