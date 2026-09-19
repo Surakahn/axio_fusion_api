@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+import json
 import os
 import sqlite3
 import subprocess
@@ -9,12 +10,29 @@ from types import SimpleNamespace
 import pytest
 
 from axio_fusion_api.tenant_budget_ledger import (
+    LedgerFencingClaim,
     InMemoryTenantBudgetLedger,
     SQLiteTenantBudgetLedger,
+    TenantBudgetLedgerFencingStale,
     TenantBudgetLedgerInvariantError,
     TenantBudgetLedgerStorageUnavailable,
     TenantBudgetLedgerUnavailable,
 )
+
+
+class _ReferenceFencingAuthority:
+    """仅用于验证跨主机契约的单调 epoch 与旧 claim 拒绝语义。"""
+
+    def __init__(self):
+        self._epoch = 0
+
+    def claim(self, owner_hash):
+        self._epoch += 1
+        return LedgerFencingClaim(owner_hash=owner_hash, epoch=self._epoch, token=f"token-{self._epoch}")
+
+    def assert_current(self, claim):
+        if claim.epoch != self._epoch:
+            raise TenantBudgetLedgerFencingStale()
 
 
 def test_sqlite_ledger_is_idempotent_across_two_instances(tmp_path):
@@ -64,6 +82,33 @@ def test_sqlite_ledger_is_idempotent_across_two_instances(tmp_path):
         overcommit=False,
         idempotent_replay=True,
     )
+
+
+def test_fencing_claim_is_monotonic_and_safe_receipt_redacts_token():
+    owner_hash = "a" * 64
+    authority = _ReferenceFencingAuthority()
+    first = authority.claim(owner_hash)
+    second = authority.claim(owner_hash)
+    assert first.epoch == 1
+    assert second.epoch == 2
+    receipt = first.safe_receipt()
+    serialized = json.dumps(receipt, sort_keys=True)
+    assert receipt["schema"] == "axio_fusion_api.tenant_budget_fencing_claim.v1"
+    assert receipt["token_sha256"] == first.token_sha256
+    assert "token-1" not in serialized
+    assert receipt["raw_token_persisted"] is False
+    with pytest.raises(TenantBudgetLedgerFencingStale) as error:
+        authority.assert_current(first)
+    assert error.value.reason_code == "tenant_budget_fencing_stale"
+    assert error.value.retryable is True
+    authority.assert_current(second)
+
+
+def test_fencing_claim_rejects_non_hash_owner_and_non_positive_epoch():
+    with pytest.raises(TenantBudgetLedgerInvariantError):
+        LedgerFencingClaim(owner_hash="raw-owner", epoch=1, token="token")
+    with pytest.raises(TenantBudgetLedgerInvariantError):
+        LedgerFencingClaim(owner_hash="b" * 64, epoch=0, token="token")
 
 
 def test_sqlite_ledger_serializes_cross_instance_reservations(tmp_path):

@@ -1,5 +1,15 @@
 # Axio Fusion API Plan
 
+## 2026-09-19 跨主机租户预算 fencing/epoch 契约
+
+将跨主机共享账本从“未来设计”收敛为可审计的协议边界：新增
+`LedgerFencingClaim` 与 `FencedTenantBudgetLedger`，要求共享后端原子递增 fencing
+epoch，并在 `reserve/settle/release/recover` 前于同一事务/脚本比较 owner、epoch、token。
+旧 claim 固定返回 `tenant_budget_fencing_stale`，token 只存在于进程内，安全 receipt 仅保存
+SHA-256。现有 SQLite/InMemory 实现明确不实现该协议，继续保持单主机/测试边界。详见
+`docs/architecture/tenant_budget_fencing_contract.md`；本轮不切换公网 scope，不执行
+provider/target 网络调用，不修改 r18 frozen 输入。
+
 ## 2026-09-19 SQLite 账本存储卷故障与可重试错误闭环
 
 继续补齐 SQLite 共享账本的商业级运维边界：新增 hash-safe `storage_status()`，检查

@@ -64,6 +64,13 @@ class TenantBudgetLedgerInvariantError(TenantBudgetLedgerError):
         )
 
 
+class TenantBudgetLedgerFencingStale(TenantBudgetLedgerError):
+    """拒绝旧 owner/epoch 的写入，避免崩溃实例恢复后污染账本。"""
+
+    def __init__(self, message: str = "Tenant budget fencing claim is stale") -> None:
+        super().__init__("tenant_budget_fencing_stale", message, retryable=True)
+
+
 @dataclass(frozen=True)
 class LedgerReservation:
     """一次原子预留的安全结果。
@@ -96,6 +103,50 @@ class LedgerSettlement:
     overcommit: bool = False
     idempotent_replay: bool = False
     reason_code: str = ""
+
+
+@dataclass(frozen=True)
+class LedgerFencingClaim:
+    """跨主机账本写入所需的内存 fencing claim。
+
+    ``token`` 只允许短生命周期地存在于进程内；receipt 只能通过
+    ``safe_receipt`` 输出 token 的 SHA-256。后端必须在同一原子操作中比较
+    owner/epoch/token，不能依靠客户端本地比较或 TTL 推断有效性。
+    """
+
+    owner_hash: str
+    epoch: int
+    token: str
+
+    def __post_init__(self) -> None:
+        owner = str(self.owner_hash or "").strip().lower()
+        token = str(self.token or "").strip()
+        try:
+            epoch = int(self.epoch)
+        except (TypeError, ValueError) as error:
+            raise TenantBudgetLedgerInvariantError("fencing epoch must be a positive integer") from error
+        if not _is_sha256_hex(owner) or not token or epoch <= 0:
+            raise TenantBudgetLedgerInvariantError("fencing claim fields are invalid")
+        object.__setattr__(self, "owner_hash", owner)
+        object.__setattr__(self, "epoch", epoch)
+        object.__setattr__(self, "token", token)
+
+    @property
+    def token_sha256(self) -> str:
+        return hashlib.sha256(self.token.encode("utf-8")).hexdigest()
+
+    def safe_receipt(self) -> dict[str, Any]:
+        """返回可持久化的 claim 投影，不包含原始 token。"""
+
+        return {
+            "schema": "axio_fusion_api.tenant_budget_fencing_claim.v1",
+            "owner_sha256": self.owner_hash,
+            "epoch": self.epoch,
+            "token_sha256": self.token_sha256,
+            "raw_owner_persisted": False,
+            "raw_token_persisted": False,
+            "secrets_persisted": False,
+        }
 
 
 class TenantBudgetLedger(Protocol):
@@ -148,6 +199,60 @@ class TenantBudgetLedger(Protocol):
         tenant_hash: str | None = None,
     ) -> dict[str, Any]:
         """返回 hash-only 运维投影，不得包含原始 tenant、prompt 或 secret。"""
+
+
+class FencedTenantBudgetLedger(TenantBudgetLedger, Protocol):
+    """需要跨主机 fencing 的共享账本扩展契约。
+
+    ``claim_fencing_epoch`` 必须由后端原子递增 epoch，并使旧 claim 立即失效。
+    所有 ``*_fenced`` 写操作都必须在同一事务/脚本内验证 claim；客户端不能
+    通过重试、TTL 或本地时钟绕过失效 fencing。SQLite 当前实现不满足此协议。
+    """
+
+    fencing_backend_name: str
+
+    def claim_fencing_epoch(self, *, owner_hash: str) -> LedgerFencingClaim:
+        """原子取得新的单调 epoch；旧 owner claim 必须立即失效。"""
+
+    def reserve_fenced(
+        self,
+        *,
+        fencing_claim: LedgerFencingClaim,
+        tenant_hash: str,
+        day: str,
+        amount_usd: float,
+        budget_usd: float,
+        reservation_key: str,
+    ) -> LedgerReservation:
+        """验证 fencing 后原子执行 reserve。"""
+
+    def settle_fenced(
+        self,
+        *,
+        fencing_claim: LedgerFencingClaim,
+        reservation_id: str,
+        actual_cost_usd: float | None,
+        success: bool,
+    ) -> LedgerSettlement:
+        """验证 fencing 后原子执行 settle。"""
+
+    def release_fenced(
+        self,
+        *,
+        fencing_claim: LedgerFencingClaim,
+        reservation_id: str,
+    ) -> LedgerSettlement:
+        """验证 fencing 后原子执行 release。"""
+
+    def recover_fenced(
+        self,
+        *,
+        fencing_claim: LedgerFencingClaim,
+        reservation_id: str,
+        recovery_key: str,
+        reason: str,
+    ) -> LedgerSettlement:
+        """验证 fencing 后执行显式 operator recovery。"""
 
 
 @dataclass
@@ -1017,6 +1122,10 @@ def _sha256_file(path: str) -> str:
     return digest.hexdigest()
 
 
+def _is_sha256_hex(value: str) -> bool:
+    return len(value) == 64 and all(character in "0123456789abcdef" for character in value)
+
+
 def _is_corrupt_sqlite_error(error: sqlite3.DatabaseError) -> bool:
     """区分不可恢复的数据库损坏与可重试的锁/暂时不可用。"""
 
@@ -1034,11 +1143,14 @@ def _is_storage_sqlite_error(error: sqlite3.Error) -> bool:
 __all__ = [
     "InMemoryTenantBudgetLedger",
     "LedgerReservation",
+    "LedgerFencingClaim",
     "LedgerReservationStatus",
     "LedgerSettlement",
+    "FencedTenantBudgetLedger",
     "TenantBudgetLedger",
     "TenantBudgetLedgerError",
     "TenantBudgetLedgerInvariantError",
+    "TenantBudgetLedgerFencingStale",
     "TenantBudgetLedgerStorageUnavailable",
     "TenantBudgetLedgerUnavailable",
     "SQLiteTenantBudgetLedger",

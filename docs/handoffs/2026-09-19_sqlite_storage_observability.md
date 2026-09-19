@@ -48,5 +48,7 @@ CPA Plus。
 该实现是预检查和错误分类，不等同于真实生产卷只读/磁盘满演练；空间检查与实际复制之间
 仍存在并发耗尽窗口，因此 backup 仍必须处理 SQLite I/O 失败。SQLite 仍仅覆盖单主机共享
 文件，没有自动 fencing/租约 epoch、跨主机一致性或全局配额证据。下一步是使用临时隔离
-卷做有界故障演练，设计带 fencing token 的跨主机账本适配器，再在可信 image pricing、
+卷做有界故障演练；本轮已将 fencing token/epoch 设计固化为
+`docs/architecture/tenant_budget_fencing_contract.md` 与 `FencedTenantBudgetLedger` 协议，
+但尚未接入真实跨主机后端。后续再在可信 image pricing、
 真实公共/operator key 和 provider credential rotation 完成后进行外部 smoke。

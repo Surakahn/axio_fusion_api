@@ -1,5 +1,16 @@
 # Axio Fusion Goal 差距矩阵（2026-08-21）
 
+## 2026-09-19 跨主机预算 fencing/epoch 契约增量
+
+新增 `LedgerFencingClaim` 和 `FencedTenantBudgetLedger` 协议，固定跨主机后端必须通过
+原子 epoch/token 验证来拒绝旧 owner；`tenant_budget_fencing_stale` 为可重试但 fail-closed
+的稳定 reason code，safe receipt 只保存哈希。SQLite/InMemory 未实现此协议，仍明确保持
+单主机/测试边界。
+
+本轮完成的是架构契约与离线语义证据，不是跨主机后端实现。下一步必须选择并审计真实
+共享后端，做网络分区、双副本崩溃、旧 owner 恢复写入、epoch 冲突、备份恢复和外部 smoke；
+在此之前不切换公网 `shared_required`，不宣称全局预算完成。
+
 ## 2026-09-19 SQLite 存储卷故障与可重试错误闭环增量
 
 在完整性与备份门禁基础上，本轮新增 `SQLiteTenantBudgetLedger.storage_status()`，对账本

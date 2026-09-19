@@ -1,5 +1,16 @@
 # Axio Fusion API Checklist
 
+# 2026-09-19 跨主机租户预算 fencing/epoch 契约
+
+- [x] 新增 `LedgerFencingClaim`：owner hash、正整数单调 epoch 和内存 token 的输入验证；
+  safe receipt 仅保存 token SHA-256，原始 token 不可持久化。
+- [x] 新增 `FencedTenantBudgetLedger` 协议，要求 `claim_fencing_epoch` 与四个
+  `*_fenced` 原子操作；文档明确禁止 TTL/本地时钟绕过旧 claim。
+- [x] stale claim 固定使用 `tenant_budget_fencing_stale`、`retryable=true`；安全 receipt、
+  单调 epoch、旧 claim 拒绝和非法 claim 回归通过。
+- [ ] 尚未接入真实跨主机 Redis/SQL/共识后端，也未完成网络分区、双副本崩溃恢复、epoch
+  冲突和跨副本外部 smoke；SQLite 不能宣称全局配额。
+
 # 2026-09-19 SQLite 账本存储卷故障与可重试错误闭环
 
 - [x] 新增 `SQLiteTenantBudgetLedger.storage_status()`，只返回可写性、只读标志、剩余空间、
