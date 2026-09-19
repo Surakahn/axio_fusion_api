@@ -26,15 +26,19 @@ CPA Plus。
 - 公网部署合同在启用每日预算和 `shared_required` 时额外要求 SQLite ledger path；缺失
   时启动门继续 fail-closed。
 
+在线备份使用 SQLite backup API 生成一致副本，receipt 只包含字节数和 SHA-256；备份文件
+可以重新打开继续读取账本，目标路径必须独立且父目录已存在。
+
 ## 验证
 
 - L1：`tenant_budget_ledger.py`、`runtime.py`、`server.py` 及测试通过 `py_compile`。
 - L2：关键模块导入通过。
-- L3：账本/预算专项 `22 passed`；覆盖两个 RuntimeState 共享同一文件的并发预留、幂等
+- L3：账本/预算专项 `24 passed`；覆盖两个 RuntimeState 共享同一文件的并发预留、幂等
   结算/释放、跨实例预算耗尽、hash-only snapshot，以及真实子进程退出后重新打开数据库
-  再执行显式 recovery。此前相关部署契约、图片和真实增量流专项共 `94 passed`。
+  再执行显式 recovery、SQLite 锁竞争 retryable 错误和在线备份恢复。此前相关部署契约、
+  图片和真实增量流专项共 `94 passed`。
 - L4：`git diff --check` 通过；没有新增 provider/target 网络调用，r18 frozen 输入与
-  serving registry 未改动。
+  serving registry 未改动；全量 Python 3.11 回归 `1169 passed`。
 
 ## 当前边界
 

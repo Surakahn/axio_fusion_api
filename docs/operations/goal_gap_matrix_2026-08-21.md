@@ -170,6 +170,8 @@ runtime 暴露 `tenant_budget_scope_ready=false`，因此不会把不安全的�
 完成文件卷可靠性、锁竞争、进程崩溃恢复和运维备份审计。当前已增加显式 operator
 recovery：疑似崩溃 reservation 不按 TTL 自动释放，必须提供 recovery key/原因并留下固定
 reason code；这仍不是自动 fencing/租约恢复。
+SQLite 现有在线 backup API 和锁竞争 retryable 证据，备份副本可独立重新打开；磁盘满、
+备份校验/恢复演练和跨主机自动 fencing 仍未完成。
 
 | 领域 | 当前状态 | 已完成的可验证内容 | 未完成/阻塞 | 下一条合法动作 |
 | --- | --- | --- | --- | --- |

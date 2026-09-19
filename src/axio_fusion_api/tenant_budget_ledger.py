@@ -1,16 +1,13 @@
-"""跨进程租户预算账本的最小可替换契约。
+"""跨进程租户预算账本契约及单主机 SQLite 实现。
 
-生产服务当前仍使用 :class:`axio_fusion_api.runtime.RuntimeState` 的进程内
-账本。这个模块只定义将来共享后端必须满足的原子性和故障语义，并提供一个
-线程安全的内存 fake backend，供离线集成测试模拟多个 RuntimeState/副本。
-
-fake backend 不会被环境变量自动发现，也不提供持久化或跨进程能力；生产配置
-必须显式注入一个实现了 ``TenantBudgetLedger`` 的真实后端。这样可以避免把
-``process_local`` 的安全投影误报成全局租户配额。
+``InMemoryTenantBudgetLedger`` 仅用于离线集成测试；生产共享预算必须显式
+注入 ``SQLiteTenantBudgetLedger`` 或未来经过审计的跨主机后端。SQLite 只
+覆盖同一主机上的多进程，不得把它的安全投影误报成跨主机全局配额。
 """
 
 from __future__ import annotations
 
+import hashlib
 import math
 import os
 import sqlite3
@@ -529,7 +526,7 @@ class SQLiteTenantBudgetLedger:
                 )
                 connection.execute(
                     "UPDATE reservations SET status='settled', actual_cost_usd=?, overcommit=?, settled_at=? "
-                    " , settled_committed_usd=?, settled_reserved_usd=? WHERE reservation_id=?",
+                    ", settled_committed_usd=?, settled_reserved_usd=? WHERE reservation_id=?",
                     (
                         float(actual),
                         int(overcommit),
@@ -634,6 +631,45 @@ class SQLiteTenantBudgetLedger:
                 }
         except sqlite3.Error as error:
             raise TenantBudgetLedgerUnavailable("sqlite ledger snapshot failed") from error
+
+    def backup(self, destination_path: str) -> dict[str, Any]:
+        """生成一致的在线备份，返回 hash-only 运维凭证。"""
+
+        destination = os.path.abspath(os.path.expanduser(str(destination_path or "").strip()))
+        if not destination or destination == self.path:
+            raise TenantBudgetLedgerInvariantError("a distinct backup path is required")
+        parent = os.path.dirname(destination)
+        if not parent or not os.path.isdir(parent):
+            raise TenantBudgetLedgerInvariantError("backup parent directory must already exist")
+        source = None
+        target = None
+        try:
+            source = self._connect()
+            target = sqlite3.connect(destination, timeout=self._timeout_seconds, isolation_level=None)
+            source.backup(target, pages=128, sleep=0.05)
+            target.execute("PRAGMA synchronous = FULL")
+        except sqlite3.Error as error:
+            raise TenantBudgetLedgerUnavailable("sqlite ledger backup failed") from error
+        finally:
+            if target is not None:
+                target.close()
+            if source is not None:
+                source.close()
+        try:
+            backup_size = int(os.path.getsize(destination))
+            backup_sha256 = _sha256_file(destination)
+        except OSError as error:
+            raise TenantBudgetLedgerUnavailable("sqlite ledger backup verification failed") from error
+        return {
+            "schema": "axio_fusion_api.tenant_budget_ledger_backup.v1",
+            "backend": self.backend_name,
+            "bytes": backup_size,
+            "sha256": backup_sha256,
+            "raw_path_persisted": False,
+            "raw_tenant_keys_persisted": False,
+            "raw_api_keys_persisted": False,
+            "secrets_persisted": False,
+        }
 
     def _initialize(self) -> None:
         try:
@@ -836,6 +872,14 @@ def _validate_recovery_inputs(reservation_id: str, recovery_key: str, reason: st
 
 def _rounded(value: float) -> float:
     return round(float(value), 8)
+
+
+def _sha256_file(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 __all__ = [

@@ -14,7 +14,8 @@
 本轮继续补齐恢复边界：新增显式 `recover` operator 操作和固定
 `tenant_budget_reservation_recovered` reason code。真实子进程退出后 reservation 仍保持
 active，只有携带 recovery key 与原因才释放；不使用未经证明的 TTL 自动释放。该路径是
-安全人工恢复，不等同于自动 fencing/租约恢复。
+安全人工恢复，不等同于自动 fencing/租约恢复。另增加 SQLite online backup 和锁竞争
+retryable 语义；备份可重新打开验证，但磁盘满、自动 fencing 与跨主机恢复仍未完成。
 
 ## 2026-09-19 共享租户预算账本契约草案
 

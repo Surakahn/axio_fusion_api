@@ -1,5 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 import os
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -142,6 +143,57 @@ def test_sqlite_ledger_requires_explicit_recovery_after_process_exit(tmp_path):
     assert replay.idempotent_replay is True
     assert replay.reason_code == recovered.reason_code
     assert ledger.snapshot(day="2026-09-19")["rows"][0]["reserved_usd"] == 0.0
+
+
+def test_sqlite_ledger_lock_contention_is_retryable_and_recovers(tmp_path):
+    path = tmp_path / "locked-budget.db"
+    ledger = SQLiteTenantBudgetLedger(str(path), timeout_seconds=0.1)
+    lock_connection = sqlite3.connect(str(path), timeout=0.1, isolation_level=None)
+    try:
+        lock_connection.execute("BEGIN IMMEDIATE")
+        with pytest.raises(TenantBudgetLedgerUnavailable) as error:
+            ledger.reserve(
+                tenant_hash="tenant-hash",
+                day="2026-09-19",
+                amount_usd=0.10,
+                budget_usd=1.00,
+                reservation_key="locked-request",
+            )
+        assert error.value.reason_code == "tenant_budget_shared_backend_unavailable"
+    finally:
+        lock_connection.execute("ROLLBACK")
+        lock_connection.close()
+    reservation = ledger.reserve(
+        tenant_hash="tenant-hash",
+        day="2026-09-19",
+        amount_usd=0.10,
+        budget_usd=1.00,
+        reservation_key="locked-request-retry",
+    )
+    assert reservation.allowed is True
+
+
+def test_sqlite_ledger_online_backup_can_be_reopened_without_raw_metadata(tmp_path):
+    source_path = tmp_path / "source-budget.db"
+    backup_path = tmp_path / "backup-budget.db"
+    ledger = SQLiteTenantBudgetLedger(str(source_path))
+    reservation = ledger.reserve(
+        tenant_hash="tenant-hash",
+        day="2026-09-19",
+        amount_usd=0.20,
+        budget_usd=1.00,
+        reservation_key="backup-request",
+    )
+    ledger.settle(reservation_id=reservation.reservation_id, actual_cost_usd=0.15, success=True)
+    receipt = ledger.backup(str(backup_path))
+    assert receipt["schema"] == "axio_fusion_api.tenant_budget_ledger_backup.v1"
+    assert len(receipt["sha256"]) == 64
+    assert receipt["raw_path_persisted"] is False
+    restored = SQLiteTenantBudgetLedger(str(backup_path))
+    row = restored.snapshot(day="2026-09-19")["rows"][0]
+    assert row["committed_usd"] == 0.15
+    with pytest.raises(TenantBudgetLedgerInvariantError):
+        ledger.backup(str(source_path))
 
 
 def test_atomic_reservation_is_shared_across_concurrent_workers():

@@ -9,6 +9,8 @@
   `shared_required` 下接入；缺少路径、初始化失败、后端异常继续 fail-closed，不启动 provider/image。
 - [x] 增加显式 operator `recover`：真实子进程退出后 reservation 默认保持 active，携带
   recovery key/原因才释放，并以固定 reason code 幂等回放；避免 TTL 误释放仍在运行的请求。
+- [x] 增加 SQLite 在线 backup receipt 和锁竞争 retryable 回归；备份文件可重新打开并读取
+  已提交账本，receipt 不保存原始路径或租户信息。
 - [x] 公网部署合同在每日预算 + `shared_required` 时要求 ledger path；跨实例并发、幂等、
   hash-only snapshot 与显式恢复专项通过，全量 `1167 passed`；提交 `67078aa` 已推送并受控发布
   至 Axio 18900（PID `2960979`）；恢复语义提交 `132daa9` 已推送并受控发布至 PID
