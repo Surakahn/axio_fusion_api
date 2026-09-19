@@ -79,7 +79,7 @@ policy = FusionPolicy(live=True)
 
 # Pre-warm all three models on the SAME engine
 print("Pre-warming...", flush=True)
-for m in ['axio-fast', 'axio-terra', 'axio-pro']:
+for m in ['axio-luna', 'axio-terra', 'axio-sol']:
     for attempt in range(3):
         try:
             r = engine.complete(FusionRequest(model=m, prompt='hi', policy=policy, max_output_tokens=5))
@@ -147,8 +147,8 @@ SUITES = [
     ('bbh.jsonl', 'Logic', 'text'),
 ]
 
-AXIO  = ['axio-fast','axio-terra','axio-pro']
-BASELINES = {'gpt-5.6-luna':'axio-fast','gpt-5.6-terra':'axio-terra','gpt-5.6-sol':'axio-pro'}
+AXIO  = ['axio-luna','axio-terra','axio-sol']
+BASELINES = {'gpt-5.6-luna':'axio-luna','gpt-5.6-terra':'axio-terra','gpt-5.6-sol':'axio-sol'}
 ALL_M = AXIO + list(BASELINES.keys())
 
 def main():
@@ -193,7 +193,7 @@ def main():
         for m in ALL_M:
             v = [s for s in scores[m] if s>=0]
             print(f"  {m:16s}: {sum(v)/len(v):.3f}" if v else f"  {m:16s}: N/A", flush=True)
-        for ax,ba in [('axio-fast','gpt-5.6-luna'),('axio-terra','gpt-5.6-terra'),('axio-pro','gpt-5.6-sol')]:
+        for ax,ba in [('axio-luna','gpt-5.6-luna'),('axio-terra','gpt-5.6-terra'),('axio-sol','gpt-5.6-sol')]:
             av = sum(s for s in scores[ax] if s>=0)/max(1,sum(1 for s in scores[ax] if s>=0))
             bv = sum(s for s in scores[ba] if s>=0)/max(1,sum(1 for s in scores[ba] if s>=0))
             f = 'WIN' if av>bv else ('LOSE' if av<bv else 'TIE')
@@ -204,7 +204,7 @@ def main():
     # Final
     wins=losses=ties=0
     for _,data in summary.items():
-        for ax,ba in [('axio-fast','gpt-5.6-luna'),('axio-terra','gpt-5.6-terra'),('axio-pro','gpt-5.6-sol')]:
+        for ax,ba in [('axio-luna','gpt-5.6-luna'),('axio-terra','gpt-5.6-terra'),('axio-sol','gpt-5.6-sol')]:
             if data['agg'][ax] > data['agg'][ba]: wins+=1
             elif data['agg'][ax] < data['agg'][ba]: losses+=1
             else: ties+=1

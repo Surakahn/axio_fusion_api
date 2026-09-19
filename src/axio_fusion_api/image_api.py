@@ -499,11 +499,11 @@ class ImagePromptTransformer:
         self,
         text_engine: Any | None,
         *,
-        model: str = "axio-fast",
+        model: str = "axio-luna",
         cost_observer: Callable[[Mapping[str, Any]], None] | None = None,
     ) -> None:
         self.text_engine = text_engine
-        self.model = str(model or "axio-fast")
+        self.model = str(model or "axio-luna")
         self.cost_observer = cost_observer
 
     def transform(
@@ -1447,9 +1447,9 @@ class ImageRouter:
             return max(0.0, min(1.0, float(value)))
         def latency(profile: ModelProfile) -> int:
             return int(profile.p50_latency_ms or profile.p95_latency_ms or PROVIDER_MAX_RESPONSE_LATENCY_MS)
-        if public_model == "axio-fast":
+        if public_model == "axio-luna":
             return sorted(eligible, key=lambda profile: (latency(profile), -quality(profile), profile.profile_id))
-        if public_model == "axio-pro":
+        if public_model == "axio-sol":
             return sorted(eligible, key=lambda profile: (-quality(profile), latency(profile), profile.profile_id))
         return sorted(eligible, key=lambda profile: (-quality(profile) * 0.65 + latency(profile) / PROVIDER_MAX_RESPONSE_LATENCY_MS * 0.35, latency(profile), profile.profile_id))
 

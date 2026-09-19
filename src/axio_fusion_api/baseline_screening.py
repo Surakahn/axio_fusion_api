@@ -4068,7 +4068,7 @@ def _run_screening_case(
             profile_hash = sha256_text(profile.profile_id)
             attempt_started = time.monotonic()
             request = FusionRequest(
-                model="axio-fast",
+                model="axio-luna",
                 prompt=case.prompt,
                 system=system_prompt,
                 api_format=profile.api_format,

@@ -41,7 +41,7 @@ BENCHMARKS = [
     ("global_mmlu_lite.jsonl", "Multilingual-GlobalMMLU", lambda r: f"Question: {r.get('question','')}\nChoices: {r.get('choices', [])}. Answer with the letter."),
 ]
 
-MODELS = ["axio-fast", "axio-terra"]
+MODELS = ["axio-luna", "axio-terra"]
 
 print(f"Starting evaluation at {time.strftime('%H:%M:%S')}", flush=True)
 print(f"Models: {MODELS}, Benchmarks: {len(BENCHMARKS)}, Samples: {MAX_SAMPLES}", flush=True)

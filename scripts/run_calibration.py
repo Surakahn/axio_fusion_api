@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Axio Fusion 定期校准运行器 - 25题核心能力检测
 
-使用权重加权的28题校准集评估axio-fast/terra/pro的当前能力水平。
+使用权重加权的28题校准集评估axio-luna/terra/pro的当前能力水平。
 """
 from __future__ import annotations
 
@@ -93,7 +93,7 @@ def run_calibration(model: str):
 
 
 def main():
-    models = ["axio-fast", "axio-terra", "axio-pro"]
+    models = ["axio-luna", "axio-terra", "axio-sol"]
     all_results = {}
     
     for model in models:

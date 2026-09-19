@@ -1561,7 +1561,7 @@ def _probe_one_model_reasoning_support(
     # when that probe started, not whatever is configured after it finishes.
     transport_binding = reasoning_transport_probe_binding(profile)
     control_request = FusionRequest(
-        model="axio-fast",
+        model="axio-luna",
         prompt=f"Return exactly {REASONING_PROBE_MARKER}.",
         system=(
             "You are an Axio provider reasoning transport capability probe. "
@@ -2686,7 +2686,7 @@ def _probe_one_model_role(
     _begin_provider_request_trace()
     system, prompt, max_output_tokens = _role_probe_packet(role)
     request = FusionRequest(
-        model="axio-fast",
+        model="axio-luna",
         prompt=prompt,
         system=system,
         max_output_tokens=max_output_tokens,
@@ -3461,7 +3461,7 @@ def _probe_one_model_tool_support(
     started = time.monotonic()
     _begin_provider_request_trace()
     request = FusionRequest(
-        model="axio-fast",
+        model="axio-luna",
         prompt=(
             f"Call the declared function {TOOL_PROBE_NAME} exactly once with "
             f'{{"value":"{TOOL_PROBE_VALUE}"}}. Do not answer with plain text.'
@@ -3627,7 +3627,7 @@ def _probe_one_model(
             f"This is health-check sample {ordinal}; do not repeat the ordinal."
         )
         request = FusionRequest(
-            model="axio-fast",
+            model="axio-luna",
             prompt=prompt,
             max_output_tokens=16,
             temperature=0.0,
@@ -3976,7 +3976,7 @@ def build_provider_input_adapter_self_test(
     test_prompt = prompt or "Return a concise provider adapter conformance sentence."
     test_system = system or "You are an Axio provider adapter conformance probe."
     request = FusionRequest(
-        model="axio-fast",
+        model="axio-luna",
         prompt=test_prompt,
         system=test_system,
         history=(

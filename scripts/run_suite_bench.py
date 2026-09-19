@@ -3,7 +3,7 @@
 
 Usage:
     python3.11 scripts/run_suite_bench.py arc_challenge axio-terra gpt-5.6-terra --n 25
-    python3.11 scripts/run_suite_bench.py math_500 axio-pro gpt-5.6-sol --n 20 --timeout 180
+    python3.11 scripts/run_suite_bench.py math_500 axio-sol gpt-5.6-sol --n 20 --timeout 180
 """
 
 import argparse, json, os, sys, time, urllib.request, random, io

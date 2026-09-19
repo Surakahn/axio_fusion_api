@@ -403,7 +403,7 @@ class _ProviderCandidate:
 
         api_format = compat.normalize_api_format(self.profile.api_format)
         _, payload = evaluation._benchmark_public_api_payload(
-            model="axio-fast",
+            model="axio-luna",
             api_format=api_format,
             prompt="",
             system="",

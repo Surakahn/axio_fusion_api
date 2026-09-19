@@ -28,7 +28,7 @@ BENCHMARKS = [
     ("legalbench.jsonl", "Vertical-LegalBench", "mcq"),
 ]
 
-MODELS = ["axio-fast", "axio-terra"]
+MODELS = ["axio-luna", "axio-terra"]
 
 def call_axio(model, messages, max_tokens=256, retries=2):
     payload = {"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": 0.0, "stream": False}
@@ -180,10 +180,10 @@ for model in MODELS:
 
 # Comparison
 print("\n=== COMPARISON ===", flush=True)
-if "axio-fast" in all_results["models"] and "axio-terra" in all_results["models"]:
-    f = all_results["models"]["axio-fast"]["overall"]
+if "axio-luna" in all_results["models"] and "axio-terra" in all_results["models"]:
+    f = all_results["models"]["axio-luna"]["overall"]
     t = all_results["models"]["axio-terra"]["overall"]
-    print(f"axio-fast: {f['acc']:.0%} @ {f['avg_lat']:.1f}s", flush=True)
+    print(f"axio-luna: {f['acc']:.0%} @ {f['avg_lat']:.1f}s", flush=True)
     print(f"axio-terra: {t['acc']:.0%} @ {t['avg_lat']:.1f}s", flush=True)
     print(f"terra vs fast: delta={t['acc']-f['acc']:+.0%}", flush=True)
 

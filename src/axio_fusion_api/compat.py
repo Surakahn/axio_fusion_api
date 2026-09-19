@@ -1866,6 +1866,11 @@ def public_route_summary(route_plan: Mapping[str, Any]) -> dict[str, Any]:
         "stage_profile_reuse": _public_stage_profile_reuse(stage_profile_reuse),
         "fusion_activated": bool(judge_contract.get("required")),
         "fusion_finalization_mode": finalization_mode,
+        "call_cost_contract": _public_call_cost_contract(
+            route_plan.get("call_cost_contract")
+            if isinstance(route_plan.get("call_cost_contract"), Mapping)
+            else {}
+        ),
         "terra_execution_admission": _public_terra_execution_admission(terra_admission),
         "local_consensus_enabled": finalization_mode == "local_consensus",
         "provider_stage_calls_reserved": bool(
@@ -2164,11 +2169,13 @@ def _public_trace_summary(trace: Mapping[str, Any]) -> dict[str, Any]:
     tool_call_arbitration = trace.get("tool_call_arbitration") if isinstance(trace.get("tool_call_arbitration"), Mapping) else {}
     cache_replay = trace.get("cache_replay") if isinstance(trace.get("cache_replay"), Mapping) else {}
     cache_origin = trace.get("cache_origin_completion") if isinstance(trace.get("cache_origin_completion"), Mapping) else {}
+    call_cost = trace.get("call_cost") if isinstance(trace.get("call_cost"), Mapping) else {}
     return {
         "schema": "axio_fusion_api.public_trace_summary.v1",
         "actual_cost_usd": _optional_float(trace.get("actual_cost_usd")),
         "latency_ms": _optional_float(trace.get("latency_ms")),
         "provider_call_count": _optional_int(trace.get("provider_call_count")),
+        "call_cost": _public_call_cost(call_cost),
         "judge_provider_call_count": _optional_int(trace.get("judge_provider_call_count")),
         "synthesis_provider_call_count": _optional_int(trace.get("synthesis_provider_call_count")),
         "fusion_finalization_mode": str(
@@ -2238,6 +2245,56 @@ def _public_trace_summary(trace: Mapping[str, Any]) -> dict[str, Any]:
         "raw_provider_model_ids_persisted": False,
         "raw_profile_ids_persisted": False,
         "raw_provider_outputs_persisted": False,
+    }
+
+
+def _public_call_cost(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Expose only bounded call-count accounting, never provider pricing data."""
+
+    return {
+        "schema": str(value.get("schema") or "axio_fusion_api.provider_call_cost_receipt.v1")[:120],
+        "public_model": str(value.get("public_model") or "")[:40],
+        "algorithm": str(value.get("algorithm") or "")[:80],
+        "intelligence_rank": _optional_int(value.get("intelligence_rank")),
+        "cost_rank": _optional_int(value.get("cost_rank")),
+        "baseline_call_count": _optional_int(value.get("baseline_call_count")) or 1,
+        "provider_call_count_total": _optional_int(value.get("provider_call_count_total")) or 0,
+        "provider_call_count_successful": _optional_int(value.get("provider_call_count_successful")),
+        "provider_call_count_failed": _optional_int(value.get("provider_call_count_failed")),
+        "provider_call_count_retry": _optional_int(value.get("provider_call_count_retry")) or 0,
+        "provider_call_count_judge": _optional_int(value.get("provider_call_count_judge")) or 0,
+        "provider_call_count_synthesizer": _optional_int(value.get("provider_call_count_synthesizer")) or 0,
+        "relative_call_count_ratio": _optional_float(value.get("relative_call_count_ratio")),
+        "quality_per_provider_call": _optional_float(value.get("quality_per_provider_call")),
+        "relative_quality_per_call": _optional_float(value.get("relative_quality_per_call")),
+        "measurement": "attempted_provider_calls",
+        "usd_comparison_used": False,
+        "cheaper_than_baseline": None,
+        "cheaper_claim_status": "unverified_without_paired_benchmark",
+        "raw_provider_names_persisted": False,
+        "raw_model_names_persisted": False,
+        "raw_prompt_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _public_call_cost_contract(value: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "schema": str(value.get("schema") or "axio_fusion_api.product_call_cost_contract.v1")[:120],
+        "public_model": str(value.get("public_model") or "")[:40],
+        "algorithm": str(value.get("algorithm") or "")[:80],
+        "intelligence_rank": _optional_int(value.get("intelligence_rank")),
+        "cost_rank": _optional_int(value.get("cost_rank")),
+        "corresponding_baseline_rank": _optional_int(value.get("corresponding_baseline_rank")),
+        "baseline_call_count_per_case": _optional_int(value.get("baseline_call_count_per_case")) or 1,
+        "admitted_call_cap": _optional_int(value.get("admitted_call_cap")),
+        "measurement": "attempted_provider_calls",
+        "usd_comparison_used": False,
+        "quality_gate_required_for_cheaper_claim": True,
+        "cheaper_claim_status": "unverified",
+        "raw_provider_names_persisted": False,
+        "raw_model_names_persisted": False,
+        "secrets_persisted": False,
     }
 
 

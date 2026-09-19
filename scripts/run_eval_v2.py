@@ -28,7 +28,7 @@ BENCHMARKS = [
     ("legalbench.jsonl", "Vertical-LegalBench", "mcq"),
 ]
 
-MODELS = ["axio-fast", "axio-terra"]
+MODELS = ["axio-luna", "axio-terra"]
 
 def call_axio(model, messages, max_tokens=256):
     payload = {"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": 0.0, "stream": False}

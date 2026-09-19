@@ -224,7 +224,7 @@ def test_provider_config_file_is_a_first_class_cli_input() -> None:
             "/private/manifest.json",
             "route-plan",
             "--model",
-            "axio-fast",
+            "axio-luna",
             "--prompt",
             "hello",
         ]
@@ -839,7 +839,7 @@ def test_http_client_rotates_multiple_keys_after_transport_failure(monkeypatch) 
                 "api_key_env": "ROTATING_KEYS",
             }
         )
-        request = FusionRequest(model="axio-fast", prompt="hello")
+        request = FusionRequest(model="axio-luna", prompt="hello")
         result = HTTPProviderClient().complete(
             profile,
             request,
@@ -863,7 +863,7 @@ def test_http_client_rotates_multiple_keys_after_transport_failure(monkeypatch) 
 
 
 def test_http_client_normalizes_common_text_block_variants_for_all_four_protocols(monkeypatch):
-    request = FusionRequest(model="axio-fast", prompt="hello")
+    request = FusionRequest(model="axio-luna", prompt="hello")
     profiles = {
         "chat": normalize_profile({"provider": "fixture", "model": "chat", "api_format": "chat"}),
         "responses": normalize_profile({"provider": "fixture", "model": "responses", "api_format": "responses"}),
@@ -934,7 +934,7 @@ def test_strict_streaming_client_rejects_ordinary_json_body(monkeypatch):
     with pytest.raises(provider_module.ProviderExecutionError) as exc_info:
         HTTPProviderClient(require_streaming=True).complete_turn(
             profile,
-            FusionRequest(model="axio-fast", prompt="hello"),
+            FusionRequest(model="axio-luna", prompt="hello"),
             prompt="hello",
             system="system",
             timeout=1.0,
@@ -993,7 +993,7 @@ def test_strict_streaming_receipt_contains_framing_evidence(monkeypatch):
             "api_key_env": "FIXTURE_STREAM_KEY",
         }
     )
-    request = FusionRequest(model="axio-fast", prompt="hello")
+    request = FusionRequest(model="axio-luna", prompt="hello")
     provider_module._begin_provider_request_trace()
     completion = HTTPProviderClient(require_streaming=True).complete_turn(
         profile,
@@ -1058,7 +1058,7 @@ def test_every_provider_adapter_uses_streaming_wire(
             "api_format": api_format,
         }
     )
-    request = FusionRequest(model="axio-fast", prompt="hello")
+    request = FusionRequest(model="axio-luna", prompt="hello")
 
     completion = HTTPProviderClient(require_streaming=True).complete_turn(
         profile,
@@ -1350,7 +1350,7 @@ def test_provider_adapters_omit_unspecified_temperature_but_preserve_explicit_ze
 
     monkeypatch.setattr(provider_module, "_post_json", fake_post)
     client = HTTPProviderClient()
-    unspecified = FusionRequest(model="axio-fast", prompt="hello")
+    unspecified = FusionRequest(model="axio-luna", prompt="hello")
     for profile in profiles.values():
         client.complete_turn(profile, unspecified, prompt=unspecified.prompt, system=unspecified.system)
 
@@ -1359,7 +1359,7 @@ def test_provider_adapters_omit_unspecified_temperature_but_preserve_explicit_ze
     assert "temperature" not in captured["anthropic"]
     assert "temperature" not in captured["gemini"]["generationConfig"]
 
-    explicit_zero = FusionRequest(model="axio-fast", prompt="hello", temperature=0.0)
+    explicit_zero = FusionRequest(model="axio-luna", prompt="hello", temperature=0.0)
     for profile in profiles.values():
         client.complete_turn(profile, explicit_zero, prompt=explicit_zero.prompt, system=explicit_zero.system)
 
@@ -1390,7 +1390,7 @@ def test_chat_adapter_uses_only_the_profile_selected_output_token_parameter(
         return {"choices": [{"message": {"content": "ok"}}]}
 
     monkeypatch.setattr(provider_module, "_post_json", fake_post)
-    request = FusionRequest(model="axio-fast", prompt="hello", max_output_tokens=123)
+    request = FusionRequest(model="axio-luna", prompt="hello", max_output_tokens=123)
     HTTPProviderClient().complete_turn(
         profile,
         request,
@@ -1408,7 +1408,7 @@ def test_http_client_retries_bounded_semantic_empty_response(monkeypatch):
     profile = normalize_profile(
         {"provider": "fixture", "model": "empty", "api_format": "chat"}
     )
-    request = FusionRequest(model="axio-fast", prompt="hello")
+    request = FusionRequest(model="axio-luna", prompt="hello")
     calls = []
 
     def fake_post(profile, path, payload, *, timeout, **kwargs):
@@ -1466,7 +1466,7 @@ def test_gemini_explicit_x_goog_api_key_auth_is_respected(monkeypatch):
 
     completion = HTTPProviderClient().complete_turn(
         profile,
-        FusionRequest(model="axio-fast", prompt="hello"),
+        FusionRequest(model="axio-luna", prompt="hello"),
         prompt="hello",
         system="system",
         timeout=1.0,
@@ -1656,7 +1656,7 @@ def test_http_client_supports_explicit_no_auth_remote_gateway(monkeypatch):
 
     completion = HTTPProviderClient().complete_turn(
         profile,
-        FusionRequest(model="axio-fast", prompt="hello"),
+        FusionRequest(model="axio-luna", prompt="hello"),
         prompt="hello",
         system="system",
         timeout=1.0,
@@ -1681,7 +1681,7 @@ def test_http_client_semantic_retry_shares_one_turn_deadline(monkeypatch):
     profile = normalize_profile(
         {"provider": "fixture", "model": "empty-deadline", "api_format": "chat"}
     )
-    request = FusionRequest(model="axio-fast", prompt="hello")
+    request = FusionRequest(model="axio-luna", prompt="hello")
     timeouts = []
 
     def fake_post(profile, path, payload, *, timeout, **kwargs):
@@ -1733,7 +1733,7 @@ def test_responses_text_fallback_consumes_remaining_turn_deadline(monkeypatch):
     profile = normalize_profile(
         {"provider": "fixture", "model": "responses-deadline", "api_format": "responses"}
     )
-    request = FusionRequest(model="axio-fast", prompt="hello")
+    request = FusionRequest(model="axio-luna", prompt="hello")
     calls = []
 
     def typed_then_text(profile, path, payload, *, timeout, **kwargs):

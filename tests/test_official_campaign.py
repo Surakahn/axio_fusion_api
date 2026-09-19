@@ -32,9 +32,9 @@ def _claim_only_freeze(*, registry_file_sha256: str) -> dict:
             for rank in (1, 2, 3)
         ],
         "tier_target_policy": [
-            {"axio_model": "axio-pro", "target_provider_rank": 1},
+            {"axio_model": "axio-sol", "target_provider_rank": 1},
             {"axio_model": "axio-terra", "target_provider_rank": 2},
-            {"axio_model": "axio-fast", "target_provider_rank": 3},
+            {"axio_model": "axio-luna", "target_provider_rank": 3},
         ],
         "external_ranking_receipt": {
             "schema": "axio_fusion_api.external_provider_ranking_receipt.v3",
@@ -54,7 +54,7 @@ def _claim_only_freeze(*, registry_file_sha256: str) -> dict:
 
 
 def _campaign_inputs(tmp_path, *, candidate_type: str) -> dict:
-    candidate_id = "axio-pro" if candidate_type == "axio" else "provider::fixture"
+    candidate_id = "axio-sol" if candidate_type == "axio" else "provider::fixture"
     task = {
         "execution_task_id": "official_harness_task_0001",
         "suite_id": "ifeval",

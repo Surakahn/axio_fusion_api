@@ -46,7 +46,7 @@ HERMES_MOA_SOURCE_COMMIT = "e89bc58a5ba80ec6be19b43beca37cbb03091afd"
 
 
 def _tier_is_pro(public_model: str) -> bool:
-    return str(public_model or "").strip().casefold() == "axio-pro"
+    return str(public_model or "").strip().casefold() == "axio-sol"
 
 
 def _stage_cognitive_policy(
@@ -158,7 +158,7 @@ def build_process_plan(
         requested_tokens = 0
     default_cap = (
         HERMES_MOA_PRO_REFERENCE_MAX_TOKENS
-        if str(public_model or "") == "axio-pro"
+        if str(public_model or "") == "axio-sol"
         else HERMES_MOA_TERRA_REFERENCE_MAX_TOKENS
     )
     reference_max_tokens = max(

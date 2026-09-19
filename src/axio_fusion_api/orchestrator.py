@@ -2951,7 +2951,7 @@ class FusionEngine:
         """Run Fusion while exposing only the final acting model's text deltas.
 
         Internal panel, Judge, critic, Hermes-reference, repair, and routing
-        calls remain private.  ``axio-fast`` may expose its direct acting
+        calls remain private.  ``axio-luna`` may expose its direct acting
         solver; the deliberative public models expose only their final
         synthesizer.  Cache/custom-client paths retain a one-shot completion
         fallback, which is still protocol-correct but deliberately marked by
@@ -13095,7 +13095,7 @@ def _response_cache_origin_completion_receipt(
     }
     if (
         not fusion_requested
-        and request.public_model in {"axio-pro", "axio-terra"}
+        and request.public_model in {"axio-sol", "axio-terra"}
         and admission_blockers.intersection(hard_fusion_blockers)
     ):
         reason_codes.append("fusion_admission_degraded_direct_not_cacheable")
@@ -14006,7 +14006,7 @@ def _timeout_for_role(
 ) -> tuple[float, dict[str, Any]]:
     """Bound one provider attempt while preserving a Fast cascade fallback.
 
-    A direct ``axio-fast`` route is intentionally serial.  Giving the primary
+    A direct ``axio-luna`` route is intentionally serial.  Giving the primary
     request the entire deadline makes the advertised fallback unreachable after
     a timeout, so that route keeps its dedicated fallback-headroom policy.
     Provider-Judge Fusion candidate roles instead use a screened p95 cap so one

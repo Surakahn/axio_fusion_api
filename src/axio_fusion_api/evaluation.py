@@ -1484,9 +1484,9 @@ def build_benchmark_run_matrix(
         ]
     else:
         candidates = [
-            _candidate_row("axio-fast", "axio", "fast_direct_cascade"),
+            _candidate_row("axio-luna", "axio", "fast_direct_cascade"),
             _candidate_row("axio-terra", "axio", "terra_cost_guarded_fusion"),
-            _candidate_row("axio-pro", "axio", "pro_panel_judge_escalation"),
+            _candidate_row("axio-sol", "axio", "pro_panel_judge_escalation"),
             _candidate_row("single_low_cost_model", "baseline", "single_low_cost_model"),
             _candidate_row("single_best_model", "baseline", "single_best_model"),
             _candidate_row("cheap_models_vote", "baseline", "cheap_models_vote"),
@@ -1593,9 +1593,9 @@ def build_benchmark_run_matrix(
         "run_units": run_units,
         "rows": rows,
         "comparison_contract": {
-            "axio_fast_target": "match_or_beat_third_best_single_model_at_lower_cost",
+            "axio_luna_target": "match_or_beat_third_best_single_model_at_lower_cost",
             "axio_terra_target": "match_or_beat_second_best_single_model_at_lower_cost",
-            "axio_pro_target": "match_or_beat_best_single_model_or_improve_reliability",
+            "axio_sol_target": "match_or_beat_best_single_model_or_improve_reliability",
             "claims_require_scorecard": True,
             "final_claims_require_externally_ranked_top_three_pre_registration": True,
             "legacy_all_provider_baselines_are_diagnostic_only": True,
@@ -5761,9 +5761,9 @@ def build_benchmark_scorecard(
                 if use_pre_registered_baselines
                 else "legacy rank 3 provider baseline by the suite primary metric"
             ),
-            "axio-pro": "must beat strongest_provider on every required suite",
+            "axio-sol": "must beat strongest_provider on every required suite",
             "axio-terra": "must beat second_strongest_provider on every required suite",
-            "axio-fast": "must beat third_strongest_provider on every required suite",
+            "axio-luna": "must beat third_strongest_provider on every required suite",
             "ranking_source": (
                 EXTERNAL_PROVIDER_RANKING_RANK_SOURCE
                 if use_pre_registered_baselines
@@ -5787,12 +5787,12 @@ def build_benchmark_scorecard(
             "suite_observed_best_provider_diagnostic": suite_observed_best_provider,
             "suite_observed_best_provider_is_diagnostic_only": bool(use_pre_registered_baselines),
             "axio_candidates": axio_rows,
-            "axio_pro_beats_best_provider": _beats(by_id.get("axio-pro"), comparison_provider),
+            "axio_sol_beats_best_provider": _beats(by_id.get("axio-sol"), comparison_provider),
             "axio_terra_beats_best_provider": _beats(by_id.get("axio-terra"), comparison_provider),
             "tier_target_summary": tier_target_summary,
             "superiority_claim_allowed": bool(
-                _beats(by_id.get("axio-pro"), comparison_provider)
-                and by_id.get("axio-pro", {}).get("case_count", 0) >= 20
+                _beats(by_id.get("axio-sol"), comparison_provider)
+                and by_id.get("axio-sol", {}).get("case_count", 0) >= 20
             ),
             "requires_more_cases_before_marketing_claim": True,
         },
@@ -5804,9 +5804,9 @@ def build_benchmark_scorecard(
 
 
 _AXIO_TIER_TARGETS: tuple[tuple[str, str, int], ...] = (
-    ("axio-pro", "strongest_provider", 0),
+    ("axio-sol", "strongest_provider", 0),
     ("axio-terra", "second_strongest_provider", 1),
-    ("axio-fast", "third_strongest_provider", 2),
+    ("axio-luna", "third_strongest_provider", 2),
 )
 
 
@@ -7180,9 +7180,9 @@ def build_benchmark_claim_audit(
         runs_by_suite.setdefault(suite_id, {})[candidate_id] = run
     comparisons = []
     model_contract = {
-        "axio-pro": ("strongest_provider", 0),
+        "axio-sol": ("strongest_provider", 0),
         "axio-terra": ("second_strongest_provider", 1),
-        "axio-fast": ("third_strongest_provider", 2),
+        "axio-luna": ("third_strongest_provider", 2),
     }
     for suite_id in suite_ids:
         suite_runs = runs_by_suite.get(suite_id, {})
@@ -7275,9 +7275,9 @@ def build_benchmark_claim_audit(
                 }
             )
     final_claims = {
-        "axio_pro_beats_strongest_single_model_on_all_required_benchmarks": by_model["axio-pro"]["all_required_suites_passed"],
+        "axio_sol_beats_strongest_single_model_on_all_required_benchmarks": by_model["axio-sol"]["all_required_suites_passed"],
         "axio_terra_beats_second_strongest_single_model_on_all_required_benchmarks": by_model["axio-terra"]["all_required_suites_passed"],
-        "axio_fast_beats_third_strongest_single_model_on_all_required_benchmarks": by_model["axio-fast"]["all_required_suites_passed"],
+        "axio_luna_beats_third_strongest_single_model_on_all_required_benchmarks": by_model["axio-luna"]["all_required_suites_passed"],
     }
     return {
         "schema": "axio_fusion_api.benchmark_claim_audit.v1",
@@ -7293,9 +7293,9 @@ def build_benchmark_claim_audit(
         "category_contract": "first eight categories require two suites; vertical_domain requires five suites",
         "category_coverage": category_coverage,
         "baseline_contract": {
-            "axio-pro": "must beat externally pre-registered configured-provider-pool rank-one provider baseline on every suite",
+            "axio-sol": "must beat externally pre-registered configured-provider-pool rank-one provider baseline on every suite",
             "axio-terra": "must beat externally pre-registered configured-provider-pool rank-two provider baseline on every suite",
-            "axio-fast": "must beat externally pre-registered configured-provider-pool rank-three provider baseline on every suite",
+            "axio-luna": "must beat externally pre-registered configured-provider-pool rank-three provider baseline on every suite",
             "provider_strength_source": (
                 EXTERNAL_PROVIDER_RANKING_RANK_SOURCE
                 if use_pre_registered_baselines
@@ -11178,9 +11178,9 @@ def _fusion_provider_baseline_freeze_readiness(
         reasons.append("provider_baseline_freeze_external_ranking_mapping_invalid")
 
     expected_tiers = {
-        "axio-pro": 1,
+        "axio-sol": 1,
         "axio-terra": 2,
-        "axio-fast": 3,
+        "axio-luna": 3,
     }
     tier_rows = manifest.get("tier_target_policy") if isinstance(manifest.get("tier_target_policy"), list) else []
     observed_tiers = {
@@ -11787,7 +11787,7 @@ def build_fusion_system_development_readiness(
         _completion_requirement(
             "public_model_and_api_contracts",
             "public_api",
-            tuple(AXIO_BENCHMARK_PUBLIC_MODELS) == ("axio-fast", "axio-terra", "axio-pro")
+            tuple(AXIO_BENCHMARK_PUBLIC_MODELS) == ("axio-luna", "axio-terra", "axio-sol")
             and tuple(AXIO_BENCHMARK_API_FORMATS) == ("chat/completions", "responses", "anthropic", "gemini"),
             evidence_refs=["AXIO_BENCHMARK_PUBLIC_MODELS", "AXIO_BENCHMARK_API_FORMATS"],
             reason_codes=[],
@@ -12627,9 +12627,9 @@ def build_benchmark_final_audit(
             "requires_official_harness_identity_bound_to_source_manifest": True,
             "requires_dataset_snapshot_bound_to_source_manifest": True,
             "requires_evaluator_config_bound_to_source_manifest": True,
-            "requires_axio_pro_beats_strongest_provider": True,
+            "requires_axio_sol_beats_strongest_provider": True,
             "requires_axio_terra_beats_second_provider": True,
-            "requires_axio_fast_beats_third_provider": True,
+            "requires_axio_luna_beats_third_provider": True,
             "requires_paired_case_hash_sign_test": True,
             "requires_holm_bonferroni_familywise_correction": True,
             "requires_practical_effect_size_gate": True,
@@ -12841,9 +12841,9 @@ def build_benchmark_evidence_pack(
         ),
         "next_command_templates": next_commands,
         "claim_contract": {
-            "axio_pro_target": "beat externally pre-registered configured-provider-pool rank 1 single-provider baseline on every required suite",
+            "axio_sol_target": "beat externally pre-registered configured-provider-pool rank 1 single-provider baseline on every required suite",
             "axio_terra_target": "beat externally pre-registered configured-provider-pool rank 2 single-provider baseline on every required suite",
-            "axio_fast_target": "beat externally pre-registered configured-provider-pool rank 3 single-provider baseline on every required suite",
+            "axio_luna_target": "beat externally pre-registered configured-provider-pool rank 3 single-provider baseline on every required suite",
             "externally_ranked_top_three_pre_registered_required_for_final_claim": True,
             "target_benchmark_results_must_not_select_or_reorder_provider_baselines": True,
             "paired_case_hashes_required": True,
@@ -13160,7 +13160,7 @@ def build_fusion_completion_audit(
         _completion_requirement(
             "public_axio_model_contract",
             "public_api",
-            tuple(AXIO_BENCHMARK_PUBLIC_MODELS) == ("axio-fast", "axio-terra", "axio-pro"),
+            tuple(AXIO_BENCHMARK_PUBLIC_MODELS) == ("axio-luna", "axio-terra", "axio-sol"),
             evidence_refs=["AXIO_BENCHMARK_PUBLIC_MODELS"],
             reason_codes=[],
             next_step="repair_public_model_registry",
@@ -13348,9 +13348,9 @@ def build_fusion_completion_audit(
             and all(
                 claim_summary.get("final_claims", {}).get(key) is True
                 for key in (
-                    "axio_pro_beats_strongest_single_model_on_all_required_benchmarks",
+                    "axio_sol_beats_strongest_single_model_on_all_required_benchmarks",
                     "axio_terra_beats_second_strongest_single_model_on_all_required_benchmarks",
-                    "axio_fast_beats_third_strongest_single_model_on_all_required_benchmarks",
+                    "axio_luna_beats_third_strongest_single_model_on_all_required_benchmarks",
                 )
             ),
             evidence_refs=["claim_summary.final_claims"],
@@ -16224,7 +16224,7 @@ def _final_run_summary(
         provider_count = sum(1 for run in suite_runs if str(run.get("candidate_id") or "").startswith("provider::"))
         candidate_ids = {str(run.get("candidate_id") or "") for run in suite_runs}
         axio_missing = [
-            model for model in ("axio-fast", "axio-terra", "axio-pro") if model not in candidate_ids
+            model for model in ("axio-luna", "axio-terra", "axio-sol") if model not in candidate_ids
         ]
         axio_surface_audit = build_benchmark_api_surface_audit(
             suite_runs,
@@ -17494,7 +17494,7 @@ def _final_scorecard_summary(
         if _optional_int(row.get("provider_baseline_count")) is not None and _optional_int(row.get("provider_baseline_count")) < expected_provider_baseline_count:
             reason_codes.append("provider_run_count_below_available")
         comparison_models = {str(item.get("axio_model") or "") for item in comparisons if isinstance(item, Mapping)}
-        if not {"axio-fast", "axio-terra", "axio-pro"}.issubset(comparison_models):
+        if not {"axio-luna", "axio-terra", "axio-sol"}.issubset(comparison_models):
             reason_codes.append("missing_axio_tier_target_comparisons")
         comparison_by_model = {
             str(item.get("axio_model") or ""): item
@@ -17646,9 +17646,9 @@ def _final_claim_summary(
     if failed_comparisons:
         missing.append({"kind": "claim_audit_failed_comparisons_present", "failed_comparison_count": len(failed_comparisons)})
     for claim_key in (
-        "axio_pro_beats_strongest_single_model_on_all_required_benchmarks",
+        "axio_sol_beats_strongest_single_model_on_all_required_benchmarks",
         "axio_terra_beats_second_strongest_single_model_on_all_required_benchmarks",
-        "axio_fast_beats_third_strongest_single_model_on_all_required_benchmarks",
+        "axio_luna_beats_third_strongest_single_model_on_all_required_benchmarks",
     ):
         if final_claims.get(claim_key) is not True:
             missing.append({"kind": "final_claim_not_proven", "claim": claim_key})
@@ -21284,7 +21284,7 @@ def _dataset_schema_for_format(task_format: str) -> dict[str, Any]:
             "optional_fields": ["imported_runs"],
             "example_schema": {
                 "imported_runs": {
-                    "axio-pro": "path/to/prompt_free_official_judge_run.json",
+                    "axio-sol": "path/to/prompt_free_official_judge_run.json",
                     "provider::<profile-hash-alias>": "path/to/prompt_free_official_judge_run.json",
                 }
             },
@@ -21792,7 +21792,7 @@ def _methodology_contract_for_suite(suite: BenchmarkSuite) -> dict[str, Any]:
         "source_type": "official_or_audited_public_benchmark",
         "source_url": suite.reference,
         "snapshot_policy": "pin source revision/date and persist only source/path hashes in campaign artifacts",
-        "candidate_policy": "run axio-fast, axio-terra, axio-pro, and the same top provider baselines on identical case ids",
+        "candidate_policy": "run axio-luna, axio-terra, axio-sol, and the same top provider baselines on identical case ids",
         "decoding_policy": "temperature=0 unless the official harness mandates a different deterministic setting",
         "leakage_policy": [
             "do not train, tune, route-calibrate, or prompt-optimize on held-out labels",
@@ -23180,7 +23180,7 @@ def _campaign_candidate_ids(
         if str(candidate).strip()
     ]
     if not candidates:
-        candidates = ["axio-fast", "axio-terra", "axio-pro"]
+        candidates = ["axio-luna", "axio-terra", "axio-sol"]
     if include_provider_baselines:
         selection_context = _provider_baseline_selection_context(
             profiles,
@@ -23286,9 +23286,9 @@ def _non_axio_run_unit(profiles: Sequence[ModelProfile], candidate_id: str) -> d
 
 def _axio_algorithm_for_candidate(candidate_id: str) -> str:
     return {
-        "axio-fast": "fast_direct_cascade",
+        "axio-luna": "fast_direct_cascade",
         "axio-terra": "terra_cost_guarded_fusion",
-        "axio-pro": "pro_panel_judge_escalation",
+        "axio-sol": "pro_panel_judge_escalation",
     }.get(str(candidate_id or ""), "axio_fusion")
 
 
@@ -25489,9 +25489,9 @@ def _external_provider_rank_mapping_validation_errors(
         errors.append("external_ranking_selected_candidate_set_mismatch")
 
     expected_tier_ranks = {
-        "axio-pro": 1,
+        "axio-sol": 1,
         "axio-terra": 2,
-        "axio-fast": 3,
+        "axio-luna": 3,
     }
     tier_rows = (
         manifest.get("tier_target_policy")
@@ -27012,9 +27012,9 @@ def build_provider_baseline_freeze_manifest(
                 if external_ranking_manifest_path is not None
                 else ["correct_count", "lower_latency_ms", "candidate_id_hash"]
             ),
-            "axio_pro_target_rank": 1,
+            "axio_sol_target_rank": 1,
             "axio_terra_target_rank": 2,
-            "axio_fast_target_rank": 3,
+            "axio_luna_target_rank": 3,
         },
         "final_claim_freeze_ready": not blockers,
         "blockers": sorted(set(blockers)),
@@ -28422,7 +28422,7 @@ def _complete_benchmark_candidate(
     if candidate_id.startswith("provider::"):
         system = _generic_system_prompt(task_type)
         request = FusionRequest(
-            model="axio-fast",
+            model="axio-luna",
             prompt=prompt,
             max_output_tokens=max_output_tokens,
             temperature=0.0,
@@ -28442,7 +28442,7 @@ def _complete_benchmark_candidate(
         profile = _single_baseline_profile(profiles, candidate_id)
         system = _generic_system_prompt(task_type)
         request = FusionRequest(
-            model="axio-fast",
+            model="axio-luna",
             prompt=prompt,
             max_output_tokens=max_output_tokens,
             temperature=0.0,
@@ -28501,7 +28501,7 @@ def _complete_benchmark_candidate(
     if candidate_id == "full_dynamic_fusion":
         request = canonicalize_payload(
             _benchmark_axio_payload(
-                model="axio-pro",
+                model="axio-sol",
                 prompt=prompt,
                 system=_generic_system_prompt(task_type),
                 task_type=task_type,
@@ -29318,7 +29318,7 @@ def _cheap_generic_plus_judge(
     judge_output = active_client.complete(
         judge_profile,
         FusionRequest(
-            model="axio-fast",
+            model="axio-luna",
             prompt=judge_prompt,
             max_output_tokens=max_output_tokens,
             temperature=0.0,
@@ -29349,7 +29349,7 @@ def _cheap_generic_plus_judge(
         synth_output = active_client.complete(
             synth_profile,
             FusionRequest(
-                model="axio-fast",
+                model="axio-luna",
                 prompt=synth_prompt,
                 max_output_tokens=max_output_tokens,
                 temperature=0.0,
@@ -29395,7 +29395,7 @@ def _generic_panel_outputs(
         output = active_client.complete(
             profile,
             FusionRequest(
-                model="axio-fast",
+                model="axio-luna",
                 prompt=prompt,
                 max_output_tokens=max_output_tokens,
                 temperature=0.0,
@@ -30762,7 +30762,7 @@ def _run_one_multiple_choice_case(
                 profiles=provider_profiles or profiles,
                 candidate_id=candidate_id,
                 request=FusionRequest(
-                    model="axio-fast",
+                    model="axio-luna",
                     prompt=prompt,
                     max_output_tokens=16,
                     temperature=0.0,
@@ -30788,7 +30788,7 @@ def _run_one_multiple_choice_case(
             profile = _single_baseline_profile(profiles, candidate_id)
             system = _mcq_system_prompt()
             request = FusionRequest(
-                model="axio-fast",
+                model="axio-luna",
                 prompt=prompt,
                 max_output_tokens=16,
                 temperature=0.0,
@@ -30837,7 +30837,7 @@ def _run_one_multiple_choice_case(
         elif candidate_id == "full_dynamic_fusion":
             request = canonicalize_payload(
                 _benchmark_axio_payload(
-                    model="axio-pro",
+                    model="axio-sol",
                     prompt=prompt,
                     system=_mcq_system_prompt(),
                     task_type="logic_reasoning",
@@ -30995,7 +30995,7 @@ def _cheap_vote(
         output = active_client.complete(
             profile,
             FusionRequest(
-                model="axio-fast",
+                model="axio-luna",
                 prompt=prompt,
                 max_output_tokens=16,
                 temperature=0.0,
@@ -31044,7 +31044,7 @@ def _cheap_models_plus_judge(
         output = active_client.complete(
             profile,
             FusionRequest(
-                model="axio-fast",
+                model="axio-luna",
                 prompt=prompt,
                 max_output_tokens=16,
                 temperature=0.0,
@@ -31071,7 +31071,7 @@ def _cheap_models_plus_judge(
     judge_output = active_client.complete(
         judge_profile,
         FusionRequest(
-            model="axio-fast",
+            model="axio-luna",
             prompt=judge_prompt,
             max_output_tokens=16,
             temperature=0.0,
@@ -31097,7 +31097,7 @@ def _cheap_models_plus_judge(
         synth_output = active_client.complete(
             synth_profile,
             FusionRequest(
-                model="axio-fast",
+                model="axio-luna",
                 prompt=synth_prompt,
                 max_output_tokens=16,
                 temperature=0.0,
@@ -31874,7 +31874,7 @@ def _claim_missing_requirements(
                     "required_provider_baseline_count": 3,
                 }
             )
-        for axio_model in ("axio-fast", "axio-terra", "axio-pro"):
+        for axio_model in ("axio-luna", "axio-terra", "axio-sol"):
             if axio_model not in runs_by_suite[suite_id]:
                 missing.append({"kind": "missing_axio_candidate_run", "suite_id": suite_id, "candidate_id": axio_model})
     for model, summary in by_model.items():

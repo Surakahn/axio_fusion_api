@@ -5,6 +5,7 @@ from itertools import combinations
 from typing import Any, Mapping, Sequence
 
 from .content_contract import content_parts_supported_by_format
+from .call_cost import product_call_cost_contract
 from .hermes_moa import build_process_plan, safe_plan
 from .latency_policy import PROVIDER_MAX_RESPONSE_LATENCY_MS, profile_latency_eligibility
 from .policy_control import resolve_routing_policy
@@ -142,7 +143,7 @@ def analyze_request(request: FusionRequest) -> dict[str, Any]:
     complexity += 0.16 if non_fusion_tools_declared else 0.0
     complexity += 0.10 if fusion_plugin_requested else 0.0
     complexity += 0.08 * quality_pressure
-    complexity += 0.18 if request.public_model == "axio-pro" else 0.06 if request.public_model == "axio-terra" else 0.0
+    complexity += 0.18 if request.public_model == "axio-sol" else 0.06 if request.public_model == "axio-terra" else 0.0
     if any(token in text for token in ("analyze", "design", "prove", "debug", "review", "benchmark", "架构", "审查", "证明", "调研")):
         complexity += 0.16
     risk = 0.15
@@ -426,6 +427,10 @@ def build_route_plan(
             finalization_mode=finalization_mode,
         ),
         "budget": budget,
+        "call_cost_contract": product_call_cost_contract(
+            request.public_model,
+            admitted_call_cap=budget.get("max_total_model_calls"),
+        ),
         "routing_policy": _safe_routing_policy_application(policy_application),
         "privacy_policy": privacy_policy,
         "fusion_admission": fusion_admission,
@@ -511,7 +516,7 @@ def build_route_plan(
                 else []
             ),
             "fast_light_verify_requested": bool(budget.get("fast_light_verify_requested")),
-            "fast_light_verify_active": request.public_model == "axio-fast" and activated and bool(budget.get("fast_light_verify_requested")),
+            "fast_light_verify_active": request.public_model == "axio-luna" and activated and bool(budget.get("fast_light_verify_requested")),
             "min_judge_candidate_count": budget["min_judge_candidate_count"],
             "timeout_enforced": True,
             "provider_fallback_enabled": True,
@@ -776,16 +781,16 @@ def _budget_for_request(
     fast_light_verify = (
         _fast_light_verify_requested(request, analysis)
         or (
-            request.public_model == "axio-fast"
+            request.public_model == "axio-luna"
             and _fast_message_heuristic_complexity(request) >= 0.04
         )
     )
-    if model == "axio-fast":
+    if model == "axio-luna":
         max_models = 2 if fast_light_verify else 1
         max_depth = 0
         max_cost = 0.0015 if fast_light_verify else 0.001
         max_latency = 15000 if fast_light_verify else FAST_DIRECT_DEFAULT_DEADLINE_MS
-    elif model == "axio-pro":
+    elif model == "axio-sol":
         max_models = 6 if complexity >= 0.72 else 4
         max_depth, max_cost, max_latency = 2, 0.02, 60000
     else:
@@ -796,7 +801,7 @@ def _budget_for_request(
         # plan is not cancelled at the exact p50 estimate before Judge or
         # Synthesis can run.
         max_depth, max_cost, max_latency = 1, 0.005, 15000
-    if quality_pressure > 0.0 and model != "axio-fast":
+    if quality_pressure > 0.0 and model != "axio-luna":
         if quality_target >= 0.90:
             max_models = max(max_models, 4 if model == "axio-terra" else 5)
             max_depth = max(max_depth, 2)
@@ -826,7 +831,7 @@ def _budget_for_request(
         # ceiling; Fusion tiers use the shared provider eligibility ceiling.
         deadline_ceiling_ms = (
             FAST_DIRECT_MAX_DEADLINE_MS
-            if model == "axio-fast"
+            if model == "axio-luna"
             else PROVIDER_MAX_RESPONSE_LATENCY_MS
         )
         max_latency = min(
@@ -836,16 +841,16 @@ def _budget_for_request(
     # Judge and synthesis are part of every admitted Fusion route, including
     # the bounded fast light-verify path.  Fallback and escalation allowances
     # remain separate so the initial plan has an explicit call budget floor.
-    fusion_stage_call_allowance = 2 if (model != "axio-fast" or fast_light_verify) else 0
-    fallback_call_allowance = 1 if model == "axio-fast" else min(2, max(1, int(max_depth)))
+    fusion_stage_call_allowance = 2 if (model != "axio-luna" or fast_light_verify) else 0
+    fallback_call_allowance = 1 if model == "axio-luna" else min(2, max(1, int(max_depth)))
     caller_max_total_model_calls_explicit = request.policy.max_total_model_calls is not None
     max_calls = request.policy.max_total_model_calls if caller_max_total_model_calls_explicit else (
         max_models + fusion_stage_call_allowance + max_depth + fallback_call_allowance
     )
-    min_judge_candidate_count = 2 if (model != "axio-fast" or fast_light_verify) else 1
-    if model != "axio-fast" and quality_target >= 0.90:
+    min_judge_candidate_count = 2 if (model != "axio-luna" or fast_light_verify) else 1
+    if model != "axio-luna" and quality_target >= 0.90:
         min_judge_candidate_count = 3
-    elif model != "axio-fast" and quality_target >= 0.82:
+    elif model != "axio-luna" and quality_target >= 0.82:
         min_judge_candidate_count = 2
     # The initial Fusion schedule has at most four expert roles
     # (primary/independent/critic/domain specialist).  Run that bounded set
@@ -859,7 +864,7 @@ def _budget_for_request(
     # capacity is a real failure-recovery allowance, not an unbounded route
     # expansion, so retain it in the safe route receipt even when the caller
     # supplied the overall ceiling explicitly.
-    if model == "axio-fast" and not fast_light_verify:
+    if model == "axio-luna" and not fast_light_verify:
         effective_fallback_call_allowance = max(0, int(max_calls) - 1)
     else:
         effective_fallback_call_allowance = 0 if caller_max_total_model_calls_explicit else fallback_call_allowance
@@ -911,7 +916,7 @@ def _budget_with_direct_profile_deadline(
     updated = dict(budget)
     receipt = {
         "schema": "axio_fusion_api.direct_profile_deadline_adaptation.v1",
-        "enabled": request.public_model == "axio-fast",
+        "enabled": request.public_model == "axio-luna",
         "applied": False,
         "reason": "not_fast_route",
         "explicit_caller_deadline_preserved": request.policy.max_latency_ms is not None,
@@ -922,7 +927,7 @@ def _budget_with_direct_profile_deadline(
         "raw_profile_id_persisted": False,
         "raw_model_name_persisted": False,
     }
-    adaptive_models = {"axio-fast", "axio-terra", "axio-pro"}
+    adaptive_models = {"axio-luna", "axio-terra", "axio-sol"}
     receipt["enabled"] = request.public_model in adaptive_models
     if request.public_model not in adaptive_models:
         updated["direct_profile_deadline_adaptation"] = receipt
@@ -945,7 +950,7 @@ def _budget_with_direct_profile_deadline(
         1,
         int(budget.get("max_latency_ms") or FAST_DIRECT_DEFAULT_DEADLINE_MS),
     )
-    if request.public_model == "axio-fast":
+    if request.public_model == "axio-luna":
         target_multiplier = FAST_DIRECT_DEADLINE_MULTIPLIER
         margin_ms = FAST_DIRECT_DEADLINE_MARGIN_MS
         reason = "calibrated_direct_profile_latency"
@@ -1480,7 +1485,7 @@ def _local_consensus_plan(
 
     default: dict[str, Any] = {
         "schema": "axio_fusion_api.local_consensus_plan.v1",
-        "enabled": request.public_model in {"axio-terra", "axio-pro"},
+        "enabled": request.public_model in {"axio-terra", "axio-sol"},
         "feasible": False,
         "finalization_mode": "provider_judge_synthesis",
         "reason": "not_applicable_for_public_tier",
@@ -1568,7 +1573,7 @@ def _local_consensus_plan(
         "raw_model_names_persisted": False,
         "secrets_persisted": False,
     }
-    if request.public_model not in {"axio-terra", "axio-pro"}:
+    if request.public_model not in {"axio-terra", "axio-sol"}:
         return [], [], default
     direct_latency_value = (
         _role_latency_ms(direct_profile, "primary_solver", "p50_latency_ms")
@@ -1603,7 +1608,7 @@ def _local_consensus_plan(
     # the second evidence branch and cannot be treated as a full Critic.
     minimum_count = (
         3
-        if request.public_model == "axio-pro"
+        if request.public_model == "axio-sol"
         and has_critic_target
         and (has_full_second_role or not has_short_verification_target)
         else 2
@@ -2304,7 +2309,7 @@ def _apply_tier_capability_band(
 ) -> list[tuple[ModelProfile, float]]:
     """Constrain Fast/Terra direct routes to their intended capability band.
 
-    ``axio-fast`` maps to the luna/sonnet tier and ``axio-terra`` to the
+    ``axio-luna`` maps to the luna/sonnet tier and ``axio-terra`` to the
     terra/opus tier. Profiles materially above a band belong to a higher
     public tier; using them as a direct solver would silently collapse the
     three-tier product into a single strongest-model path. The lower bound
@@ -2313,7 +2318,7 @@ def _apply_tier_capability_band(
     when no profile lies inside the band. The pro tier keeps the full pool.
     """
 
-    if request.public_model == "axio-fast":
+    if request.public_model == "axio-luna":
         ceiling = FAST_DIRECT_CAPABILITY_CEILING
         floor = FAST_DIRECT_CAPABILITY_FLOOR
     elif request.public_model == "axio-terra":
@@ -2618,7 +2623,7 @@ def _select_panel(
         return []
     max_models = int(budget.get("max_models") or 1)
     fast_light_verify = _fast_light_verify_enabled(request, analysis, budget)
-    if request.public_model == "axio-fast" and not fast_light_verify:
+    if request.public_model == "axio-luna" and not fast_light_verify:
         fast_candidates = _fast_direct_candidate_order(scored, budget, analysis)
         return [fast_candidates[0][0]] if fast_candidates else []
     selected: list[ModelProfile] = []
@@ -2653,7 +2658,7 @@ def _select_panel(
         dict.fromkeys(
             [
                 *panel_roles,
-                *( ["judge", "synthesizer"] if request.public_model != "axio-fast" else [] ),
+                *( ["judge", "synthesizer"] if request.public_model != "axio-luna" else [] ),
             ]
         )
     )
@@ -2678,7 +2683,7 @@ def _select_panel(
     if max_models > 1 and role_eligible_provider_count > 1:
         quality_target = float(budget.get("quality_target") or 0.0)
         max_provider_target = (
-            3 if request.public_model == "axio-pro" or quality_target >= 0.90 else 2
+            3 if request.public_model == "axio-sol" or quality_target >= 0.90 else 2
         )
         target_provider_count = min(
             role_eligible_provider_count,
@@ -2827,10 +2832,10 @@ def _latency_constrained_fusion_panel(
     )
     receipt: dict[str, Any] = {
         "schema": "axio_fusion_api.latency_constrained_panel.v1",
-        "enabled": request.public_model != "axio-fast",
+        "enabled": request.public_model != "axio-luna",
         "applied": False,
         "reason": "not_applicable_for_fast_direct_path"
-        if request.public_model == "axio-fast"
+        if request.public_model == "axio-luna"
         else "panel_within_operational_latency_target",
         "hard_latency_multiplier_target": FUSION_LATENCY_MULTIPLIER_GUARD,
         "operational_latency_multiplier_target": FUSION_OPERATIONAL_LATENCY_TARGET,
@@ -2912,7 +2917,7 @@ def _latency_constrained_fusion_panel(
     )
     underfilled_panel_search = len(selected) < 2 and distinct_role_candidate_exists
     if (
-        request.public_model == "axio-fast"
+        request.public_model == "axio-luna"
         or direct_profile is None
         or direct_latency is None
         or not initial_known
@@ -2925,16 +2930,16 @@ def _latency_constrained_fusion_panel(
         )
         or (len(selected) < 2 and not underfilled_panel_search)
     ):
-        if request.public_model != "axio-fast" and not initial_known:
+        if request.public_model != "axio-luna" and not initial_known:
             receipt["reason"] = "unknown_latency_telemetry"
         elif (
-            request.public_model != "axio-fast"
+            request.public_model != "axio-luna"
             and initial_multiplier is not None
             and initial_multiplier <= FUSION_LATENCY_MULTIPLIER_GUARD
         ):
             receipt["reason"] = "panel_within_hard_latency_guard"
         elif (
-            request.public_model != "axio-fast"
+            request.public_model != "axio-luna"
             and len(selected) < 2
             and not underfilled_panel_search
         ):
@@ -3072,7 +3077,7 @@ def _latency_constrained_fusion_panel(
         and _screening_role_allowed(profile, "critic")
         for profile in other_profiles
     )
-    if request.public_model == "axio-pro" and distinct_critic_candidate and any(
+    if request.public_model == "axio-sol" and distinct_critic_candidate and any(
         isinstance(row, Mapping) and str(row.get("role") or "") == "critic"
         for row in role_blueprint
     ):
@@ -3099,7 +3104,7 @@ def _latency_constrained_fusion_panel(
                 roles,
             ):
                 continue
-            if request.public_model != "axio-fast" and not {
+            if request.public_model != "axio-luna" and not {
                 "judge",
                 "synthesizer",
             }.issubset(
@@ -3154,7 +3159,7 @@ def _latency_constrained_fusion_panel(
     provider_target = min(
         len({profile.provider for profile, _ in scored}),
         max_models,
-        3 if request.public_model == "axio-pro" else 2,
+        3 if request.public_model == "axio-sol" else 2,
     )
     receipt.update(
         {
@@ -3205,7 +3210,7 @@ def _model_selection_policy(
     diversity_metrics = _panel_diversity_metrics(selected, analysis)
     target_provider_count = 1
     fast_light_verify = _fast_light_verify_enabled(request, analysis, budget)
-    diversity_enabled = request.public_model != "axio-fast" or fast_light_verify
+    diversity_enabled = request.public_model != "axio-luna" or fast_light_verify
     panel_roles = list(
         dict.fromkeys(
             [
@@ -3213,7 +3218,7 @@ def _model_selection_policy(
                 for row in role_blueprint
                 if isinstance(row, Mapping) and str(row.get("role") or "")
             ]
-            + (["judge", "synthesizer"] if request.public_model != "axio-fast" else [])
+            + (["judge", "synthesizer"] if request.public_model != "axio-luna" else [])
         )
     )
     role_eligible_providers = {
@@ -3224,7 +3229,7 @@ def _model_selection_policy(
     role_eligible_provider_count = len(role_eligible_providers)
     if diversity_enabled and max_models > 1 and role_eligible_provider_count > 1:
         quality_target = float(budget.get("quality_target") or 0.0)
-        max_provider_target = 3 if request.public_model == "axio-pro" or quality_target >= 0.90 else 2
+        max_provider_target = 3 if request.public_model == "axio-sol" or quality_target >= 0.90 else 2
         target_provider_count = min(
             role_eligible_provider_count,
             max_models,
@@ -3242,7 +3247,7 @@ def _model_selection_policy(
         diversity_relaxed_reason = (
             "quality_floor" if role_eligible_outside else "role_contract"
         )
-    fast_direct_cascade = request.public_model == "axio-fast" and not fast_light_verify
+    fast_direct_cascade = request.public_model == "axio-luna" and not fast_light_verify
     fast_deadline_ms = max(1, int(budget.get("max_latency_ms") or FAST_DIRECT_DEFAULT_DEADLINE_MS))
     fast_feasible_profiles = [
         profile
@@ -3323,7 +3328,7 @@ def _role_blueprint(
             stop_condition="candidate_answer_with_evidence_or_explicit_uncertainty",
         )
     ]
-    if request.public_model != "axio-fast" or _fast_light_verify_enabled(request, analysis, budget):
+    if request.public_model != "axio-luna" or _fast_light_verify_enabled(request, analysis, budget):
         targets.append(
             _role_target(
                 role="independent_solver",
@@ -3343,7 +3348,7 @@ def _role_blueprint(
             )
         )
     if (
-        request.public_model == "axio-pro"
+        request.public_model == "axio-sol"
         or high_quality
         or risk >= 0.45
         or uncertainty >= 0.58
@@ -3396,7 +3401,7 @@ def _role_blueprint(
                 stop_condition="specialist_findings_with_evidence_and_unresolved_questions",
             )
         )
-    if request.public_model != "axio-fast":
+    if request.public_model != "axio-luna":
         targets.extend(
             [
                 _role_target(
@@ -3452,7 +3457,7 @@ def _augment_pro_role_blueprint_for_screened_specialist(
     """
 
     blueprint = [dict(row) for row in role_blueprint]
-    if request.public_model not in {"axio-terra", "axio-pro"}:
+    if request.public_model not in {"axio-terra", "axio-sol"}:
         return blueprint
     if int(budget.get("max_models") or 1) < 2:
         return blueprint
@@ -3467,7 +3472,7 @@ def _augment_pro_role_blueprint_for_screened_specialist(
         and not _screening_role_allowed(profile, "primary_solver")
         for profile, _ in scored
     )
-    if request.public_model == "axio-pro" and not has_domain_target and has_screened_domain_specialist:
+    if request.public_model == "axio-sol" and not has_domain_target and has_screened_domain_specialist:
         blueprint.append(
             _role_target(
                 role="domain_specialist",
@@ -3702,7 +3707,7 @@ def _panel_has_distinct_evidence_shape(
 ) -> bool:
     """Keep latency repair from replacing evidence with role-less models."""
 
-    if request.public_model == "axio-fast":
+    if request.public_model == "axio-luna":
         return True
     primary_identity = next(
         (
@@ -4043,7 +4048,7 @@ def _provider_fusion_required_roles(
     """Return mandatory seats for a provider Judge/Synthesizer route."""
 
     required = ["primary_solver"]
-    verification_enabled = request.public_model != "axio-fast" or _fast_light_verify_enabled(
+    verification_enabled = request.public_model != "axio-luna" or _fast_light_verify_enabled(
         request, analysis, budget
     )
     if verification_enabled and len(selected) >= 2:
@@ -4078,7 +4083,7 @@ def _provider_fusion_required_roles(
     # ``domain_specialist`` is an optional coverage seat.  The initial call
     # planner may trim it under an explicit model-call ceiling, so it must not
     # be treated as a mandatory provider-fusion blocker.
-    if request.public_model != "axio-fast":
+    if request.public_model != "axio-luna":
         required.extend(["judge", "synthesizer"])
     return list(dict.fromkeys(required))
 
@@ -4109,7 +4114,7 @@ def _local_consensus_required_roles(
         required.append("critic")
     else:
         required.append("independent_solver")
-    if request.public_model == "axio-pro" and len(selected) >= 3 and any(
+    if request.public_model == "axio-sol" and len(selected) >= 3 and any(
         isinstance(row, Mapping) and str(row.get("role") or "") == "critic"
         for row in role_blueprint
     ) and "critic" in assigned_role_names:
@@ -4175,7 +4180,7 @@ def _fusion_admission(
     fast_light_verify = _fast_light_verify_enabled(request, analysis, budget)
     if request.policy.fusion_depth >= request.policy.max_fusion_depth:
         blocked_reasons.append("max_fusion_depth_reached")
-    if request.public_model == "axio-fast" and not fast_light_verify:
+    if request.public_model == "axio-luna" and not fast_light_verify:
         blocked_reasons.append("fast_tier_prefers_direct_cascade")
     for role in direct_role_gate.get("missing_roles", []):
         blocked_reasons.append(f"screening_role_gate_blocked_{str(role)[:64]}")
@@ -4205,7 +4210,7 @@ def _fusion_admission(
         blocked_reasons.append("insufficient_independent_models")
     if bool(initial_fusion_call_plan.get("blocked_by_call_budget")) or (
         initial_fusion_call_plan.get("call_budget_meets_complete_floor") is False
-        and (request.public_model != "axio-fast" or fast_light_verify)
+        and (request.public_model != "axio-luna" or fast_light_verify)
     ):
         blocked_reasons.append("max_total_model_calls_below_complete_fusion_floor")
     for reason in initial_fusion_resource_admission.get("blocked_reasons", []):
@@ -4227,13 +4232,13 @@ def _fusion_admission(
         force_reasons.append("active_routing_policy_requires_fusion")
     if float(analysis.get("quality_target") or 0.0) >= 0.82:
         force_reasons.append("quality_target_requires_fusion")
-    if request.public_model == "axio-pro" and len(selected) >= 2:
+    if request.public_model == "axio-sol" and len(selected) >= 2:
         force_reasons.append("pro_tier_independent_verification_policy")
-    if request.public_model == "axio-fast" and fast_light_verify and len(selected) >= 2:
+    if request.public_model == "axio-luna" and fast_light_verify and len(selected) >= 2:
         force_reasons.append("fast_light_verify_policy")
     if float(analysis.get("risk") or 0.0) >= 0.55 and len(selected) >= 2:
         force_reasons.append("high_risk_requires_independent_verification")
-    if _non_fusion_tools_declared(request) and len(selected) >= 2 and (request.public_model != "axio-fast" or fast_light_verify):
+    if _non_fusion_tools_declared(request) and len(selected) >= 2 and (request.public_model != "axio-luna" or fast_light_verify):
         force_reasons.append("tool_task_requires_independent_plan_check")
     utility_score = float(estimate["utility_score"])
     threshold_passed = utility_score >= threshold
@@ -4272,17 +4277,17 @@ def _fusion_admission(
                 ),
             )
         )
-        and request.public_model in {"axio-terra", "axio-pro"}
+        and request.public_model in {"axio-terra", "axio-sol"}
     )
     finalization_mode = "local_consensus" if local_can_replace_provider_plan else (
-        "provider_judge_synthesis" if request.public_model != "axio-fast" else "direct"
+        "provider_judge_synthesis" if request.public_model != "axio-luna" else "direct"
     )
     effective_blocked_reasons = (
         [] if local_can_replace_provider_plan else list(blocked_reasons)
     )
     local_consensus_activation = bool(
         local_can_replace_provider_plan
-        and request.public_model in {"axio-terra", "axio-pro"}
+        and request.public_model in {"axio-terra", "axio-sol"}
     )
     activated = bool(
         local_consensus_activation
@@ -4899,7 +4904,7 @@ def _fusion_admission_threshold(
     analysis: Mapping[str, Any],
     budget: Mapping[str, Any],
 ) -> float:
-    if request.public_model == "axio-pro":
+    if request.public_model == "axio-sol":
         base = 0.025
     elif request.public_model == "axio-terra":
         base = 0.065
@@ -4918,9 +4923,9 @@ def _fusion_demand_score(request: FusionRequest, analysis: Mapping[str, Any]) ->
         + float(analysis.get("uncertainty") or 0.0) * 0.22
         + float(analysis.get("quality_pressure") or 0.0) * 0.24
     )
-    if request.public_model == "axio-pro":
+    if request.public_model == "axio-sol":
         demand += 0.16
-    elif request.public_model == "axio-fast" and _fast_light_verify_requested(request, analysis):
+    elif request.public_model == "axio-luna" and _fast_light_verify_requested(request, analysis):
         demand += 0.08
     if bool(analysis.get("fusion_plugin_requested")):
         demand += 0.18
@@ -4930,7 +4935,7 @@ def _fusion_demand_score(request: FusionRequest, analysis: Mapping[str, Any]) ->
 
 
 def _fast_light_verify_requested(request: FusionRequest, analysis: Mapping[str, Any]) -> bool:
-    if request.public_model != "axio-fast":
+    if request.public_model != "axio-luna":
         return False
     quality_target = float(analysis.get("quality_target") or _quality_target(request))
     complexity = float(analysis.get("complexity") or 0.0)
@@ -7182,7 +7187,7 @@ def _orchestration_scaffold(
             "requires_independent_verification": bool(
                 activated
                 and (
-                    request.public_model == "axio-pro"
+                    request.public_model == "axio-sol"
                     or float(analysis.get("risk") or 0.0) >= 0.45
                     or float(analysis.get("quality_target") or 0.0) >= 0.82
                 )
@@ -7212,7 +7217,7 @@ def _deliberative_search_policy(
     verification_width = 0
     if activated:
         verification_width = 1
-        if request.public_model == "axio-pro" or quality_target >= 0.90:
+        if request.public_model == "axio-sol" or quality_target >= 0.90:
             verification_width = min(2, max(1, selected_count - exploration_width))
     role_branches = [_search_branch_for_role(role, domains) for role in roles if isinstance(role, Mapping)]
     role_branches = [row for row in role_branches if row]
@@ -7457,10 +7462,10 @@ def _strategy_id(
     finalization_mode: str = "direct",
 ) -> str:
     if activated and str(finalization_mode or "") == "local_consensus":
-        return "pro_local_consensus" if public_model == "axio-pro" else "terra_local_consensus"
-    if public_model == "axio-fast":
+        return "pro_local_consensus" if public_model == "axio-sol" else "terra_local_consensus"
+    if public_model == "axio-luna":
         return "fast_light_verify" if activated else "fast_direct_cascade"
-    if public_model == "axio-pro":
+    if public_model == "axio-sol":
         return "pro_panel_judge_escalation" if activated else "pro_direct_with_verifier_gap"
     return "terra_cost_guarded_fusion" if activated else "terra_direct"
 
@@ -8198,7 +8203,7 @@ def _provider_routing_policy(
     selected_providers = {profile.provider for profile in selected}
     selected_api_formats = {profile.api_format for profile in selected}
     fast_direct_cascade = bool(
-        request.public_model == "axio-fast"
+        request.public_model == "axio-luna"
         and not _fast_light_verify_enabled(request, analysis, budget)
     )
     fast_deadline_ms = max(1, int(budget.get("max_latency_ms") or FAST_DIRECT_DEFAULT_DEADLINE_MS))

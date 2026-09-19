@@ -19,7 +19,7 @@ AXIO_URL = os.environ.get('AXIO_BASE_URL', 'http://127.0.0.1:18900/v1/chat/compl
 CPA_URL = os.environ.get('CPA_BASE_URL', 'http://127.0.0.1:8317/v1/responses')
 CPA_KEY = os.environ.get('CPA_API_KEY') or os.environ.get('AXIO_CPA_PLUS_API_KEY', '')
 
-AXIO_MODELS = ['axio-fast', 'axio-terra', 'axio-pro']
+AXIO_MODELS = ['axio-luna', 'axio-terra', 'axio-sol']
 BASELINE_MODELS = ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol']
 
 SUITES = {
@@ -324,7 +324,7 @@ def main(argv=None):
         print(row)
     
     print('\n── Fusion vs Baseline ──')
-    for am, bm in [('axio-pro', 'gpt-5.6-sol'), ('axio-terra', 'gpt-5.6-terra'), ('axio-fast', 'gpt-5.6-luna')]:
+    for am, bm in [('axio-sol', 'gpt-5.6-sol'), ('axio-terra', 'gpt-5.6-terra'), ('axio-luna', 'gpt-5.6-luna')]:
         as_ = [r['accuracy'] for r in results['runs'] if r['model'] == am]
         bs_ = [r['accuracy'] for r in results['runs'] if r['model'] == bm]
         if as_ and bs_:

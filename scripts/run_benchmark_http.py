@@ -28,7 +28,7 @@ os.environ['https_proxy'] = PROXY
 random.seed(SEED)
 
 # ── Models to test ──
-AXIO_MODELS = ["axio-fast", "axio-terra", "axio-pro"]
+AXIO_MODELS = ["axio-luna", "axio-terra", "axio-sol"]
 BASELINE_MODELS = {
     "gpt-5.6-luna": "responses",
     "gpt-5.6-terra": "responses", 

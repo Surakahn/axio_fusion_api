@@ -45,7 +45,7 @@ def default_benchmark_evaluation_policy() -> dict[str, Any]:
             "fail_closed": True,
         },
         "baseline_roster": {
-            "axio-pro": {
+            "axio-sol": {
                 "rank": 1,
                 "model": "gpt-5.6-sol",
                 "reasoning_effort": BENCHMARK_TARGET_REASONING_EFFORT,
@@ -55,7 +55,7 @@ def default_benchmark_evaluation_policy() -> dict[str, Any]:
                 "model": "gpt-5.6-terra",
                 "reasoning_effort": BENCHMARK_TARGET_REASONING_EFFORT,
             },
-            "axio-fast": {
+            "axio-luna": {
                 "rank": 3,
                 "model": "gpt-5.6-luna",
                 "reasoning_effort": BENCHMARK_TARGET_REASONING_EFFORT,
@@ -123,9 +123,9 @@ def validate_benchmark_evaluation_policy(value: Mapping[str, Any]) -> dict[str, 
 
     roster = policy.get("baseline_roster") if isinstance(policy.get("baseline_roster"), Mapping) else {}
     expected = {
-        "axio-pro": (1, "gpt-5.6-sol"),
+        "axio-sol": (1, "gpt-5.6-sol"),
         "axio-terra": (2, "gpt-5.6-terra"),
-        "axio-fast": (3, "gpt-5.6-luna"),
+        "axio-luna": (3, "gpt-5.6-luna"),
     }
     if set(roster) != set(expected):
         raise BenchmarkPolicyError("baseline_roster_models_invalid")

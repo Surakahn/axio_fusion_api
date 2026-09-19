@@ -38,7 +38,7 @@ def test_formal_policy_freezes_replacement_roster_and_max_contract():
     }
     assert receipt["target_reasoning_effort"] == "max"
     assert receipt["native_max_required"] is True
-    assert receipt["baseline_roster"]["axio-fast"]["model"] == "gpt-5.6-luna"
+    assert receipt["baseline_roster"]["axio-luna"]["model"] == "gpt-5.6-luna"
 
 
 def test_policy_rejects_credentials_and_wrong_reasoning_order():
@@ -58,7 +58,7 @@ def test_policy_rejects_credentials_and_wrong_reasoning_order():
 def test_public_benchmark_surfaces_carry_one_logical_max_request():
     for api_format in ("chat/completions", "responses", "anthropic", "gemini"):
         _, payload = _benchmark_public_api_payload(
-            model="axio-pro",
+            model="axio-sol",
             api_format=api_format,
             prompt="fixture prompt",
             system="fixture system",

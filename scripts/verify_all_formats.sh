@@ -7,7 +7,7 @@ echo "=== API Format Verification ==="
 echo "Time: $(date)"
 echo ""
 
-for model in axio-fast axio-terra axio-pro; do
+for model in axio-luna axio-terra axio-sol; do
     echo "--- $model ---"
     
     # Chat/Completions

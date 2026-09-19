@@ -298,7 +298,7 @@ def build_default_registry() -> dict[str, Any]:
         "schema": "axio_fusion_api.registry.v1",
         "standalone_product": True,
         "decoupled_from_asci_fs": True,
-        "public_models": ["axio-fast", "axio-terra", "axio-pro"],
+        "public_models": ["axio-luna", "axio-terra", "axio-sol"],
         "models": [model.safe_dict() for model in models],
         "secrets_persisted": False,
         "raw_prompt_persisted": False,
@@ -917,7 +917,7 @@ def build_registry_from_probe_artifacts(
         "standalone_product": True,
         "decoupled_from_asci_fs": True,
         "generated_from_probe": True,
-        "public_models": ["axio-fast", "axio-terra", "axio-pro"],
+        "public_models": ["axio-luna", "axio-terra", "axio-sol"],
         "source_artifacts": {
             "probe_file_count": len(probe_paths),
             "probe_file_path_hashes": [sha256_text(str(path)) for path in probe_paths],
@@ -1745,7 +1745,7 @@ def _portfolio_recommendations(
                 "add_low_latency_fast_path",
                 "P0",
                 ["missing_fast_candidate"],
-                "Add at least one low-latency or explicitly fast/mini/flash model so axio-fast can route without exceeding latency gates.",
+                "Add at least one low-latency or explicitly fast/mini/flash model so axio-luna can route without exceeding latency gates.",
             )
         )
     if {"provider_diversity_below_target", "api_format_diversity_below_target"} & reason_set:
@@ -1907,7 +1907,7 @@ def _redacted_registry_evidence_from_profiles(
         "decoupled_from_asci_fs": True,
         "generated_from_probe": True,
         "operational_registry": False,
-        "public_models": ["axio-fast", "axio-terra", "axio-pro"],
+        "public_models": ["axio-luna", "axio-terra", "axio-sol"],
         "source_artifacts": {
             "probe_file_count": len(probe_paths),
             "probe_file_path_hashes": [sha256_text(str(path)) for path in probe_paths],

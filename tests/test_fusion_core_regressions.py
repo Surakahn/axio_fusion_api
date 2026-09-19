@@ -186,7 +186,7 @@ def _capability_band_profile(model: str, *, core_average: float) -> ModelProfile
 
 
 def test_tier_capability_band_keeps_each_public_tier_in_its_intended_band():
-    request = FusionRequest(model="axio-fast", prompt="x")
+    request = FusionRequest(model="axio-luna", prompt="x")
     scored = [
         (_capability_band_profile("strong", core_average=0.90), 1.0),
         (_capability_band_profile("luna", core_average=0.86), 0.9),
@@ -301,7 +301,7 @@ def test_runtime_fusion_latency_budget_preserves_full_deadline_for_high_effort()
         },
     }
     request = FusionRequest(
-        model="axio-pro",
+        model="axio-sol",
         prompt="reasoning task",
         reasoning_effort="max",
     )
@@ -600,14 +600,14 @@ def test_explicit_fusion_deadline_reaches_provider_ceiling_without_changing_defa
     )
     ninety_second_request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_latency_ms": 90_000,
             "messages": [{"role": "user", "content": "ping"}],
         }
     )
     over_ceiling_request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_latency_ms": 120_000,
             "messages": [{"role": "user", "content": "ping"}],
         }
@@ -619,7 +619,7 @@ def test_explicit_fusion_deadline_reaches_provider_ceiling_without_changing_defa
 
     fast_request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "max_latency_ms": 90_000,
             "messages": [{"role": "user", "content": "ping"}],
         }
@@ -780,7 +780,7 @@ def test_judge_stage_uses_successful_panel_fallback_after_control_profile_failur
     }
     client = JudgeFailoverClient()
     result = FusionEngine([first, second], client=client, cache_enabled=False)._judge_candidates(
-        FusionRequest(model="axio-pro", prompt="judge this panel"),
+        FusionRequest(model="axio-sol", prompt="judge this panel"),
         route_plan,
         candidates,
         call_budget=_CallBudget(2),
@@ -962,7 +962,7 @@ def test_panel_repair_stops_at_independent_quorum_without_filling_optional_herme
     completed = [primary]
 
     receipt = engine._repair_panel(
-        FusionRequest(model="axio-pro", prompt="bounded repair task"),
+        FusionRequest(model="axio-sol", prompt="bounded repair task"),
         route_plan,
         [primary],
         completed,
@@ -1017,7 +1017,7 @@ def test_panel_repair_hard_stops_after_bounded_failed_attempts():
     completed = [primary]
 
     receipt = engine._repair_panel(
-        FusionRequest(model="axio-pro", prompt="bounded failure task"),
+        FusionRequest(model="axio-sol", prompt="bounded failure task"),
         route_plan,
         [primary],
         completed,
@@ -1048,7 +1048,7 @@ def test_role_assignment_fails_closed_when_primary_role_is_denied():
         allowed_roles=("domain_specialist",),
         disallowed_roles=("primary_solver", "judge", "synthesizer"),
     )
-    request = FusionRequest(model="axio-pro", prompt="Solve a code task.")
+    request = FusionRequest(model="axio-sol", prompt="Solve a code task.")
     analysis = analyze_request(request)
     budget = _budget_for_request(request, analysis)
     blueprint = _role_blueprint(request, analysis, budget)
@@ -1067,7 +1067,7 @@ def test_missing_screened_mandatory_stages_blocks_provider_fusion():
     first = _screened_profile("primary", allowed_roles=roles, disallowed_roles=("judge", "synthesizer", "critic"))
     second = _screened_profile("independent", allowed_roles=roles, disallowed_roles=("judge", "synthesizer", "critic"))
     request = FusionRequest(
-        model="axio-pro",
+        model="axio-sol",
         prompt="Solve a complex scientific code task and verify contradictions.",
     )
 
@@ -1109,7 +1109,7 @@ def _short_verification_profiles():
 def test_short_verifier_opens_bounded_local_consensus_without_solver_promotion():
     primary, short = _short_verification_profiles()
     request = FusionRequest(
-        model="axio-pro",
+        model="axio-sol",
         prompt="Solve a complex scientific code task and verify the key constraint.",
     )
 
@@ -1164,7 +1164,7 @@ def test_reused_critic_does_not_suppress_distinct_short_verifier():
 
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "quality_target": 0.9,
             "max_models": 3,
             "messages": [
@@ -1300,7 +1300,7 @@ def test_unused_domain_prior_does_not_suppress_short_verification_target():
         ),
     )
     request = FusionRequest(
-        model="axio-pro",
+        model="axio-sol",
         prompt="Solve a complex scientific code task and verify the key constraint.",
     )
 
@@ -1319,7 +1319,7 @@ def test_same_primary_domain_prior_does_not_count_as_independent_evidence():
         allowed_roles=("primary_solver", "domain_specialist"),
     )
     request = FusionRequest(
-        model="axio-pro",
+        model="axio-sol",
         prompt="Solve a difficult scientific code task and verify contradictions.",
     )
 
@@ -1383,7 +1383,7 @@ def test_short_verifier_is_evidence_but_not_independent_solver():
 def test_short_verifier_prompt_and_candidate_packet_are_narrow_and_tool_free():
     primary, short = _short_verification_profiles()
     request = FusionRequest(
-        model="axio-pro",
+        model="axio-sol",
         prompt="Verify the one critical condition.",
         tools=(
             {
@@ -1512,7 +1512,7 @@ def test_screening_prior_can_open_bounded_stage_without_overwriting_runtime_capa
 def test_expert_latency_optimizer_never_reuses_another_expert_profile():
     primary = _latency_profile("primary", 100, critique=0.86, structured=0.86)
     independent = _latency_profile("independent", 1_000, critique=0.86, structured=0.86)
-    request = FusionRequest(model="axio-pro", prompt="Review a complex workflow.")
+    request = FusionRequest(model="axio-sol", prompt="Review a complex workflow.")
     analysis = analyze_request(request)
     budget = _budget_for_request(request, analysis)
     roles = [
@@ -1556,7 +1556,7 @@ def test_legacy_profiles_without_screening_contract_keep_stage_compatibility():
     )
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [{"role": "user", "content": "analyze a scientific claim"}],
         }
     )
@@ -1583,7 +1583,7 @@ def test_deadline_budget_reserves_measured_mandatory_stages_from_optional_work(m
     clock["now"] = 0.25
     assert budget.acquire(kind="model_role", role="primary_solver", profile_id="optional") is False
     assert budget.acquire(kind="judge", role="judge", profile_id="judge") is True
-    assert 0.34 <= budget.timeout_seconds(FusionRequest(model="axio-pro", prompt="task"), role="judge") <= 0.36
+    assert 0.34 <= budget.timeout_seconds(FusionRequest(model="axio-sol", prompt="task"), role="judge") <= 0.36
 
     receipt = budget.safe_dict()
     assert receipt["mandatory_stage_deadline_reservation_enabled"] is True
@@ -1646,7 +1646,7 @@ def test_fusion_panel_phase_timeout_and_admission_stop_at_phase_boundary(monkeyp
         budget_ms=600,
         reason="phase_contract_test",
     ) is True
-    request = FusionRequest(model="axio-pro", prompt="task")
+    request = FusionRequest(model="axio-sol", prompt="task")
 
     clock["now"] = 0.1
     assert budget.acquire_in_phase(
@@ -1693,7 +1693,7 @@ def test_phase_aware_role_timeout_is_forwarded_without_changing_outer_deadline(
     )
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_latency_ms": 90_000,
             "messages": [{"role": "user", "content": "task"}],
         }
@@ -1724,7 +1724,7 @@ def test_phase_aware_role_timeout_is_forwarded_without_changing_outer_deadline(
 
 
 def test_safe_trace_exports_phase_budget_without_runtime_secrets():
-    request = FusionRequest(model="axio-pro", prompt="phase trace task")
+    request = FusionRequest(model="axio-sol", prompt="phase trace task")
     response = FusionResponse(
         text="answer",
         request=request,
@@ -1789,7 +1789,7 @@ def test_deadline_budget_caps_judge_to_its_own_reservation(monkeypatch):
     # seconds).  Judge is admitted a single 800ms stage and must stop there.
     clock["now"] = 0.1
     timeout = budget.timeout_seconds(
-        FusionRequest(model="axio-pro", prompt="task"),
+        FusionRequest(model="axio-sol", prompt="task"),
         role="judge",
         kind="judge",
     )
@@ -1819,7 +1819,7 @@ def test_deadline_budget_dynamic_rejudge_gets_a_new_stage_cap_without_borrowing_
     clock["now"] = 0.1
     assert budget.acquire(kind="judge", role="judge", profile_id="judge-recheck") is True
     timeout = budget.timeout_seconds(
-        FusionRequest(model="axio-pro", prompt="task"),
+        FusionRequest(model="axio-sol", prompt="task"),
         role="judge",
         kind="judge",
     )
@@ -1950,7 +1950,7 @@ def test_large_control_prompt_extension_uses_only_unreserved_deadline_slack(monk
     # The extension lengthens only the active Judge window; the pending
     # Synthesizer reservation remains protected from optional work.
     assert budget.timeout_seconds(
-        FusionRequest(model="axio-pro", prompt="prompt"),
+        FusionRequest(model="axio-sol", prompt="prompt"),
         role="judge",
         kind="judge",
     ) == 3.0
@@ -2136,7 +2136,7 @@ def test_fusion_candidate_timeout_uses_screened_tail_without_consuming_control_w
     )
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_latency_ms": 90_000,
             "messages": [{"role": "user", "content": "task"}],
         }
@@ -2184,7 +2184,7 @@ def test_fusion_candidate_timeout_adds_bounded_runtime_context_allowance():
     )
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_latency_ms": 90_000,
             "messages": [{"role": "user", "content": "task"}],
         }
@@ -2227,7 +2227,7 @@ def test_fusion_candidate_timeout_applies_reasoning_effort_floor():
         }
     )
     request = FusionRequest(
-        model="axio-pro",
+        model="axio-sol",
         prompt="reasoning task",
         reasoning_effort="max",
     )
@@ -2262,7 +2262,7 @@ def test_fusion_candidate_timeout_leaves_unknown_profiles_and_fast_cascade_uncha
     monkeypatch.setattr(orchestrator_module.time, "monotonic", lambda: 0.0)
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_latency_ms": 90_000,
             "messages": [{"role": "user", "content": "task"}],
         }
@@ -2305,7 +2305,7 @@ def test_fusion_candidate_timeout_leaves_unknown_profiles_and_fast_cascade_uncha
     fast_timeout, fast_receipt = _timeout_for_role(
         canonicalize_payload(
             {
-                "model": "axio-fast",
+                "model": "axio-luna",
                 "max_latency_ms": 60_000,
                 "messages": [{"role": "user", "content": "task"}],
             }
@@ -2372,7 +2372,7 @@ def test_local_consensus_route_replaces_over_3x_provider_plan_for_terra_and_pro(
     profiles = _local_consensus_fixture_profiles()
     prompt = "Analyze a high-risk production workflow and prove the routing constraints are logically consistent."
 
-    for public_model, minimum_candidates in (("axio-terra", 2), ("axio-pro", 3)):
+    for public_model, minimum_candidates in (("axio-terra", 2), ("axio-sol", 3)):
         route_plan = build_route_plan(
             FusionRequest(model=public_model, prompt=prompt),
             profiles,
@@ -2428,7 +2428,7 @@ def test_provider_stage_p95_deadline_guard_switches_to_local_consensus_when_p50_
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_latency_ms": 2_500,
             "messages": [
                 {
@@ -2491,7 +2491,7 @@ def test_provider_stage_p95_three_x_guard_switches_to_local_consensus_when_p50_p
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_latency_ms": 10_000,
             "messages": [
                 {
@@ -2524,7 +2524,7 @@ def test_provider_stage_p95_three_x_guard_switches_to_local_consensus_when_p50_p
 def test_missing_p95_evidence_remains_unknown_and_does_not_block_provider_admission():
     route_plan = build_route_plan(
         FusionRequest(
-            model="axio-pro",
+            model="axio-sol",
             prompt="Analyze a high-risk production workflow and prove the routing constraints are logically consistent.",
         ),
         _local_consensus_fixture_profiles(),
@@ -2683,7 +2683,7 @@ def test_neutral_runtime_portfolio_uses_provider_diversity_and_one_parallel_back
     ]
     route_plan = build_route_plan(
         FusionRequest(
-            model="axio-pro",
+            model="axio-sol",
             prompt="Compare two difficult scientific hypotheses and identify falsifying evidence.",
         ),
         profiles,
@@ -2892,7 +2892,7 @@ def test_provider_panel_uses_quality_safe_cross_provider_role_candidate():
 
     route_plan = build_route_plan(
         FusionRequest(
-            model="axio-pro",
+            model="axio-sol",
             prompt="Design and review a production workflow with an independent domain check.",
         ),
         profiles,
@@ -2930,7 +2930,7 @@ def test_provider_diversity_target_excludes_profiles_without_panel_role_contract
         )
 
     route_plan = build_route_plan(
-        FusionRequest(model="axio-pro", prompt="Review this operational workflow."),
+        FusionRequest(model="axio-sol", prompt="Review this operational workflow."),
         [
             profile("primary-provider", "primary", ("primary_solver",)),
             profile(
@@ -2980,7 +2980,7 @@ def test_local_consensus_runtime_uses_only_parallel_experts_and_marks_complete()
     profiles = _local_consensus_fixture_profiles()
     client = ExpertOnlyClient()
     request = FusionRequest(
-        model="axio-pro",
+        model="axio-sol",
         prompt="Analyze a high-risk production workflow and prove the routing constraints are logically consistent.",
     )
     engine = FusionEngine(profiles, client=client, cache_enabled=True)
@@ -3025,7 +3025,7 @@ def test_local_consensus_never_overrides_explicit_call_latency_or_cost_caps():
 
     call_capped = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_total_model_calls": 3,
             "messages": [{"role": "user", "content": prompt}],
         }
@@ -3066,7 +3066,7 @@ def test_local_consensus_uses_an_explicit_budget_when_the_complete_floor_is_met(
     profiles = _local_consensus_fixture_profiles()
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_total_model_calls": 5,
             "messages": [
                 {
@@ -3330,7 +3330,7 @@ def test_latency_constrained_panel_search_preserves_direct_baseline_and_restores
     fast_c = profile("fast-channel", "fast-model-c", 140, 0.86)
     all_profiles = [anchor, slow_a, slow_b, slow_c, fast_a, fast_b, fast_c]
     request = FusionRequest(
-        model="axio-pro",
+        model="axio-sol",
         prompt="Solve a complex scientific and code workflow, identify contradictions, verify claims, and define a tool plan.",
         task_type="latency_constrained_panel_test",
     )
@@ -3406,7 +3406,7 @@ def test_latency_constrained_panel_prefers_fast_quality_equivalent_panel_before_
     fast_b = profile("fast-channel", "fast-b", 750)
     all_profiles = [anchor, slow_a, slow_b, fast_a, fast_b]
     request = FusionRequest(
-        model="axio-pro",
+        model="axio-sol",
         prompt="Solve a complex scientific and code workflow with independent verification and contradictions.",
         task_type="latency_panel_objective_test",
     )
@@ -3455,7 +3455,7 @@ def test_screened_domain_specialist_completes_two_profile_pro_route_without_rela
 
     route_plan = build_route_plan(
         FusionRequest(
-            model="axio-pro",
+            model="axio-sol",
             prompt="Solve this task and use a narrow domain review to check the result.",
         ),
         [primary, specialist],
@@ -3488,7 +3488,7 @@ def test_underfilled_panel_search_adds_screened_domain_specialist_as_second_evid
         disallowed_roles=("primary_solver", "independent_solver", "critic", "judge", "synthesizer"),
     )
     request = FusionRequest(
-        model="axio-pro",
+        model="axio-sol",
         prompt="Produce a focused answer with a separate domain-specific verification pass.",
     )
     analysis = analyze_request(request)
@@ -3539,7 +3539,7 @@ def test_underfilled_panel_search_adds_screened_domain_specialist_as_second_evid
 def test_stage_roles_use_unassigned_profiles_before_reusing_experts():
     profiles = [_profile(index, critique=0.72 + index * 0.03) for index in range(6)]
     request = FusionRequest(
-        model="axio-pro",
+        model="axio-sol",
         prompt=(
             "Analyze and review a complex medical legal code and mathematical policy "
             "workflow with evidence, contradictions, and tool planning."
@@ -3627,7 +3627,7 @@ def test_stage_only_pool_can_supply_control_stages_without_counting_as_evidence(
     route_plan = build_route_plan(
         canonicalize_payload(
             {
-                "model": "axio-pro",
+                "model": "axio-sol",
                 "max_models": 2,
                 "messages": [
                     {
@@ -3656,7 +3656,7 @@ def test_stage_only_pool_can_supply_control_stages_without_counting_as_evidence(
 def test_provider_judge_cannot_clear_local_hard_evidence_blocker():
     profiles = [_profile(0), _profile(1, critique=0.98, structured=0.98)]
     request = FusionRequest(
-        model="axio-pro",
+        model="axio-sol",
         prompt="Review this factual medical workflow and identify unsupported claims.",
     )
     route_plan = build_route_plan(request, profiles)
@@ -3964,7 +3964,7 @@ def test_canonical_replicas_rotate_and_do_not_count_as_independent_panel_models(
     engine = FusionEngine(profiles, client=client, cache_enabled=False)
     request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "messages": [{"role": "user", "content": "fixture replica task"}],
         }
     )
@@ -3987,7 +3987,7 @@ def test_canonical_replicas_rotate_and_do_not_count_as_independent_panel_models(
     assert len(_candidates_for_fusion_finalization(candidates)) == 1
 
     route_plan = build_route_plan(
-        FusionRequest(model="axio-pro", prompt="review this fixture workflow"),
+        FusionRequest(model="axio-sol", prompt="review this fixture workflow"),
         profiles,
     )
     selected = route_plan["selected_models"]
@@ -4030,7 +4030,7 @@ def test_fast_direct_cascade_preserves_raw_prompt_and_system_without_fusion_pack
     )
     client = DirectClient()
     request = FusionRequest(
-        model="axio-fast",
+        model="axio-luna",
         prompt="Keep this exact user task.",
         system="Keep this exact system message.",
     )
@@ -4060,7 +4060,7 @@ def test_implicit_fast_deadline_adapts_to_observed_direct_profile_latency():
         }
     )
     adapted = _budget_with_direct_profile_deadline(
-        FusionRequest(model="axio-fast", prompt="task"),
+        FusionRequest(model="axio-luna", prompt="task"),
         {"max_latency_ms": 2_500},
         profile,
     )
@@ -4111,7 +4111,7 @@ def test_canonical_replica_failover_precedes_cross_model_fallback_and_stage_fail
     client = FailoverClient()
     request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "messages": [{"role": "user", "content": "fixture failover task"}],
         }
     )
@@ -4138,10 +4138,10 @@ def test_canonical_replica_failover_precedes_cross_model_fallback_and_stage_fail
     stage_client = FailoverClient()
     stage_engine = FusionEngine(profiles, client=stage_client, cache_enabled=False)
     stage_route_plan = build_route_plan(
-        FusionRequest(model="axio-pro", prompt="fixture stage failover"),
+        FusionRequest(model="axio-sol", prompt="fixture stage failover"),
         profiles,
     )
-    stage_request = FusionRequest(model="axio-pro", prompt="fixture stage failover")
+    stage_request = FusionRequest(model="axio-sol", prompt="fixture stage failover")
     output, selected_profile, stage_receipt, stage_attempt_count = (
         stage_engine._complete_stage_with_replica_failover(
             profiles[0],
@@ -4188,7 +4188,7 @@ def test_stage_cross_model_failover_is_one_shot_and_budgeted_after_canonical_rep
     engine = FusionEngine(profiles, client=StageFailoverClient(), cache_enabled=False)
     output, selected, routing, attempt_count = engine._complete_stage_with_replica_failover(
         canonical_profiles[0],
-        FusionRequest(model="axio-pro", prompt="stage failover fixture"),
+        FusionRequest(model="axio-sol", prompt="stage failover fixture"),
         route_plan={},
         kind="judge",
         role_name="judge",
@@ -4220,7 +4220,7 @@ def test_stage_cross_model_failover_is_one_shot_and_budgeted_after_canonical_rep
     budget_engine = FusionEngine(profiles, client=budget_client, cache_enabled=False)
     empty, _, budget_routing, budget_attempt_count = budget_engine._complete_stage_with_replica_failover(
         canonical_profiles[0],
-        FusionRequest(model="axio-pro", prompt="budgeted stage failover fixture"),
+        FusionRequest(model="axio-sol", prompt="budgeted stage failover fixture"),
         route_plan={},
         kind="judge",
         role_name="judge",
@@ -4290,7 +4290,7 @@ def test_stage_cross_model_failover_gets_a_new_bounded_deadline_window(monkeypat
     )
     output, selected, routing, attempt_count = engine._complete_stage_with_replica_failover(
         primary,
-        FusionRequest(model="axio-pro", prompt="deadline failover fixture"),
+        FusionRequest(model="axio-sol", prompt="deadline failover fixture"),
         route_plan={},
         kind="judge",
         role_name="judge",
@@ -4366,7 +4366,7 @@ def test_stage_same_canonical_retry_gets_its_own_call_and_deadline_slot(monkeypa
     )
     output, selected, routing, attempt_count = engine._complete_stage_with_replica_failover(
         primary,
-        FusionRequest(model="axio-pro", prompt="same-model retry fixture"),
+        FusionRequest(model="axio-sol", prompt="same-model retry fixture"),
         route_plan={},
         kind="judge",
         role_name="judge",
@@ -4448,7 +4448,7 @@ def test_stage_same_canonical_retry_fails_closed_without_borrowing_synthesizer_w
     )
     output, _, routing, attempt_count = engine._complete_stage_with_replica_failover(
         primary,
-        FusionRequest(model="axio-pro", prompt="tight same-model retry fixture"),
+        FusionRequest(model="axio-sol", prompt="tight same-model retry fixture"),
         route_plan={},
         kind="judge",
         role_name="judge",
@@ -4483,7 +4483,7 @@ def test_failed_judge_cross_model_fallback_remains_unaccepted_and_safe():
             del profile, request, prompt, system, timeout
             raise RuntimeError("SECRET_PROVIDER_FAILURE_DETAIL")
 
-    request = FusionRequest(model="axio-pro", prompt="judge failure fixture")
+    request = FusionRequest(model="axio-sol", prompt="judge failure fixture")
     fallback_pool = [
         {
             "profile_id_sha256": profile.profile_id and sha256_text(profile.profile_id),
@@ -4563,7 +4563,7 @@ def test_role_replica_selected_but_blocked_before_provider_is_not_counted_as_att
     role = {"role": "primary_solver", "model": profiles[0].safe_dict()}
 
     candidate = engine._run_role(
-        FusionRequest(model="axio-fast", prompt="bounded retry accounting"),
+        FusionRequest(model="axio-luna", prompt="bounded retry accounting"),
         role,
         call_budget=_CallBudget(1),
     )

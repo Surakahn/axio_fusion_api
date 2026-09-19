@@ -24,15 +24,15 @@ TIMEOUT = 120
 
 # Baseline: single models with reasoning=max
 BASELINES = {
-    "gpt-5.6-sol": "max",    # rank 1 → vs axio-pro
+    "gpt-5.6-sol": "max",    # rank 1 → vs axio-sol
     "gpt-5.6-terra": "max",  # rank 2 → vs axio-terra
-    "gpt-5.6-luna": "max",   # rank 3 → vs axio-fast
+    "gpt-5.6-luna": "max",   # rank 3 → vs axio-luna
 }
 
 AXIO_TIERS = {
-    "axio-pro": "gpt-5.6-sol",
+    "axio-sol": "gpt-5.6-sol",
     "axio-terra": "gpt-5.6-terra",
-    "axio-fast": "gpt-5.6-luna",
+    "axio-luna": "gpt-5.6-luna",
 }
 
 # Benchmark suites available

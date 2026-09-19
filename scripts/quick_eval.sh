@@ -23,7 +23,7 @@ echo "" | tee -a "$RESULTS"
 echo "--- Science: MMLU Biology ---" | tee -a "$RESULTS"
 Q="Question: Which organelle is responsible for energy production in eukaryotic cells?\nChoices: ['A. Nucleus', 'B. Mitochondria', 'C. Endoplasmic reticulum', 'D. Golgi apparatus']. Answer with the letter only."
 A="B"
-for model in axio-fast axio-terra axio-pro; do
+for model in axio-luna axio-terra axio-sol; do
     result=$(test_mcq "$model" "$Q" "$A")
     echo "  $model: $result" | tee -a "$RESULTS"
 done
@@ -33,7 +33,7 @@ echo "" | tee -a "$RESULTS"
 echo "--- Math: Arithmetic ---" | tee -a "$RESULTS"
 Q="Solve: If a triangle has sides of length 3, 4, and 5, what is its area?\nOutput only the number."
 A="6"
-for model in axio-fast axio-terra axio-pro; do
+for model in axio-luna axio-terra axio-sol; do
     resp=$(curl -s --max-time 60 --noproxy '127.0.0.1' -X POST "$AXIO/v1/chat/completions" \
         -H "Content-Type: application/json" -H "Authorization: Bearer test" \
         -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":$(echo "$Q" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))")}],\"max_tokens\":50,\"stream\":false}" 2>/dev/null)
@@ -46,7 +46,7 @@ echo "" | tee -a "$RESULTS"
 echo "--- Logic: Syllogism ---" | tee -a "$RESULTS"
 Q="All dogs are animals. All animals need water. Does a dog need water? Answer yes or no."
 A="yes"
-for model in axio-fast axio-terra axio-pro; do
+for model in axio-luna axio-terra axio-sol; do
     resp=$(curl -s --max-time 60 --noproxy '127.0.0.1' -X POST "$AXIO/v1/chat/completions" \
         -H "Content-Type: application/json" -H "Authorization: Bearer test" \
         -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":$(echo "$Q" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))")}],\"max_tokens\":50,\"stream\":false}" 2>/dev/null)

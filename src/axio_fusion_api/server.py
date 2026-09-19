@@ -72,7 +72,7 @@ from .trace_store import record_execution_trace
 from .tools import execute_tool_batch
 
 API_SURFACE_PROTOCOL_FORMATS = ("chat/completions", "responses", "anthropic", "gemini")
-FUSION_DELIBERATION_SMOKE_DEFAULT_MODELS = ("axio-terra", "axio-pro")
+FUSION_DELIBERATION_SMOKE_DEFAULT_MODELS = ("axio-terra", "axio-sol")
 
 
 @dataclass(frozen=True)
@@ -2345,7 +2345,7 @@ def build_fast_path_live_diagnostic(
     client: Any | None = None,
     require_live_credentials: bool = True,
 ) -> dict[str, Any]:
-    """Run one bounded streaming request against ``axio-fast``.
+    """Run one bounded streaming request against ``axio-luna``.
 
     This is an operator diagnostic rather than a smoke matrix: it isolates a
     single public protocol and allows exactly one upstream model call.  The
@@ -2387,7 +2387,7 @@ def build_fast_path_live_diagnostic(
     end_to_end_latency_ms = 0.0
     if preflight_ready:
         endpoint, payload = _api_surface_stream_live_smoke_payload(
-            model="axio-fast",
+            model="axio-luna",
             api_format=requested_api_format,
             prompt=test_prompt,
             task_type=task_type,
@@ -2414,7 +2414,7 @@ def build_fast_path_live_diagnostic(
         )
         end_to_end_latency_ms = (time.monotonic() - started) * 1000
         row = _api_surface_stream_live_smoke_row(
-            model="axio-fast",
+            model="axio-luna",
             api_format=requested_api_format,
             status=response_status,
             response_headers=response_headers,
@@ -2442,7 +2442,7 @@ def build_fast_path_live_diagnostic(
     )
     diagnostic_input = {
         "schema": "axio_fusion_api.fast_path_live_diagnostic_digest.v1",
-        "public_model": "axio-fast",
+        "public_model": "axio-luna",
         "api_format": requested_api_format,
         "registry_profile_set_sha256": _profile_set_sha256(profiles),
         "eligible_profile_set_sha256": _profile_set_sha256(active_profiles),
@@ -2462,7 +2462,7 @@ def build_fast_path_live_diagnostic(
         "live_requested": bool(live),
         "preflight_ready": preflight_ready,
         "preflight_reason_codes": sorted(set(preflight_reason_codes)),
-        "public_model": "axio-fast",
+        "public_model": "axio-luna",
         "api_format": requested_api_format,
         "attempted_request_count": 1 if row else 0,
         "response_status_code": response_status,
@@ -4338,20 +4338,29 @@ def _profile_has_live_credentials(profile: Any) -> bool:
 
 
 def _public_model_policy(model: str) -> dict[str, Any]:
-    if model == "axio-fast":
+    if model == "axio-luna":
         return {
-            "tier": "fast",
+            "product": "axio-luna",
+            "legacy_algorithm_family": "fast",
+            "intelligence_rank": 3,
+            "cost_rank": 1,
             "default_strategy": "fast_direct_cascade",
             "latency_priority": "highest",
         }
-    if model == "axio-pro":
+    if model == "axio-sol":
         return {
-            "tier": "pro",
+            "product": "axio-sol",
+            "legacy_algorithm_family": "pro",
+            "intelligence_rank": 1,
+            "cost_rank": 3,
             "default_strategy": "pro_panel_judge_escalation",
             "quality_priority": "highest",
         }
     return {
-        "tier": "terra",
+        "product": "axio-terra",
+        "legacy_algorithm_family": "terra",
+        "intelligence_rank": 2,
+        "cost_rank": 2,
         "default_strategy": "terra_cost_guarded_fusion",
         "cost_quality_balance": "balanced",
     }
@@ -5069,7 +5078,7 @@ def _estimate_image_composer_cost(engine: FusionEngine | None) -> float | None:
         estimate = _estimate_request_cost(
             engine,
             FusionRequest(
-                model="axio-fast",
+                model="axio-luna",
                 prompt="image prompt composition",
                 system="Compose one bounded image prompt.",
                 max_output_tokens=900,

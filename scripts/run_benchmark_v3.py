@@ -11,7 +11,7 @@ PYTHON = '/home/he/axio_fusion_api/.venv/bin/python'
 SAMPLES = 8
 TIMEOUT_SEC = 60
 
-AXIO_MODELS = ['axio-fast', 'axio-terra', 'axio-pro']
+AXIO_MODELS = ['axio-luna', 'axio-terra', 'axio-sol']
 BASELINE_MODELS = ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol']
 
 SUITES = {
@@ -194,7 +194,7 @@ def main():
         print(row)
     
     print('\n── Fusion vs Baseline ──')
-    for am,bm in [('axio-pro','gpt-5.6-sol'),('axio-terra','gpt-5.6-terra'),('axio-fast','gpt-5.6-luna')]:
+    for am,bm in [('axio-sol','gpt-5.6-sol'),('axio-terra','gpt-5.6-terra'),('axio-luna','gpt-5.6-luna')]:
         as_=[r['accuracy'] for r in results['runs'] if r['model']==am]
         bs_=[r['accuracy'] for r in results['runs'] if r['model']==bm]
         if as_ and bs_:

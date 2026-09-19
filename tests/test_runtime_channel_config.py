@@ -653,7 +653,7 @@ def test_secret_resolver_key_pool_is_used_for_transport_failover():
         )
         assert len(profiles) == 1
 
-        request = FusionRequest(model="axio-fast", prompt="hello")
+        request = FusionRequest(model="axio-luna", prompt="hello")
         result = HTTPProviderClient().complete(
             profiles[0],
             request,
@@ -1120,25 +1120,25 @@ def test_runtime_http_gateway_bridges_four_upstream_and_public_protocols(monkeyp
         requests = [
             (
                 "/v1/chat/completions",
-                {"model": "axio-fast", "messages": [{"role": "user", "content": "hello"}]},
+                {"model": "axio-luna", "messages": [{"role": "user", "content": "hello"}]},
                 lambda body: body["choices"][0]["message"]["content"],
             ),
             (
                 "/v1/responses",
-                {"model": "axio-fast", "input": "hello"},
+                {"model": "axio-luna", "input": "hello"},
                 lambda body: body["output_text"],
             ),
             (
                 "/v1/messages",
                 {
-                    "model": "axio-fast",
+                    "model": "axio-luna",
                     "max_tokens": 32,
                     "messages": [{"role": "user", "content": "hello"}],
                 },
                 lambda body: body["content"][0]["text"],
             ),
             (
-                "/v1beta/models/axio-fast:generateContent",
+                "/v1beta/models/axio-luna:generateContent",
                 {
                     "contents": [
                         {"role": "user", "parts": [{"text": "hello"}]},

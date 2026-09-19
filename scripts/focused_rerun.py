@@ -55,7 +55,7 @@ def call_model(model, prompt):
     except Exception as e:
         return '', str(e)[:80]
 
-pairs = [('axio-terra', 'gpt-5.6-terra'), ('axio-fast', 'gpt-5.6-luna')]
+pairs = [('axio-terra', 'gpt-5.6-terra'), ('axio-luna', 'gpt-5.6-luna')]
 all_results = {}
 
 for sname, fmt in FOCUS:

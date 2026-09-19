@@ -1,5 +1,21 @@
 # Axio Fusion API Checklist
 
+# 2026-09-19 三个独立公开模型与相对调用成本
+
+- [x] canonical public models 收敛为 `axio-luna`、`axio-terra`、`axio-sol`；旧
+  `axio-fast`/`axio-pro` 仅作为兼容输入别名。
+- [x] 三个模型保留不同算法：快速直接级联、选择性 Fusion、专家面板/Judge/Synthesizer；
+  未将它们实现成同一模型的 reasoning tier。
+- [x] route-plan、`/v1/models`、health、四协议 canonical request、benchmark candidate
+  与产品文档使用新名称。
+- [x] 新增 attempted provider-call 成本 receipt：包含失败/重试/Judge/Synthesizer，使用
+  单模型 baseline 每 case 一次调用计算相对比，不使用 provider USD 价格。
+- [x] 成本优势在没有 paired quality evidence 时保持 `unverified`/`null`，不提前宣称便宜。
+- [x] 名称与成本专项、Terra 回归及全量回归通过：`1188 passed`；未执行 provider/target
+  网络、未修改 r18 frozen 输入，未发布生产。
+- [ ] 仍需在完整 21-suite 同 case campaign 中收集三模型与对应 provider 基线的质量/调用
+  比/延迟证据，再决定是否允许成本优势 claim。
+
 # 2026-09-19 Pro 跨 provider 角色多样性修复
 
 - [x] provider diversity target 只统计当前 panel 角色合同可执行的 provider，不再把 role

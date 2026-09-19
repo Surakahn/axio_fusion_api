@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Comprehensive benchmark evaluation: Axio Fusion vs Single-Model Baselines.
-Tests across 9 categories, 20 benchmarks, comparing axio-fast/terra/pro
+Tests across 9 categories, 20 benchmarks, comparing axio-luna/terra/pro
 against single-model baselines (gpt-5.6-luna/terra/sol).
 """
 import json, os, sys, time, urllib.request, urllib.error, re, hashlib
@@ -26,15 +26,15 @@ if not CPA_KEY:
                 CPA_KEY = line.split("=", 1)[1].strip().strip('"').strip("'")
 
 BASELINE_MODELS = {
-    "rank1": ("gpt-5.6-sol", "max"),     # Strongest → vs axio-pro
+    "rank1": ("gpt-5.6-sol", "max"),     # Strongest → vs axio-sol
     "rank2": ("gpt-5.6-terra", "max"),    # 2nd → vs axio-terra  
-    "rank3": ("gpt-5.6-luna", "max"),     # 3rd → vs axio-fast
+    "rank3": ("gpt-5.6-luna", "max"),     # 3rd → vs axio-luna
 }
 
 AXIO_MODELS = {
-    "axio-pro": "rank1",
+    "axio-sol": "rank1",
     "axio-terra": "rank2", 
-    "axio-fast": "rank3",
+    "axio-luna": "rank3",
 }
 
 Path(RESULTS_DIR).mkdir(parents=True, exist_ok=True)
@@ -373,7 +373,7 @@ if __name__ == "__main__":
     print(f"Benchmarks: {len(BENCHMARKS)}", flush=True)
     
     # Models to test
-    all_models = ["axio-fast", "axio-terra", "axio-pro", 
+    all_models = ["axio-luna", "axio-terra", "axio-sol",
                   "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]
     
     all_results = []
@@ -418,9 +418,9 @@ if __name__ == "__main__":
     print(f"{'='*80}")
     
     pairs = [
-        ("axio-pro", "gpt-5.6-sol"),
+        ("axio-sol", "gpt-5.6-sol"),
         ("axio-terra", "gpt-5.6-terra"),
-        ("axio-fast", "gpt-5.6-luna"),
+        ("axio-luna", "gpt-5.6-luna"),
     ]
     
     for axio_model, baseline_model in pairs:

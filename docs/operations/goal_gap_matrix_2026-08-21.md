@@ -1,5 +1,19 @@
 # Axio Fusion Goal 差距矩阵（2026-08-21）
 
+## 2026-09-19 三个独立公开模型与相对调用成本增量
+
+公开模型 canonical identity 已从历史 `axio-fast`/`axio-pro` 收敛为
+`axio-luna`/`axio-terra`/`axio-sol`。三者是独立的算法产品，不是一个模型的三档
+reasoning tier：Luna 使用直接级联，Terra 使用选择性 Fusion，Sol 使用专家面板、Judge
+和 Synthesizer。旧名称仅作为输入兼容别名；新 health、模型目录、四协议 canonical
+request、route-plan 和 benchmark candidate 不再输出旧主名称。
+
+新增相对调用成本契约，使用同一 case 上所有 attempted provider calls（包括失败、重试、
+Judge、Synthesizer），单模型 baseline 每 case 记一次调用。receipt 输出相对调用比与可选
+质量/调用效率，不使用不可比的 provider 美元价格；没有 paired benchmark 证据时，
+`cheaper_than_baseline` 保持 `null`，不构成成本优势 claim。名称/成本专项与全量回归
+`1188 passed`，但尚未执行 provider/target benchmark，不能据此宣称三模型能力或价格优势。
+
 ## 2026-09-19 Pro 跨 provider 角色多样性修复增量
 
 修复前 Pro 的 provider diversity target 直接使用全部 scored provider 数量，导致 Anthropic

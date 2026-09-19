@@ -19,14 +19,24 @@ from .content_contract import (
 )
 
 
-PUBLIC_MODELS = ("axio-fast", "axio-terra", "axio-pro")
+# These are three independent public products, not reasoning settings of one
+# model.  Their implementations intentionally retain different orchestration
+# contracts: Luna uses the legacy fast cascade, Terra uses selective Fusion,
+# and Sol uses the full panel/Judge/Synthesizer path.
+PUBLIC_MODELS = ("axio-luna", "axio-terra", "axio-sol")
 PUBLIC_MODEL_ALIASES = {
-    "fast": "axio-fast",
+    "fast": "axio-luna",
+    "luna": "axio-luna",
+    "axio-fast": "axio-luna",
+    "axio-luna": "axio-luna",
     "terra": "axio-terra",
     "budget": "axio-terra",
     "balanced": "axio-terra",
-    "high": "axio-pro",
-    "pro": "axio-pro",
+    "high": "axio-sol",
+    "pro": "axio-sol",
+    "sol": "axio-sol",
+    "axio-pro": "axio-sol",
+    "axio-sol": "axio-sol",
     "fusion": "axio-terra",
     "openrouter/fusion": "axio-terra",
     "openrouter:fusion": "axio-terra",

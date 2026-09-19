@@ -48,7 +48,7 @@ def _profile(api_format: str, *, supports_vision: bool = True):
 
 def _image_request() -> FusionRequest:
     return FusionRequest(
-        model="axio-pro",
+        model="axio-sol",
         prompt="Inspect the image and summarize it.",
         content_parts=(
             {"type": "text", "text": "Inspect the image and summarize it."},
@@ -173,7 +173,7 @@ def test_provider_renderers_reconstruct_the_closed_image_contract(api_format):
 
 def test_base64_image_renders_for_all_image_capable_provider_protocols():
     request = FusionRequest(
-        model="axio-pro",
+        model="axio-sol",
         prompt="Inspect",
         content_parts=(
             {"type": "text", "text": "Inspect"},
@@ -211,7 +211,7 @@ def test_file_reference_is_rendered_only_by_protocols_that_have_a_file_input():
 @pytest.mark.parametrize("api_format", ["chat", "responses", "anthropic", "gemini"])
 def test_structured_output_uses_each_protocols_native_wrapper(api_format):
     request = FusionRequest(
-        model="axio-pro",
+        model="axio-sol",
         prompt="Return an object.",
         structured_output={
             "type": "json_schema",
@@ -306,7 +306,7 @@ def test_indeterminate_vision_probe_does_not_remove_text_route_eligibility():
 
     image_plan = build_route_plan(_image_request(), [profile])
     text_plan = build_route_plan(
-        FusionRequest(model="axio-pro", prompt="Summarize the meeting notes."),
+        FusionRequest(model="axio-sol", prompt="Summarize the meeting notes."),
         [profile],
     )
 
@@ -317,7 +317,7 @@ def test_indeterminate_vision_probe_does_not_remove_text_route_eligibility():
 @pytest.mark.parametrize("response_path", ["/v1/chat/completions", "/v1/axio/route-plan"])
 def test_invalid_content_contract_is_a_public_400(response_path):
     payload = {
-        "model": "axio-fast",
+        "model": "axio-luna",
         "messages": [{"role": "user", "content": [{"type": "audio", "audio": {}}]}],
     }
     if response_path.endswith("route-plan"):
@@ -342,7 +342,7 @@ def test_invalid_content_contract_is_a_public_400(response_path):
         (
             "/v1/chat/completions",
             {
-                "model": "axio-fast",
+                "model": "axio-luna",
                 "messages": [{"role": "user", "content": "hello"}],
                 "reasoning_effort": "high",
                 "reasoning": {"effort": "low"},
@@ -377,7 +377,7 @@ def test_conflicting_openai_reasoning_aliases_are_public_400(path, payload):
 
 def test_invalid_content_contract_is_a_400_before_incremental_stream_headers():
     payload = {
-        "model": "axio-fast",
+        "model": "axio-luna",
         "stream": True,
         "messages": [{"role": "user", "content": [{"type": "audio"}]}],
     }
@@ -411,7 +411,7 @@ def test_invalid_structured_output_is_rejected_without_persisting_schema():
 def test_chat_developer_role_keeps_instruction_priority_across_history_normalization():
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [
                 {"role": "developer", "content": "Follow the internal policy."},
                 {"role": "user", "content": "Answer the task."},
@@ -428,7 +428,7 @@ def test_chat_developer_role_keeps_instruction_priority_across_history_normaliza
 def test_responses_array_instructions_are_text_normalized_not_stringified():
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "instructions": [
                 {
                     "role": "developer",
@@ -450,7 +450,7 @@ def test_responses_non_text_instruction_is_rejected_before_provider_dispatch():
     with pytest.raises(ContentContractError, match="instructions must contain text only"):
         canonicalize_payload(
             {
-                "model": "axio-pro",
+                "model": "axio-sol",
                 "instructions": [
                     {
                         "type": "input_image",

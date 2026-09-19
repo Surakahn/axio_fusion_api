@@ -41,7 +41,7 @@ BENCHMARKS = [
     ("tau_bench_mini.jsonl", "Agentic-TauBench", "tool"),
 ]
 
-AXIO_MODELS = ["axio-fast", "axio-terra", "axio-pro"]
+AXIO_MODELS = ["axio-luna", "axio-terra", "axio-sol"]
 BASELINE_MODELS = [("gpt-5.6-sol", "strongest"), ("gpt-5.6-terra", "second"), ("gpt-5.6-luna", "third")]
 
 def call_api(url, payload, headers):
@@ -236,7 +236,7 @@ def main():
         print(f"  OVERALL: {overall['total_accuracy']:.1%} ({overall['total_correct']:.1f}/{overall['total_cases']}) avg={overall['avg_latency_s']:.1f}s wall={overall['wall_time_s']:.0f}s", flush=True)
     
     print("\n=== COMPARISON ===", flush=True)
-    for axio_m, base_m, tier_label in [("axio-pro","gpt-5.6-sol","Strongest"),("axio-terra","gpt-5.6-terra","Second"),("axio-fast","gpt-5.6-luna","Third")]:
+    for axio_m, base_m, tier_label in [("axio-sol","gpt-5.6-sol","Strongest"),("axio-terra","gpt-5.6-terra","Second"),("axio-luna","gpt-5.6-luna","Third")]:
         ao = all_results["axio_models"].get(axio_m, {}).get("overall", {})
         bo = all_results["baseline_models"].get(base_m, {}).get("overall", {})
         aa, ba = ao.get("total_accuracy",0), bo.get("total_accuracy",0)

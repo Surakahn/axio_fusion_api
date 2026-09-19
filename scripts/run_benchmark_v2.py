@@ -26,7 +26,7 @@ SAMPLES = 5
 MAX_TOKENS = 300
 TIMEOUT_SEC = 90
 
-AXIO_MODELS = ['axio-fast', 'axio-terra', 'axio-pro']
+AXIO_MODELS = ['axio-luna', 'axio-terra', 'axio-sol']
 BASELINE_MODELS = ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol']
 
 SUITES = {

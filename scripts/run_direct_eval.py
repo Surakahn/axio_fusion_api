@@ -108,9 +108,9 @@ BENCHMARKS = [
 ]
 
 MODELS = {
-    'axio-fast': {'baseline': 'gpt-5.6-luna', 'reasoning': 'max'},
+    'axio-luna': {'baseline': 'gpt-5.6-luna', 'reasoning': 'max'},
     'axio-terra': {'baseline': 'gpt-5.6-terra', 'reasoning': 'max'},
-    'axio-pro': {'baseline': 'gpt-5.6-sol', 'reasoning': 'max'},
+    'axio-sol': {'baseline': 'gpt-5.6-sol', 'reasoning': 'max'},
 }
 
 # ── Run ─────────────────────────────────────────────────────────────────────

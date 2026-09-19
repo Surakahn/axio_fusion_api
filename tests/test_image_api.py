@@ -337,7 +337,7 @@ def test_explicit_image_profiles_are_isolated_from_text_engine():
         method="POST",
         path="/v1/images/generations",
         headers={"Content-Type": "application/json"},
-        body=json.dumps({"model": "axio-fast", "prompt": "a red kite"}),
+        body=json.dumps({"model": "axio-luna", "prompt": "a red kite"}),
         engine=FusionEngine([profile]),
         image_profiles=[],
         record_runtime=False,
@@ -415,7 +415,7 @@ def test_generation_parser_allowlists_fields_and_parses_boolean():
     payload = parse_generation_payload(
         json.dumps(
             {
-                "model": "axio-pro",
+                "model": "axio-sol",
                 "prompt": "a red kite",
                 "n": 2,
                 "stream": "false",
@@ -424,14 +424,14 @@ def test_generation_parser_allowlists_fields_and_parses_boolean():
         )
     )
 
-    assert payload == {"model": "axio-pro", "prompt": "a red kite", "n": 2, "stream": False}
+    assert payload == {"model": "axio-sol", "prompt": "a red kite", "n": 2, "stream": False}
     assert "unknown_provider_field" not in payload
 
 
 def test_generation_parser_uses_official_partial_image_limit():
     with pytest.raises(ImageRequestError) as error:
         parse_generation_payload(
-            json.dumps({"model": "axio-pro", "prompt": "x", "partial_images": 4})
+            json.dumps({"model": "axio-sol", "prompt": "x", "partial_images": 4})
         )
     assert error.value.code == "image_field_invalid"
 
@@ -440,7 +440,7 @@ def test_generation_parser_enforces_request_size_limit(monkeypatch):
     monkeypatch.setenv("AXIO_FUSION_IMAGE_MAX_REQUEST_BYTES", "1048576")
     with pytest.raises(ImageRequestError) as error:
         parse_generation_payload(
-            json.dumps({"model": "axio-pro", "prompt": "x" * 1_100_000})
+            json.dumps({"model": "axio-sol", "prompt": "x" * 1_100_000})
         )
     assert error.value.code == "image_request_too_large"
     assert error.value.status == 413
@@ -519,7 +519,7 @@ def test_image_prompt_transformer_falls_back_on_non_json_model_output():
     transformer = ImagePromptTransformer(engine)
 
     payload, receipt = transformer.transform(
-        {"model": "axio-pro", "prompt": original},
+        {"model": "axio-sol", "prompt": original},
         operation="editing",
     )
 
@@ -684,7 +684,7 @@ def test_image_router_enforces_streaming_and_input_limits():
     router = ImageRouter([profile], client=fake)
 
     with pytest.raises(ImageRequestError) as stream_error:
-        router.generate({"model": "axio-fast", "prompt": "x", "stream": True})
+        router.generate({"model": "axio-luna", "prompt": "x", "stream": True})
     assert stream_error.value.code == "image_capability_unavailable"
 
     two_images = [
@@ -704,10 +704,10 @@ def test_image_router_enforces_streaming_and_input_limits():
 def test_image_router_returns_one_provider_result_without_text_merging():
     fake = _FakeImageClient()
     response, result, profile = ImageRouter([_image_profile()], client=fake).generate(
-        {"model": "axio-pro", "prompt": "a red kite"}
+        {"model": "axio-sol", "prompt": "a red kite"}
     )
 
-    assert response["model"] == "axio-pro"
+    assert response["model"] == "axio-sol"
     assert response["data"][0]["b64_json"] == "encoded-image"
     assert result.data[0]["b64_json"] == "encoded-image"
     assert profile.model == "gpt-image-2"
@@ -745,7 +745,7 @@ def test_image_provider_client_fails_over_to_next_key(monkeypatch):
     monkeypatch.setattr("axio_fusion_api.image_api._open_provider_url", fake_open)
     result = ImageProviderClient().generate(
         profile,
-        {"model": "axio-fast", "prompt": "x"},
+        {"model": "axio-luna", "prompt": "x"},
         timeout=5,
     )
 
@@ -772,7 +772,7 @@ def test_server_dispatches_images_without_invoking_text_fusion(monkeypatch):
         method="POST",
         path="/v1/images/generations",
         headers={"Content-Type": "application/json"},
-        body=json.dumps({"model": "axio-fast", "prompt": "a red kite"}),
+        body=json.dumps({"model": "axio-luna", "prompt": "a red kite"}),
         engine=FusionEngine([profile]),
         record_runtime=False,
         record_trace=False,
@@ -798,18 +798,18 @@ def test_server_records_priced_image_cost_for_buffered_and_streaming(monkeypatch
         method="POST",
         path="/v1/images/generations",
         headers=headers,
-        body=json.dumps({"model": "axio-fast", "prompt": "buffered"}),
+        body=json.dumps({"model": "axio-luna", "prompt": "buffered"}),
         engine=FusionEngine([profile]),
     )
     stream_status, _, _ = server.handle_request(
         method="POST",
         path="/v1/images/generations",
         headers=headers,
-        body=json.dumps({"model": "axio-fast", "prompt": "stream", "stream": True}),
+        body=json.dumps({"model": "axio-luna", "prompt": "stream", "stream": True}),
         engine=FusionEngine([profile]),
     )
     edit_body, edit_content_type = _encode_multipart(
-        {"model": "axio-fast", "prompt": "edit"},
+        {"model": "axio-luna", "prompt": "edit"},
         [ImagePart("image", "source.png", "image/png", b"png")],
     )
     edit_status, _, _ = server.handle_request(
@@ -840,7 +840,7 @@ def test_server_does_not_record_unknown_or_failed_image_cost(monkeypatch):
         method="POST",
         path="/v1/images/generations",
         headers=headers,
-        body=json.dumps({"model": "axio-fast", "prompt": "unknown"}),
+        body=json.dumps({"model": "axio-luna", "prompt": "unknown"}),
         engine=FusionEngine([profile]),
     )
     assert status == 200
@@ -878,7 +878,7 @@ def test_server_returns_sanitized_image_capability_error_for_unverified_model():
         method="POST",
         path="/v1/images/generations",
         headers={"Content-Type": "application/json"},
-        body=json.dumps({"model": "axio-pro", "prompt": "a red kite"}),
+        body=json.dumps({"model": "axio-sol", "prompt": "a red kite"}),
         engine=FusionEngine([_image_profile(probe_status="not_run")]),
         record_runtime=False,
         record_trace=False,
@@ -945,7 +945,7 @@ def test_http_server_delivers_image_event_before_provider_finishes(monkeypatch):
             "/v1/images/generations",
             body=json.dumps(
                 {
-                    "model": "axio-fast",
+                    "model": "axio-luna",
                     "prompt": "a red kite",
                     "stream": True,
                     "partial_images": 1,
@@ -1005,7 +1005,7 @@ def test_http_image_stream_records_profile_bound_cost(monkeypatch):
         connection.request(
             "POST",
             "/v1/images/generations",
-            body=json.dumps({"model": "axio-fast", "prompt": "priced", "stream": True}),
+            body=json.dumps({"model": "axio-luna", "prompt": "priced", "stream": True}),
             headers={"Content-Type": "application/json", "x-api-key": "stream-cost-tenant"},
         )
         response = connection.getresponse()
@@ -1030,7 +1030,7 @@ def test_http_image_edit_stream_records_profile_bound_cost(monkeypatch):
     fake = _FakeImageClient()
     monkeypatch.setattr(server, "ImageRouter", lambda profiles: ImageRouter(profiles, client=fake))
     body, content_type = _encode_multipart(
-        {"model": "axio-fast", "prompt": "stream edit", "stream": True},
+        {"model": "axio-luna", "prompt": "stream edit", "stream": True},
         [ImagePart("image", "source.png", "image/png", b"png")],
     )
     gateway = server.create_http_server(
@@ -1121,7 +1121,7 @@ def test_responses_image_generation_uses_responses_tool_wire_and_parses_output(m
     monkeypatch.setattr("axio_fusion_api.image_api._open_provider_url", fake_open)
     result = ImageProviderClient().generate(
         profile,
-        {"model": "axio-pro", "prompt": "blue square"},
+        {"model": "axio-sol", "prompt": "blue square"},
         timeout=5,
     )
 
@@ -1169,7 +1169,7 @@ def test_responses_image_stream_promotes_final_response_completed_event(monkeypa
     monkeypatch.setattr("axio_fusion_api.image_api._open_provider_url", fake_open)
     result = ImageProviderClient().generate(
         profile,
-        {"model": "axio-pro", "prompt": "blue square", "stream": True},
+        {"model": "axio-sol", "prompt": "blue square", "stream": True},
         timeout=5,
         stream_observer=lambda event: captured.append(dict(event)) is None,
     )

@@ -112,8 +112,8 @@ def test_cli_scores_emit_hash_only_blocked_receipt(tmp_path: Path) -> None:
     output = tmp_path / "result.json"
     _write_manifest(previous, "nvidia")
     _write_manifest(current, "cpa")
-    fusion_scores.write_text(json.dumps({"axio-pro": 0.8}), encoding="utf-8")
-    baseline_scores.write_text(json.dumps({"axio-pro": 1.0}), encoding="utf-8")
+    fusion_scores.write_text(json.dumps({"axio-sol": 0.8}), encoding="utf-8")
+    baseline_scores.write_text(json.dumps({"axio-sol": 1.0}), encoding="utf-8")
 
     payload = _run_cli(
         previous,
@@ -135,7 +135,7 @@ def test_cli_scores_emit_hash_only_blocked_receipt(tmp_path: Path) -> None:
     assert receipt["raw_provider_outputs_persisted"] is False
     assert receipt["activation_ready"] is False
     assert receipt["promotion_gate"]["automatic_activation_allowed"] is False
-    assert "axio-pro" not in json.dumps(payload, ensure_ascii=False)
+    assert "axio-sol" not in json.dumps(payload, ensure_ascii=False)
 
 
 def test_cli_complete_binding_artifacts_emit_shadow_candidate(tmp_path: Path) -> None:
@@ -146,8 +146,8 @@ def test_cli_complete_binding_artifacts_emit_shadow_candidate(tmp_path: Path) ->
     output = tmp_path / "result.json"
     _write_manifest(previous, "nvidia")
     _write_manifest(current, "cpa")
-    fusion_scores.write_text(json.dumps({"axio-pro": 0.8}), encoding="utf-8")
-    baseline_scores.write_text(json.dumps({"axio-pro": 1.0}), encoding="utf-8")
+    fusion_scores.write_text(json.dumps({"axio-sol": 0.8}), encoding="utf-8")
+    baseline_scores.write_text(json.dumps({"axio-sol": 1.0}), encoding="utf-8")
     names = ("registry", "rollback", "prompt_pack", "workflow", "contamination")
     binding_artifacts = {}
     for index, name in enumerate(names):

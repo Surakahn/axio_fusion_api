@@ -56,10 +56,10 @@ print(f"Found {len(results)} completed benchmarks\n")
 wins = losses = ties = 0
 for bench, data in sorted(results.items()):
     print(f"--- {bench} ---")
-    for m in ['axio-fast','axio-terra','axio-pro','gpt-5.6-luna','gpt-5.6-terra','gpt-5.6-sol']:
+    for m in ['axio-luna','axio-terra','axio-sol','gpt-5.6-luna','gpt-5.6-terra','gpt-5.6-sol']:
         a = data.get(f'{m}_avg', 'N/A')
         print(f"  {m:16s}: {a}")
-    for ax,ba in [('axio-fast','gpt-5.6-luna'),('axio-terra','gpt-5.6-terra'),('axio-pro','gpt-5.6-sol')]:
+    for ax,ba in [('axio-luna','gpt-5.6-luna'),('axio-terra','gpt-5.6-terra'),('axio-sol','gpt-5.6-sol')]:
         av = data.get(f'{ax}_avg', 0)
         bv = data.get(f'{ba}_avg', 0)
         f = 'WIN' if av>bv else ('LOSE' if av<bv else 'TIE')

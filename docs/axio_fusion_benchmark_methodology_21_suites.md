@@ -60,8 +60,8 @@ the same logical `max` request through their protocol-specific fields, while
 the public boundary receipt does not itself prove the upstream provider's
 native implementation.
 
-The pre-registered comparison roster is `gpt-5.6-sol` for `axio-pro`,
-`gpt-5.6-terra` for `axio-terra`, and `gpt-5.6-luna` for `axio-fast`. This is a
+The pre-registered comparison roster is `gpt-5.6-sol` for `axio-sol`,
+`gpt-5.6-terra` for `axio-terra`, and `gpt-5.6-luna` for `axio-luna`. This is a
 target mapping, not a completed live result: the final claim still requires a
 hash-bound provider freeze, live evidence, paired runs, statistical gates, and
 the latency limit below.
@@ -72,9 +72,9 @@ All model answers must be produced through API calls, never by local shortcuts o
 
 Axio public candidates:
 
-- `axio-fast`
+- `axio-luna`
 - `axio-terra`
-- `axio-pro`
+- `axio-sol`
 
 Each Axio candidate must be evaluated through all four public API surfaces:
 
@@ -91,9 +91,9 @@ Provider single-model baselines:
 
 The primary superiority claims are:
 
-- `axio-pro` versus strongest available single model
+- `axio-sol` versus strongest available single model
 - `axio-terra` versus second strongest available single model
-- `axio-fast` versus third strongest available single model
+- `axio-luna` versus third strongest available single model
 
 The four Axio API-surface rows test both engineering compatibility and model-behavior invariance. The canonical ability comparison for each Axio tier is computed from the same locked case set and then audited across all four surfaces; a surface-specific failure blocks release even if one surface scores well.
 

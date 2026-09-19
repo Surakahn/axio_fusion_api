@@ -53,7 +53,7 @@ def test_incremental_renderer_preserves_native_terminal_shapes(
 ) -> None:
     request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "messages": [{"role": "user", "content": "private request text"}],
         },
         api_format=api_format,
@@ -87,7 +87,7 @@ def test_incremental_renderer_preserves_native_terminal_shapes(
 def test_incremental_renderer_projects_bounded_error_code_for_all_protocols(api_format: str) -> None:
     request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "messages": [{"role": "user", "content": "error contract"}],
         },
         api_format=api_format,
@@ -132,7 +132,7 @@ def test_public_output_normalization_preserves_ordinary_and_explicit_json():
     ordinary = '{"answer": "用户要求的 JSON", "kind": "public"}'
     explicit_request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "response_format": {"type": "json_object"},
             "messages": [{"role": "user", "content": "return JSON"}],
         }
@@ -160,7 +160,7 @@ def test_all_public_protocols_hide_internal_synthesizer_json(api_format: str):
     )
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [{"role": "user", "content": "check"}],
         },
         api_format=api_format,
@@ -187,7 +187,7 @@ def test_all_public_protocols_hide_internal_synthesizer_json(api_format: str):
 def test_incremental_renderer_normalizes_final_internal_json_before_terminal_events():
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [{"role": "user", "content": "check"}],
         }
     )
@@ -290,7 +290,7 @@ def test_complete_stream_buffers_json_like_synthesizer_deltas_before_public_rele
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "task_type": "science_research",
             "messages": [{"role": "user", "content": "buffer this"}],
         }
@@ -314,7 +314,7 @@ def test_complete_stream_buffers_json_like_synthesizer_deltas_before_public_rele
         (
             "/v1/chat/completions",
             {
-                "model": "axio-fast",
+                "model": "axio-luna",
                 "stream": True,
                 "messages": [{"role": "user", "content": "private caller prompt"}],
             },
@@ -323,14 +323,14 @@ def test_complete_stream_buffers_json_like_synthesizer_deltas_before_public_rele
         ),
         (
             "/v1/responses",
-            {"model": "axio-fast", "stream": True, "input": "private caller prompt"},
+            {"model": "axio-luna", "stream": True, "input": "private caller prompt"},
             b'"delta":"first "',
             "event: response.completed",
         ),
         (
             "/v1/messages",
             {
-                "model": "axio-fast",
+                "model": "axio-luna",
                 "stream": True,
                 "messages": [{"role": "user", "content": "private caller prompt"}],
             },
@@ -338,7 +338,7 @@ def test_complete_stream_buffers_json_like_synthesizer_deltas_before_public_rele
             "event: message_stop",
         ),
         (
-            "/v1beta/models/axio-fast:streamGenerateContent?alt=sse",
+            "/v1beta/models/axio-luna:streamGenerateContent?alt=sse",
             {
                 "contents": [
                     {"role": "user", "parts": [{"text": "private caller prompt"}]}
@@ -506,7 +506,7 @@ def test_http_server_disconnect_releases_stream_tenant_lease(monkeypatch) -> Non
             "/v1/chat/completions",
             body=json.dumps(
                 {
-                    "model": "axio-fast",
+                    "model": "axio-luna",
                     "stream": True,
                     "messages": [{"role": "user", "content": "disconnect"}],
                 }
@@ -596,7 +596,7 @@ def test_http_provider_stream_observer_preserves_visible_whitespace_and_ignores_
         }
     )
     request = canonicalize_payload(
-        {"model": "axio-fast", "messages": [{"role": "user", "content": "hello"}]}
+        {"model": "axio-luna", "messages": [{"role": "user", "content": "hello"}]}
     )
     visible_deltas: list[str] = []
     observer = ProviderStreamObserver(visible_deltas.append)
@@ -664,7 +664,7 @@ def test_http_provider_stops_after_downstream_stream_cancellation(monkeypatch) -
         }
     )
     request = canonicalize_payload(
-        {"model": "axio-fast", "messages": [{"role": "user", "content": "hello"}]}
+        {"model": "axio-luna", "messages": [{"role": "user", "content": "hello"}]}
     )
     cancellation_event = threading.Event()
     observer = ProviderStreamObserver(lambda _text: False, cancellation_event=cancellation_event)
@@ -730,7 +730,7 @@ def test_http_server_emits_a_terminal_error_without_fallback_after_public_text()
             "/v1/chat/completions",
             body=json.dumps(
                 {
-                    "model": "axio-fast",
+                    "model": "axio-luna",
                     "stream": True,
                     "messages": [{"role": "user", "content": "private failure request"}],
                 }
@@ -787,7 +787,7 @@ def test_pro_direct_fallback_route_streams_its_public_acting_solver() -> None:
     client = DirectProClient()
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [{"role": "user", "content": "say hello"}],
         }
     )
@@ -806,7 +806,7 @@ def test_pro_direct_fallback_route_streams_its_public_acting_solver() -> None:
     assert client.calls == 1
 
 
-@pytest.mark.parametrize("public_model", ["axio-terra", "axio-pro"])
+@pytest.mark.parametrize("public_model", ["axio-terra", "axio-sol"])
 def test_public_stream_exposes_only_the_final_acting_role(
     public_model: str,
 ) -> None:

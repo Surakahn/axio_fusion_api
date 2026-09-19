@@ -2,7 +2,7 @@
 
 Axio Fusion API is a standalone, remote-only model composition service. It
 turns a changing set of provider endpoints into one stable public model family:
-`axio-fast`, `axio-terra`, and `axio-pro`.
+`axio-luna`, `axio-terra`, and `axio-sol`.
 
 The service does not train weights, run a local model, or require ASciFS. ASciFS
 or any other application may consume Axio over HTTP, but Axio is developed,
@@ -23,14 +23,24 @@ Physical replicas that expose the same canonical model identity are one logical
 model. Replicas are used for load balancing and failover; they are never counted
 as independent Fusion votes.
 
-The public model family is deliberately small:
+The public product family contains three independent models. They are not
+reasoning settings of one model, and each has its own orchestration algorithm,
+call budget, failure policy, and benchmark comparison contract:
 
-- `axio-fast`: the smallest bounded route that meets the task and latency
+- `axio-luna`: the smallest bounded route that meets the task and latency
   budget.
 - `axio-terra`: selective independent solving, verification, or critique when
   a second view is likely to add information.
-- `axio-pro`: a bounded expert panel, Judge, targeted repair, and acting
+- `axio-sol`: a bounded expert panel, Judge, targeted repair, and acting
   Synthesizer for difficult or high-risk work.
+
+The intelligence order is `axio-sol > axio-terra > axio-luna`; the intended
+provider-call cost order is `axio-luna < axio-terra < axio-sol`. Cost is
+measured by attempted provider calls on the same case set, including failed
+attempts, retries, Judge calls, and Synthesizer calls. Provider-specific USD
+prices are not used to compare channels. A cheaper-than-baseline claim is
+emitted only after paired benchmark evidence proves the quality gate; runtime
+receipts expose the call ratio but never assert that claim by assumption.
 
 The public gateway exposes all four streaming protocol surfaces:
 

@@ -106,40 +106,40 @@ def test_detect_channel_change_ignores_credential_rotation():
 
 
 def test_evaluate_fusion_vs_baseline_above_threshold():
-    result = evaluate_fusion_vs_baseline(0.95, 1.0, "axio-pro")
+    result = evaluate_fusion_vs_baseline(0.95, 1.0, "axio-sol")
     assert result["ratio"] == 0.95
     assert result["needs_recalibration"] is False
 
 
 def test_evaluate_fusion_vs_baseline_below_threshold():
-    result = evaluate_fusion_vs_baseline(0.85, 1.0, "axio-pro")
+    result = evaluate_fusion_vs_baseline(0.85, 1.0, "axio-sol")
     assert result["ratio"] == 0.85
     assert result["needs_recalibration"] is True
 
 
 def test_build_recalibration_decision_triggers_on_degradation():
     snapshots = [
-        CalibrationSnapshot("axio-pro", 0.80, "2026-08-10"),
+        CalibrationSnapshot("axio-sol", 0.80, "2026-08-10"),
         CalibrationSnapshot("axio-terra", 0.95, "2026-08-10"),
     ]
     decision = build_recalibration_decision(
         snapshots,
-        baseline_map={"axio-pro": 1.0, "axio-terra": 1.0},
+        baseline_map={"axio-sol": 1.0, "axio-terra": 1.0},
         channel_changed=True,
         previous_channel_digest="abc",
         current_channel_digest="def",
     )
     assert decision["needs_recalibration"] is True
-    assert any("axio-pro" in reason for reason in decision["reasons"])
+    assert any("axio-sol" in reason for reason in decision["reasons"])
 
 
 def test_build_recalibration_decision_does_not_trigger_when_healthy():
     snapshots = [
-        CalibrationSnapshot("axio-pro", 0.95, "2026-08-10"),
+        CalibrationSnapshot("axio-sol", 0.95, "2026-08-10"),
     ]
     decision = build_recalibration_decision(
         snapshots,
-        baseline_map={"axio-pro": 1.0},
+        baseline_map={"axio-sol": 1.0},
         channel_changed=True,
         previous_channel_digest="abc",
         current_channel_digest="def",
@@ -151,7 +151,7 @@ def test_build_recalibration_decision_does_not_trigger_when_healthy():
 def test_build_recalibration_prompt_contains_safe_channel_only():
     decision = {
         "needs_recalibration": True,
-        "reasons": ["axio-pro 退化"],
+        "reasons": ["axio-sol 退化"],
         "evaluations": [],
     }
     channel = {
@@ -181,8 +181,8 @@ def test_build_recalibration_receipt_is_shadow_candidate_with_complete_bindings(
         ]
     }
     decision = build_recalibration_decision(
-        [CalibrationSnapshot("axio-pro", 0.80, "2026-08-10")],
-        baseline_map={"axio-pro": 1.0},
+        [CalibrationSnapshot("axio-sol", 0.80, "2026-08-10")],
+        baseline_map={"axio-sol": 1.0},
         channel_changed=True,
         previous_channel_digest=channel_fingerprint(previous),
         current_channel_digest=channel_fingerprint(current),
@@ -223,7 +223,7 @@ def test_build_recalibration_receipt_blocks_digest_mismatch():
         "previous_channel_digest_sha256": "f" * 64,
         "current_channel_digest_sha256": channel_fingerprint(manifest),
         "needs_recalibration": True,
-        "evaluations": [{"model": "axio-pro", "ratio": 0.8}],
+        "evaluations": [{"model": "axio-sol", "ratio": 0.8}],
         "reasons": ["退化"],
     }
     receipt = build_recalibration_receipt(

@@ -124,7 +124,7 @@ def test_final_claim_anti_leakage_gate_requires_prompt_contract_for_local_runs()
     _, _, clean_contract = _prompt_for(case, "exact_match")
     base = {
         "suite_id": "math_500",
-        "candidate_id": "axio-pro",
+        "candidate_id": "axio-sol",
         "anti_leakage_contract": {
             "prompt_contract_required_for_final_claim": True,
             "prompt_contract_schema": clean_contract["schema"],

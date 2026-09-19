@@ -28,9 +28,9 @@ from axio_fusion_api.compat import canonicalize_payload
 BENCH_ROOT = Path("/mnt/storage/axio_fusion_benchmarks/standardized")
 
 PAIRINGS = [
-    ("axio-pro", "provider::cpa-plus/gpt-5.6-sol"),
+    ("axio-sol", "provider::cpa-plus/gpt-5.6-sol"),
     ("axio-terra", "provider::cpa-plus/gpt-5.6-terra"),
-    ("axio-fast", "provider::cpa-plus/gpt-5.6-luna"),
+    ("axio-luna", "provider::cpa-plus/gpt-5.6-luna"),
 ]
 
 SUITE_SPECS = {
@@ -251,9 +251,9 @@ def main():
     if args.pairs == "terra":
         pairings = [p for p in PAIRINGS if p[0] == "axio-terra"]
     elif args.pairs == "pro":
-        pairings = [p for p in PAIRINGS if p[0] == "axio-pro"]
+        pairings = [p for p in PAIRINGS if p[0] == "axio-sol"]
     elif args.pairs == "fast":
-        pairings = [p for p in PAIRINGS if p[0] == "axio-fast"]
+        pairings = [p for p in PAIRINGS if p[0] == "axio-luna"]
     
     all_results = []
     

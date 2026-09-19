@@ -349,7 +349,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     fast_path_diagnostic = sub.add_parser(
         "fast-path-live-diagnostic",
-        help="Run one strict-streaming axio-fast request with a bounded safe receipt.",
+        help="Run one strict-streaming axio-luna request with a bounded safe receipt.",
     )
     fast_path_diagnostic.add_argument(
         "--api-format",
@@ -1192,7 +1192,7 @@ def build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("benchmark-run")
     run.add_argument("--suite-id", required=True)
     run.add_argument("--dataset", required=True)
-    run.add_argument("--candidate-id", default="axio-pro")
+    run.add_argument("--candidate-id", default="axio-sol")
     run.add_argument("--task-format", default="auto")
     run.add_argument("--api-format", default="")
     run.add_argument("--limit", type=int, default=None)
@@ -1263,7 +1263,7 @@ def build_parser() -> argparse.ArgumentParser:
     harness_preflight.add_argument("--dataset", required=True)
     harness_preflight.add_argument("--harness-root", required=True)
     harness_preflight.add_argument("--private-run-dir", required=True)
-    harness_preflight.add_argument("--candidate-id", default="axio-pro")
+    harness_preflight.add_argument("--candidate-id", default="axio-sol")
     harness_preflight.add_argument("--api-format", default="chat/completions")
     harness_preflight.add_argument("--provider-baseline-freeze-manifest", default=None)
     harness_preflight.add_argument("--harness-pin-manifest", required=True)
@@ -1292,7 +1292,7 @@ def build_parser() -> argparse.ArgumentParser:
     harness_generate.add_argument("--dataset", required=True)
     harness_generate.add_argument("--harness-root", required=True)
     harness_generate.add_argument("--private-run-dir", required=True)
-    harness_generate.add_argument("--candidate-id", default="axio-pro")
+    harness_generate.add_argument("--candidate-id", default="axio-sol")
     harness_generate.add_argument("--api-format", default="chat/completions")
     harness_generate.add_argument("--provider-baseline-freeze-manifest", default=None)
     harness_generate.add_argument("--harness-pin-manifest", required=True)
@@ -1322,7 +1322,7 @@ def build_parser() -> argparse.ArgumentParser:
     harness_evaluate.add_argument("--dataset", required=True)
     harness_evaluate.add_argument("--harness-root", required=True)
     harness_evaluate.add_argument("--private-run-dir", required=True)
-    harness_evaluate.add_argument("--candidate-id", default="axio-pro")
+    harness_evaluate.add_argument("--candidate-id", default="axio-sol")
     harness_evaluate.add_argument("--api-format", default="chat/completions")
     harness_evaluate.add_argument("--provider-baseline-freeze-manifest", default=None)
     harness_evaluate.add_argument("--harness-pin-manifest", required=True)

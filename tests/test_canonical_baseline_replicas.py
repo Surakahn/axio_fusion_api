@@ -298,7 +298,7 @@ def test_provider_baseline_rotation_and_same_group_failover_are_bounded():
         _profile("provider-b", "same-model", "same-model", api_format="responses", latency=80),
     ]
     candidate_id = _provider_candidate_id(profiles[0])
-    request = FusionRequest(model="axio-fast", prompt="fixture", max_output_tokens=16, temperature=0.0)
+    request = FusionRequest(model="axio-luna", prompt="fixture", max_output_tokens=16, temperature=0.0)
 
     rotating_client = _ReplicaClient()
     first = _complete_provider_baseline_with_replica_failover(

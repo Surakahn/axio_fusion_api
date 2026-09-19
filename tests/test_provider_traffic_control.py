@@ -87,7 +87,7 @@ def _profile(
 
 
 def _request() -> FusionRequest:
-    return FusionRequest(model="axio-fast", prompt="return a concise answer")
+    return FusionRequest(model="axio-luna", prompt="return a concise answer")
 
 
 def _rate_limited_error(

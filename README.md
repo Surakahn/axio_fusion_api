@@ -1,6 +1,6 @@
 # Axio Fusion API
 
-> **模型融合即服务** — 将任意渠道的异构大模型自动编排为稳定、高性能的三档融合模型家族
+> **模型融合即服务** — 将任意渠道的异构大模型自动编排为三个独立、稳定、高性能的融合模型
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://python.org)
 [![GitHub](https://img.shields.io/badge/GitHub-Surakahn/axio__fusion__api-green.svg)](https://github.com/Surakahn/axio_fusion_api)
@@ -9,13 +9,13 @@
 
 今天，大语言模型（LLM）的竞争格局瞬息万变：每周都有新模型发布，供应商不断调整定价与能力，企业级应用面临"模型锁定"和"渠道脆弱性"两大挑战。
 
-**Axio Fusion API** 给出了根本性的解决方案：**不依赖任何单一模型，而是动态融合多个异构模型的能力**。无论底层接入的是 NVIDIA NIM、OpenAI Responses、Anthropic Messages 还是 Google Gemini——Axio 始终对外暴露稳定的三档融合模型：
+**Axio Fusion API** 给出了根本性的解决方案：**不依赖任何单一模型，而是动态融合多个异构模型的能力**。无论底层接入的是 NVIDIA NIM、OpenAI Responses、Anthropic Messages 还是 Google Gemini——Axio 始终对外暴露三个独立模型：
 
 | 模型 | 定位 | 融合策略 |
 |------|------|----------|
-| **axio-fast** | 高性价比快速响应 | 直接级联 + 智能降级 |
+| **axio-luna** | 高性价比快速响应 | 直接级联 + 智能降级 |
 | **axio-terra** | 平衡智能与成本 | 选择性融合 + 独立验证 |
-| **axio-pro** | 最高智能深度推理 | 专家面板 + 裁判 + 定向纠错 + 综合作答 |
+| **axio-sol** | 最高智能深度推理 | 专家面板 + 裁判 + 定向纠错 + 综合作答 |
 
 ### 核心创新
 
@@ -35,10 +35,11 @@
 ## 当前状态（2026-08-27）
 
 ### 已完成
-- ✅ axio-fast / axio-terra / axio-pro 三档融合模型全部正常响应
+- ✅ axio-luna / axio-terra / axio-sol 三个独立融合模型全部正常响应
 - ✅ Chat/Completions、Responses、Anthropic、Gemini 四种对外 API 格式
 - ✅ 多供应商接入（NVIDIA Chat + CPA Plus Responses/Anthropic）
 - ✅ 推理强度五档参数（low/medium/high/xhigh/max）透传
+- ✅ 以 provider 尝试调用次数衡量相对成本，不使用不可比的绝对美元价格
 - ✅ 图像生成/编辑独立模块（gpt-image-2）
 - ✅ 1000+ 自动化测试
 - ✅ 生产工程回归、四协议兼容、图片 lane 隔离和 Harness 控制面已具备可审计证据
@@ -59,7 +60,7 @@
 正式目标是 9 类 21 套 benchmark。历史 14 套结果属于旧 cohort，不能作为当前
 provider baseline freeze、同 case 对比或 superiority 证据；在完整 screening、
 transport admission、complete-pool ranking、baseline freeze、同 cohort Harness
-binding 和最终统计审计完成前，不声明三档 Fusion 优于对应单模型。
+binding 和最终统计审计完成前，不声明三个 Fusion 模型优于对应单模型。
 
 ### 待推进
 - r18 live screening（仍需 operator 明确授权）以及后续 transport admission、完整池排名和 baseline freeze
@@ -81,7 +82,7 @@ PYTHONPATH=src python3 scripts/run_server.py
 curl http://127.0.0.1:18900/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "axio-pro",
+    "model": "axio-sol",
     "messages": [{"role": "user", "content": "解释量子纠缠"}],
     "reasoning_effort": "max",
     "stream": true
@@ -97,7 +98,7 @@ curl http://127.0.0.1:18900/v1/chat/completions \
    │  Compat │  协议归一化 + 推理强度提取
    └────┬────┘
    ┌────▼────────┐
-   │  Router     │  任务分析 + 三档策略选择 + 专家角色分配
+   │  Router     │  三个模型的独立策略 + 任务分析 + 专家角色分配
    └────┬────────┘
    ┌────▼───────────┐
    │  Orchestrator  │  并行专家面板 + 裁判 + 定向纠错 + 综合作答

@@ -59,7 +59,7 @@ def test_hermes_moa_2_process_policy_separates_stage_depth_and_output_budget() -
         finalization_mode="provider_judge_synthesis",
     )
     pro = build_process_plan(
-        public_model="axio-pro",
+        public_model="axio-sol",
         request_max_output_tokens=4_096,
         tools_declared=False,
         budget=budget,
@@ -136,7 +136,7 @@ def test_hermes_process_plan_only_enables_admitted_provider_route() -> None:
     roles = _roles("primary_solver", "independent_solver", "critic", "judge", "synthesizer")
 
     provider_plan = build_process_plan(
-        public_model="axio-pro",
+        public_model="axio-sol",
         request_max_output_tokens=4_096,
         tools_declared=False,
         budget=budget,
@@ -144,7 +144,7 @@ def test_hermes_process_plan_only_enables_admitted_provider_route() -> None:
         finalization_mode="provider_judge_synthesis",
     )
     direct_plan = build_process_plan(
-        public_model="axio-fast",
+        public_model="axio-luna",
         request_max_output_tokens=4_096,
         tools_declared=True,
         budget=budget,
@@ -180,7 +180,7 @@ def test_hermes_process_plan_only_enables_admitted_provider_route() -> None:
     assert safe_plan(provider_plan)["raw_provider_outputs_persisted"] is False
 
     tool_plan = build_process_plan(
-        public_model="axio-pro",
+        public_model="axio-sol",
         request_max_output_tokens=4_096,
         tools_declared=True,
         budget=budget,
@@ -193,7 +193,7 @@ def test_hermes_process_plan_only_enables_admitted_provider_route() -> None:
 
 def test_hermes_process_plan_requires_judge_before_aggregator() -> None:
     plan = build_process_plan(
-        public_model="axio-pro",
+        public_model="axio-sol",
         request_max_output_tokens=4_096,
         tools_declared=False,
         budget={"max_total_model_calls": 8, "max_latency_ms": 10_000},
@@ -257,7 +257,7 @@ def test_hermes_reference_projection_preserves_inert_tool_evidence_from_four_sur
     result_marker = "OBSERVED_TOOL_RESULT_FOR_REFERENCE"
     payloads = {
         "chat/completions": {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [
                 {"role": "user", "content": "inspect status"},
                 {
@@ -282,7 +282,7 @@ def test_hermes_reference_projection_preserves_inert_tool_evidence_from_four_sur
             ],
         },
         "responses": {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "input": [
                 {"role": "user", "content": "inspect status"},
                 {
@@ -300,7 +300,7 @@ def test_hermes_reference_projection_preserves_inert_tool_evidence_from_four_sur
             ],
         },
         "anthropic": {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [
                 {"role": "user", "content": "inspect status"},
                 {
@@ -328,7 +328,7 @@ def test_hermes_reference_projection_preserves_inert_tool_evidence_from_four_sur
             ],
         },
         "gemini": {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "contents": [
                 {"role": "user", "parts": [{"text": "inspect status"}]},
                 {
@@ -437,7 +437,7 @@ def test_hermes_runtime_uses_tool_free_reference_requests_and_one_aggregator(
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "system": "PRIVATE PUBLIC SYSTEM SHOULD NOT REACH REFERENCE",
             "messages": [
                 {"role": "user", "content": "analyze two scientific hypotheses"},
@@ -651,7 +651,7 @@ def test_hermes_runtime_reruns_reference_wave_when_tool_state_advances() -> None
     ]
     initial_request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [
                 {"role": "user", "content": "analyze two scientific hypotheses"}
             ],
@@ -661,7 +661,7 @@ def test_hermes_runtime_reruns_reference_wave_when_tool_state_advances() -> None
     tool_result_marker = "NEW_OBSERVED_TOOL_STATE"
     advanced_request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [
                 {"role": "user", "content": "analyze two scientific hypotheses"},
                 {
@@ -794,7 +794,7 @@ def test_hermes_parallel_reference_results_preserve_route_slot_order() -> None:
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [
                 {"role": "user", "content": "analyze two scientific hypotheses"}
             ],
@@ -910,7 +910,7 @@ def test_hermes_reference_keeps_role_across_same_model_replica_failover() -> Non
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [
                 {"role": "user", "content": "analyze two scientific hypotheses"}
             ],
@@ -973,7 +973,7 @@ def test_hermes_reference_failure_is_nonfatal_and_receipt_is_partial() -> None:
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [{"role": "user", "content": "analyze a scientific claim"}],
         }
     )
@@ -1076,7 +1076,7 @@ def test_hermes_high_agreement_still_requires_acting_aggregator() -> None:
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [
                 {
                     "role": "user",
@@ -1165,7 +1165,7 @@ def test_hermes_empty_aggregator_output_is_explicitly_degraded() -> None:
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [
                 {
                     "role": "user",
@@ -1217,7 +1217,7 @@ def test_hermes_process_contract_admits_tools_only_to_proven_acting_aggregator()
         }
     )
     plan = build_process_plan(
-        public_model="axio-pro",
+        public_model="axio-sol",
         request_max_output_tokens=4_096,
         tools_declared=True,
         budget={"max_total_model_calls": 8, "max_latency_ms": 10_000},
@@ -1244,7 +1244,7 @@ def test_hermes_execution_receipt_distinguishes_feedback_wave() -> None:
             self.task_execution = {"hermes_process_stage": stage}
 
     plan = build_process_plan(
-        public_model="axio-pro",
+        public_model="axio-sol",
         request_max_output_tokens=1_024,
         tools_declared=False,
         budget={"max_total_model_calls": 8, "max_latency_ms": 10_000},
@@ -1284,7 +1284,7 @@ def test_hermes_execution_receipt_required_feedback_without_candidate_is_incompl
         task_execution = {"hermes_process_stage": "reference"}
 
     plan = build_process_plan(
-        public_model="axio-pro",
+        public_model="axio-sol",
         request_max_output_tokens=1_024,
         tools_declared=False,
         budget={"max_total_model_calls": 8, "max_latency_ms": 10_000},
@@ -1323,7 +1323,7 @@ def test_hermes_execution_receipt_feedback_candidate_is_conservatively_required(
             self.task_execution = {"hermes_process_stage": stage}
 
     plan = build_process_plan(
-        public_model="axio-pro",
+        public_model="axio-sol",
         request_max_output_tokens=1_024,
         tools_declared=False,
         budget={"max_total_model_calls": 8, "max_latency_ms": 10_000},
@@ -1423,7 +1423,7 @@ def test_hermes_runtime_runs_one_tool_free_feedback_wave_then_rejudges() -> None
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [{"role": "user", "content": "compare two design approaches"}],
             "max_tokens": 1_024,
         }
@@ -1535,7 +1535,7 @@ def _feedback_admission_profiles(*, cost: float | None = None, latency: int | No
 
 def _feedback_admission_request(**overrides):
     payload = {
-        "model": "axio-pro",
+        "model": "axio-sol",
         "messages": [
             {"role": "user", "content": "compare two complex design approaches"}
         ],
@@ -1801,7 +1801,7 @@ def test_hermes_failed_feedback_without_rejudge_is_explicitly_incomplete() -> No
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [
                 {"role": "user", "content": "compare two complex design approaches"}
             ],
@@ -1891,7 +1891,7 @@ def test_hermes_required_feedback_without_available_model_is_incomplete_and_lear
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [
                 {"role": "user", "content": "compare two complex design approaches"}
             ],
@@ -2052,7 +2052,7 @@ def test_hermes_acting_aggregator_can_return_native_tool_call() -> None:
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [{"role": "user", "content": "check ticket status"}],
             "tools": [
                 {
@@ -2164,7 +2164,7 @@ def test_hermes_acting_tool_turn_keeps_unexecuted_required_feedback_incomplete()
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [{"role": "user", "content": "check ticket status"}],
             "tools": [
                 {

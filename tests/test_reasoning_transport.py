@@ -47,7 +47,7 @@ def _profile(
 def test_public_payloads_normalize_matching_reasoning_effort_aliases():
     chat = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "messages": [{"role": "user", "content": "hello"}],
             "reasoning_effort": "HIGH",
             "reasoning": {"effort": "high"},
@@ -65,7 +65,7 @@ def test_public_payloads_normalize_matching_reasoning_effort_aliases():
     )
     fallback = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "messages": [{"role": "user", "content": "hello"}],
             "reasoning": {"effort": "minimal"},
         },
@@ -73,7 +73,7 @@ def test_public_payloads_normalize_matching_reasoning_effort_aliases():
     )
     invalid = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "messages": [{"role": "user", "content": "hello"}],
             "reasoning_effort": "provider-private-ultra",
         },
@@ -90,7 +90,7 @@ def test_public_payloads_reject_conflicting_openai_reasoning_efforts():
     with pytest.raises(CompatibilityError, match="conflicts"):
         canonicalize_payload(
             {
-                "model": "axio-fast",
+                "model": "axio-luna",
                 "messages": [{"role": "user", "content": "hello"}],
                 "reasoning_effort": "high",
                 "reasoning": {"effort": "low"},
@@ -110,7 +110,7 @@ def test_public_payloads_normalize_anthropic_and_gemini_reasoning_budgets():
     )
     gemini = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "contents": [{"role": "user", "parts": [{"text": "hello"}]}],
             "generationConfig": {
                 "thinkingConfig": {"thinkingBudget": 4096},
@@ -131,8 +131,8 @@ def test_reasoning_budget_contract_requires_a_positive_integer():
 
 
 def test_reasoning_effort_partitions_request_fingerprint_and_safe_summary():
-    base = FusionRequest(model="axio-fast", prompt="same task", reasoning_effort="low")
-    stronger = FusionRequest(model="axio-fast", prompt="same task", reasoning_effort="high")
+    base = FusionRequest(model="axio-luna", prompt="same task", reasoning_effort="low")
+    stronger = FusionRequest(model="axio-luna", prompt="same task", reasoning_effort="high")
 
     assert base.request_fingerprint != stronger.request_fingerprint
     assert base.prompt_free_dict()["reasoning_effort"] == "low"
@@ -140,8 +140,8 @@ def test_reasoning_effort_partitions_request_fingerprint_and_safe_summary():
 
 
 def test_reasoning_budget_partitions_request_fingerprint_and_safe_summary():
-    base = FusionRequest(model="axio-fast", prompt="same task", reasoning_budget_tokens=512)
-    stronger = FusionRequest(model="axio-fast", prompt="same task", reasoning_budget_tokens=2048)
+    base = FusionRequest(model="axio-luna", prompt="same task", reasoning_budget_tokens=512)
+    stronger = FusionRequest(model="axio-luna", prompt="same task", reasoning_budget_tokens=2048)
 
     assert base.request_fingerprint != stronger.request_fingerprint
     assert base.prompt_free_dict()["reasoning_budget_tokens"] == 512
@@ -177,7 +177,7 @@ def test_verified_chat_and_responses_profiles_use_only_their_own_wire_shape(monk
 
     monkeypatch.setattr(provider_module, "_post_json", fake_post)
     client = HTTPProviderClient()
-    chat_request = FusionRequest(model="axio-fast", prompt="hello", reasoning_effort="high")
+    chat_request = FusionRequest(model="axio-luna", prompt="hello", reasoning_effort="high")
     responses_request = FusionRequest(
         model="axio-terra",
         prompt="hello",
@@ -226,7 +226,7 @@ def test_verified_nim_responses_profile_uses_top_level_reasoning_effort(monkeypa
         return {"output_text": "responses-ok"}
 
     monkeypatch.setattr(provider_module, "_post_json", fake_post)
-    request = FusionRequest(model="axio-pro", prompt="hello", reasoning_effort="high")
+    request = FusionRequest(model="axio-sol", prompt="hello", reasoning_effort="high")
 
     assert HTTPProviderClient().complete_turn(
         profile,
@@ -269,7 +269,7 @@ def test_candidate_or_protocol_mismatched_profile_omits_reasoning_fields(monkeyp
         return {"output_text": "responses-ok"}
 
     monkeypatch.setattr(provider_module, "_post_json", fake_post)
-    request = FusionRequest(model="axio-fast", prompt="hello", reasoning_effort="high")
+    request = FusionRequest(model="axio-luna", prompt="hello", reasoning_effort="high")
     client = HTTPProviderClient()
     client.complete_turn(candidate, request, prompt=request.prompt, system=request.system)
     client.complete_turn(mismatched, request, prompt=request.prompt, system=request.system)
@@ -463,8 +463,8 @@ def test_hermes_role_budget_is_capped_by_the_public_reasoning_effort():
             },
         },
     }
-    capped = FusionRequest(model="axio-pro", prompt="task", reasoning_effort="low")
-    defaulted = FusionRequest(model="axio-pro", prompt="task")
+    capped = FusionRequest(model="axio-sol", prompt="task", reasoning_effort="low")
+    defaulted = FusionRequest(model="axio-sol", prompt="task")
     direct_route = {
         "strategy": "fast_direct_cascade",
         "hermes_moa": route_plan["hermes_moa"],
@@ -487,7 +487,7 @@ def test_hermes_role_budget_is_capped_by_the_public_reasoning_effort():
     ).reasoning_effort == "low"
 
     budgeted = FusionRequest(
-        model="axio-pro",
+        model="axio-sol",
         prompt="task",
         reasoning_budget_tokens=2048,
     )
@@ -991,7 +991,7 @@ def test_responses_strict_wire_does_not_retry_as_text_input_after_parameterized_
         raise ProviderExecutionError("field rejected", error_code="http_error", http_status=400)
 
     monkeypatch.setattr(provider_module, "_post_json", fake_post)
-    request = FusionRequest(model="axio-fast", prompt="hello", reasoning_effort="high")
+    request = FusionRequest(model="axio-luna", prompt="hello", reasoning_effort="high")
     with pytest.raises(ProviderExecutionError):
         HTTPProviderClient().complete_turn(
             profile,

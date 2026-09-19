@@ -3109,9 +3109,9 @@ def validate_provider_baseline_freeze_for_official_campaign(
         if isinstance(row, Mapping)
     }
     expected_tiers = {
-        "axio-pro": 1,
+        "axio-sol": 1,
         "axio-terra": 2,
-        "axio-fast": 3,
+        "axio-luna": 3,
     }
     external = (
         manifest.get("external_ranking_receipt")
@@ -5834,7 +5834,7 @@ def _official_provider_request(
         rows.insert(0, {"role": "system", "content": system})
     return canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "messages": rows,
             "task_type": task_type,
             "temperature": 0,

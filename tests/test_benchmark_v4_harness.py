@@ -33,7 +33,7 @@ def test_call_axio_returns_none_on_error_response(harness, monkeypatch) -> None:
             return b'{"error": {"message": "boom"}}'
 
     monkeypatch.setattr(harness.urllib.request, "urlopen", lambda *a, **k: FakeResponse())
-    assert harness.call_axio("axio-pro", "question") is None
+    assert harness.call_axio("axio-sol", "question") is None
 
 
 def test_call_cpa_returns_none_on_error_response(harness, monkeypatch) -> None:
@@ -46,10 +46,10 @@ def test_call_cpa_returns_none_on_error_response(harness, monkeypatch) -> None:
 
 
 def test_should_rerun_supports_suite_and_model_scopes(harness) -> None:
-    assert harness.should_rerun("halueval", "axio-fast", ["halueval"]) is True
-    assert harness.should_rerun("halueval", "axio-fast", ["halueval:axio-fast"]) is True
-    assert harness.should_rerun("halueval", "axio-pro", ["halueval:axio-fast"]) is False
-    assert harness.should_rerun("halueval", "axio-fast", []) is False
+    assert harness.should_rerun("halueval", "axio-luna", ["halueval"]) is True
+    assert harness.should_rerun("halueval", "axio-luna", ["halueval:axio-luna"]) is True
+    assert harness.should_rerun("halueval", "axio-sol", ["halueval:axio-luna"]) is False
+    assert harness.should_rerun("halueval", "axio-luna", []) is False
 
 
 def test_score_mcq_maps_digit_gold_to_letter(harness) -> None:

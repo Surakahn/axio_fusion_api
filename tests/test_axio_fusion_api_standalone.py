@@ -308,7 +308,7 @@ def test_standalone_route_plan_is_prompt_free_and_panel_based_for_pro():
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "task_type": "science_research",
             "messages": [{"role": "user", "content": f"分析复杂研究问题 {secret_prompt}"}],
         }
@@ -318,7 +318,7 @@ def test_standalone_route_plan_is_prompt_free_and_panel_based_for_pro():
     route_plan = response.route_plan
     serialized = json.dumps(route_plan, ensure_ascii=False)
 
-    assert route_plan["public_model"] == "axio-pro"
+    assert route_plan["public_model"] == "axio-sol"
     assert route_plan["strategy"] == "pro_panel_judge_escalation"
     assert route_plan["judge_contract"]["required"] is True
     assert route_plan["targeted_escalation"]["enabled"] is True
@@ -337,7 +337,7 @@ def test_standalone_route_plan_prefers_provider_diversity_when_available():
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [{"role": "user", "content": "Design and review an operational workflow."}],
         }
     )
@@ -360,7 +360,7 @@ def test_standalone_route_plan_assigns_complementary_role_specialists():
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "task_type": "code_security_review",
             "quality_target": 0.93,
             "messages": [{"role": "user", "content": "review python authorization logic and injection failure paths"}],
@@ -518,7 +518,7 @@ def test_standalone_route_plan_has_quality_diversity_archive_and_provider_routin
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "quality_target": 0.92,
             "messages": [{"role": "user", "content": "Review code, logic, and math-heavy security scoring with independent verification."}],
         }
@@ -550,7 +550,7 @@ def test_standalone_route_plan_has_quality_diversity_archive_and_provider_routin
 def test_standalone_route_plan_penalizes_correlated_panels_and_rewards_complementarity():
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "quality_target": 0.9,
             "messages": [
                 {
@@ -658,7 +658,7 @@ def test_standalone_route_plan_enforces_privacy_and_tool_isolation():
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "metadata": {"privacy_level": "confidential"},
             "messages": [{"role": "user", "content": "review internal confidential workflow"}],
             "tools": [
@@ -1001,7 +1001,7 @@ def test_standalone_latency_multiplier_guard_blocks_known_over_3x_fusion():
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [
                 {
                     "role": "user",
@@ -1048,7 +1048,7 @@ def test_standalone_route_declines_known_initial_fusion_cost_above_request_budge
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_cost_usd": 0.006,
             "max_latency_ms": 5_000,
             "messages": [
@@ -1103,7 +1103,7 @@ def test_standalone_route_declines_known_initial_fusion_latency_above_request_de
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_cost_usd": 0.02,
             "max_latency_ms": 1_500,
             "messages": [
@@ -1154,7 +1154,7 @@ def test_standalone_unknown_initial_fusion_cost_and_latency_do_not_false_block_r
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_cost_usd": 0.000001,
             "max_latency_ms": 1,
             "messages": [
@@ -1200,7 +1200,7 @@ def test_standalone_latency_multiplier_guard_parallelizes_bounded_initial_expert
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_models": 4,
             "messages": [
                 {
@@ -1270,7 +1270,7 @@ def test_standalone_latency_guard_uses_assigned_runtime_roles_not_panel_order():
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_models": 3,
             "messages": [
                 {
@@ -1549,7 +1549,7 @@ def test_standalone_fusion_utility_uses_only_assigned_initial_roles_for_cost_and
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_models": 3,
             "max_total_model_calls": 5,
             "quality_target": 0.90,
@@ -1647,7 +1647,7 @@ def test_standalone_selected_unassigned_spare_does_not_change_initial_fusion_est
     }
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_models": 5,
             "messages": [
                 {
@@ -1802,7 +1802,7 @@ def test_standalone_fast_high_quality_uses_light_verify_under_latency_guard():
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "quality_target": 0.86,
             "messages": [
                 {
@@ -1895,7 +1895,7 @@ def test_standalone_fast_light_verify_reserves_judge_and_synthesis_calls():
     client = FastVerifyClient()
     request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "quality_target": 0.86,
             "messages": [{"role": "user", "content": "Quickly check this production workflow decision."}],
         }
@@ -1933,7 +1933,7 @@ def test_standalone_fast_light_verify_declines_below_complete_call_floor():
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "quality_target": 0.86,
             "max_total_model_calls": 3,
             "messages": [{"role": "user", "content": "Quickly check this production workflow decision."}],
@@ -1981,7 +1981,7 @@ def test_standalone_route_declines_incomplete_fusion_before_runtime_call_budget_
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_total_model_calls": 2,
             "messages": [{"role": "user", "content": "Review this workflow."}],
         }
@@ -2027,7 +2027,7 @@ def test_standalone_high_quality_pro_requires_five_calls_for_complete_three_cand
         for provider in ("alpha", "beta", "gamma", "delta")
     ]
     base_payload = {
-        "model": "axio-pro",
+        "model": "axio-sol",
         "quality_target": 0.95,
         "messages": [
             {
@@ -2088,7 +2088,7 @@ def test_standalone_route_trims_optional_expert_roles_before_complete_fusion_adm
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "quality_target": 0.95,
             "max_total_model_calls": 5,
             "messages": [
@@ -2150,7 +2150,7 @@ def test_standalone_public_budget_summaries_and_safe_trace_preserve_complete_fus
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "quality_target": 0.95,
             "max_total_model_calls": 5,
             "messages": [
@@ -2228,7 +2228,7 @@ def test_standalone_resource_admission_receipt_is_safe_across_public_surfaces_an
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_cost_usd": 0.006,
             "max_latency_ms": 2_000,
             "messages": [
@@ -2332,7 +2332,7 @@ def test_standalone_mandatory_fusion_stage_reservations_keep_judge_and_synthesis
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             # Two independent survivors are enough for this reservation
             # fixture. A 0.95 target deliberately requires three and would
             # correctly force the runtime into degraded mode after the critic
@@ -2433,7 +2433,7 @@ def test_standalone_zero_candidate_panel_releases_mandatory_slots_for_bounded_de
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "quality_target": 0.95,
             "max_total_model_calls": 5,
             "messages": [
@@ -2590,7 +2590,7 @@ def test_standalone_zero_candidate_fusion_recovers_panel_before_control_stages()
     }
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_latency_ms": 90_000,
             "messages": [{"role": "user", "content": "recover a fusion panel"}],
         }
@@ -2671,7 +2671,7 @@ def test_standalone_all_provider_failures_close_mandatory_stage_reservations_in_
         path="/v1/responses",
         body=json.dumps(
             {
-                "model": "axio-pro",
+                "model": "axio-sol",
                 "live": True,
                 "quality_target": 0.95,
                 "max_total_model_calls": 5,
@@ -2744,7 +2744,7 @@ def test_standalone_native_tool_turn_releases_mandatory_stage_reservations_witho
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "quality_target": 0.95,
             "max_total_model_calls": 5,
             "messages": [{"role": "user", "content": f"{secret_prompt} Plan a tool-assisted workflow."}],
@@ -2849,7 +2849,7 @@ def test_standalone_native_tool_plan_arbitration_prefers_primary_without_extra_r
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "quality_target": 0.95,
             "max_total_model_calls": 7,
             "messages": [{"role": "user", "content": private_prompt}],
@@ -2917,7 +2917,7 @@ def test_standalone_native_tool_plan_arbitration_prefers_independent_provider_co
     private_argument = "PRIVATE_CONSENSUS_ARGUMENT_MUST_NOT_LEAK"
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [{"role": "user", "content": "private tool consensus task"}],
             "tools": [{"type": "function", "function": {"name": declared_tool_name}}],
         }
@@ -3390,7 +3390,7 @@ def test_standalone_targeted_escalation_can_use_privacy_filtered_pool_beyond_pan
     fake = PoolEscalationClient()
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "quality_target": 0.95,
             "max_models": 3,
             "max_total_model_calls": 8,
@@ -3540,7 +3540,7 @@ def test_standalone_factuality_vertical_gaps_trigger_focused_escalation_without_
     fake = FactVerticalClient()
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "quality_target": 0.94,
             "max_models": 3,
             "max_total_model_calls": 9,
@@ -3620,7 +3620,7 @@ def test_standalone_route_plan_has_domain_task_dag_and_checkpoints():
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "task_type": "code_security_review",
             "messages": [{"role": "user", "content": "review python production authorization and injection risks"}],
         }
@@ -3693,7 +3693,7 @@ def test_standalone_live_execution_prompts_receive_role_scoped_task_dag_without_
     fake = CapturingDagClient()
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "task_type": "code_security_review",
             "quality_target": 0.95,
             "messages": [
@@ -3842,7 +3842,7 @@ def test_standalone_live_executes_domain_specialist_and_records_task_receipts():
     fake = DomainSpecialistClient()
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "task_type": "code_security_review",
             "quality_target": 0.95,
             "max_depth": 0,
@@ -3887,8 +3887,8 @@ def test_standalone_four_api_shapes_render_public_axio_models_only():
     cases = [
         (
             "chat/completions",
-            {"model": "axio-fast", "messages": [{"role": "user", "content": "hello"}]},
-            ("model", "axio-fast"),
+            {"model": "axio-luna", "messages": [{"role": "user", "content": "hello"}]},
+            ("model", "axio-luna"),
         ),
         (
             "responses",
@@ -3897,13 +3897,13 @@ def test_standalone_four_api_shapes_render_public_axio_models_only():
         ),
         (
             "anthropic",
-            {"model": "axio-pro", "system": "brief", "messages": [{"role": "user", "content": "hello"}]},
-            ("model", "axio-pro"),
+            {"model": "axio-sol", "system": "brief", "messages": [{"role": "user", "content": "hello"}]},
+            ("model", "axio-sol"),
         ),
         (
             "gemini",
-            {"model": "axio-fast", "contents": [{"role": "user", "parts": [{"text": "hello"}]}]},
-            ("modelVersion", "axio-fast"),
+            {"model": "axio-luna", "contents": [{"role": "user", "parts": [{"text": "hello"}]}]},
+            ("modelVersion", "axio-luna"),
         ),
     ]
 
@@ -3975,7 +3975,7 @@ def test_standalone_live_panel_judges_and_synthesizes_with_fake_client():
     fake = FakeClient()
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "task_type": "science_research",
             "messages": [{"role": "user", "content": "compare two scientific hypotheses"}],
         }
@@ -3987,7 +3987,7 @@ def test_standalone_live_panel_judges_and_synthesizes_with_fake_client():
 
     assert response.text == "final synthesized answer"
     assert response.provider_calls_recorded is True
-    assert rendered["model"] == "axio-pro"
+    assert rendered["model"] == "axio-sol"
     assert rendered["metadata"]["provider_calls_recorded"] is True
     assert rendered["metadata"]["internal_details_redacted"] is True
     assert rendered["metadata"]["fusion_trace_summary"]["provider_call_count"] == 4
@@ -4067,7 +4067,7 @@ def test_standalone_live_panel_skips_optional_repair_after_reference_quorum():
     fake = RepairClient()
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [{"role": "user", "content": "Review a complex operational workflow."}],
         }
     )
@@ -4160,7 +4160,7 @@ def test_standalone_fast_runtime_uses_provider_routing_fallback_pool_on_failure(
     fake = FastFallbackClient()
     request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "messages": [{"role": "user", "content": "Summarize this short operational note."}],
         }
     )
@@ -4252,7 +4252,7 @@ def test_standalone_fast_direct_prefers_deadline_feasible_primary_and_reserves_f
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "max_latency_ms": 2_500,
             "max_total_model_calls": 2,
             "messages": [{"role": "user", "content": "Summarize this short operational note."}],
@@ -4316,7 +4316,7 @@ def test_standalone_fast_direct_requires_cascade_headroom_when_selecting_primary
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "max_latency_ms": 2_500,
             "max_total_model_calls": 2,
             "messages": [{"role": "user", "content": "Summarize this short operational note."}],
@@ -4372,7 +4372,7 @@ def test_standalone_fast_timeout_keeps_full_primary_window_when_fallback_cannot_
     client = SlowFallbackHeadroomClient()
     request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "max_latency_ms": 2_500,
             "max_total_model_calls": 2,
             "messages": [{"role": "user", "content": "Summarize this short operational note."}],
@@ -4442,7 +4442,7 @@ def test_standalone_provider_judge_sanitizes_echoed_candidate_text():
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [{"role": "user", "content": "Review this workflow."}],
         }
     )
@@ -4519,7 +4519,7 @@ def test_standalone_candidate_standardization_parses_reasoning_summary_without_s
     fake = StandardizingClient()
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_depth": 0,
             "messages": [{"role": "user", "content": "Compare and synthesize this operational decision."}],
         }
@@ -4564,7 +4564,7 @@ def test_standalone_candidate_standardization_records_raw_text_fallback_safely()
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "messages": [{"role": "user", "content": "Answer directly."}],
         }
     )
@@ -4647,7 +4647,7 @@ def test_standalone_rank_first_synthesis_compresses_lower_ranked_candidates():
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [
                 {
                     "role": "user",
@@ -4747,7 +4747,7 @@ def test_standalone_synthesis_selection_preserves_evidence_backed_minority_insig
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "quality_target": 0.84,
             "messages": [
                 {
@@ -4847,7 +4847,7 @@ def test_standalone_provider_context_window_budget_bounds_prompts_and_candidate_
     fake = ContextBudgetClient()
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_total_model_calls": 6,
             "messages": [{"role": "user", "content": long_user_prompt}],
         }
@@ -4931,7 +4931,7 @@ def test_standalone_early_exit_skips_synthesizer_when_candidates_agree():
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [{"role": "user", "content": "Review a complex operational workflow and risk-control plan."}],
             "tools": [{"type": "fusion", "name": "openrouter:fusion"}],
         }
@@ -4992,7 +4992,7 @@ def test_standalone_local_judge_detects_conflict_when_provider_judge_budget_skip
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_total_model_calls": 2,
             "messages": [{"role": "user", "content": "Review deployment rollback decision logic."}],
         }
@@ -5049,7 +5049,7 @@ def test_standalone_local_judge_calibrates_overconfident_unsupported_factual_can
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_total_model_calls": 2,
             "messages": [
                 {
@@ -5112,7 +5112,7 @@ def test_standalone_early_exit_uses_calibrated_confidence_before_skipping_synthe
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_total_model_calls": 2,
             "messages": [{"role": "user", "content": "Choose option A or B for the operational rollout plan."}],
         }
@@ -5178,7 +5178,7 @@ def test_standalone_answer_claim_consensus_requires_independent_provider_when_av
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_total_model_calls": 3,
             "messages": [{"role": "user", "content": "Choose option A or B for this workflow decision."}],
         }
@@ -5300,7 +5300,7 @@ def test_standalone_targeted_escalation_prefers_cross_provider_answer_claim_veri
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_models": 3,
             # The route has an admitted cross-model Synthesizer recovery
             # profile. Reserve one additional slot so the feedback wave can
@@ -5370,7 +5370,7 @@ def test_standalone_local_judge_clusters_equivalent_answer_claims_when_provider_
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_total_model_calls": 2,
             "messages": [{"role": "user", "content": "Solve the constrained arithmetic check and give the final number."}],
         }
@@ -5449,7 +5449,7 @@ def test_standalone_local_judge_clusters_numeric_fraction_decimal_and_percent_cl
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_total_model_calls": 3,
             "messages": [{"role": "user", "content": "Solve the probability ratio and return the final value."}],
         }
@@ -5517,7 +5517,7 @@ def test_standalone_runtime_budget_lock_caps_judge_and_synthesis_calls():
     fake = BudgetedClient()
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_total_model_calls": 2,
             "messages": [{"role": "user", "content": "Review this workflow."}],
         }
@@ -5594,7 +5594,7 @@ def test_standalone_runtime_cost_budget_lock_caps_optional_late_stages_after_rou
     fake = CostBudgetedClient()
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_cost_usd": 0.02,
             "messages": [
                 {
@@ -5674,7 +5674,7 @@ def test_standalone_runtime_deadline_budget_skips_optional_late_stages(monkeypat
     fake = DeadlineClient()
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "max_latency_ms": 2,
             "max_total_model_calls": 8,
             "messages": [{"role": "user", "content": "Review this workflow."}],
@@ -5727,7 +5727,7 @@ def test_standalone_server_dispatches_gemini_and_models(monkeypatch):
     )
     gemini_status, _, gemini_body = handle_request(
         method="POST",
-        path="/v1beta/models/axio-fast:generateContent",
+        path="/v1beta/models/axio-luna:generateContent",
         body=json.dumps({"contents": [{"role": "user", "parts": [{"text": "hello"}]}]}),
         engine=engine,
     )
@@ -5738,7 +5738,7 @@ def test_standalone_server_dispatches_gemini_and_models(monkeypatch):
     serialized_gemini = json.dumps(gemini, ensure_ascii=False)
 
     assert models_status == 200
-    assert {item["id"] for item in models["data"]} == {"axio-fast", "axio-terra", "axio-pro"}
+    assert {item["id"] for item in models["data"]} == {"axio-luna", "axio-terra", "axio-sol"}
     assert models["registry_summary"]["schema"] == "axio_fusion_api.public_models_registry_summary.v1"
     assert models["registry_summary"]["all_listed_models_usable"] is True
     assert models["registry_summary"]["all_listed_models_live_usable"] is False
@@ -5753,7 +5753,7 @@ def test_standalone_server_dispatches_gemini_and_models(monkeypatch):
     assert "UNIT_MODELS_BASE_URL" not in serialized_models
     assert "UNIT_MODELS_API_KEY" not in serialized_models
     assert gemini_status == 200
-    assert gemini["modelVersion"] == "axio-fast"
+    assert gemini["modelVersion"] == "axio-luna"
     assert gemini["metadata"]["raw_prompt_persisted"] is False
     assert gemini["metadata"]["internal_details_redacted"] is True
     assert "route_plan" not in gemini["metadata"]
@@ -5788,7 +5788,7 @@ def test_standalone_api_surface_protocol_self_test_is_hash_only_and_route_consis
 
     assert direct["schema"] == "axio_fusion_api.api_surface_protocol_self_test.v1"
     assert direct["mode"] == "dry_gateway_protocol_self_test"
-    assert direct["public_models"] == ["axio-fast", "axio-terra", "axio-pro"]
+    assert direct["public_models"] == ["axio-luna", "axio-terra", "axio-sol"]
     assert direct["api_surfaces"] == ["chat/completions", "responses", "anthropic", "gemini"]
     assert direct["expected_request_count"] == 12
     assert direct["completed_request_count"] == 12
@@ -5973,7 +5973,7 @@ def test_standalone_api_surface_stream_live_smoke_validates_all_public_stream_pr
     assert all(row["raw_response_text_persisted"] is False for row in payload["rows"])
     assert all(row["raw_provider_outputs_persisted"] is False for row in payload["rows"])
     assert all(row["all_required_stream_surfaces_live"] is True for row in payload["per_model"])
-    by_format = {row["api_format"]: row for row in payload["rows"] if row["public_model"] == "axio-fast"}
+    by_format = {row["api_format"]: row for row in payload["rows"] if row["public_model"] == "axio-luna"}
     assert by_format["chat/completions"]["stream_done_sentinel_observed"] is True
     assert by_format["responses"]["stream_done_sentinel_observed"] is False
     assert by_format["anthropic"]["stream_done_sentinel_observed"] is False
@@ -6067,7 +6067,7 @@ def test_standalone_fast_path_live_diagnostic_is_single_request_and_hash_only(mo
     assert payload["schema"] == "axio_fusion_api.fast_path_live_diagnostic.v1"
     assert payload["mode"] == "live_fast_path_diagnostic"
     assert payload["status"] == "passed"
-    assert payload["public_model"] == "axio-fast"
+    assert payload["public_model"] == "axio-luna"
     assert payload["api_format"] == "chat/completions"
     assert payload["attempted_request_count"] == 1
     assert payload["provider_call_observed_request_count"] == 1
@@ -6134,7 +6134,7 @@ def test_standalone_api_surface_live_smoke_projects_redacted_provider_failure_di
 
     payload = build_api_surface_live_smoke(
         registry_path=str(registry_path),
-        models=["axio-fast"],
+        models=["axio-luna"],
         prompt="PRIVATE_LIVE_SMOKE_PROMPT_MUST_NOT_PERSIST",
         live=True,
         client=FailingLiveSmokeClient(),
@@ -6224,7 +6224,7 @@ def test_standalone_fusion_deliberation_live_smoke_exercises_complete_panel_with
 
     payload = build_fusion_deliberation_live_smoke(
         registry_path=str(registry_path),
-        models=["axio-pro"],
+        models=["axio-sol"],
         prompt=secret_prompt,
         max_latency_ms=30_000,
         max_output_tokens=128,
@@ -6239,7 +6239,7 @@ def test_standalone_fusion_deliberation_live_smoke_exercises_complete_panel_with
     assert payload["schema"] == "axio_fusion_api.fusion_deliberation_live_smoke.v1"
     assert payload["mode"] == "live_fusion_deliberation_smoke"
     assert payload["status"] == "passed"
-    assert payload["public_models"] == ["axio-pro"]
+    assert payload["public_models"] == ["axio-sol"]
     assert payload["expected_request_count"] == 1
     assert payload["attempted_request_count"] == 1
     assert payload["passed_request_count"] == 1
@@ -6297,7 +6297,7 @@ def test_standalone_fusion_deliberation_live_smoke_exercises_complete_panel_with
 def test_standalone_fusion_deliberation_smoke_rejects_hermes_early_exit() -> None:
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [{"role": "user", "content": "synthetic private task"}],
         }
     )
@@ -6329,7 +6329,7 @@ def test_standalone_fusion_deliberation_smoke_rejects_hermes_early_exit() -> Non
     )
 
     row = server_module._fusion_deliberation_live_smoke_row(
-        model="axio-pro",
+        model="axio-sol",
         response=response,
         end_to_end_latency_ms=50.0,
         max_total_model_calls=6,
@@ -6393,7 +6393,7 @@ def test_standalone_fusion_deliberation_smoke_keeps_non_hermes_early_exit() -> N
 def test_standalone_fusion_deliberation_smoke_accepts_local_consensus_finalization() -> None:
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [{"role": "user", "content": "synthetic private task"}],
         }
     )
@@ -6425,7 +6425,7 @@ def test_standalone_fusion_deliberation_smoke_accepts_local_consensus_finalizati
     )
 
     row = server_module._fusion_deliberation_live_smoke_row(
-        model="axio-pro",
+        model="axio-sol",
         response=response,
         end_to_end_latency_ms=50.0,
         max_total_model_calls=6,
@@ -6442,7 +6442,7 @@ def test_standalone_fusion_deliberation_smoke_accepts_local_consensus_finalizati
 def test_standalone_fusion_deliberation_smoke_classifies_synthesizer_http_failure_without_raw_output() -> None:
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [{"role": "user", "content": "synthetic private task"}],
         }
     )
@@ -6490,7 +6490,7 @@ def test_standalone_fusion_deliberation_smoke_classifies_synthesizer_http_failur
     )
 
     row = server_module._fusion_deliberation_live_smoke_row(
-        model="axio-pro",
+        model="axio-sol",
         response=response,
         end_to_end_latency_ms=50.0,
         max_total_model_calls=6,
@@ -6583,7 +6583,7 @@ def test_standalone_fusion_deliberation_smoke_projects_safe_control_stage_diagno
 
 def test_standalone_fusion_deliberation_failure_row_matches_digest_contract() -> None:
     row = server_module._fusion_deliberation_live_smoke_failure_row(
-        model="axio-pro",
+        model="axio-sol",
         error_code="provider_execution_failed",
         end_to_end_latency_ms=1234.5,
     )
@@ -6607,7 +6607,7 @@ def test_standalone_fusion_deliberation_failure_row_matches_digest_contract() ->
 def test_standalone_fusion_deliberation_smoke_rejects_planned_but_unfinished_local_consensus() -> None:
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [{"role": "user", "content": "synthetic private task"}],
         }
     )
@@ -6636,7 +6636,7 @@ def test_standalone_fusion_deliberation_smoke_rejects_planned_but_unfinished_loc
     )
 
     row = server_module._fusion_deliberation_live_smoke_row(
-        model="axio-pro",
+        model="axio-sol",
         response=response,
         end_to_end_latency_ms=50.0,
         max_total_model_calls=6,
@@ -6709,7 +6709,7 @@ def test_standalone_models_keeps_cpa_plus_when_live_credentials_are_ready(monkey
     summary = models["registry_summary"]["live_credential_summary"]
 
     assert status == 200
-    assert {item["id"] for item in models["data"]} == {"axio-fast", "axio-terra", "axio-pro"}
+    assert {item["id"] for item in models["data"]} == {"axio-luna", "axio-terra", "axio-sol"}
     assert models["registry_summary"]["all_listed_models_usable"] is True
     assert models["registry_summary"]["all_listed_models_live_usable"] is True
     assert summary["schema"] == "axio_fusion_api.live_provider_credential_summary.v1"
@@ -6889,7 +6889,7 @@ def test_standalone_server_streaming_shapes_for_four_api_formats():
     cases = [
         (
             "/v1/chat/completions",
-            {"model": "axio-fast", "stream": True, "messages": [{"role": "user", "content": secret_prompt}]},
+            {"model": "axio-luna", "stream": True, "messages": [{"role": "user", "content": secret_prompt}]},
             "chat.completion.chunk",
             True,
         ),
@@ -6901,12 +6901,12 @@ def test_standalone_server_streaming_shapes_for_four_api_formats():
         ),
         (
             "/v1/messages",
-            {"model": "axio-pro", "stream": True, "messages": [{"role": "user", "content": secret_prompt}]},
+            {"model": "axio-sol", "stream": True, "messages": [{"role": "user", "content": secret_prompt}]},
             "message_delta",
             False,
         ),
         (
-            "/v1beta/models/axio-fast:streamGenerateContent",
+            "/v1beta/models/axio-luna:streamGenerateContent",
             {"contents": [{"role": "user", "parts": [{"text": secret_prompt}]}]},
             "usageMetadata",
             False,
@@ -6933,7 +6933,7 @@ def test_standalone_server_streaming_shapes_for_four_api_formats():
 def test_standalone_anthropic_stream_tool_events_use_native_input_delta_and_terminal_sequence():
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [{"role": "user", "content": "Return a tool call."}],
         },
         api_format="anthropic",
@@ -6966,7 +6966,7 @@ def test_standalone_anthropic_stream_tool_events_use_native_input_delta_and_term
 def test_standalone_openai_stream_tool_events_reassemble_to_non_stream_shape():
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [{"role": "user", "content": "Call the lookup tool."}],
         }
     )
@@ -7019,7 +7019,7 @@ def test_standalone_openai_stream_tool_events_reassemble_to_non_stream_shape():
 def test_standalone_responses_stream_exposes_complete_item_lifecycle_and_function_argument_events():
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "input": "Return text and a tool call.",
         },
         api_format="responses",
@@ -7087,7 +7087,7 @@ def test_standalone_responses_stream_exposes_complete_item_lifecycle_and_functio
 def test_standalone_chat_stream_usage_trailer_is_opt_in_and_protocol_local():
     request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "stream": True,
             "stream_options": {"include_usage": True},
             "messages": [{"role": "user", "content": "usage"}],
@@ -7162,7 +7162,7 @@ def test_standalone_server_chat_stream_usage_trailer_round_trips_from_request():
         path="/v1/chat/completions",
         body=json.dumps(
             {
-                "model": "axio-fast",
+                "model": "axio-luna",
                 "stream": True,
                 "stream_options": {"include_usage": True},
                 "messages": [{"role": "user", "content": "usage trailer"}],
@@ -7314,11 +7314,11 @@ def test_standalone_http_server_loopback_preserves_four_public_api_surfaces(monk
             "chat",
             "/v1/chat/completions",
             {
-                "model": "axio-fast",
+                "model": "axio-luna",
                 "messages": [{"role": "user", "content": secret_prompt}],
                 "max_tokens": 16,
             },
-            "axio-fast",
+            "axio-luna",
         ),
         (
             "responses",
@@ -7330,20 +7330,20 @@ def test_standalone_http_server_loopback_preserves_four_public_api_surfaces(monk
             "anthropic",
             "/v1/messages",
             {
-                "model": "axio-pro",
+                "model": "axio-sol",
                 "messages": [{"role": "user", "content": secret_prompt}],
                 "max_tokens": 16,
             },
-            "axio-pro",
+            "axio-sol",
         ),
         (
             "gemini",
-            "/v1beta/models/axio-pro:generateContent",
+            "/v1beta/models/axio-sol:generateContent",
             {
                 "contents": [{"role": "user", "parts": [{"text": secret_prompt}]}],
                 "generationConfig": {"maxOutputTokens": 16},
             },
-            "axio-pro",
+            "axio-sol",
         ),
     ]
     observed_surfaces = set()
@@ -7400,7 +7400,7 @@ def test_standalone_http_server_loopback_preserves_native_stream_terminal_semant
             "chat",
             "/v1/chat/completions",
             {
-                "model": "axio-fast",
+                "model": "axio-luna",
                 "stream": True,
                 "messages": [{"role": "user", "content": secret_prompt}],
             },
@@ -7418,7 +7418,7 @@ def test_standalone_http_server_loopback_preserves_native_stream_terminal_semant
             "anthropic",
             "/v1/messages",
             {
-                "model": "axio-pro",
+                "model": "axio-sol",
                 "stream": True,
                 "messages": [{"role": "user", "content": secret_prompt}],
             },
@@ -7427,7 +7427,7 @@ def test_standalone_http_server_loopback_preserves_native_stream_terminal_semant
         ),
         (
             "gemini",
-            "/v1beta/models/axio-pro:streamGenerateContent?alt=sse",
+            "/v1beta/models/axio-sol:streamGenerateContent?alt=sse",
             {"contents": [{"role": "user", "parts": [{"text": secret_prompt}]}]},
             "usageMetadata",
             False,
@@ -7502,7 +7502,7 @@ def test_standalone_public_generation_error_redacts_internal_trace():
         path="/v1/chat/completions",
         body=json.dumps(
             {
-                "model": "axio-fast",
+                "model": "axio-luna",
                 "live": True,
                 "messages": [{"role": "user", "content": "trigger provider failure"}],
             }
@@ -7558,7 +7558,7 @@ def test_standalone_public_provider_failure_trace_allowlists_upstream_diagnostic
         path="/v1/chat/completions",
         body=json.dumps(
             {
-                "model": "axio-fast",
+                "model": "axio-luna",
                 "live": True,
                 "messages": [{"role": "user", "content": "trigger provider failure"}],
             }
@@ -7601,7 +7601,7 @@ def test_standalone_public_no_eligible_model_error_is_hash_only():
         path="/v1/responses",
         body=json.dumps(
             {
-                "model": "axio-pro",
+                "model": "axio-sol",
                 "live": True,
                 "metadata": {"privacy_level": "confidential"},
                 "input": "confidential request should not use external provider",
@@ -7637,17 +7637,17 @@ def test_standalone_gateway_operator_auth_separates_control_plane(monkeypatch):
         method="POST",
         path="/v1/chat/completions",
         headers={"x-api-key": "pub-key"},
-        body=json.dumps({"model": "axio-fast", "messages": [{"role": "user", "content": "hello"}]}),
+        body=json.dumps({"model": "axio-luna", "messages": [{"role": "user", "content": "hello"}]}),
         engine=engine,
     )
     generation = json.loads(generation_body.decode("utf-8"))
 
     assert generation_status == 200
-    assert generation["model"] == "axio-fast"
+    assert generation["model"] == "axio-luna"
 
     control_cases = [
         ("GET", "/v1/axio/runtime", None),
-        ("POST", "/v1/axio/route-plan", {"request": {"model": "axio-fast", "messages": [{"role": "user", "content": "plan"}]}}),
+        ("POST", "/v1/axio/route-plan", {"request": {"model": "axio-luna", "messages": [{"role": "user", "content": "plan"}]}}),
         ("POST", "/v1/inventory", {"live": False}),
         ("POST", "/v1/axio/feedback", {"response_id": "unit", "score": 1, "notes": "private operator note"}),
         ("POST", "/v1/axio/agent-outcome", {"task_success": True, "task_id": "private-task"}),
@@ -7694,13 +7694,13 @@ def test_standalone_gateway_operator_auth_separates_control_plane(monkeypatch):
         method="POST",
         path="/v1/axio/route-plan",
         headers={"authorization": "Bearer op-key"},
-        body=json.dumps({"request": {"model": "axio-fast", "messages": [{"role": "user", "content": "plan"}]}}),
+        body=json.dumps({"request": {"model": "axio-luna", "messages": [{"role": "user", "content": "plan"}]}}),
         engine=engine,
     )
     bearer_payload = json.loads(bearer_body.decode("utf-8"))
 
     assert bearer_status == 200
-    assert bearer_payload["public_model"] == "axio-fast"
+    assert bearer_payload["public_model"] == "axio-luna"
 
 
 def test_standalone_gateway_operator_auth_preserves_legacy_public_key_when_unconfigured(monkeypatch):
@@ -7713,13 +7713,13 @@ def test_standalone_gateway_operator_auth_preserves_legacy_public_key_when_uncon
         method="POST",
         path="/v1/axio/route-plan",
         headers={"x-api-key": "pub-key"},
-        body=json.dumps({"request": {"model": "axio-fast", "messages": [{"role": "user", "content": "plan"}]}}),
+        body=json.dumps({"request": {"model": "axio-luna", "messages": [{"role": "user", "content": "plan"}]}}),
         engine=engine,
     )
     payload = json.loads(body.decode("utf-8"))
 
     assert status == 200
-    assert payload["public_model"] == "axio-fast"
+    assert payload["public_model"] == "axio-luna"
 
 
 def test_standalone_gateway_inventory_requires_explicit_operator_key_even_when_auth_is_unconfigured(monkeypatch):
@@ -7829,7 +7829,7 @@ def test_standalone_gateway_operator_header_partitions_rate_limit_buckets(monkey
     monkeypatch.setenv("AXIO_FUSION_OPERATOR_API_KEYS", "op-a,op-b")
     monkeypatch.setenv("AXIO_FUSION_RATE_LIMIT_PER_MINUTE", "1")
     engine = FusionEngine([normalize_profile({"provider": "unit", "model": "fast-model"})])
-    body = json.dumps({"request": {"model": "axio-fast", "messages": [{"role": "user", "content": "plan"}]}})
+    body = json.dumps({"request": {"model": "axio-luna", "messages": [{"role": "user", "content": "plan"}]}})
 
     first_status, _, _ = handle_request(
         method="POST",
@@ -7860,7 +7860,7 @@ def test_standalone_gateway_operator_header_partitions_rate_limit_buckets(monkey
     assert second_status == 429
     assert other_status == 200
     assert second["error"]["code"] == "rate_limit_exceeded"
-    assert other["public_model"] == "axio-fast"
+    assert other["public_model"] == "axio-luna"
     assert "op-a" not in serialized
     assert "op-b" not in serialized
 
@@ -7996,7 +7996,7 @@ def test_standalone_gateway_daily_budget_uses_public_trace_summary_cost(monkeypa
     headers = {"x-api-key": "tenant-budget"}
     body = json.dumps(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "live": True,
             "messages": [{"role": "user", "content": "bill this dry-sized live call"}],
         }
@@ -8081,7 +8081,7 @@ def test_standalone_gateway_daily_budget_only_blocks_generation_endpoints(monkey
     headers = {"x-api-key": "tenant-budget-scope"}
     generation_body = json.dumps(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "live": True,
             "messages": [{"role": "user", "content": "consume tenant budget"}],
         }
@@ -8108,7 +8108,7 @@ def test_standalone_gateway_daily_budget_only_blocks_generation_endpoints(monkey
         method="POST",
         path="/v1/axio/route-plan",
         headers=headers,
-        body=json.dumps({"request": {"model": "axio-fast", "messages": [{"role": "user", "content": "plan"}]}}),
+        body=json.dumps({"request": {"model": "axio-luna", "messages": [{"role": "user", "content": "plan"}]}}),
         engine=engine,
     )
     blocked = json.loads(blocked_body.decode("utf-8"))
@@ -8126,9 +8126,9 @@ def test_standalone_gateway_daily_budget_only_blocks_generation_endpoints(monkey
     assert runtime_status == 200
     assert route_plan_status == 200
     assert health["runtime"]["tenant_budget_enabled"] is True
-    assert {item["id"] for item in models["data"]} == {"axio-fast", "axio-terra", "axio-pro"}
+    assert {item["id"] for item in models["data"]} == {"axio-luna", "axio-terra", "axio-sol"}
     assert runtime["tenant_budget_enabled"] is True
-    assert route_plan["public_model"] == "axio-fast"
+    assert route_plan["public_model"] == "axio-luna"
 
 
 def test_standalone_gateway_rate_limit_and_feedback_are_prompt_free(monkeypatch, tmp_path):
@@ -8218,7 +8218,7 @@ def test_standalone_rate_limit_projection_is_consistent_across_buffered_and_stre
         headers=headers,
         body=json.dumps(
             {
-                "model": "axio-fast",
+                "model": "axio-luna",
                 "stream": True,
                 "messages": [{"role": "user", "content": "rate parity"}],
             }
@@ -8231,7 +8231,7 @@ def test_standalone_rate_limit_projection_is_consistent_across_buffered_and_stre
         method="POST",
         path="/v1/images/generations",
         headers=headers,
-        body=json.dumps({"model": "axio-fast", "prompt": "rate parity", "stream": True}),
+        body=json.dumps({"model": "axio-luna", "prompt": "rate parity", "stream": True}),
         engine=engine,
         image_profiles=(),
         live=False,
@@ -8265,7 +8265,7 @@ def test_standalone_execution_trace_artifact_is_prompt_free(monkeypatch, tmp_pat
         headers={"x-api-key": "tenant-trace"},
         body=json.dumps(
             {
-                "model": "axio-fast",
+                "model": "axio-luna",
                 "messages": [{"role": "user", "content": secret_prompt}],
             }
         ),
@@ -8291,7 +8291,7 @@ def test_standalone_execution_trace_artifact_is_prompt_free(monkeypatch, tmp_pat
     serialized = json.dumps({"trace": trace_row, "report": report, "artifact": trace_text}, ensure_ascii=False)
 
     assert status == 200
-    assert payload["model"] == "axio-fast"
+    assert payload["model"] == "axio-luna"
     assert trace_row["schema"] == "axio_fusion_api.execution_trace_receipt.v1"
     assert trace_row["request"]["prompt_sha256"]
     assert trace_row["routing_decision"]["selected_profile_hashes"]
@@ -8421,7 +8421,7 @@ def test_standalone_live_expert_tool_calls_execute_under_route_policy(monkeypatc
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "messages": [{"role": "user", "content": "Use declared tools to calculate and search safely."}],
             "tools": [
                 {"type": "function", "function": {"name": "math_eval"}},
@@ -8476,7 +8476,7 @@ def test_standalone_tool_execution_enforces_route_plan_tool_policy(monkeypatch, 
     )
     route_request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [{"role": "user", "content": "Plan a safe tool workflow."}],
             "tools": [
                 {"type": "function", "function": {"name": "math_eval"}},
@@ -8776,7 +8776,7 @@ def test_standalone_registry_calibration_updates_dynamic_model_profile(tmp_path)
     route = FusionEngine(load_registry(updated_registry_path)).complete(
         canonicalize_payload(
             {
-                "model": "axio-fast",
+                "model": "axio-luna",
                 "messages": [{"role": "user", "content": "simple logic task"}],
             }
         ),
@@ -8805,7 +8805,7 @@ def test_standalone_learning_report_uses_feedback_without_raw_text(monkeypatch, 
     engine = FusionEngine([normalize_profile({"provider": "unit", "model": "fast-model"})])
     secret_feedback = "SECRET_LEARNING_FEEDBACK_SHOULD_NOT_PERSIST"
     route_plan = {
-        "public_model": "axio-pro",
+        "public_model": "axio-sol",
         "strategy": "pro_panel_judge_escalation",
         "request_analysis": {
             "task_type": "science_research",
@@ -8881,7 +8881,7 @@ def test_standalone_learning_report_keeps_benchmark_scorecards_diagnostic_only(t
             {
                 "schema": "axio_fusion_api.benchmark_scorecard.v1",
                 "candidates": [
-                    {"candidate_id": "axio-pro", "case_count": 20, "accuracy": 0.61},
+                    {"candidate_id": "axio-sol", "case_count": 20, "accuracy": 0.61},
                     {"candidate_id": "provider::" + sha256_text("rank-1"), "case_count": 20, "accuracy": 0.72},
                 ],
             }
@@ -8946,7 +8946,7 @@ def test_standalone_orchestrator_training_dataset_joins_safe_traces_and_feedback
     secret_prompt = "SECRET_TRAINING_PROMPT_SHOULD_NOT_PERSIST"
     request_fingerprint = "same-training-fingerprint"
     route_plan_good = {
-        "public_model": "axio-pro",
+        "public_model": "axio-sol",
         "strategy": "pro_panel_judge_escalation",
         "request_analysis": {
             "task_type": "logic_reasoning",
@@ -8958,7 +8958,7 @@ def test_standalone_orchestrator_training_dataset_joins_safe_traces_and_feedback
         "selected_models": [{"profile_id": "provider/good"}],
     }
     route_plan_bad = {
-        "public_model": "axio-fast",
+        "public_model": "axio-luna",
         "strategy": "fast_direct",
         "request_analysis": {
             "task_type": "logic_reasoning",
@@ -9004,7 +9004,7 @@ def test_standalone_orchestrator_training_dataset_joins_safe_traces_and_feedback
             "response_id": "training-good",
             "request": {"prompt_sha256": sha256_text(secret_prompt), "raw_prompt_persisted": False},
             "request_analysis": {"task_type": "logic_reasoning", "domains": ["logic"], "complexity": 0.82, "risk": 0.45, "uncertainty": 0.7, "needs_tools": False},
-            "routing_decision": {"public_model": "axio-pro", "strategy": "pro_panel_judge_escalation", "selected_profile_hashes": [sha256_text("provider/good")], "selected_model_count": 3},
+            "routing_decision": {"public_model": "axio-sol", "strategy": "pro_panel_judge_escalation", "selected_profile_hashes": [sha256_text("provider/good")], "selected_model_count": 3},
             "model_selection_policy": {
                 "schema": "axio_fusion_api.model_selection_policy.v1",
                 "provider_diversity_enabled": True,
@@ -9148,7 +9148,7 @@ def test_standalone_orchestrator_training_dataset_joins_safe_traces_and_feedback
             "response_id": "training-bad",
             "request": {"prompt_sha256": sha256_text(secret_prompt), "raw_prompt_persisted": False},
             "request_analysis": {"task_type": "logic_reasoning", "domains": ["logic"], "complexity": 0.82, "risk": 0.45, "uncertainty": 0.7, "needs_tools": False},
-            "routing_decision": {"public_model": "axio-fast", "strategy": "fast_direct", "selected_profile_hashes": [sha256_text("provider/bad")], "selected_model_count": 1},
+            "routing_decision": {"public_model": "axio-luna", "strategy": "fast_direct", "selected_profile_hashes": [sha256_text("provider/bad")], "selected_model_count": 1},
             "task_plan": {"node_count": 5, "subtask_count": 0, "max_dependency_depth": 2},
             "judge_result": {"ready_for_synthesis": False, "judge_provider_call_count": 0, "missing_coverage_count": 1, "contradiction_count": 0},
             "early_exit": {"triggered": False, "reason": "single_candidate"},
@@ -9279,7 +9279,7 @@ def test_standalone_training_contamination_audit_blocks_benchmark_leakage(tmp_pa
                         "example_id": "example-1",
                         "request_fingerprint_sha256": case_hash,
                         "response_id_sha256": sha256_text("response-1"),
-                        "features": {"strategy": "axio-pro"},
+                        "features": {"strategy": "axio-sol"},
                         "targets": {"reward": 1.0},
                         "raw_prompt_persisted": False,
                         "raw_provider_output_persisted": False,
@@ -9433,7 +9433,7 @@ def test_standalone_agent_outcome_endpoint_feeds_learning_without_asci_fs_coupli
     secret_task = "SECRET_AGENT_TASK_TEXT_SHOULD_NOT_PERSIST"
     secret_tool_output = "SECRET_AGENT_TOOL_OUTPUT_SHOULD_NOT_PERSIST"
     route_plan = {
-        "public_model": "axio-pro",
+        "public_model": "axio-sol",
         "strategy": "pro_panel_judge_escalation",
         "request_analysis": {
             "task_type": "agentic_tool_calling",
@@ -9658,7 +9658,7 @@ def test_standalone_router_policy_shadow_patch_uses_safe_diversity_and_prompt_bu
     secret_prompt = "SECRET_DIVERSITY_SHADOW_PROMPT_SHOULD_NOT_PERSIST"
     secret_model = "provider/correlated-shadow-model"
     route_plan = {
-        "public_model": "axio-pro",
+        "public_model": "axio-sol",
         "strategy": "pro_panel_judge_escalation",
         "request_analysis": {
             "task_type": "logic_reasoning",
@@ -9702,7 +9702,7 @@ def test_standalone_router_policy_shadow_patch_uses_safe_diversity_and_prompt_bu
                     "needs_tools": False,
                 },
                 "routing_decision": {
-                    "public_model": "axio-pro",
+                    "public_model": "axio-sol",
                     "strategy": "pro_panel_judge_escalation",
                     "selected_profile_hashes": [sha256_text(secret_model)],
                     "selected_model_count": 3,
@@ -9844,7 +9844,7 @@ def test_standalone_learning_uses_provider_routing_fallback_signals_safely(monke
     response_id = "provider-routing-failed"
     request_fingerprint = "provider-routing-fingerprint"
     route_plan = {
-        "public_model": "axio-fast",
+        "public_model": "axio-luna",
         "strategy": "fast_direct",
         "request_analysis": {
             "task_type": "daily_work",
@@ -9888,7 +9888,7 @@ def test_standalone_learning_uses_provider_routing_fallback_signals_safely(monke
                     "needs_tools": False,
                 },
                 "routing_decision": {
-                    "public_model": "axio-fast",
+                    "public_model": "axio-luna",
                     "strategy": "fast_direct",
                     "selected_profile_hashes": [sha256_text(secret_model)],
                     "selected_model_count": 1,
@@ -10007,7 +10007,7 @@ def test_standalone_learning_uses_fast_light_and_answer_claim_signals_safely(mon
     response_id = "fast-claim-failed"
     request_fingerprint = "fast-claim-fingerprint"
     route_plan = {
-        "public_model": "axio-fast",
+        "public_model": "axio-luna",
         "strategy": "fast_direct",
         "request_analysis": {
             "task_type": "logic_reasoning",
@@ -10051,7 +10051,7 @@ def test_standalone_learning_uses_fast_light_and_answer_claim_signals_safely(mon
                     "needs_tools": False,
                 },
                 "routing_decision": {
-                    "public_model": "axio-fast",
+                    "public_model": "axio-luna",
                     "strategy": "fast_direct",
                     "selected_profile_hashes": [sha256_text(secret_model)],
                     "selected_model_count": 1,
@@ -10225,7 +10225,7 @@ def test_standalone_learning_distinguishes_answer_claim_independence_escalation_
     response_id = "targeted-claim-routing-failed"
     request_fingerprint = "targeted-claim-routing-fingerprint"
     route_plan = {
-        "public_model": "axio-pro",
+        "public_model": "axio-sol",
         "strategy": "pro_panel_judge_escalation",
         "request_analysis": {
             "task_type": "logic_reasoning",
@@ -10269,7 +10269,7 @@ def test_standalone_learning_distinguishes_answer_claim_independence_escalation_
                     "needs_tools": False,
                 },
                 "routing_decision": {
-                    "public_model": "axio-pro",
+                    "public_model": "axio-sol",
                     "strategy": "pro_panel_judge_escalation",
                     "selected_profile_hashes": [sha256_text(secret_model)],
                     "selected_model_count": 3,
@@ -10424,7 +10424,7 @@ def test_standalone_learning_uses_factuality_vertical_guardrail_signals_safely(m
     response_id = "fact-vertical-failed"
     request_fingerprint = "fact-vertical-fingerprint"
     route_plan = {
-        "public_model": "axio-pro",
+        "public_model": "axio-sol",
         "strategy": "pro_panel_judge_escalation",
         "request_analysis": {
             "task_type": "factuality_check",
@@ -10472,7 +10472,7 @@ def test_standalone_learning_uses_factuality_vertical_guardrail_signals_safely(m
                     "vertical_domain_signals": ["medical", "finance"],
                 },
                 "routing_decision": {
-                    "public_model": "axio-pro",
+                    "public_model": "axio-sol",
                     "strategy": "pro_panel_judge_escalation",
                     "selected_profile_hashes": [sha256_text(secret_model)],
                     "selected_model_count": 3,
@@ -10578,7 +10578,7 @@ def test_standalone_agent_outcome_case_hash_blocks_benchmark_training_contaminat
             {
                 "schema": "axio_fusion_api.benchmark_run.v2",
                 "suite_id": "bfcl",
-                "candidate_id": "axio-pro",
+                "candidate_id": "axio-sol",
                 "case_results": [{"case_id": case_hash, "correct": True}],
                 "raw_prompt_persisted": False,
                 "raw_provider_output_persisted": False,
@@ -10860,7 +10860,7 @@ def test_standalone_runtime_budget_rejection_does_not_open_provider_circuit():
     )
     request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "messages": [{"role": "user", "content": "budget rejection fixture"}],
         }
     )
@@ -10902,7 +10902,7 @@ def test_standalone_parallel_role_cancellation_blocks_calls_and_discards_late_re
     )
     request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "messages": [{"role": "user", "content": "cancellation fixture"}],
         }
     )
@@ -10987,7 +10987,7 @@ def test_standalone_runtime_provider_telemetry_adapts_future_routing_without_ide
     )
     request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "messages": [{"role": "user", "content": "runtime telemetry fixture"}],
         }
     )
@@ -11066,7 +11066,7 @@ def test_standalone_response_cache_isolated_by_quality_target_policy():
         client=fake,
         cache_enabled=True,
     )
-    base_payload = {"model": "axio-fast", "messages": [{"role": "user", "content": "same prompt"}]}
+    base_payload = {"model": "axio-luna", "messages": [{"role": "user", "content": "same prompt"}]}
     first = engine.complete(canonicalize_payload(base_payload), live=True)
     second = engine.complete(canonicalize_payload({**base_payload, "quality_target": 0.9}), live=True)
     third = engine.complete(canonicalize_payload({**base_payload, "quality_target": 0.9}), live=True)
@@ -11120,7 +11120,7 @@ def test_standalone_response_cache_isolated_by_stop_and_privacy_routing_contract
         client=fake,
         cache_enabled=True,
     )
-    base_payload = {"model": "axio-fast", "messages": [{"role": "user", "content": "same prompt"}]}
+    base_payload = {"model": "axio-luna", "messages": [{"role": "user", "content": "same prompt"}]}
 
     first = engine.complete(canonicalize_payload({**base_payload, "stop": ["one"]}), live=True)
     second = engine.complete(canonicalize_payload({**base_payload, "stop": ["two"]}), live=True)
@@ -11149,7 +11149,7 @@ def test_standalone_response_cache_isolated_by_stop_and_privacy_routing_contract
 def test_standalone_public_metadata_cannot_set_private_axio_execution_markers():
     request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "prompt": "keep the current user turn",
             "metadata": {
                 "_axio_current_prompt_in_history": True,
@@ -11177,7 +11177,7 @@ def test_standalone_responses_text_fallback_preserves_native_tool_contract(monke
     )
     request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "messages": [{"role": "user", "content": "look this up"}],
             "tools": [
                 {
@@ -11226,7 +11226,7 @@ def test_standalone_responses_text_fallback_remains_available_for_plain_text_tur
     )
     request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "messages": [{"role": "user", "content": "plain text request"}],
         }
     )
@@ -11764,7 +11764,7 @@ def test_standalone_provider_control_context_reaches_all_formats_without_breakin
     }
     payloads = {
         "chat": {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "tools": [{"type": "function", "function": {"name": "lookup", "parameters": {"type": "object"}}}],
             "messages": [
                 {"role": "user", "content": "original user task"},
@@ -11782,7 +11782,7 @@ def test_standalone_provider_control_context_reaches_all_formats_without_breakin
             ],
         },
         "responses": {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "tools": [{"type": "function", "name": "lookup", "parameters": {"type": "object"}}],
             "input": [
                 {"role": "user", "content": [{"type": "input_text", "text": "original user task"}]},
@@ -11791,7 +11791,7 @@ def test_standalone_provider_control_context_reaches_all_formats_without_breakin
             ],
         },
         "anthropic": {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "tools": [{"name": "lookup", "input_schema": {"type": "object"}}],
             "messages": [
                 {"role": "user", "content": "original user task"},
@@ -11800,7 +11800,7 @@ def test_standalone_provider_control_context_reaches_all_formats_without_breakin
             ],
         },
         "gemini": {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "tools": [{"functionDeclarations": [{"name": "lookup", "parameters": {"type": "object"}}]}],
             "contents": [
                 {"role": "user", "parts": [{"text": "original user task"}]},
@@ -12075,7 +12075,7 @@ def test_standalone_provider_retries_transient_post_failure_without_secret_leaka
             "api_key_env": "RETRY_API_KEY",
         }
     )
-    request = canonicalize_payload({"model": "axio-fast", "messages": [{"role": "user", "content": "hello"}]})
+    request = canonicalize_payload({"model": "axio-luna", "messages": [{"role": "user", "content": "hello"}]})
 
     text = provider_module.HTTPProviderClient().complete(
         profile,
@@ -12134,7 +12134,7 @@ def test_standalone_nvidia_profile_requires_explicit_base_url_before_network_acc
         }
     )
     request = canonicalize_payload(
-        {"model": "axio-fast", "messages": [{"role": "user", "content": "hello"}]}
+        {"model": "axio-luna", "messages": [{"role": "user", "content": "hello"}]}
     )
     engine = FusionEngine([profile])
 
@@ -12202,7 +12202,7 @@ def test_standalone_unsafe_provider_base_url_blocks_transport_and_readiness_with
         }
     )
     request = canonicalize_payload(
-        {"model": "axio-fast", "messages": [{"role": "user", "content": "validate endpoint"}]}
+        {"model": "axio-luna", "messages": [{"role": "user", "content": "validate endpoint"}]}
     )
 
     base_url_receipt = provider_module.provider_base_url_readiness(unsafe_base_url)
@@ -12431,7 +12431,7 @@ def test_standalone_responses_provider_forwards_top_p_across_typed_and_text_payl
     )
     request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "instructions": "brief",
             "input": "hello",
             "max_output_tokens": 77,
@@ -12673,7 +12673,7 @@ def test_standalone_provider_rotates_gemini_query_keys_and_sanitizes_failures(mo
     )
     request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "contents": [{"role": "user", "parts": [{"text": "hello"}]}],
             "generationConfig": {
                 "temperature": 0,
@@ -12686,7 +12686,7 @@ def test_standalone_provider_rotates_gemini_query_keys_and_sanitizes_failures(mo
     )
     explicit_zero_top_p_request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "contents": [{"role": "user", "parts": [{"text": "hello"}]}],
             "top_p": 0,
             "generationConfig": {"topP": 0.73},
@@ -12767,7 +12767,7 @@ def test_standalone_gemini_provider_accepts_prefixed_model_names_without_double_
     )
     request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "contents": [{"role": "user", "parts": [{"text": "hello"}]}],
         },
         api_format="gemini",
@@ -12828,7 +12828,7 @@ def test_standalone_anthropic_provider_uses_x_api_key_auth_without_secret_leakag
     )
     request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "messages": [{"role": "user", "content": "hello"}],
             "max_tokens": 88,
             "top_p": 0.67,
@@ -13053,7 +13053,7 @@ def test_standalone_custom_provider_configs_support_chat_responses_and_anthropic
     route_plan = FusionEngine(profiles).complete(
         canonicalize_payload(
             {
-                "model": "axio-pro",
+                "model": "axio-sol",
                 "quality_target": 0.9,
                 "messages": [{"role": "user", "content": "Review a multi-step operations policy."}],
             }
@@ -13751,7 +13751,7 @@ def test_standalone_live_fusion_can_mix_chat_responses_and_anthropic_provider_mo
     ]
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "quality_target": 0.92,
             "max_total_model_calls": 6,
             "messages": [{"role": "user", "content": "Review mixed provider routing."}],
@@ -14605,7 +14605,7 @@ def test_standalone_benchmark_matrix_and_dry_run_do_not_persist_raw_cases(tmp_pa
     run = run_multiple_choice_benchmark(
         suite_id="arc_challenge",
         dataset_path=dataset_path,
-        candidate_id="axio-pro",
+        candidate_id="axio-sol",
         registry_path=registry_path,
         limit=1,
         live=False,
@@ -14636,7 +14636,7 @@ def test_standalone_benchmark_matrix_and_dry_run_do_not_persist_raw_cases(tmp_pa
             "--dataset",
             str(dataset_path),
             "--candidate-id",
-            "axio-pro",
+            "axio-sol",
             "--limit",
             "1",
             "--output",
@@ -14715,14 +14715,14 @@ def test_standalone_frozen_top_three_matrix_excludes_diagnostic_candidates(tmp_p
     matrix = build_benchmark_run_matrix(
         registry_path=registry_path,
         suite_ids=["arc_challenge"],
-        candidate_ids=["axio-pro", "single_best_model"],
+        candidate_ids=["axio-sol", "single_best_model"],
         include_provider_baselines=True,
         max_provider_baselines=None,
         provider_baseline_freeze_path=freeze_path,
     )
     checklist = build_benchmark_acquisition_checklist(
         registry_path=registry_path,
-        candidate_ids=["axio-pro", "single_best_model"],
+        candidate_ids=["axio-sol", "single_best_model"],
         include_provider_baselines=True,
         max_provider_baselines=None,
         provider_baseline_freeze_path=freeze_path,
@@ -14730,7 +14730,7 @@ def test_standalone_frozen_top_three_matrix_excludes_diagnostic_candidates(tmp_p
     status = build_benchmark_acquisition_status(
         registry_path=registry_path,
         dataset_dir=tmp_path / "missing_formal_datasets",
-        candidate_ids=["axio-pro", "single_best_model"],
+        candidate_ids=["axio-sol", "single_best_model"],
         include_provider_baselines=True,
         max_provider_baselines=None,
         provider_baseline_freeze_path=freeze_path,
@@ -14743,7 +14743,7 @@ def test_standalone_frozen_top_three_matrix_excludes_diagnostic_candidates(tmp_p
             "--suite-id",
             "arc_challenge",
             "--candidate-id",
-            "axio-pro",
+            "axio-sol",
             "--all-provider-baselines",
             "--provider-baseline-freeze",
             str(freeze_path),
@@ -14907,7 +14907,7 @@ def test_standalone_provider_baseline_freeze_manifest_is_hash_only_and_cli_ready
     assert freeze["freeze_receipt"]["external_ranking_mapping_valid"] is True
     assert cli_freeze["freeze_digest_sha256"] == freeze["freeze_digest_sha256"]
     assert cli_freeze["selected_provider_candidate_id_set_sha256"] == freeze["selected_provider_candidate_id_set_sha256"]
-    assert {row["axio_model"] for row in freeze["tier_target_policy"]} == {"axio-fast", "axio-terra", "axio-pro"}
+    assert {row["axio_model"] for row in freeze["tier_target_policy"]} == {"axio-luna", "axio-terra", "axio-sol"}
     assert {
         row["rank_source"] for row in freeze["tier_target_policy"]
     } == {"externally_evidenced_pre_registered_provider_pool_rank_before_target_campaign"}
@@ -14963,7 +14963,7 @@ def test_standalone_canonical_identity_is_required_only_for_final_claim_freeze(t
         [normalize_profile({"provider": "unit", "model": "unattested-alias"})]
     )
     request = canonicalize_payload(
-        {"model": "axio-fast", "messages": [{"role": "user", "content": "hello"}]},
+        {"model": "axio-luna", "messages": [{"role": "user", "content": "hello"}]},
         api_format="chat/completions",
     )
     response = engine.complete(request, live=False)
@@ -15070,7 +15070,7 @@ def test_standalone_routing_policy_lifecycle_applies_only_bounded_context_and_ro
             {
                 "patch_id": "policy-shadow-agentic",
                 "target": {
-                    "public_model": "axio-fast",
+                    "public_model": "axio-luna",
                     "strategy": "fast_direct_cascade",
                     "task_type": "all",
                 },
@@ -15124,7 +15124,7 @@ def test_standalone_routing_policy_lifecycle_applies_only_bounded_context_and_ro
     engine = FusionEngine(profiles, routing_policy=active_policy)
     request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "messages": [
                 {
                     "role": "user",
@@ -15202,7 +15202,7 @@ def test_standalone_routing_policy_fails_closed_on_registry_drift_and_keeps_call
         "patch_candidates": [
             {
                 "patch_id": "policy-shadow-fast",
-                "target": {"public_model": "axio-fast", "task_type": "all"},
+                "target": {"public_model": "axio-luna", "task_type": "all"},
                 "action": "fast_claim_verification",
                 "evidence": {"example_count": 4, "trace_joined_count": 4},
                 "suggested_policy_delta": {"fast_light_verify": True},
@@ -15243,7 +15243,7 @@ def test_standalone_routing_policy_fails_closed_on_registry_drift_and_keeps_call
     active = load_active_routing_policy(profiles, path=policy_path)
     request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "messages": [{"role": "user", "content": "verify this claim"}],
             "max_total_model_calls": 1,
         },
@@ -15275,7 +15275,7 @@ def test_standalone_routing_policy_rejects_raw_shadow_input_before_review():
             "patch_candidates": [
                 {
                     "patch_id": "raw-policy-input",
-                    "target": {"public_model": "axio-fast", "task_type": "all"},
+                    "target": {"public_model": "axio-luna", "task_type": "all"},
                     "action": "fast_claim_verification",
                     "evidence": {"example_count": 1},
                     "suggested_policy_delta": {"fast_light_verify": True},
@@ -15326,7 +15326,7 @@ def test_standalone_routing_policy_versioned_trace_learning_and_shadow_replay_ar
         "patch_candidates": [
             {
                 "patch_id": "versioned-shadow-agentic",
-                "target": {"public_model": "axio-fast", "task_type": "all"},
+                "target": {"public_model": "axio-luna", "task_type": "all"},
                 "action": "increase_agentic_verification_and_escalation",
                 "evidence": {"example_count": 4, "trace_joined_count": 4},
                 "suggested_policy_delta": {
@@ -15367,7 +15367,7 @@ def test_standalone_routing_policy_versioned_trace_learning_and_shadow_replay_ar
     active_policy = load_active_routing_policy(profiles, path=policy_path)
     request = canonicalize_payload(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "messages": [{"role": "user", "content": secret_prompt}],
             "max_total_model_calls": 6,
         },
@@ -15404,7 +15404,7 @@ def test_standalone_routing_policy_versioned_trace_learning_and_shadow_replay_ar
                         "score": 0.8,
                         "accepted": True,
                         "route_snapshot": {
-                            "public_model": "axio-fast",
+                            "public_model": "axio-luna",
                             "strategy": active_trace["routing_decision"]["strategy"],
                             "task_type": active_trace["request_analysis"]["task_type"],
                             "routing_policy": active_trace["routing_policy"],
@@ -15421,7 +15421,7 @@ def test_standalone_routing_policy_versioned_trace_learning_and_shadow_replay_ar
                         "score": -0.5,
                         "accepted": False,
                         "route_snapshot": {
-                            "public_model": "axio-fast",
+                            "public_model": "axio-luna",
                             "strategy": historical_trace["routing_decision"]["strategy"],
                             "task_type": historical_trace["request_analysis"]["task_type"],
                             "routing_policy": historical_trace["routing_policy"],
@@ -15587,7 +15587,7 @@ def test_standalone_provider_onboarding_keeps_new_remote_provider_out_of_fusion_
     )
     request = canonicalize_payload(
         {
-            "model": "axio-pro",
+            "model": "axio-sol",
             "messages": [{"role": "user", "content": "Solve a logic task."}],
         },
         api_format="chat/completions",
@@ -16185,7 +16185,7 @@ def test_standalone_acquisition_checklist_can_match_formal_axio_provider_campaig
 
     checklist = build_benchmark_acquisition_checklist(
         registry_path=registry_path,
-        candidate_ids=["axio-fast", "axio-terra", "axio-pro"],
+        candidate_ids=["axio-luna", "axio-terra", "axio-sol"],
         include_provider_baselines=True,
         max_provider_baselines=None,
         min_cases_per_suite=100,
@@ -16193,7 +16193,7 @@ def test_standalone_acquisition_checklist_can_match_formal_axio_provider_campaig
     status = build_benchmark_acquisition_status(
         registry_path=registry_path,
         dataset_dir=tmp_path / "missing_datasets",
-        candidate_ids=["axio-fast", "axio-terra", "axio-pro"],
+        candidate_ids=["axio-luna", "axio-terra", "axio-sol"],
         include_provider_baselines=True,
         max_provider_baselines=None,
         min_cases_per_suite=100,
@@ -16204,11 +16204,11 @@ def test_standalone_acquisition_checklist_can_match_formal_axio_provider_campaig
             str(registry_path),
             "benchmark-acquisition-checklist",
             "--candidate-id",
-            "axio-fast",
+            "axio-luna",
             "--candidate-id",
             "axio-terra",
             "--candidate-id",
-            "axio-pro",
+            "axio-sol",
             "--all-provider-baselines",
             "--output",
             str(output_path),
@@ -16222,11 +16222,11 @@ def test_standalone_acquisition_checklist_can_match_formal_axio_provider_campaig
             "--dataset-dir",
             str(tmp_path / "missing_datasets"),
             "--candidate-id",
-            "axio-fast",
+            "axio-luna",
             "--candidate-id",
             "axio-terra",
             "--candidate-id",
-            "axio-pro",
+            "axio-sol",
             "--all-provider-baselines",
             "--output",
             str(status_output_path),
@@ -16462,7 +16462,7 @@ def test_standalone_official_harness_bridge_preflight_and_generation_are_hash_sa
         dataset_path=dataset_path,
         harness_root=harness_root,
         private_run_dir=private_run_dir,
-        candidate_id="axio-fast",
+        candidate_id="axio-luna",
         api_format="anthropic",
         harness_pin_manifest_path=pin_path,
     )
@@ -16478,7 +16478,7 @@ def test_standalone_official_harness_bridge_preflight_and_generation_are_hash_sa
             "--private-run-dir",
             str(private_run_dir),
             "--candidate-id",
-            "axio-fast",
+            "axio-luna",
             "--api-format",
             "anthropic",
             "--harness-pin-manifest",
@@ -16492,7 +16492,7 @@ def test_standalone_official_harness_bridge_preflight_and_generation_are_hash_sa
         dataset_path=dataset_path,
         harness_root=harness_root,
         private_run_dir=private_run_dir,
-        candidate_id="axio-fast",
+        candidate_id="axio-luna",
         api_format="anthropic",
         registry_path=registry_path,
         harness_pin_manifest_path=pin_path,
@@ -16503,7 +16503,7 @@ def test_standalone_official_harness_bridge_preflight_and_generation_are_hash_sa
         dataset_path=dataset_path,
         harness_root=harness_root,
         private_run_dir=private_run_dir,
-        candidate_id="axio-fast",
+        candidate_id="axio-luna",
         api_format="anthropic",
         registry_path=registry_path,
         harness_pin_manifest_path=pin_path,
@@ -16724,7 +16724,7 @@ def test_standalone_bfcl_official_bridge_generates_scores_and_imports_hash_safel
         dataset_path=dataset_path,
         harness_root=harness_root,
         private_run_dir=private_run_dir,
-        candidate_id="axio-fast",
+        candidate_id="axio-luna",
         api_format="responses",
         harness_pin_manifest_path=pin_path,
     )
@@ -16741,7 +16741,7 @@ def test_standalone_bfcl_official_bridge_generates_scores_and_imports_hash_safel
             "--private-run-dir",
             str(private_run_dir),
             "--candidate-id",
-            "axio-fast",
+            "axio-luna",
             "--api-format",
             "responses",
             "--harness-pin-manifest",
@@ -16756,7 +16756,7 @@ def test_standalone_bfcl_official_bridge_generates_scores_and_imports_hash_safel
         dataset_path=dataset_path,
         harness_root=harness_root,
         private_run_dir=private_run_dir,
-        candidate_id="axio-fast",
+        candidate_id="axio-luna",
         api_format="responses",
         harness_pin_manifest_path=pin_path,
         live=True,
@@ -16797,7 +16797,7 @@ def test_standalone_bfcl_official_bridge_generates_scores_and_imports_hash_safel
         dataset_path=dataset_path,
         harness_root=harness_root,
         private_run_dir=private_run_dir,
-        candidate_id="axio-fast",
+        candidate_id="axio-luna",
         api_format="responses",
         harness_pin_manifest_path=pin_path,
     )
@@ -17091,7 +17091,7 @@ def test_standalone_livecodebench_bridge_evaluates_imports_and_rejects_tampering
         dataset_path=dataset_path,
         harness_root=harness_root,
         private_run_dir=private_run_dir,
-        candidate_id="axio-fast",
+        candidate_id="axio-luna",
         api_format="responses",
         harness_pin_manifest_path=pin_path,
         live=True,
@@ -17138,7 +17138,7 @@ def test_standalone_livecodebench_bridge_evaluates_imports_and_rejects_tampering
         dataset_path=dataset_path,
         harness_root=harness_root,
         private_run_dir=private_run_dir,
-        candidate_id="axio-fast",
+        candidate_id="axio-luna",
         api_format="responses",
         harness_pin_manifest_path=pin_path,
         allow_unsafe_code_execution=True,
@@ -17264,7 +17264,7 @@ def test_standalone_livecodebench_bridge_rejects_evaluator_output_hash_substitut
         dataset_path=dataset_path,
         harness_root=harness_root,
         private_run_dir=private_run_dir,
-        candidate_id="axio-fast",
+        candidate_id="axio-luna",
         harness_pin_manifest_path=pin_path,
         live=True,
         client=FakeBridgeClient(),
@@ -17295,7 +17295,7 @@ def test_standalone_livecodebench_bridge_rejects_evaluator_output_hash_substitut
         dataset_path=dataset_path,
         harness_root=harness_root,
         private_run_dir=private_run_dir,
-        candidate_id="axio-fast",
+        candidate_id="axio-luna",
         harness_pin_manifest_path=pin_path,
         allow_unsafe_code_execution=True,
     )
@@ -17364,7 +17364,7 @@ def test_standalone_humaneval_bridge_evaluates_and_imports_pinned_run_safely(mon
         dataset_path=dataset_path,
         harness_root=harness_root,
         private_run_dir=private_run_dir,
-        candidate_id="axio-pro",
+        candidate_id="axio-sol",
         api_format="responses",
         harness_pin_manifest_path=pin_path,
         live=True,
@@ -17397,7 +17397,7 @@ def test_standalone_humaneval_bridge_evaluates_and_imports_pinned_run_safely(mon
         dataset_path=dataset_path,
         harness_root=harness_root,
         private_run_dir=private_run_dir,
-        candidate_id="axio-pro",
+        candidate_id="axio-sol",
         api_format="responses",
         harness_pin_manifest_path=pin_path,
         allow_unsafe_code_execution=True,
@@ -17423,7 +17423,7 @@ def test_standalone_humaneval_bridge_evaluates_and_imports_pinned_run_safely(mon
     assert all(row["raw_model_output_persisted"] is False for row in scored_rows)
     assert imported.get("status") != "blocked", imported.get("reason_codes")
     assert imported["mode"] == "official_harness_import"
-    assert imported["candidate_id"] == "axio-pro"
+    assert imported["candidate_id"] == "axio-sol"
     assert imported["api_format"] == "responses"
     assert imported["primary_metric"] == "pass_at_1"
     assert imported["accuracy"] == 0.5
@@ -17660,8 +17660,8 @@ def test_standalone_official_harness_campaign_resumes_valid_import_without_leaka
         "execution_task_id": "official_harness_task_0001",
         "suite_id": "ifeval",
         "task_format": "instruction_checks",
-        "candidate_id_hash": sha256_text("axio-pro"),
-        "run_unit_id_hash": sha256_text("axio-pro@chat_completions"),
+        "candidate_id_hash": sha256_text("axio-sol"),
+        "run_unit_id_hash": sha256_text("axio-sol@chat_completions"),
         "candidate_type": "axio",
         "api_format": "chat/completions",
         "provider_profile_hash": "",
@@ -17705,7 +17705,7 @@ def test_standalone_official_harness_campaign_resumes_valid_import_without_leaka
 
     def fake_preflight(**kwargs):
         calls["preflight"] += 1
-        assert kwargs["candidate_id"] == "axio-pro"
+        assert kwargs["candidate_id"] == "axio-sol"
         return {"status": "ready", "case_set_digest_sha256": sha256_text("ifeval-cases"), "case_count": 2, "reason_codes": []}
 
     def fake_generate(**kwargs):
@@ -17714,7 +17714,7 @@ def test_standalone_official_harness_campaign_resumes_valid_import_without_leaka
         return {
             "status": "generated",
             "suite_id": "ifeval",
-            "candidate_id": "axio-pro",
+            "candidate_id": "axio-sol",
             "case_set_digest_sha256": sha256_text("ifeval-cases"),
             "case_count": 2,
             "completed_case_count": 2,
@@ -17729,7 +17729,7 @@ def test_standalone_official_harness_campaign_resumes_valid_import_without_leaka
         return {
             "status": "evaluated",
             "suite_id": "ifeval",
-            "candidate_id": "axio-pro",
+            "candidate_id": "axio-sol",
             "case_set_digest_sha256": sha256_text("ifeval-cases"),
             "case_count": 2,
             "completed_case_count": 2,
@@ -17745,7 +17745,7 @@ def test_standalone_official_harness_campaign_resumes_valid_import_without_leaka
         return {
             "mode": "official_harness_import",
             "suite_id": "ifeval",
-            "candidate_id": "axio-pro",
+            "candidate_id": "axio-sol",
             "case_results": [{"case_id": sha256_text("case-1")}],
         }
 
@@ -17839,7 +17839,7 @@ def test_standalone_official_harness_import_bridge_derives_pinned_run_and_cli(mo
         dataset_path=dataset_path,
         harness_root=harness_root,
         private_run_dir=private_run_dir,
-        candidate_id="axio-pro",
+        candidate_id="axio-sol",
         api_format="anthropic",
         harness_pin_manifest_path=pin_path,
         live=True,
@@ -17876,7 +17876,7 @@ def test_standalone_official_harness_import_bridge_derives_pinned_run_and_cli(mo
         dataset_path=dataset_path,
         harness_root=harness_root,
         private_run_dir=private_run_dir,
-        candidate_id="axio-pro",
+        candidate_id="axio-sol",
         api_format="anthropic",
         harness_pin_manifest_path=pin_path,
     )
@@ -17902,7 +17902,7 @@ def test_standalone_official_harness_import_bridge_derives_pinned_run_and_cli(mo
     assert len(evaluation["evaluation_receipt_digest_sha256"]) == 64
     assert imported.get("status") != "blocked", imported.get("reason_codes")
     assert imported["mode"] == "official_harness_import"
-    assert imported["candidate_id"] == "axio-pro"
+    assert imported["candidate_id"] == "axio-sol"
     assert imported["api_format"] == "anthropic"
     assert imported["accuracy"] == 0.5
     assert imported["secondary_metrics"] == {"instruction_level_accuracy": 0.75}
@@ -17968,7 +17968,7 @@ def test_standalone_official_harness_import_bridge_rejects_scored_row_drift(monk
         dataset_path=dataset_path,
         harness_root=harness_root,
         private_run_dir=private_run_dir,
-        candidate_id="axio-fast",
+        candidate_id="axio-luna",
         harness_pin_manifest_path=pin_path,
         live=True,
         client=FakeBridgeClient(),
@@ -17998,7 +17998,7 @@ def test_standalone_official_harness_import_bridge_rejects_scored_row_drift(monk
         dataset_path=dataset_path,
         harness_root=harness_root,
         private_run_dir=private_run_dir,
-        candidate_id="axio-fast",
+        candidate_id="axio-luna",
         harness_pin_manifest_path=pin_path,
     )["status"] == "evaluated"
     scored_path = private_run_dir / "official_scored_rows.safe.jsonl"
@@ -18414,7 +18414,7 @@ def test_standalone_humaneval_bridge_requires_explicit_code_execution_authorizat
         dataset_path=dataset_path,
         harness_root=harness_root,
         private_run_dir=private_run_dir,
-        candidate_id="axio-pro",
+        candidate_id="axio-sol",
         harness_pin_manifest_path=pin_path,
     )
 
@@ -19050,7 +19050,7 @@ def test_standalone_benchmark_acquisition_status_reconciles_partial_inputs_safel
     )
     safe_import = import_official_benchmark_run(
         suite_id="livecodebench",
-        candidate_id="axio-pro",
+        candidate_id="axio-sol",
         source_path=source_path,
         task_format="python_code",
         harness_name="LiveCodeBench official",
@@ -19058,7 +19058,7 @@ def test_standalone_benchmark_acquisition_status_reconciles_partial_inputs_safel
         dataset_snapshot="release:2026-07",
         evaluator_config="python=3.11 timeout=5",
     )
-    import_path = import_dir / "livecodebench_axio_pro.safe.json"
+    import_path = import_dir / "livecodebench_axio_sol.safe.json"
     import_path.write_text(json.dumps(safe_import), encoding="utf-8")
     output_path = tmp_path / "acquisition_status.json"
 
@@ -19115,7 +19115,7 @@ def test_standalone_benchmark_acquisition_status_reconciles_partial_inputs_safel
     assert str(dataset_dir) not in serialized
     assert str(import_dir) not in serialized
     assert str(source_path) not in serialized
-    assert "axio-pro" not in serialized
+    assert "axio-sol" not in serialized
     assert '"raw_candidate_ids_persisted": true' not in serialized
     assert '"raw_dataset_paths_persisted": true' not in serialized
     assert '"raw_provider_outputs_persisted": true' not in serialized
@@ -19879,7 +19879,7 @@ def test_standalone_generic_benchmark_runner_supports_non_mcq_formats(monkeypatc
             run_benchmark_dataset(
                 suite_id=suite_id,
                 dataset_path=dataset_path,
-                candidate_id="axio-fast",
+                candidate_id="axio-luna",
                 task_format=task_format,
                 registry_path=registry_path,
                 live=True,
@@ -19927,7 +19927,7 @@ def test_standalone_exact_match_parser_handles_wrapped_final_answers_safely(tmp_
     run = run_benchmark_dataset(
         suite_id="math_500",
         dataset_path=dataset_path,
-        candidate_id="axio-fast",
+        candidate_id="axio-luna",
         task_format="exact_match",
         registry_path=registry_path,
         live=True,
@@ -20316,7 +20316,7 @@ def test_standalone_strict_live_gateway_preflight_redacts_invalid_url(monkeypatc
     monkeypatch.delenv("AXIO_FUSION_BENCHMARK_GATEWAY_URL", raising=False)
     receipt = evaluation_module._strict_live_axio_http_gateway_preflight_receipt(
         axio_gateway_url=gateway_url,
-        run_units=[{"candidate_id": "axio-fast", "api_format": "chat/completions"}],
+        run_units=[{"candidate_id": "axio-luna", "api_format": "chat/completions"}],
     )
     serialized = json.dumps(receipt, ensure_ascii=False)
 
@@ -20701,9 +20701,9 @@ def test_standalone_benchmark_campaign_progress_plan_guides_safe_resume(monkeypa
 
 def test_standalone_benchmark_readiness_and_imported_external_runs_are_safe(tmp_path):
     registry_path = _benchmark_registry_path(tmp_path)
-    imported_run = _claim_audit_run("mt_bench_work", "axio-pro", 1, total=1)
+    imported_run = _claim_audit_run("mt_bench_work", "axio-sol", 1, total=1)
     imported_run.pop("harness_receipt", None)
-    imported_path = tmp_path / "imported_axio_pro.json"
+    imported_path = tmp_path / "imported_axio_sol.json"
     imported_path.write_text(json.dumps(imported_run), encoding="utf-8")
     manifest_path = tmp_path / "manifest.json"
     manifest_path.write_text(
@@ -20713,7 +20713,7 @@ def test_standalone_benchmark_readiness_and_imported_external_runs_are_safe(tmp_
                     {
                         "suite_id": "mt_bench_work",
                         "task_format": "external_pairwise_judge",
-                        "imported_runs": {"axio-pro": str(imported_path)},
+                        "imported_runs": {"axio-sol": str(imported_path)},
                     }
                 ]
             }
@@ -20746,7 +20746,7 @@ def test_standalone_benchmark_readiness_and_imported_external_runs_are_safe(tmp_
         dataset_manifest_path=manifest_path,
         output_dir=tmp_path / "import_campaign",
         registry_path=registry_path,
-        candidate_ids=["axio-pro"],
+        candidate_ids=["axio-sol"],
         include_provider_baselines=False,
         min_cases_per_suite=1,
     )
@@ -20768,7 +20768,7 @@ def test_standalone_benchmark_readiness_and_imported_external_runs_are_safe(tmp_
     assert output_path.exists()
     assert campaign["completed_or_resumed_run_count"] == 4
     assert campaign["artifacts"][0]["status"] == "imported"
-    assert imported_copy["runs"][0]["candidate_id"] == "axio-pro"
+    assert imported_copy["runs"][0]["candidate_id"] == "axio-sol"
     assert str(imported_path) not in serialized
     assert '"raw_dataset_paths_persisted": true' not in serialized
     assert '"raw_provider_outputs_persisted": true' not in serialized
@@ -20934,7 +20934,7 @@ def test_standalone_official_harness_suites_require_import_receipts_for_readines
     readiness = audit_benchmark_campaign_readiness(
         dataset_manifest_path=manifest_path,
         registry_path=registry_path,
-        candidate_ids=["axio-pro"],
+        candidate_ids=["axio-sol"],
         include_provider_baselines=False,
         min_cases_per_suite=1,
     )
@@ -21027,7 +21027,7 @@ def test_standalone_import_official_harness_run_is_safe_and_readiness_compatible
 
     run = import_official_benchmark_run(
         suite_id="livecodebench",
-        candidate_id="axio-pro",
+        candidate_id="axio-sol",
         source_path=source_path,
         task_format="python_code",
         harness_name="LiveCodeBench official",
@@ -21041,7 +21041,7 @@ def test_standalone_import_official_harness_run_is_safe_and_readiness_compatible
             "--suite-id",
             "livecodebench",
             "--candidate-id",
-            "axio-pro",
+            "axio-sol",
             "--source",
             str(source_path),
             "--task-format",
@@ -21064,7 +21064,7 @@ def test_standalone_import_official_harness_run_is_safe_and_readiness_compatible
     for api_format in ("responses", "anthropic", "gemini"):
         surface_run = import_official_benchmark_run(
             suite_id="livecodebench",
-            candidate_id=f"axio-pro@{_api_format_slug_for_test(api_format)}",
+            candidate_id=f"axio-sol@{_api_format_slug_for_test(api_format)}",
             source_path=source_path,
             task_format="python_code",
             api_format=api_format,
@@ -21094,7 +21094,7 @@ def test_standalone_import_official_harness_run_is_safe_and_readiness_compatible
     readiness = audit_benchmark_campaign_readiness(
         dataset_manifest_path=manifest_path,
         registry_path=_benchmark_registry_path(tmp_path),
-        candidate_ids=["axio-pro"],
+        candidate_ids=["axio-sol"],
         include_provider_baselines=False,
         min_cases_per_suite=2,
     )
@@ -21134,7 +21134,7 @@ def _official_import_audit_fixture(tmp_path, *, tamper_dataset_snapshot=False):
         if _suite_requires_official_harness_for_test(suite)
     ]
     candidate_surface_ids = [
-        f"axio-pro@{_api_format_slug_for_test(api_format)}"
+        f"axio-sol@{_api_format_slug_for_test(api_format)}"
         for api_format in AXIO_BENCHMARK_API_FORMATS_FOR_TESTS
     ]
 
@@ -21305,7 +21305,7 @@ def test_standalone_official_import_audit_ready_path_is_hash_only(tmp_path):
         case_hash_manifest_path=fixture["case_manifest_path"],
         harness_pin_manifest_path=fixture["harness_pin_path"],
         import_dirs=[fixture["import_dir"]],
-        candidate_ids=["axio-pro"],
+        candidate_ids=["axio-sol"],
         include_provider_baselines=False,
         min_cases_per_suite=2,
     )
@@ -21323,7 +21323,7 @@ def test_standalone_official_import_audit_ready_path_is_hash_only(tmp_path):
             "--import-dir",
             str(fixture["import_dir"]),
             "--candidate-id",
-            "axio-pro",
+            "axio-sol",
             "--no-provider-baselines",
             "--min-cases-per-suite",
             "2",
@@ -21352,7 +21352,7 @@ def test_standalone_official_import_audit_ready_path_is_hash_only(tmp_path):
     assert cli_audit["ready_for_campaign_import_stage"] is True
     assert "SECRET_IMPORT_AUDIT" not in serialized
     assert "SECRET_PROVIDER_OUTPUT" not in serialized
-    assert "axio-pro" not in serialized
+    assert "axio-sol" not in serialized
     assert str(fixture["manifest_path"]) not in serialized
     assert str(fixture["source_manifest_path"]) not in serialized
     assert str(fixture["case_manifest_path"]) not in serialized
@@ -21373,7 +21373,7 @@ def test_standalone_official_import_audit_blocks_tampered_harness_binding(tmp_pa
         case_hash_manifest_path=fixture["case_manifest_path"],
         harness_pin_manifest_path=fixture["harness_pin_path"],
         import_dirs=[fixture["import_dir"]],
-        candidate_ids=["axio-pro"],
+        candidate_ids=["axio-sol"],
         include_provider_baselines=False,
         min_cases_per_suite=2,
     )
@@ -21387,7 +21387,7 @@ def test_standalone_official_import_audit_blocks_tampered_harness_binding(tmp_pa
     assert audit["blocking_reason_counts"]["run_dataset_snapshot_source_manifest_mismatch"] >= 1
     assert "SECRET_IMPORT_AUDIT" not in serialized
     assert "SECRET_PROVIDER_OUTPUT" not in serialized
-    assert "axio-pro" not in serialized
+    assert "axio-sol" not in serialized
     assert str(fixture["import_dir"]) not in serialized
     assert '"raw_provider_outputs_persisted": true' not in serialized
 
@@ -21423,7 +21423,7 @@ def test_standalone_import_official_harness_batch_is_safe_and_writes_receipts(tm
                 "imports": [
                     {
                         "suite_id": "livecodebench",
-                        "candidate_id": "axio-pro",
+                        "candidate_id": "axio-sol",
                         "source": str(source_path),
                         "task_format": "python_code",
                     },
@@ -21581,7 +21581,7 @@ def test_standalone_official_import_case_alignment_blocks_mismatched_candidates(
     )
     imported_runs = {}
     import_paths = []
-    for model, source in (("axio-pro", first_source), ("axio-terra", second_source)):
+    for model, source in (("axio-sol", first_source), ("axio-terra", second_source)):
         for api_format in AXIO_BENCHMARK_API_FORMATS_FOR_TESTS:
             run = import_official_benchmark_run(
                 suite_id="livecodebench",
@@ -21617,7 +21617,7 @@ def test_standalone_official_import_case_alignment_blocks_mismatched_candidates(
     readiness = audit_benchmark_campaign_readiness(
         dataset_manifest_path=manifest_path,
         registry_path=_benchmark_registry_path(tmp_path),
-        candidate_ids=["axio-pro", "axio-terra"],
+        candidate_ids=["axio-sol", "axio-terra"],
         include_provider_baselines=False,
         min_cases_per_suite=1,
     )
@@ -21625,7 +21625,7 @@ def test_standalone_official_import_case_alignment_blocks_mismatched_candidates(
         registry_path=_benchmark_registry_path(tmp_path),
         dataset_dir=tmp_path / "datasets",
         import_dirs=[import_dir],
-        candidate_ids=["axio-pro", "axio-terra"],
+        candidate_ids=["axio-sol", "axio-terra"],
         include_provider_baselines=False,
         max_provider_baselines=0,
         min_cases_per_suite=1,
@@ -21664,7 +21664,7 @@ def test_standalone_assemble_manifest_collects_datasets_and_safe_imports(tmp_pat
     for api_format in AXIO_BENCHMARK_API_FORMATS_FOR_TESTS:
         surface_run = import_official_benchmark_run(
             suite_id="livecodebench",
-            candidate_id=f"axio-pro@{_api_format_slug_for_test(api_format)}",
+            candidate_id=f"axio-sol@{_api_format_slug_for_test(api_format)}",
             source_path=_official_import_source_fixture(tmp_path),
             task_format="python_code",
             api_format=api_format,
@@ -21674,7 +21674,7 @@ def test_standalone_assemble_manifest_collects_datasets_and_safe_imports(tmp_pat
             evaluator_config="python=3.11 timeout=5",
         )
         imported_run = surface_run
-        import_path = import_dir / f"livecodebench_axio_pro_{_api_format_slug_for_test(api_format)}.safe.json"
+        import_path = import_dir / f"livecodebench_axio_sol_{_api_format_slug_for_test(api_format)}.safe.json"
         import_path.write_text(json.dumps(surface_run), encoding="utf-8")
         import_paths[surface_run["api_surface_id"]] = import_path
     unsafe_path = import_dir / "unsafe.json"
@@ -21709,7 +21709,7 @@ def test_standalone_assemble_manifest_collects_datasets_and_safe_imports(tmp_pat
     readiness = audit_benchmark_campaign_readiness(
         dataset_manifest_path=output_path,
         registry_path=_benchmark_registry_path(tmp_path),
-        candidate_ids=["axio-pro"],
+        candidate_ids=["axio-sol"],
         include_provider_baselines=False,
         min_cases_per_suite=1,
     )
@@ -21718,7 +21718,7 @@ def test_standalone_assemble_manifest_collects_datasets_and_safe_imports(tmp_pat
 
     assert manifest["schema"] == "axio_fusion_api.dataset_manifest.v1"
     assert by_suite["math_500"]["dataset"] == str(math_path)
-    primary_surface_id = "axio-pro@chat_completions"
+    primary_surface_id = "axio-sol@chat_completions"
     assert by_suite["livecodebench"]["imported_runs"][primary_surface_id] == str(import_paths[primary_surface_id])
     assert "axio-terra" not in by_suite["livecodebench"]["imported_runs"]
     assert cli_by_suite["livecodebench"]["imported_runs"][primary_surface_id] == str(import_paths[primary_surface_id])
@@ -21742,7 +21742,7 @@ def test_standalone_benchmark_case_hash_manifest_is_safe_and_complete(tmp_path):
         if _suite_requires_official_harness_for_test(suite):
             imported = import_official_benchmark_run(
                 suite_id=suite_id,
-                candidate_id="axio-pro",
+                candidate_id="axio-sol",
                 source_path=_official_import_source_fixture(tmp_path),
                 task_format=task_format,
                 harness_name=f"{suite_id} official",
@@ -21751,7 +21751,7 @@ def test_standalone_benchmark_case_hash_manifest_is_safe_and_complete(tmp_path):
                 evaluator_config="deterministic-evaluator",
                 position_balanced=task_format == "external_pairwise_judge",
             )
-            (import_dir / f"{suite_id}_axio_pro.safe.json").write_text(json.dumps(imported), encoding="utf-8")
+            (import_dir / f"{suite_id}_axio_sol.safe.json").write_text(json.dumps(imported), encoding="utf-8")
             continue
         row = _minimal_dataset_row_for_format(task_format, suite_id=suite_id)
         (dataset_dir / f"{suite_id}.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
@@ -21766,7 +21766,7 @@ def test_standalone_benchmark_case_hash_manifest_is_safe_and_complete(tmp_path):
 
     case_manifest = build_benchmark_case_hash_manifest(
         dataset_manifest_path=manifest_path,
-        candidate_ids=["axio-pro"],
+        candidate_ids=["axio-sol"],
         min_cases_per_suite=1,
     )
     assert fusion_cli_main(
@@ -21775,7 +21775,7 @@ def test_standalone_benchmark_case_hash_manifest_is_safe_and_complete(tmp_path):
             "--dataset-manifest",
             str(manifest_path),
             "--candidate-id",
-            "axio-pro",
+            "axio-sol",
             "--min-cases-per-suite",
             "1",
             "--output",
@@ -22054,7 +22054,7 @@ def test_standalone_source_manifest_prepare_fills_hash_bindings_safely(tmp_path)
         if _suite_requires_official_harness_for_test(suite):
             imported = import_official_benchmark_run(
                 suite_id=suite_id,
-                candidate_id="axio-pro",
+                candidate_id="axio-sol",
                 source_path=_official_import_source_fixture(tmp_path),
                 task_format=task_format,
                 harness_name=f"{suite_id} official",
@@ -22063,7 +22063,7 @@ def test_standalone_source_manifest_prepare_fills_hash_bindings_safely(tmp_path)
                 evaluator_config=f"evaluator:{suite_id}",
                 position_balanced=task_format == "external_pairwise_judge",
             )
-            (import_dir / f"{suite_id}_axio_pro.safe.json").write_text(json.dumps(imported), encoding="utf-8")
+            (import_dir / f"{suite_id}_axio_sol.safe.json").write_text(json.dumps(imported), encoding="utf-8")
             continue
         row = _minimal_dataset_row_for_format(task_format, suite_id=suite_id)
         (dataset_dir / f"{suite_id}.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
@@ -22081,7 +22081,7 @@ def test_standalone_source_manifest_prepare_fills_hash_bindings_safely(tmp_path)
     case_manifest_path = tmp_path / "SECRET_PREPARE_CASE_HASH_MANIFEST.json"
     case_manifest = build_benchmark_case_hash_manifest(
         dataset_manifest_path=dataset_manifest_path,
-        candidate_ids=["axio-pro"],
+        candidate_ids=["axio-sol"],
         min_cases_per_suite=1,
     )
     case_manifest_path.write_text(json.dumps(case_manifest), encoding="utf-8")
@@ -22182,7 +22182,7 @@ def test_standalone_source_manifest_binds_case_hash_manifest_safely(tmp_path):
         if _suite_requires_official_harness_for_test(suite):
             imported = import_official_benchmark_run(
                 suite_id=suite_id,
-                candidate_id="axio-pro",
+                candidate_id="axio-sol",
                 source_path=_official_import_source_fixture(tmp_path),
                 task_format=task_format,
                 harness_name=f"{suite_id} official",
@@ -22191,7 +22191,7 @@ def test_standalone_source_manifest_binds_case_hash_manifest_safely(tmp_path):
                 evaluator_config="deterministic-evaluator",
                 position_balanced=task_format == "external_pairwise_judge",
             )
-            (import_dir / f"{suite_id}_axio_pro.safe.json").write_text(json.dumps(imported), encoding="utf-8")
+            (import_dir / f"{suite_id}_axio_sol.safe.json").write_text(json.dumps(imported), encoding="utf-8")
             continue
         row = _minimal_dataset_row_for_format(task_format, suite_id=suite_id)
         (dataset_dir / f"{suite_id}.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
@@ -22209,7 +22209,7 @@ def test_standalone_source_manifest_binds_case_hash_manifest_safely(tmp_path):
     case_manifest_path = tmp_path / "SECRET_BIND_CASE_HASH_MANIFEST.json"
     case_manifest = build_benchmark_case_hash_manifest(
         dataset_manifest_path=dataset_manifest_path,
-        candidate_ids=["axio-pro"],
+        candidate_ids=["axio-sol"],
         min_cases_per_suite=1,
     )
     case_manifest_path.write_text(json.dumps(case_manifest), encoding="utf-8")
@@ -23803,7 +23803,7 @@ def test_standalone_live_multiple_choice_scorecard_with_fake_client(tmp_path):
     axio_run = run_multiple_choice_benchmark(
         suite_id="arc_challenge",
         dataset_path=dataset_path,
-        candidate_id="axio-pro",
+        candidate_id="axio-sol",
         registry_path=registry_path,
         live=True,
         client=fake,
@@ -23849,18 +23849,18 @@ def test_standalone_live_multiple_choice_scorecard_with_fake_client(tmp_path):
     assert all(row["pricing_known"] is True for row in provider_run["case_results"])
     by_candidate = {row["candidate_id"]: row for row in scorecard["candidates"]}
     provider_alias = f"provider::{sha256_text('weak/low')}"
-    assert by_candidate["axio-pro"]["total_estimated_cost_usd"] == axio_run["estimated_cost_usd"]
+    assert by_candidate["axio-sol"]["total_estimated_cost_usd"] == axio_run["estimated_cost_usd"]
     assert provider_run["candidate_id"] == provider_alias
     assert by_candidate[provider_alias]["total_estimated_cost_usd"] == provider_run["estimated_cost_usd"]
-    assert by_candidate["axio-pro"]["cost_per_case_usd"] > 0
-    assert by_candidate["axio-pro"]["primary_score_per_dollar"] > 0
+    assert by_candidate["axio-sol"]["cost_per_case_usd"] > 0
+    assert by_candidate["axio-sol"]["primary_score_per_dollar"] > 0
     suite = scorecard["per_suite"][0]
     provider_tier = suite["provider_baseline_tiers"][0]
     comparison = suite["axio_target_comparisons"][0]
     assert provider_tier["estimated_cost_usd"] == provider_run["estimated_cost_usd"]
     assert comparison["axio_estimated_cost_usd"] == axio_run["estimated_cost_usd"]
     assert comparison["baseline_estimated_cost_usd"] == provider_run["estimated_cost_usd"]
-    assert scorecard["comparison"]["axio_pro_beats_best_provider"] is True
+    assert scorecard["comparison"]["axio_sol_beats_best_provider"] is True
     assert scorecard["comparison"]["superiority_claim_allowed"] is False
     assert scorecard_path.exists()
     assert "Pick the blue option" not in serialized
@@ -23896,14 +23896,14 @@ def test_standalone_live_axio_benchmark_exercises_all_public_api_surfaces(monkey
         "chat/completions": "/v1/chat/completions",
         "responses": "/v1/responses",
         "anthropic": "/v1/messages",
-        "gemini": "/v1beta/models/axio-fast:generateContent",
+        "gemini": "/v1beta/models/axio-luna:generateContent",
     }
     axio_runs = []
     for api_format in AXIO_BENCHMARK_API_FORMATS_FOR_TESTS:
         run = run_multiple_choice_benchmark(
             suite_id="arc_challenge",
             dataset_path=dataset_path,
-            candidate_id="axio-fast",
+            candidate_id="axio-luna",
             api_format=api_format,
             registry_path=registry_path,
             live=True,
@@ -24004,7 +24004,7 @@ def test_standalone_public_benchmark_tool_calls_cover_four_api_surfaces_without_
 
     for api_format in AXIO_BENCHMARK_API_FORMATS_FOR_TESTS:
         _, payload = evaluation_module._benchmark_public_api_payload(
-            model="axio-fast",
+            model="axio-luna",
             api_format=api_format,
             prompt="PRIVATE_TOOL_BENCHMARK_PROMPT",
             system="PRIVATE_TOOL_BENCHMARK_SYSTEM",
@@ -24016,7 +24016,7 @@ def test_standalone_public_benchmark_tool_calls_cover_four_api_surfaces_without_
 
         completion = evaluation_module._complete_public_axio_benchmark_candidate(
             engine=FusionEngine([profile], client=ToolBenchmarkClient()),
-            candidate_id="axio-fast",
+            candidate_id="axio-luna",
             api_format=api_format,
             prompt="PRIVATE_TOOL_BENCHMARK_PROMPT",
             system="PRIVATE_TOOL_BENCHMARK_SYSTEM",
@@ -24082,7 +24082,7 @@ def test_standalone_public_benchmark_message_history_covers_four_api_surfaces_wi
 
     for api_format in AXIO_BENCHMARK_API_FORMATS_FOR_TESTS:
         endpoint, payload = evaluation_module._benchmark_public_api_payload(
-            model="axio-fast",
+            model="axio-luna",
             api_format=api_format,
             prompt="PRIVATE_HISTORY_FALLBACK_PROMPT",
             system="PRIVATE_HISTORY_FALLBACK_SYSTEM",
@@ -24106,7 +24106,7 @@ def test_standalone_public_benchmark_message_history_covers_four_api_surfaces_wi
         client = HistoryBenchmarkClient()
         completion = evaluation_module._complete_public_axio_benchmark_candidate(
             engine=FusionEngine([profile], client=client),
-            candidate_id="axio-fast",
+            candidate_id="axio-luna",
             api_format=api_format,
             prompt="PRIVATE_HISTORY_FALLBACK_PROMPT",
             system="PRIVATE_HISTORY_FALLBACK_SYSTEM",
@@ -24189,7 +24189,7 @@ def test_standalone_public_benchmark_tool_history_covers_four_api_surfaces_witho
 
     for api_format in AXIO_BENCHMARK_API_FORMATS_FOR_TESTS:
         _, payload = evaluation_module._benchmark_public_api_payload(
-            model="axio-fast",
+            model="axio-luna",
             api_format=api_format,
             prompt="PRIVATE_TOOL_HISTORY_FALLBACK_PROMPT",
             system="PRIVATE_TOOL_HISTORY_FALLBACK_SYSTEM",
@@ -24214,7 +24214,7 @@ def test_standalone_public_benchmark_tool_history_covers_four_api_surfaces_witho
         client = ToolHistoryBenchmarkClient()
         completion = evaluation_module._complete_public_axio_benchmark_candidate(
             engine=FusionEngine([profile], client=client),
-            candidate_id="axio-fast",
+            candidate_id="axio-luna",
             api_format=api_format,
             prompt="PRIVATE_TOOL_HISTORY_FALLBACK_PROMPT",
             system="PRIVATE_TOOL_HISTORY_FALLBACK_SYSTEM",
@@ -24281,7 +24281,7 @@ def test_standalone_benchmark_http_gateway_keeps_local_key_local_and_joins_gemin
         )
         return FakeGatewayResponse(
             {
-                "modelVersion": "axio-fast",
+                "modelVersion": "axio-luna",
                 "candidates": [
                     {
                         "content": {
@@ -24312,7 +24312,7 @@ def test_standalone_benchmark_http_gateway_keeps_local_key_local_and_joins_gemin
     run = run_multiple_choice_benchmark(
         suite_id="arc_challenge",
         dataset_path=dataset_path,
-        candidate_id="axio-fast",
+        candidate_id="axio-luna",
         api_format="gemini",
         registry_path=registry_path,
         live=True,
@@ -24323,7 +24323,7 @@ def test_standalone_benchmark_http_gateway_keeps_local_key_local_and_joins_gemin
 
     assert run["correct_count"] == 1
     assert len(calls) == 1
-    assert calls[0]["url"] == "https://benchmark-gateway.invalid/v1beta/models/axio-fast:generateContent"
+    assert calls[0]["url"] == "https://benchmark-gateway.invalid/v1beta/models/axio-luna:generateContent"
     assert calls[0]["timeout"] == 90.0
     assert all(str(key).lower() != "authorization" for key in calls[0]["headers"])
     assert invocation["transport"] == "http_gateway"
@@ -24376,9 +24376,9 @@ def test_standalone_benchmark_scorecard_tracks_per_suite_provider_tiers_by_prima
         scored_run("provider::rank-by-mean-1", 0.92, 0.10),
         scored_run("provider::rank-by-mean-2", 0.80, 0.95),
         scored_run("provider::rank-by-mean-3", 0.70, 0.90),
-        scored_run("axio-pro", 0.95, 0.20),
+        scored_run("axio-sol", 0.95, 0.20),
         scored_run("axio-terra", 0.81, 0.20),
-        scored_run("axio-fast", 0.71, 0.20),
+        scored_run("axio-luna", 0.71, 0.20),
     ]
 
     scorecard = build_benchmark_scorecard(runs)
@@ -24393,18 +24393,18 @@ def test_standalone_benchmark_scorecard_tracks_per_suite_provider_tiers_by_prima
     assert tiers[0]["candidate_id"] == "provider::rank-by-mean-1"
     assert tiers[1]["candidate_id"] == "provider::rank-by-mean-2"
     assert tiers[2]["candidate_id"] == "provider::rank-by-mean-3"
-    assert comparisons["axio-pro"]["target_tier"] == "strongest_provider"
+    assert comparisons["axio-sol"]["target_tier"] == "strongest_provider"
     assert comparisons["axio-terra"]["target_tier"] == "second_strongest_provider"
-    assert comparisons["axio-fast"]["target_tier"] == "third_strongest_provider"
-    assert comparisons["axio-pro"]["beats_target"] is True
+    assert comparisons["axio-luna"]["target_tier"] == "third_strongest_provider"
+    assert comparisons["axio-sol"]["beats_target"] is True
     assert comparisons["axio-terra"]["beats_target"] is True
-    assert comparisons["axio-fast"]["beats_target"] is True
-    assert scorecard["comparison"]["tier_target_summary"]["axio-pro"]["passed_suite_count"] == 1
-    assert scorecard["comparison"]["tier_target_summary"]["axio-pro"]["all_scored_suites_passed"] is True
-    assert scorecard["comparison"]["tier_target_summary"]["axio-pro"]["all_required_suites_present"] is False
-    assert scorecard["comparison"]["tier_target_summary"]["axio-pro"]["all_required_suites_passed"] is False
-    assert scorecard["comparison"]["tier_target_summary"]["axio-pro"]["missing_required_suite_count"] == _benchmark_suite_count() - 1
-    assert scorecard["provider_tier_contract"]["axio-pro"] == "must beat strongest_provider on every required suite"
+    assert comparisons["axio-luna"]["beats_target"] is True
+    assert scorecard["comparison"]["tier_target_summary"]["axio-sol"]["passed_suite_count"] == 1
+    assert scorecard["comparison"]["tier_target_summary"]["axio-sol"]["all_scored_suites_passed"] is True
+    assert scorecard["comparison"]["tier_target_summary"]["axio-sol"]["all_required_suites_present"] is False
+    assert scorecard["comparison"]["tier_target_summary"]["axio-sol"]["all_required_suites_passed"] is False
+    assert scorecard["comparison"]["tier_target_summary"]["axio-sol"]["missing_required_suite_count"] == _benchmark_suite_count() - 1
+    assert scorecard["provider_tier_contract"]["axio-sol"] == "must beat strongest_provider on every required suite"
     assert "raw_provider_outputs_persisted\": true" not in serialized
     assert "raw_model_output_persisted\": true" not in serialized
 
@@ -24448,9 +24448,9 @@ def test_standalone_pre_registered_scorecard_comparison_uses_provider_pool_rank_
         scored_run("provider::rank-1", 0.60, 0),
         scored_run("provider::rank-2", 0.70, 0),
         scored_run("provider::rank-3", 0.90, 1),
-        scored_run("axio-pro", 0.95, 1),
+        scored_run("axio-sol", 0.95, 1),
         scored_run("axio-terra", 0.80, 1),
-        scored_run("axio-fast", 0.75, 1),
+        scored_run("axio-luna", 0.75, 1),
     ]
 
     scorecard = build_benchmark_scorecard(
@@ -24474,7 +24474,7 @@ def test_standalone_api_surface_parity_report_guides_four_surface_repairs(tmp_pa
         for run in runs
         if not (
             run["suite_id"] == "arc_challenge"
-            and run["candidate_id"] == "axio-fast"
+            and run["candidate_id"] == "axio-luna"
             and run.get("api_format") == "gemini"
         )
     ]
@@ -24507,7 +24507,7 @@ def test_standalone_api_surface_parity_report_guides_four_surface_repairs(tmp_pa
     arc_fast = next(
         row
         for row in report["repair_queue"]
-        if row["suite_id"] == "arc_challenge" and row["axio_model"] == "axio-fast"
+        if row["suite_id"] == "arc_challenge" and row["axio_model"] == "axio-luna"
     )
     math_terra = next(
         row
@@ -24527,7 +24527,7 @@ def test_standalone_api_surface_parity_report_guides_four_surface_repairs(tmp_pa
     assert "investigate_surface_adapter_score_drift" in rec_ids
     assert arc_fast["missing_api_formats"] == ["gemini"]
     assert math_terra["max_primary_score_delta"] > 0.02
-    assert report["by_model"][0]["axio_model"] in {"axio-fast", "axio-terra", "axio-pro"}
+    assert report["by_model"][0]["axio_model"] in {"axio-luna", "axio-terra", "axio-sol"}
     assert cli_report["surface_audit_digest_sha256"] == report["surface_audit_digest_sha256"]
     assert "benchmark-run --suite-id <SUITE_ID>" in report["next_command_templates"]["rerun_missing_surface"]
     assert report["claim_contract"]["four_public_api_surfaces_required_for_each_axio_model_suite"] is True
@@ -24545,7 +24545,7 @@ def test_standalone_strict_api_surface_parity_rejects_in_process_or_missing_tran
         run
         for run in runs
         if run["suite_id"] == "arc_challenge"
-        and run["candidate_id"] == "axio-fast"
+        and run["candidate_id"] == "axio-luna"
         and run.get("api_format") == "responses"
     )
     for row in in_process["case_results"]:
@@ -24555,7 +24555,7 @@ def test_standalone_strict_api_surface_parity_rejects_in_process_or_missing_tran
         run
         for run in runs
         if run["suite_id"] == "math_500"
-        and run["candidate_id"] == "axio-pro"
+        and run["candidate_id"] == "axio-sol"
         and run.get("api_format") == "gemini"
     )
     missing["case_results"][0].pop("public_api_invocation")
@@ -24565,7 +24565,7 @@ def test_standalone_strict_api_surface_parity_rejects_in_process_or_missing_tran
     arc_row = next(
         row
         for row in strict_report["repair_queue"]
-        if row["suite_id"] == "arc_challenge" and row["axio_model"] == "axio-fast"
+        if row["suite_id"] == "arc_challenge" and row["axio_model"] == "axio-luna"
     )
 
     assert engineering_report["all_required_api_surfaces_ready"] is True
@@ -24605,9 +24605,9 @@ def test_standalone_benchmark_claim_audit_requires_paired_provider_tiers(tmp_pat
 
     assert audit["all_required_suites_present"] is True
     assert audit["all_final_claims_allowed"] is True
-    assert audit["final_claims"]["axio_pro_beats_strongest_single_model_on_all_required_benchmarks"] is True
+    assert audit["final_claims"]["axio_sol_beats_strongest_single_model_on_all_required_benchmarks"] is True
     assert audit["final_claims"]["axio_terra_beats_second_strongest_single_model_on_all_required_benchmarks"] is True
-    assert audit["final_claims"]["axio_fast_beats_third_strongest_single_model_on_all_required_benchmarks"] is True
+    assert audit["final_claims"]["axio_luna_beats_third_strongest_single_model_on_all_required_benchmarks"] is True
     assert cli_audit["all_final_claims_allowed"] is True
     assert all(row["paired_case_stats"]["p_value_one_sided"] <= 0.05 for row in audit["comparisons"])
     assert audit["statistical_contract"]["multiple_comparison_correction_required"] is True
@@ -24641,17 +24641,17 @@ def test_standalone_benchmark_claim_audit_rejects_terra_and_fast_tier_failures()
     for run in runs:
         if run["candidate_id"] == "axio-terra":
             weaken(run, 17)
-        elif run["candidate_id"] == "axio-fast":
+        elif run["candidate_id"] == "axio-luna":
             weaken(run, 15)
 
     audit = build_benchmark_claim_audit(runs, min_cases_per_suite=20, alpha=0.05)
     terra_failures = [row for row in audit["comparisons"] if row["axio_model"] == "axio-terra"]
-    fast_failures = [row for row in audit["comparisons"] if row["axio_model"] == "axio-fast"]
+    fast_failures = [row for row in audit["comparisons"] if row["axio_model"] == "axio-luna"]
 
     assert audit["all_required_suites_present"] is True
-    assert audit["final_claims"]["axio_pro_beats_strongest_single_model_on_all_required_benchmarks"] is True
+    assert audit["final_claims"]["axio_sol_beats_strongest_single_model_on_all_required_benchmarks"] is True
     assert audit["final_claims"]["axio_terra_beats_second_strongest_single_model_on_all_required_benchmarks"] is False
-    assert audit["final_claims"]["axio_fast_beats_third_strongest_single_model_on_all_required_benchmarks"] is False
+    assert audit["final_claims"]["axio_luna_beats_third_strongest_single_model_on_all_required_benchmarks"] is False
     assert audit["all_final_claims_allowed"] is False
     assert all("axio_primary_score_not_higher" in row["reason_codes"] for row in terra_failures)
     assert all("axio_primary_score_not_higher" in row["reason_codes"] for row in fast_failures)
@@ -24671,9 +24671,9 @@ def test_standalone_benchmark_claim_audit_requires_practical_effect_size():
         for api_format in AXIO_BENCHMARK_API_FORMATS_FOR_TESTS:
             runs.extend(
                 [
-                    _claim_audit_run(suite_id, "axio-pro", 282, total=300, api_format=api_format),
+                    _claim_audit_run(suite_id, "axio-sol", 282, total=300, api_format=api_format),
                     _claim_audit_run(suite_id, "axio-terra", 272, total=300, api_format=api_format),
-                    _claim_audit_run(suite_id, "axio-fast", 262, total=300, api_format=api_format),
+                    _claim_audit_run(suite_id, "axio-luna", 262, total=300, api_format=api_format),
                 ]
             )
 
@@ -24695,7 +24695,7 @@ def test_standalone_benchmark_claim_audit_requires_practical_effect_size():
     assert '"raw_provider_outputs_persisted": true' not in serialized
     assert '"secrets_persisted": true' not in serialized
     assert any(item["kind"] == "model_claim_not_proven" and item["candidate_id"] == "axio-terra" for item in audit["missing_requirements"])
-    assert any(item["kind"] == "model_claim_not_proven" and item["candidate_id"] == "axio-fast" for item in audit["missing_requirements"])
+    assert any(item["kind"] == "model_claim_not_proven" and item["candidate_id"] == "axio-luna" for item in audit["missing_requirements"])
 
 
 def test_standalone_benchmark_claim_audit_rejects_over_3x_latency_even_when_scores_win():
@@ -24703,7 +24703,7 @@ def test_standalone_benchmark_claim_audit_rejects_over_3x_latency_even_when_scor
     for run in runs:
         if (
             run["suite_id"] == "arc_challenge"
-            and run["candidate_id"] == "axio-pro"
+            and run["candidate_id"] == "axio-sol"
             and run.get("api_surface_is_primary_claim") is True
         ):
             run["p95_case_latency_ms"] = 400.0
@@ -24715,7 +24715,7 @@ def test_standalone_benchmark_claim_audit_rejects_over_3x_latency_even_when_scor
     comparison = next(
         row
         for row in audit["comparisons"]
-        if row["suite_id"] == "arc_challenge" and row["axio_model"] == "axio-pro"
+        if row["suite_id"] == "arc_challenge" and row["axio_model"] == "axio-sol"
     )
     scorecard_comparison = next(
         row
@@ -24734,13 +24734,13 @@ def test_standalone_benchmark_claim_audit_rejects_over_3x_latency_even_when_scor
     assert "axio_latency_exceeds_3x_baseline" in comparison["reason_codes"]
     assert "axio_p95_latency_exceeds_3x_baseline" in comparison["reason_codes"]
     assert comparison["claim_allowed"] is False
-    assert audit["final_claims"]["axio_pro_beats_strongest_single_model_on_all_required_benchmarks"] is False
+    assert audit["final_claims"]["axio_sol_beats_strongest_single_model_on_all_required_benchmarks"] is False
     assert audit["all_final_claims_allowed"] is False
-    assert any(item["kind"] == "model_claim_not_proven" and item["candidate_id"] == "axio-pro" for item in audit["missing_requirements"])
+    assert any(item["kind"] == "model_claim_not_proven" and item["candidate_id"] == "axio-sol" for item in audit["missing_requirements"])
     assert scorecard_comparison["latency_within_3x_baseline"] is False
     assert "axio_latency_exceeds_3x_baseline" in scorecard_comparison["reason_codes"]
     assert "axio_p95_latency_exceeds_3x_baseline" in scorecard_comparison["reason_codes"]
-    assert scorecard["comparison"]["tier_target_summary"]["axio-pro"]["all_required_suites_passed"] is False
+    assert scorecard["comparison"]["tier_target_summary"]["axio-sol"]["all_required_suites_passed"] is False
     assert "raw_provider_outputs_persisted\": true" not in serialized
 
 
@@ -24752,7 +24752,7 @@ def test_standalone_benchmark_claim_audit_rejects_over_3x_p50_latency_even_when_
         if run["candidate_id"] == "provider::rank-1":
             run["p95_case_latency_ms"] = 100.0
         if (
-            run["candidate_id"] == "axio-pro"
+            run["candidate_id"] == "axio-sol"
             and run.get("api_surface_is_primary_claim") is True
         ):
             run["p50_case_latency_ms"] = 40.0
@@ -24763,7 +24763,7 @@ def test_standalone_benchmark_claim_audit_rejects_over_3x_p50_latency_even_when_
     comparison = next(
         row
         for row in audit["comparisons"]
-        if row["suite_id"] == "arc_challenge" and row["axio_model"] == "axio-pro"
+        if row["suite_id"] == "arc_challenge" and row["axio_model"] == "axio-sol"
     )
     scorecard_comparison = next(
         row
@@ -24796,11 +24796,11 @@ def test_standalone_fusion_failure_analysis_recommends_latency_and_score_ablatio
             row["correct"] = index < correct_count
 
     for run in runs:
-        if run["candidate_id"] == "axio-fast":
+        if run["candidate_id"] == "axio-luna":
             weaken(run, 15)
         if (
             run["suite_id"] == "arc_challenge"
-            and run["candidate_id"] == "axio-pro"
+            and run["candidate_id"] == "axio-sol"
             and run.get("api_surface_is_primary_claim") is True
         ):
             run["p95_case_latency_ms"] = 400.0
@@ -24819,7 +24819,7 @@ def test_standalone_fusion_failure_analysis_recommends_latency_and_score_ablatio
             "average_latency_ms": 3200.0,
             "average_cost_usd": 0.002,
             "by_strategy": {"pro_panel_judge_escalation": 8},
-            "by_public_model": {"axio-pro": 8},
+            "by_public_model": {"axio-sol": 8},
             "provider_routing_summary": {
                 "schema": "axio_fusion_api.trace_provider_routing_summary.v1",
                 "policy_count": 8,
@@ -24847,8 +24847,8 @@ def test_standalone_fusion_failure_analysis_recommends_latency_and_score_ablatio
 
     assert analysis["schema"] == "axio_fusion_api.benchmark_fusion_failure_analysis.v1"
     assert analysis["status"] == "optimization_needed"
-    assert summaries["axio-pro"]["latency_failure_count"] >= 1
-    assert summaries["axio-fast"]["score_failure_count"] >= _benchmark_suite_count()
+    assert summaries["axio-sol"]["latency_failure_count"] >= 1
+    assert summaries["axio-luna"]["score_failure_count"] >= _benchmark_suite_count()
     assert "latency_guarded_adaptive_panel" in rec_ids
     assert "score_diversity_judge_escalation" in rec_ids
     assert "provider_fallback_pool_refresh" in rec_ids
@@ -24868,9 +24868,9 @@ def test_standalone_fusion_failure_analysis_cli_flags_api_surface_and_readiness_
         _claim_audit_run("arc_challenge", "provider::rank-1", 30, total=40),
         _claim_audit_run("arc_challenge", "provider::rank-2", 28, total=40),
         _claim_audit_run("arc_challenge", "provider::rank-3", 26, total=40),
-        _claim_audit_run("arc_challenge", "axio-pro", 35, total=40, api_format="chat/completions"),
+        _claim_audit_run("arc_challenge", "axio-sol", 35, total=40, api_format="chat/completions"),
         _claim_audit_run("arc_challenge", "axio-terra", 30, total=40, api_format="chat/completions"),
-        _claim_audit_run("arc_challenge", "axio-fast", 27, total=40, api_format="chat/completions"),
+        _claim_audit_run("arc_challenge", "axio-luna", 27, total=40, api_format="chat/completions"),
     ]
     scorecard = build_benchmark_scorecard(runs)
     readiness = {
@@ -24923,7 +24923,7 @@ def test_standalone_benchmark_claim_audit_rejects_missing_and_weak_evidence():
         [
             _claim_audit_run("arc_challenge", "provider::rank-1", 8, total=10),
             _claim_audit_run("arc_challenge", "provider::rank-2", 7, total=10),
-            _claim_audit_run("arc_challenge", "axio-pro", 9, total=10),
+            _claim_audit_run("arc_challenge", "axio-sol", 9, total=10),
         ],
         min_cases_per_suite=20,
         alpha=0.05,
@@ -24933,7 +24933,7 @@ def test_standalone_benchmark_claim_audit_rejects_missing_and_weak_evidence():
     assert audit["covered_required_suite_count"] == 1
     assert any(item["kind"] == "missing_provider_baseline_tiers" for item in audit["missing_requirements"])
     assert any(item["kind"] == "missing_required_suite" for item in audit["missing_requirements"])
-    failed_arc = [row for row in audit["comparisons"] if row["suite_id"] == "arc_challenge" and row["axio_model"] == "axio-pro"][0]
+    failed_arc = [row for row in audit["comparisons"] if row["suite_id"] == "arc_challenge" and row["axio_model"] == "axio-sol"][0]
     assert "insufficient_paired_case_count" in failed_arc["reason_codes"]
     assert audit["statistical_contract"]["aggregate_only_scores_can_not_support_claim"] is True
 
@@ -25129,7 +25129,7 @@ def test_standalone_benchmark_final_audit_rejects_forged_claim_audit_even_with_m
     target_row = next(
         row
         for row in claim_audit["comparisons"]
-        if row["suite_id"] == "arc_challenge" and row["axio_model"] == "axio-pro"
+        if row["suite_id"] == "arc_challenge" and row["axio_model"] == "axio-sol"
     )
     target_row["baseline_candidate_id"] = "provider::rank-2"
     claim_audit_path.write_text(json.dumps(claim_audit), encoding="utf-8")
@@ -25324,7 +25324,7 @@ def test_standalone_benchmark_final_audit_rejects_forged_scorecard_tier_summary(
     )
     scorecard_path = campaign_dir / "scorecard.json"
     scorecard = json.loads(scorecard_path.read_text(encoding="utf-8"))
-    del scorecard["comparison"]["tier_target_summary"]["axio-fast"]
+    del scorecard["comparison"]["tier_target_summary"]["axio-luna"]
     scorecard_path.write_text(json.dumps(scorecard), encoding="utf-8")
 
     audit = build_benchmark_final_audit(
@@ -25361,7 +25361,7 @@ def test_standalone_benchmark_final_audit_rejects_digest_match_without_binding_r
         "expected_run_count": len(runs),
         "completed_or_resumed_run_count": len(runs),
         "missing_suite_count": 0,
-        "candidate_ids": ["provider::rank-1", "provider::rank-2", "provider::rank-3", "axio-pro", "axio-terra", "axio-fast"],
+        "candidate_ids": ["provider::rank-1", "provider::rank-2", "provider::rank-3", "axio-sol", "axio-terra", "axio-luna"],
         "claim_summary": {
             "all_required_suites_present": claim_audit["all_required_suites_present"],
             "all_final_claims_allowed": claim_audit["all_final_claims_allowed"],
@@ -25445,7 +25445,7 @@ def test_standalone_benchmark_final_audit_rejects_missing_or_unfilled_source_man
         "expected_run_count": len(runs),
         "completed_or_resumed_run_count": len(runs),
         "missing_suite_count": 0,
-        "candidate_ids": ["provider::rank-1", "provider::rank-2", "provider::rank-3", "axio-pro", "axio-terra", "axio-fast"],
+        "candidate_ids": ["provider::rank-1", "provider::rank-2", "provider::rank-3", "axio-sol", "axio-terra", "axio-luna"],
         "claim_summary": {
             "all_required_suites_present": claim_audit["all_required_suites_present"],
             "all_final_claims_allowed": claim_audit["all_final_claims_allowed"],
@@ -26691,7 +26691,7 @@ def test_standalone_benchmark_final_audit_rejects_dry_run_or_unsafe_artifacts(tm
         ),
         encoding="utf-8",
     )
-    bad_run = _claim_audit_run("arc_challenge", "axio-pro", 1, total=1)
+    bad_run = _claim_audit_run("arc_challenge", "axio-sol", 1, total=1)
     bad_run["mode"] = "dry_run"
     (campaign_dir / "runs.json").write_text(
         json.dumps({"runs": [bad_run]}),
@@ -28806,10 +28806,10 @@ def _write_complete_final_audit_campaign(tmp_path, runs, name):
         require_http_gateway=True,
     )
     methodology = build_benchmark_methodology_manifest()
-    candidate_ids = ["provider::rank-1", "provider::rank-2", "provider::rank-3", "axio-pro", "axio-terra", "axio-fast"]
+    candidate_ids = ["provider::rank-1", "provider::rank-2", "provider::rank-3", "axio-sol", "axio-terra", "axio-luna"]
     run_unit_ids = [
         f"{model}@{_api_format_slug_for_test(api_format)}"
-        for model in ("axio-pro", "axio-terra", "axio-fast")
+        for model in ("axio-sol", "axio-terra", "axio-luna")
         for api_format in AXIO_BENCHMARK_API_FORMATS_FOR_TESTS
     ] + ["provider::rank-1", "provider::rank-2", "provider::rank-3"]
     campaign = {
@@ -29563,7 +29563,7 @@ def _claim_provider_baseline_freeze_manifest():
         "frozen_candidate_rows": rows,
         "tier_target_policy": [
             {
-                "axio_model": "axio-pro",
+                "axio_model": "axio-sol",
                 "target_provider_tier": "strongest_provider",
                 "target_provider_rank": 1,
                 "rank_source": "externally_evidenced_pre_registered_provider_pool_rank_before_target_campaign",
@@ -29579,7 +29579,7 @@ def _claim_provider_baseline_freeze_manifest():
                 "raw_provider_outputs_persisted": False,
             },
             {
-                "axio_model": "axio-fast",
+                "axio_model": "axio-luna",
                 "target_provider_tier": "third_strongest_provider",
                 "target_provider_rank": 3,
                 "rank_source": "externally_evidenced_pre_registered_provider_pool_rank_before_target_campaign",
@@ -29598,9 +29598,9 @@ def _claim_provider_baseline_freeze_manifest():
             "suite_tier_rank_source": "externally_evidenced_pre_registered_provider_pool_rank",
             "benchmark_results_must_not_change_rank_mapping": True,
             "tie_breakers": ["pre_registered_external_tie_break_policy"],
-            "axio_pro_target_rank": 1,
+            "axio_sol_target_rank": 1,
             "axio_terra_target_rank": 2,
-            "axio_fast_target_rank": 3,
+            "axio_luna_target_rank": 3,
         },
         "final_claim_freeze_ready": True,
         "blockers": [],
@@ -30272,9 +30272,9 @@ def _strong_claim_audit_runs_for_all_required_suites():
         for api_format in AXIO_BENCHMARK_API_FORMATS_FOR_TESTS:
             runs.extend(
                 [
-                    _claim_audit_run(suite_id, "axio-pro", 40, total=40, api_format=api_format),
+                    _claim_audit_run(suite_id, "axio-sol", 40, total=40, api_format=api_format),
                     _claim_audit_run(suite_id, "axio-terra", 39, total=40, api_format=api_format),
-                    _claim_audit_run(suite_id, "axio-fast", 38, total=40, api_format=api_format),
+                    _claim_audit_run(suite_id, "axio-luna", 38, total=40, api_format=api_format),
                 ]
             )
     return runs
@@ -30294,9 +30294,9 @@ def _raw_significant_but_uncorrected_claim_audit_runs_for_all_required_suites():
         for api_format in AXIO_BENCHMARK_API_FORMATS_FOR_TESTS:
             runs.extend(
                 [
-                    _claim_audit_run(suite_id, "axio-pro", 20, total=20, api_format=api_format),
+                    _claim_audit_run(suite_id, "axio-sol", 20, total=20, api_format=api_format),
                     _claim_audit_run(suite_id, "axio-terra", 19, total=20, api_format=api_format),
-                    _claim_audit_run(suite_id, "axio-fast", 18, total=20, api_format=api_format),
+                    _claim_audit_run(suite_id, "axio-luna", 18, total=20, api_format=api_format),
                 ]
             )
     return runs
@@ -30470,7 +30470,7 @@ def test_standalone_tau_bench_official_bridge_imports_hash_only_results_and_reje
         "dataset_path": harness_root,
         "harness_root": harness_root,
         "private_run_dir": private_run_dir,
-        "candidate_id": "axio-fast",
+        "candidate_id": "axio-luna",
         "api_format": "gemini",
         "harness_pin_manifest_path": pin_path,
         "axio_gateway_url": "http://127.0.0.1:19191",
@@ -30494,7 +30494,7 @@ def test_standalone_tau_bench_official_bridge_imports_hash_only_results_and_reje
             "--private-run-dir",
             str(private_run_dir),
             "--candidate-id",
-            "axio-fast",
+            "axio-luna",
             "--api-format",
             "gemini",
             "--harness-pin-manifest",
@@ -30836,7 +30836,7 @@ def test_standalone_mt_bench_bridge_uses_two_turn_public_surfaces_and_blocks_tam
         "dataset_path": question_path,
         "harness_root": harness_root,
         "private_run_dir": private_run_dir,
-        "candidate_id": "axio-fast",
+        "candidate_id": "axio-luna",
         "api_format": api_format,
         "registry_path": registry_path,
         "provider_baseline_freeze_manifest_path": freeze_path,
@@ -31021,7 +31021,7 @@ def test_standalone_responses_previous_response_id_replays_private_context_and_i
         headers=headers,
         body=json.dumps(
             {
-                "model": "axio-fast",
+                "model": "axio-luna",
                 "live": True,
                 "instructions": private_instruction,
                 "input": first_prompt,
@@ -31062,7 +31062,7 @@ def test_standalone_responses_previous_response_id_replays_private_context_and_i
     assert second["store"] is True
     assert first["metadata"]["response_continuation"]["storage_scope"] == "process_memory"
     assert first["metadata"]["response_continuation"]["durable"] is False
-    assert second_request.model == "axio-fast"
+    assert second_request.model == "axio-luna"
     assert private_instruction in second_request.system
     assert [item["name"] for item in second_request.tools] == ["lookup_status"]
     history = list(second_request.history)
@@ -31096,7 +31096,7 @@ def test_standalone_responses_continuation_store_false_tenant_isolation_and_cach
     )
     tenant_a = {"x-api-key": "responses-tenant-a"}
     tenant_b = {"x-api-key": "responses-tenant-b"}
-    cache_payload = {"model": "axio-fast", "live": True, "input": "same cacheable input"}
+    cache_payload = {"model": "axio-luna", "live": True, "input": "same cacheable input"}
     first_status, _, first_body = handle_request(
         method="POST",
         path="/v1/responses",
@@ -31125,7 +31125,7 @@ def test_standalone_responses_continuation_store_false_tenant_isolation_and_cach
         method="POST",
         path="/v1/responses",
         headers=tenant_a,
-        body=json.dumps({"model": "axio-fast", "store": False, "input": "do not retain"}),
+        body=json.dumps({"model": "axio-luna", "store": False, "input": "do not retain"}),
         engine=engine,
     )
     no_store = json.loads(no_store_body.decode("utf-8"))
@@ -31168,7 +31168,7 @@ def test_standalone_response_continuation_store_enforces_ttl_capacity_and_snapsh
         tenant_key=tenant,
         response_id="response-one",
         history=({"role": "user", "content": private_context},),
-        model="axio-fast",
+        model="axio-luna",
         instructions="private instruction",
         tools=(),
         now=100.0,
@@ -31186,7 +31186,7 @@ def test_standalone_response_continuation_store_enforces_ttl_capacity_and_snapsh
         tenant_key=tenant,
         response_id="z-response-old",
         history=({"role": "user", "content": "short"},),
-        model="axio-fast",
+        model="axio-luna",
         instructions="",
         tools=(),
         now=200.0,
@@ -31195,7 +31195,7 @@ def test_standalone_response_continuation_store_enforces_ttl_capacity_and_snapsh
         tenant_key=tenant,
         response_id="a-response-new",
         history=({"role": "user", "content": "newest"},),
-        model="axio-fast",
+        model="axio-luna",
         instructions="",
         tools=(),
         now=200.0,
@@ -31208,7 +31208,7 @@ def test_standalone_response_continuation_store_enforces_ttl_capacity_and_snapsh
         tenant_key=tenant,
         response_id="response-too-large",
         history=({"role": "user", "content": "x" * 256},),
-        model="axio-fast",
+        model="axio-luna",
         instructions="",
         tools=(),
         now=201.0,
@@ -31271,7 +31271,7 @@ def test_standalone_responses_previous_response_id_preserves_native_tool_call_re
         headers=headers,
         body=json.dumps(
             {
-                "model": "axio-fast",
+                "model": "axio-luna",
                 "live": True,
                 "input": "start tool workflow",
                 "tools": [
@@ -31381,7 +31381,7 @@ def test_standalone_gateway_tenant_concurrency_blocks_only_overlapping_work(monk
     )
     body = json.dumps(
         {
-            "model": "axio-fast",
+            "model": "axio-luna",
             "live": True,
             "messages": [{"role": "user", "content": "overlap this request"}],
         }
@@ -31431,7 +31431,7 @@ def test_standalone_gateway_record_runtime_false_does_not_consume_tenant_slot(mo
         headers={"x-api-key": "offline-diagnostic-tenant"},
         body=json.dumps(
             {
-                "model": "axio-fast",
+                "model": "axio-luna",
                 "messages": [{"role": "user", "content": "offline diagnostic"}],
             }
         ),

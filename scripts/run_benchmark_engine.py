@@ -29,7 +29,7 @@ from axio_fusion_api.registry import load_registry
 from axio_fusion_api.orchestrator import FusionEngine
 from axio_fusion_api.providers import HTTPProviderClient
 
-AXIO_MODELS = ["axio-fast", "axio-terra", "axio-pro"]
+AXIO_MODELS = ["axio-luna", "axio-terra", "axio-sol"]
 BASELINE_MODELS = ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]
 
 SUITES = {

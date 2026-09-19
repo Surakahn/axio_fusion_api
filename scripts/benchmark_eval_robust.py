@@ -97,7 +97,7 @@ def call_axio_with_retry(model: str, prompt: str, max_tok: int = 300) -> tuple[s
             engine = make_engine()
             policy = FusionPolicy(live=True)
             # Pre-warm ALL models to establish TCP connections
-            for warm_model in ['axio-fast', 'axio-terra', 'axio-pro']:
+            for warm_model in ['axio-luna', 'axio-terra', 'axio-sol']:
                 try:
                     engine.complete(FusionRequest(
                         model=warm_model, prompt='hi', policy=policy, max_output_tokens=5))
@@ -165,8 +165,8 @@ SUITES = [
     ('bbh.jsonl', 'Logic', 'text'),
 ]
 
-AXIO_MODELS  = ['axio-fast', 'axio-terra', 'axio-pro']
-CPA_BASELINE = {'gpt-5.6-luna': 'axio-fast', 'gpt-5.6-terra': 'axio-terra', 'gpt-5.6-sol': 'axio-pro'}
+AXIO_MODELS  = ['axio-luna', 'axio-terra', 'axio-sol']
+CPA_BASELINE = {'gpt-5.6-luna': 'axio-luna', 'gpt-5.6-terra': 'axio-terra', 'gpt-5.6-sol': 'axio-sol'}
 ALL_MODELS   = AXIO_MODELS + list(CPA_BASELINE.keys())
 
 # ── Main ──
@@ -179,7 +179,7 @@ def main():
     
     # Global pre-warm: establish connections for all three models
     print("Pre-warming all models...", flush=True)
-    for warm_model in ['axio-fast', 'axio-terra', 'axio-pro']:
+    for warm_model in ['axio-luna', 'axio-terra', 'axio-sol']:
         try:
             engine = make_engine()
             policy = FusionPolicy(live=True)
@@ -246,7 +246,7 @@ def main():
             errs = sum(1 for v in bench_scores[m] if v < 0)
             print(f"  {m:16s}: {mean:.3f} (n={len(valid)}, err={errs})", flush=True)
         
-        for ax, ba in [('axio-fast','gpt-5.6-luna'),('axio-terra','gpt-5.6-terra'),('axio-pro','gpt-5.6-sol')]:
+        for ax, ba in [('axio-luna','gpt-5.6-luna'),('axio-terra','gpt-5.6-terra'),('axio-sol','gpt-5.6-sol')]:
             av = summary[bench_file]['agg'][ax]
             bv = summary[bench_file]['agg'][ba]
             flag = '🟢 WIN' if av > bv else ('🔴 LOSE' if av < bv else '⚪ TIE')
@@ -257,7 +257,7 @@ def main():
     wins = losses = ties = 0
     for bench_file, data in summary.items():
         agg = data['agg']
-        for ax, ba in [('axio-fast','gpt-5.6-luna'),('axio-terra','gpt-5.6-terra'),('axio-pro','gpt-5.6-sol')]:
+        for ax, ba in [('axio-luna','gpt-5.6-luna'),('axio-terra','gpt-5.6-terra'),('axio-sol','gpt-5.6-sol')]:
             if agg[ax] > agg[ba]: wins += 1
             elif agg[ax] < agg[ba]: losses += 1
             else: ties += 1

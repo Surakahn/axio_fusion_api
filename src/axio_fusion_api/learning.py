@@ -1922,7 +1922,7 @@ def _shadow_patch_candidates(bucket: Mapping[str, Any], *, min_examples: int) ->
     fast_light_active_rate = _optional_float(metrics.get("fast_light_verify_active_rate"))
     if (
         poor_outcome
-        and public_model == "axio-fast"
+        and public_model == "axio-luna"
         and strategy != "fast_light_verify"
         and (fast_light_active_rate is None or fast_light_active_rate < 0.5)
         and (

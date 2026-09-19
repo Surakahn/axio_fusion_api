@@ -6,6 +6,7 @@ HTTP-compatible model APIs.
 """
 
 from .compat import canonicalize_payload, render_response
+from .call_cost import product_call_cost_contract, provider_call_cost_receipt
 from .image_api import (
     ImageProviderClient,
     ImageProviderResult,
@@ -100,6 +101,8 @@ __all__ = [
     "create_runtime_http_server",
     "build_route_plan",
     "canonicalize_payload",
+    "product_call_cost_contract",
+    "provider_call_cost_receipt",
     "load_registry",
     "enroll_provider_channels",
     "enroll_runtime_channels",

@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from .call_cost import provider_call_cost_receipt
 from .schemas import FusionResponse, sha256_text, stable_json
 from .tool_contract import tool_call_safe_summary
 
@@ -47,6 +48,14 @@ def safe_execution_trace(response: FusionResponse, *, tenant_key: str = "") -> d
         else {}
     )
     judge = response.judge_result if isinstance(response.judge_result, Mapping) else {}
+    attempted_calls = _optional_int(trace.get("provider_call_count")) or 0
+    call_cost = provider_call_cost_receipt(
+        response.request.public_model,
+        attempted_calls=attempted_calls,
+        judge_calls=_optional_int(trace.get("judge_provider_call_count")) or 0,
+        synthesizer_calls=_optional_int(trace.get("synthesis_provider_call_count")) or 0,
+        admitted_call_cap=_optional_int(budget.get("max_total_model_calls")),
+    )
     return {
         "schema": "axio_fusion_api.execution_trace_receipt.v1",
         "response_id": response.response_id,
@@ -132,9 +141,11 @@ def safe_execution_trace(response: FusionResponse, *, tenant_key: str = "") -> d
         },
         "cost": {
             "actual_cost_usd": _optional_float(trace.get("actual_cost_usd")),
-            "provider_call_count": _optional_int(trace.get("provider_call_count")),
+            "provider_call_count": attempted_calls,
+            "measurement": "attempted_provider_calls",
             "cache_hit": bool(trace.get("cache_hit")),
         },
+        "call_cost": call_cost,
         "latency_ms": _optional_float(trace.get("latency_ms")),
         "runtime_guards": _safe_runtime_guards(route_plan),
         "budget_lock": _safe_budget_lock(trace.get("budget_lock") if isinstance(trace.get("budget_lock"), Mapping) else {}),

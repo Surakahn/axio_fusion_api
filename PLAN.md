@@ -1,5 +1,22 @@
 # Axio Fusion API Plan
 
+## 2026-09-19 三个独立公开模型与相对调用成本契约
+
+公开产品名称已收敛为 `axio-luna`、`axio-terra`、`axio-sol`。它们不是同一个
+模型的三档参数，而是三套独立的编排产品：Luna 保留快速直接级联，Terra 保留选择性
+Fusion 与验证，Sol 保留专家面板、Judge、定向纠错和 Synthesizer。旧名称
+`axio-fast`、`axio-pro` 只作为请求兼容别名，`PUBLIC_MODELS`、`/v1/models`、四种
+协议 canonical request、路由摘要和 benchmark candidate 均只输出新名称。
+
+成本不使用跨渠道不可比的美元价格，统一记录同一 case 上所有 provider 尝试次数，包含
+失败、重试、Judge 与 Synthesizer。每个产品的 receipt 暴露 baseline 单模型每 case
+一次调用、实际尝试次数、相对调用比和质量/调用效率（只有 paired benchmark 提供质量
+分数时才计算）；`cheaper_than_baseline` 在证据不足时保持 `null`，不得从路由先验推导
+便宜结论。智能顺序为 `sol > terra > luna`，预期调用成本顺序为 `luna < terra < sol`，
+最终是否成立仍由完整 21-suite 同 case 评测决定。
+
+详见 `docs/handoffs/2026-09-19_public_models_and_call_cost.md`。
+
 ## 2026-09-19 Terra 路由准入与运行时模式一致性
 
 为 Terra 补齐专门的 `terra_execution_admission.v1` 与

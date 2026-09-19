@@ -599,7 +599,7 @@ def _run_workload(
     http_status: int | None = None
     try:
         request = FusionRequest(
-            model="axio-fast",
+            model="axio-luna",
             prompt=workload.prompt,
             system=workload.system,
             task_type="operational_admission",

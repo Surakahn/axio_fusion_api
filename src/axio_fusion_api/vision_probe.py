@@ -175,7 +175,7 @@ def _probe_one_profile(
     started = time.perf_counter()
     _begin_provider_request_trace()
     request = FusionRequest(
-        model="axio-fast",
+        model="axio-luna",
         prompt=VISION_PROBE_PROMPT,
         content_parts=(
             {"type": "text", "text": VISION_PROBE_PROMPT},

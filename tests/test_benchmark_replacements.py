@@ -176,7 +176,7 @@ def test_mmlu_pro_v1_replacement_remains_diagnostic_not_formal_ready(tmp_path: P
     assert rejected["_replacement_invalid_reason"] == "replacement_screening_disjointness_unverified"
     readiness = audit_benchmark_campaign_readiness(
         dataset_manifest_path=replacement_manifest,
-        candidate_ids=["axio-pro"],
+        candidate_ids=["axio-sol"],
         include_provider_baselines=False,
         min_cases_per_suite=1,
     )
@@ -321,7 +321,7 @@ def test_mmlu_pro_screening_disjoint_dataset_hash_tampering_blocks_readiness(
 
     readiness = audit_benchmark_campaign_readiness(
         dataset_manifest_path=replacement_manifest,
-        candidate_ids=["axio-pro"],
+        candidate_ids=["axio-sol"],
         include_provider_baselines=False,
         min_cases_per_suite=1,
     )

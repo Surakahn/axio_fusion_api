@@ -3258,7 +3258,7 @@ def build_fusion_registry_from_screening(
         "decoupled_from_asci_fs": True,
         "generated_from_prefusion_screening": True,
         "binding_status": "ready" if screening_ready and selected else "blocked",
-        "public_models": ["axio-fast", "axio-terra", "axio-pro"],
+        "public_models": ["axio-luna", "axio-terra", "axio-sol"],
         "model_count": len(models),
         "provider_count": len({profile.provider for profile in selected}),
         "available_model_count": len(models),
