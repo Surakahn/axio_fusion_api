@@ -789,26 +789,46 @@ class SQLiteTenantBudgetLedger:
         storage = self._storage_status_for_directory(parent, required_bytes=required_bytes)
         if not storage["ready"]:
             raise TenantBudgetLedgerStorageUnavailable("sqlite ledger backup storage is not ready")
+        temporary_destination = (
+            f"{destination}.tmp-{os.getpid()}-{uuid.uuid4().hex}"
+        )
         source = None
         target = None
         try:
             source = self._connect()
-            target = sqlite3.connect(destination, timeout=self._timeout_seconds, isolation_level=None)
+            target = sqlite3.connect(
+                temporary_destination,
+                timeout=self._timeout_seconds,
+                isolation_level=None,
+            )
             target.row_factory = sqlite3.Row
             source.backup(target, pages=128, sleep=0.05)
             target.execute("PRAGMA synchronous = FULL")
             self._integrity_receipt(target)
         except TenantBudgetLedgerError:
+            _unlink_if_exists(temporary_destination)
             raise
         except sqlite3.Error as error:
+            _unlink_if_exists(temporary_destination)
             if _is_storage_sqlite_error(error):
                 raise TenantBudgetLedgerStorageUnavailable("sqlite ledger backup storage failed") from error
             raise TenantBudgetLedgerUnavailable("sqlite ledger backup failed") from error
+        except OSError as error:
+            _unlink_if_exists(temporary_destination)
+            raise TenantBudgetLedgerStorageUnavailable("sqlite ledger backup storage failed") from error
         finally:
             if target is not None:
                 target.close()
             if source is not None:
                 source.close()
+        try:
+            os.replace(temporary_destination, destination)
+        except OSError as error:
+            try:
+                os.unlink(temporary_destination)
+            except OSError:
+                pass
+            raise TenantBudgetLedgerStorageUnavailable("sqlite ledger backup publication failed") from error
         try:
             backup_size = int(os.path.getsize(destination))
             backup_sha256 = _sha256_file(destination)
@@ -1120,6 +1140,17 @@ def _sha256_file(path: str) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _unlink_if_exists(path: str) -> None:
+    """清理失败的临时备份，不影响已有目标副本。"""
+
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        return
+    except OSError:
+        return
 
 
 def _is_sha256_hex(value: str) -> bool:

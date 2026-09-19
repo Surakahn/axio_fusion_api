@@ -1,5 +1,14 @@
 # Axio Fusion API Plan
 
+## 2026-09-19 SQLite 备份原子发布与旧副本保护
+
+审计发现在线备份若在目标文件上直接复制，复制中断或磁盘错误可能留下半成品并覆盖已有
+可恢复副本。本轮将 `SQLiteTenantBudgetLedger.backup()` 改为同卷临时文件复制：源/临时副本
+完整性检查通过后才 `os.replace()` 原子发布；任何 SQLite、I/O 或替换失败都会清理临时文件
+并保留旧目标。新增回归覆盖成功发布、替换失败、旧副本保留、临时文件清理和恢复后重开。
+L1/L2、账本专项 `23 passed`，预算/部署/真实流式专项 `41 passed`；下一步执行完整回归。
+本轮不执行 provider/target 网络调用，不修改 r18 frozen 输入、serving registry 或 CPA Plus。
+
 ## 2026-09-19 Operator 账本诊断 CLI 与安全输出
 
 新增 `tenant-budget-ledger-diagnostic` 运维命令，统一执行 SQLite 账本完整性检查、承载卷

@@ -249,6 +249,45 @@ def test_sqlite_ledger_online_backup_can_be_reopened_without_raw_metadata(tmp_pa
         ledger.backup(str(source_path))
 
 
+def test_sqlite_ledger_backup_publishes_atomically_and_preserves_old_copy_on_replace_failure(
+    tmp_path, monkeypatch
+):
+    source_path = tmp_path / "atomic-source-budget.db"
+    backup_path = tmp_path / "atomic-backup-budget.db"
+    ledger = SQLiteTenantBudgetLedger(str(source_path))
+    reservation = ledger.reserve(
+        tenant_hash="tenant-hash",
+        day="2026-09-19",
+        amount_usd=0.20,
+        budget_usd=1.00,
+        reservation_key="atomic-backup-request",
+    )
+    ledger.settle(reservation_id=reservation.reservation_id, actual_cost_usd=0.15, success=True)
+    first_receipt = ledger.backup(str(backup_path))
+    assert first_receipt["storage_ready"] is True
+    assert not list(tmp_path.glob(f"{backup_path.name}.tmp-*"))
+
+    backup_path.write_bytes(b"known-good-old-backup")
+    original_replace = os.replace
+
+    def fail_replace(source, destination):
+        assert str(destination) == str(backup_path)
+        raise OSError("database or disk is full")
+
+    monkeypatch.setattr(os, "replace", fail_replace)
+    with pytest.raises(TenantBudgetLedgerStorageUnavailable) as error:
+        ledger.backup(str(backup_path))
+    assert error.value.reason_code == "tenant_budget_shared_backend_storage_unavailable"
+    assert backup_path.read_bytes() == b"known-good-old-backup"
+    assert not list(tmp_path.glob(f"{backup_path.name}.tmp-*"))
+
+    monkeypatch.setattr(os, "replace", original_replace)
+    final_receipt = ledger.backup(str(backup_path))
+    assert final_receipt["schema"] == "axio_fusion_api.tenant_budget_ledger_backup.v1"
+    assert final_receipt["storage_ready"] is True
+    assert SQLiteTenantBudgetLedger(str(backup_path)).integrity_check()["valid"] is True
+
+
 def test_sqlite_ledger_integrity_check_fails_closed_on_incomplete_schema(tmp_path):
     path = tmp_path / "incomplete-budget.db"
     ledger = SQLiteTenantBudgetLedger(str(path))
