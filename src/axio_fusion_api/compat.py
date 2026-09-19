@@ -13,6 +13,7 @@ from .content_contract import (
     structured_output_from_payload,
     structured_output_wire_fields,
 )
+from .call_cost import provider_call_cost_receipt
 from .schemas import (
     FusionPolicy,
     FusionRequest,
@@ -1774,7 +1775,10 @@ def _response_metadata(
         "external_model_name": response.request.public_model,
         "route_summary": public_route_summary(response.route_plan),
         "judge_summary": _public_judge_summary(response.judge_result),
-        "fusion_trace_summary": _public_trace_summary(response.trace),
+        "fusion_trace_summary": _public_trace_summary(
+            response.trace,
+            route_plan=response.route_plan,
+        ),
         "provider_calls_recorded": response.provider_calls_recorded,
         "request_fingerprint": response.request.request_fingerprint,
         "output_text_normalization": dict(normalization_receipt or derived_receipt),
@@ -2147,7 +2151,11 @@ def _public_judge_summary(judge: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _public_trace_summary(trace: Mapping[str, Any]) -> dict[str, Any]:
+def _public_trace_summary(
+    trace: Mapping[str, Any],
+    *,
+    route_plan: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     early_exit = trace.get("early_exit") if isinstance(trace.get("early_exit"), Mapping) else {}
     panel_repair = trace.get("panel_repair") if isinstance(trace.get("panel_repair"), Mapping) else {}
     synthesis_compression = trace.get("synthesis_compression") if isinstance(trace.get("synthesis_compression"), Mapping) else {}
@@ -2170,6 +2178,16 @@ def _public_trace_summary(trace: Mapping[str, Any]) -> dict[str, Any]:
     cache_replay = trace.get("cache_replay") if isinstance(trace.get("cache_replay"), Mapping) else {}
     cache_origin = trace.get("cache_origin_completion") if isinstance(trace.get("cache_origin_completion"), Mapping) else {}
     call_cost = trace.get("call_cost") if isinstance(trace.get("call_cost"), Mapping) else {}
+    if not call_cost:
+        routing = trace.get("routing_decision") if isinstance(trace.get("routing_decision"), Mapping) else {}
+        budget = route_plan.get("budget") if isinstance(route_plan, Mapping) and isinstance(route_plan.get("budget"), Mapping) else {}
+        call_cost = provider_call_cost_receipt(
+            str(routing.get("public_model") or "axio-terra"),
+            attempted_calls=_optional_int(trace.get("provider_call_count")) or 0,
+            judge_calls=_optional_int(trace.get("judge_provider_call_count")) or 0,
+            synthesizer_calls=_optional_int(trace.get("synthesis_provider_call_count")) or 0,
+            admitted_call_cap=_optional_int(budget.get("max_total_model_calls")),
+        )
     return {
         "schema": "axio_fusion_api.public_trace_summary.v1",
         "actual_cost_usd": _optional_float(trace.get("actual_cost_usd")),
