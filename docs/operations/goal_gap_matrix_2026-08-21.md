@@ -1,5 +1,20 @@
 # Axio Fusion Goal 差距矩阵（2026-08-21）
 
+## 2026-09-19 SQLite 存储卷故障与可重试错误闭环增量
+
+在完整性与备份门禁基础上，本轮新增 `SQLiteTenantBudgetLedger.storage_status()`，对账本
+卷执行只读、可写和剩余空间检查；`backup()` 在复制前按源库大小执行目标卷空间门禁，
+并把 SQLite `disk full`、只读和磁盘 I/O 故障固定为
+`tenant_budget_shared_backend_storage_unavailable`。Runtime snapshot 只暴露安全 storage
+投影；公共 budget admission 对 shared backend unavailable/storage failure 返回 HTTP 503
+和 bounded `Retry-After`，不再把基础设施故障误报为 402 预算耗尽。
+
+验证：专项 `31 passed`，全量 `1173 passed`，L1/L2、compileall 和 `git diff --check`
+通过；无 provider/target 网络调用，r18 frozen 输入未改动。当前证据仍是离线故障注入，
+不等同于真实卷故障演练、自动 fencing、跨主机共享配额或公网发布。下一步继续完成有界
+卷/磁盘演练与 fencing ledger contract，再回到 r18 screening -> transport admission ->
+ranking -> freeze -> Harness/import -> 21-suite campaign。
+
 ## 2026-09-19 SQLite 账本完整性与备份恢复门禁增量
 
 在共享租户预算账本已支持单主机多进程原子 reserve/settle/release、显式 operator

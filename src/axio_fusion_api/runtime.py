@@ -706,6 +706,22 @@ class RuntimeState:
             in_flight_tenant_count = len(self._in_flight)
             budget_ledger_error_count = self._budget_ledger_error_count
         shared_budget_snapshot = None
+        ledger_storage_status = None
+        storage_status_reader = getattr(self._budget_ledger, "storage_status", None)
+        if callable(storage_status_reader):
+            try:
+                ledger_storage_status = storage_status_reader()
+            except TenantBudgetLedgerError:
+                ledger_storage_status = {
+                    "schema": "axio_fusion_api.tenant_budget_ledger_storage.v1",
+                    "backend": self._budget_ledger.backend_name,
+                    "ready": False,
+                    "status": "unavailable",
+                    "raw_path_persisted": False,
+                    "raw_tenant_keys_persisted": False,
+                    "raw_api_keys_persisted": False,
+                    "secrets_persisted": False,
+                }
         if daily_budget is not None and daily_budget > 0 and _tenant_budget_scope_name() == "shared_required":
             if self._budget_ledger is not None:
                 try:
@@ -726,6 +742,7 @@ class RuntimeState:
             "tenant_budget_ledger_backend": (
                 self._budget_ledger.backend_name if self._budget_ledger is not None else None
             ),
+            "tenant_budget_ledger_storage": ledger_storage_status,
             "tenant_budget_ledger_error_count": budget_ledger_error_count,
             "rate_limit_buckets": rate_bucket_rows,
             "budget_tenants": budget_rows,

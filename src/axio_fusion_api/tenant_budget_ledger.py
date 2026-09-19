@@ -42,6 +42,17 @@ class TenantBudgetLedgerUnavailable(TenantBudgetLedgerError):
         )
 
 
+class TenantBudgetLedgerStorageUnavailable(TenantBudgetLedgerError):
+    """账本所在卷只读、不可写或空间不足。"""
+
+    def __init__(self, message: str = "Tenant budget ledger storage is unavailable") -> None:
+        super().__init__(
+            "tenant_budget_shared_backend_storage_unavailable",
+            message,
+            retryable=True,
+        )
+
+
 class TenantBudgetLedgerInvariantError(TenantBudgetLedgerError):
     """发现未知 reservation 或非法账本状态；调用方必须 fail closed。"""
 
@@ -427,6 +438,7 @@ class SQLiteTenantBudgetLedger:
     """
 
     backend_name = "sqlite_shared_file"
+    _STORAGE_SCHEMA = "axio_fusion_api.tenant_budget_ledger_storage.v1"
     _REQUIRED_COLUMNS = {
         "accounts": frozenset(
             {"tenant_hash", "day", "budget_usd", "committed_usd", "reserved_usd", "updated_at"}
@@ -665,6 +677,13 @@ class SQLiteTenantBudgetLedger:
         if not parent or not os.path.isdir(parent):
             raise TenantBudgetLedgerInvariantError("backup parent directory must already exist")
         self.integrity_check()
+        try:
+            required_bytes = max(1, int(os.path.getsize(self.path)))
+        except OSError as error:
+            raise TenantBudgetLedgerUnavailable("sqlite ledger source size unavailable") from error
+        storage = self._storage_status_for_directory(parent, required_bytes=required_bytes)
+        if not storage["ready"]:
+            raise TenantBudgetLedgerStorageUnavailable("sqlite ledger backup storage is not ready")
         source = None
         target = None
         try:
@@ -677,6 +696,8 @@ class SQLiteTenantBudgetLedger:
         except TenantBudgetLedgerError:
             raise
         except sqlite3.Error as error:
+            if _is_storage_sqlite_error(error):
+                raise TenantBudgetLedgerStorageUnavailable("sqlite ledger backup storage failed") from error
             raise TenantBudgetLedgerUnavailable("sqlite ledger backup failed") from error
         finally:
             if target is not None:
@@ -693,6 +714,42 @@ class SQLiteTenantBudgetLedger:
             "backend": self.backend_name,
             "bytes": backup_size,
             "sha256": backup_sha256,
+            "raw_path_persisted": False,
+            "raw_tenant_keys_persisted": False,
+            "raw_api_keys_persisted": False,
+            "secrets_persisted": False,
+            "storage_checked": True,
+            "storage_ready": True,
+        }
+
+    def storage_status(self, *, required_bytes: int = 0) -> dict[str, Any]:
+        """返回账本卷的可写性和剩余空间安全投影。"""
+
+        bounded_required = _finite_nonnegative(required_bytes)
+        if bounded_required is None:
+            raise TenantBudgetLedgerInvariantError("required storage bytes must be finite and non-negative")
+        return self._storage_status_for_directory(
+            os.path.dirname(self.path),
+            required_bytes=int(bounded_required),
+        )
+
+    @classmethod
+    def _storage_status_for_directory(cls, directory: str, *, required_bytes: int) -> dict[str, Any]:
+        try:
+            stats = os.statvfs(directory)
+            free_bytes = int(stats.f_bavail) * int(stats.f_frsize)
+            read_only = bool(int(stats.f_flag) & int(getattr(os, "ST_RDONLY", 1)))
+            writable = os.access(directory, os.W_OK) and not read_only
+        except (AttributeError, OSError, TypeError, ValueError, OverflowError) as error:
+            raise TenantBudgetLedgerUnavailable("sqlite ledger storage status unavailable") from error
+        return {
+            "schema": cls._STORAGE_SCHEMA,
+            "backend": cls.backend_name,
+            "ready": bool(writable and free_bytes >= int(required_bytes)),
+            "writable": bool(writable),
+            "read_only": bool(read_only),
+            "free_bytes": max(0, free_bytes),
+            "required_bytes": max(0, int(required_bytes)),
             "raw_path_persisted": False,
             "raw_tenant_keys_persisted": False,
             "raw_api_keys_persisted": False,
@@ -967,6 +1024,13 @@ def _is_corrupt_sqlite_error(error: sqlite3.DatabaseError) -> bool:
     return any(marker in message for marker in ("malformed", "not a database", "corrupt"))
 
 
+def _is_storage_sqlite_error(error: sqlite3.Error) -> bool:
+    """识别 SQLite 对只读卷、空间耗尽和磁盘 I/O 的稳定错误文本。"""
+
+    message = str(error).lower()
+    return any(marker in message for marker in ("disk i/o", "database or disk is full", "readonly"))
+
+
 __all__ = [
     "InMemoryTenantBudgetLedger",
     "LedgerReservation",
@@ -975,6 +1039,7 @@ __all__ = [
     "TenantBudgetLedger",
     "TenantBudgetLedgerError",
     "TenantBudgetLedgerInvariantError",
+    "TenantBudgetLedgerStorageUnavailable",
     "TenantBudgetLedgerUnavailable",
     "SQLiteTenantBudgetLedger",
 ]

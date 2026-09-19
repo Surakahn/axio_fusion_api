@@ -111,6 +111,21 @@ def test_shared_budget_scope_has_stable_service_unavailable_error():
     assert b"tenant_budget_shared_backend_required" in body
 
 
+def test_shared_budget_storage_failure_is_retryable_service_error():
+    status, headers, body = _tenant_budget_admission_response(
+        {
+            "allowed": False,
+            "reason_code": "tenant_budget_shared_backend_storage_unavailable",
+            "scope": "shared_required",
+            "scope_ready": False,
+            "retry_after_seconds": 1,
+        }
+    )
+    assert status == 503
+    assert headers["Retry-After"] == "1"
+    assert b"tenant_budget_shared_backend_storage_unavailable" in body
+
+
 def test_shared_budget_scope_uses_explicit_sqlite_ledger_across_runtime_states(monkeypatch, tmp_path):
     monkeypatch.setenv("AXIO_FUSION_TENANT_DAILY_BUDGET_USD", "0.50")
     monkeypatch.setenv("AXIO_FUSION_TENANT_BUDGET_SCOPE", "shared_required")
@@ -126,6 +141,9 @@ def test_shared_budget_scope_uses_explicit_sqlite_ledger_across_runtime_states(m
     assert second.check_budget("shared-tenant", now=1000.0)["spent_usd"] == 0.30
     assert second.snapshot(now=1000.0)["tenant_budget_scope_ready"] is True
     assert second.snapshot(now=1000.0)["tenant_budget_ledger_backend"] == "sqlite_shared_file"
+    storage = second.snapshot(now=1000.0)["tenant_budget_ledger_storage"]
+    assert storage["ready"] is True
+    assert storage["raw_path_persisted"] is False
     second_lease.settle(success=False, now=1000.0)
 
 

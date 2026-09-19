@@ -1,5 +1,16 @@
 # Axio Fusion API Plan
 
+## 2026-09-19 SQLite 账本存储卷故障与可重试错误闭环
+
+继续补齐 SQLite 共享账本的商业级运维边界：新增 hash-safe `storage_status()`，检查
+账本卷是否可写、是否只读以及剩余空间；在线 backup 在复制前按源库大小执行目标卷空间
+门禁，SQLite 的 `disk full`/只读/I/O 错误统一映射为
+`tenant_budget_shared_backend_storage_unavailable`。Runtime snapshot 暴露安全 storage
+状态，公共预算 admission 将 shared-backend unavailable/storage failure 映射为可重试
+HTTP 503，而不是误报为 402 预算耗尽。专项通过后全量回归 `1173 passed`；仍不执行
+provider/target 网络调用，不修改 r18 frozen plan/source/registry。详见
+`docs/handoffs/2026-09-19_sqlite_storage_observability.md`。
+
 ## 2026-09-19 SQLite 账本完整性与备份恢复门禁
 
 在已有 SQLite 共享租户预算账本之上补齐页级一致性和 schema 完整性检查。新增

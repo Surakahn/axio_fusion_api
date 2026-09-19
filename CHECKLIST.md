@@ -1,5 +1,18 @@
 # Axio Fusion API Checklist
 
+# 2026-09-19 SQLite 账本存储卷故障与可重试错误闭环
+
+- [x] 新增 `SQLiteTenantBudgetLedger.storage_status()`，只返回可写性、只读标志、剩余空间、
+  要求空间和安全持久化标志，不返回原始路径。
+- [x] `backup()` 在复制前检查目标卷空间/只读状态；SQLite `disk full`、只读卷和磁盘 I/O
+  失败统一使用 `tenant_budget_shared_backend_storage_unavailable` retryable reason code。
+- [x] Runtime snapshot 暴露 `tenant_budget_ledger_storage`；共享账本基础设施故障在公共
+  admission 层返回 HTTP 503 + bounded `Retry-After`，配置缺失仍保持原有契约。
+- [x] 故障注入覆盖只读/零空间卷与公共 503 投影；预算/账本/部署专项 `31 passed`，全量
+  Python 3.11 回归 `1173 passed`。
+- [ ] 仍需做真实卷只读/磁盘满演练、自动 fencing/租约恢复和跨主机后端审计；当前不宣称
+  SQLite 已具备跨主机全局配额能力。
+
 # 2026-09-19 SQLite 账本完整性与备份恢复门禁
 
 - [x] `SQLiteTenantBudgetLedger.integrity_check()` 同时验证 SQLite `PRAGMA integrity_check`

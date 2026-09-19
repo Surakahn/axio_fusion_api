@@ -4857,13 +4857,24 @@ def _tenant_budget_exhausted_response(budget: Mapping[str, Any]) -> tuple[int, d
 def _tenant_budget_admission_response(budget: Mapping[str, Any]) -> tuple[int, dict[str, str], bytes]:
     """Map preflight rejection to a stable public budget or pricing error."""
 
-    if budget.get("reason_code") == "tenant_budget_shared_backend_required":
+    reason_code = str(budget.get("reason_code") or "")
+    shared_backend_reason_codes = {
+        "tenant_budget_shared_backend_required",
+        "tenant_budget_shared_backend_unavailable",
+        "tenant_budget_shared_backend_storage_unavailable",
+    }
+    if reason_code in shared_backend_reason_codes:
+        message = (
+            "Tenant budget requires a configured shared ledger."
+            if reason_code == "tenant_budget_shared_backend_required"
+            else "Tenant budget shared backend is temporarily unavailable."
+        )
         return _json_response(
             503,
             {
                 "error": {
-                    "message": "Tenant budget requires a configured shared ledger.",
-                    "code": "tenant_budget_shared_backend_required",
+                    "message": message,
+                    "code": reason_code,
                 },
                 "metadata": {
                     "budget": dict(budget),
@@ -4871,6 +4882,11 @@ def _tenant_budget_admission_response(budget: Mapping[str, Any]) -> tuple[int, d
                     "secrets_persisted": False,
                 },
             },
+            extra_headers=(
+                {"Retry-After": str(budget.get("retry_after_seconds") or 1)}
+                if reason_code != "tenant_budget_shared_backend_required"
+                else None
+            ),
         )
 
     if budget.get("pricing_known") is False and budget.get("unknown_pricing_policy") == "deny":

@@ -4,6 +4,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -11,6 +12,7 @@ from axio_fusion_api.tenant_budget_ledger import (
     InMemoryTenantBudgetLedger,
     SQLiteTenantBudgetLedger,
     TenantBudgetLedgerInvariantError,
+    TenantBudgetLedgerStorageUnavailable,
     TenantBudgetLedgerUnavailable,
 )
 
@@ -224,6 +226,28 @@ def test_sqlite_ledger_integrity_check_classifies_malformed_file(tmp_path):
     with pytest.raises(TenantBudgetLedgerInvariantError) as error:
         ledger.integrity_check()
     assert error.value.reason_code == "tenant_budget_shared_backend_invariant_failed"
+
+
+def test_sqlite_ledger_storage_status_is_safe_and_detects_read_only_volume(tmp_path, monkeypatch):
+    path = tmp_path / "storage-budget.db"
+    ledger = SQLiteTenantBudgetLedger(str(path))
+    status = ledger.storage_status()
+    assert status["ready"] is True
+    assert status["writable"] is True
+    assert status["free_bytes"] > 0
+    assert status["raw_path_persisted"] is False
+    read_only_flags = int(getattr(os, "ST_RDONLY", 1))
+    monkeypatch.setattr(
+        os,
+        "statvfs",
+        lambda _: SimpleNamespace(f_bavail=0, f_frsize=4096, f_flag=read_only_flags),
+    )
+    unavailable = ledger.storage_status()
+    assert unavailable["ready"] is False
+    assert unavailable["read_only"] is True
+    with pytest.raises(TenantBudgetLedgerStorageUnavailable) as error:
+        ledger.backup(str(tmp_path / "storage-backup.db"))
+    assert error.value.reason_code == "tenant_budget_shared_backend_storage_unavailable"
 
 
 def test_atomic_reservation_is_shared_across_concurrent_workers():
