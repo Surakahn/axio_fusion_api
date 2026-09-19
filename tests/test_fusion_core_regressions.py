@@ -385,6 +385,121 @@ def test_terra_high_effort_panel_completes_all_admitted_experts_before_control_s
     assert response.trace["secrets_persisted"] is False
 
 
+def test_terra_execution_admission_records_role_contract_degradation():
+    primary = _screened_profile(
+        "terra-primary-only",
+        allowed_roles=("primary_solver", "independent_solver"),
+        disallowed_roles=("judge", "synthesizer"),
+    )
+    independent = _screened_profile(
+        "terra-independent-only",
+        allowed_roles=("primary_solver",),
+        disallowed_roles=("independent_solver", "judge", "synthesizer"),
+    )
+    request = canonicalize_payload(
+        {
+            "model": "axio-terra",
+            "quality_target": 0.95,
+            "messages": [{
+                "role": "user",
+                "content": "Review a complex scientific workflow and verify contradictions.",
+            }],
+        }
+    )
+
+    route_plan = build_route_plan(request, [primary, independent])
+    admission = route_plan["terra_execution_admission"]
+
+    assert admission["schema"] == "axio_fusion_api.terra_execution_admission.v1"
+    assert admission["applies"] is True
+    assert admission["requested_mode"] == "provider_judge_synthesis"
+    assert admission["admitted_mode"] == "direct"
+    assert admission["provider_stage_required"] is True
+    assert admission["degraded"] is True
+    assert "judge" in admission["missing_roles"]
+    assert "synthesizer" in admission["missing_roles"]
+    assert "missing_judge_role" in admission["reason_codes"]
+    assert "missing_synthesizer_role" in admission["reason_codes"]
+
+    response = FusionEngine(
+        [primary, independent],
+        client=_TerraPanelClient(),
+        cache_enabled=False,
+    ).complete(request, live=True)
+    outcome = response.trace["runtime_fusion_stage_outcome"]["terra_execution_outcome"]
+    assert outcome["route_mode"] == "direct"
+    assert outcome["runtime_mode"] == "direct_fallback"
+    assert outcome["degraded"] is True
+    assert outcome["fallback_used"] is True
+    assert outcome["degradation_reason"] == "missing_judge_role"
+
+
+def test_terra_execution_outcome_matches_complete_provider_route_and_releases_reservations():
+    profiles = [
+        _screened_profile(
+            f"terra-complete-{index}",
+            allowed_roles=(
+                "primary_solver",
+                "independent_solver",
+                "critic",
+                "domain_specialist",
+                "judge",
+                "synthesizer",
+            ),
+        )
+        for index in range(8)
+    ]
+    request = canonicalize_payload(
+        {
+            "model": "axio-terra",
+            "quality_target": 0.95,
+            "reasoning_effort": "high",
+            "max_total_model_calls": 9,
+            "messages": [{
+                "role": "user",
+                "content": "Review a complex medical scientific workflow and contradictions.",
+            }],
+        }
+    )
+    response = FusionEngine(
+        profiles,
+        client=_TerraPanelClient(),
+        cache_enabled=False,
+    ).complete(request, live=True)
+    outcome = response.trace["runtime_fusion_stage_outcome"]["terra_execution_outcome"]
+
+    assert outcome["applies"] is True
+    assert outcome["route_mode"] == "provider_judge_synthesis"
+    assert outcome["runtime_mode"] == "provider_judge_synthesis"
+    assert outcome["panel_phase_configured"] is True
+    assert set(outcome["panel_roles_admitted"]) >= {
+        "primary_solver",
+        "independent_solver",
+    }
+    assert set(outcome["panel_roles_completed"]) >= {
+        "primary_solver",
+        "independent_solver",
+    }
+    assert outcome["judge_attempted"] is True
+    assert outcome["judge_completed"] is True
+    assert outcome["synthesizer_attempted"] is True
+    assert outcome["synthesizer_completed"] is True
+    assert outcome["mandatory_reservations_released"] is True
+    assert outcome["fallback_used"] is False
+    assert outcome["degraded"] is False
+
+    safe = safe_execution_trace(response, tenant_key="terra-contract")
+    assert safe["terra_execution_admission"]["admitted_mode"] == "provider_judge_synthesis"
+    assert safe["runtime_fusion_stage_outcome"]["terra_execution_outcome"][
+        "mandatory_reservations_released"
+    ] is True
+
+    public = render_response(response, api_format="gemini")
+    public_summary = public["metadata"]["fusion_trace_summary"]
+    assert public_summary["terra_execution"]["route_mode"] == "provider_judge_synthesis"
+    assert public_summary["terra_execution"]["runtime_mode"] == "provider_judge_synthesis"
+
+
 def test_initial_stage_failover_does_not_consume_explicitly_reserved_initial_shape():
     engine = FusionEngine([])
     route_plan = {

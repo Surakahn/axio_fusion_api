@@ -1,5 +1,21 @@
 # Axio Fusion API Plan
 
+## 2026-09-19 Terra 路由准入与运行时模式一致性
+
+为 Terra 补齐专门的 `terra_execution_admission.v1` 与
+`terra_execution_outcome.v1` bounded contract。route-plan 现在明确 requested/admitted mode、
+canonical role capacity、missing roles、fallback 和固定 degradation reason；runtime 对账
+实际 panel roles、panel phase、Judge/Synthesizer 尝试与完成、mandatory reservation release
+及 direct fallback。安全 trace/store 和四协议公共 trace 只暴露 bounded 字段，不持久化
+provider/model 原文、prompt 或 secret。
+
+本轮用完整 fake role pool 验证 Terra provider Judge/Synthesizer 的 mode 一致性，用缺少
+角色的 fixture 验证 `direct_fallback` 与 `missing_*_role`，并验证 safe receipt/public
+Gemini trace parity。L1/L2、`compileall`、`git diff --check` 和全量回归均通过（`1183 passed`）。
+这是离线执行契约证据，不是 provider 能力、质量、成本、延迟或 superiority 证据；未执行
+provider/target 网络，不修改 r18 frozen 输入、serving registry 或生产进程。详见
+`docs/handoffs/2026-09-19_terra_execution_admission.md`。
+
 ## 2026-09-19 Pro 跨 provider 角色多样性修复
 
 离线 dry-run 审计发现 Pro 原先按全部 scored provider 计算多样性目标，且角色填充在

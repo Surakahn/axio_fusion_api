@@ -1077,6 +1077,130 @@ def _effective_hermes_plan(route_plan: Mapping[str, Any] | None) -> dict[str, An
     return plan
 
 
+def _terra_execution_outcome(
+    route_plan: Mapping[str, Any],
+    *,
+    runtime_mode: str,
+    runtime_degraded: bool,
+    degradation_reason: str,
+    panel_phase_configured: bool,
+    completed_roles: Sequence[str],
+    judge_attempted: bool,
+    judge_completed: bool,
+    synthesizer_attempted: bool,
+    synthesizer_completed: bool,
+    mandatory_reservations_released: bool,
+    fallback_used: bool,
+) -> dict[str, Any]:
+    """Reconcile Terra route admission with the mode actually executed."""
+
+    admission = (
+        route_plan.get("terra_execution_admission")
+        if isinstance(route_plan.get("terra_execution_admission"), Mapping)
+        else {}
+    )
+    applies = admission.get("applies") is True
+    if not applies:
+        return {
+            "schema": "axio_fusion_api.terra_execution_outcome.v1",
+            "applies": False,
+            "route_mode": "not_applicable",
+            "runtime_mode": "not_applicable",
+            "panel_phase_configured": False,
+            "panel_roles_admitted": [],
+            "panel_roles_completed": [],
+            "judge_attempted": False,
+            "judge_completed": False,
+            "synthesizer_attempted": False,
+            "synthesizer_completed": False,
+            "mandatory_reservations_released": True,
+            "fallback_used": False,
+            "degraded": False,
+            "degradation_reason": "",
+            "reason_codes": [],
+            "raw_prompt_persisted": False,
+            "raw_profile_ids_persisted": False,
+            "secrets_persisted": False,
+        }
+
+    route_mode = str(admission.get("admitted_mode") or "direct")
+    if route_mode not in {"direct", "local_consensus", "provider_judge_synthesis"}:
+        route_mode = "direct"
+    mode = str(runtime_mode or "direct")
+    if mode not in {
+        "direct",
+        "local_consensus",
+        "provider_judge_synthesis",
+        "provider_judge_synthesis_degraded",
+        "direct_fallback",
+        "tool_call_turn",
+        "provider_failed",
+    }:
+        mode = "direct_fallback" if runtime_degraded else "direct"
+    admission_degraded = admission.get("degraded") is True
+    if mode == "direct_fallback" and not admission_degraded and route_mode == "direct":
+        mode = "direct"
+    admitted_roles = {
+        str(row.get("role") or "")[:80]
+        for row in route_plan.get("roles", [])
+        if isinstance(row, Mapping) and str(row.get("role") or "")
+    }
+    panel_roles = {
+        "primary_solver",
+        "independent_solver",
+        "critic",
+        "domain_specialist",
+        "short_verification",
+        "backup_solver",
+    }
+    completed = sorted(
+        {
+            str(role)[:80]
+            for role in completed_roles
+            if str(role) in panel_roles
+        }
+    )
+    admitted_panel_roles = sorted(admitted_roles.intersection(panel_roles))
+    reason_codes = [
+        str(reason)[:120]
+        for reason in admission.get("reason_codes", [])
+        if str(reason)
+    ] if isinstance(admission.get("reason_codes"), list) else []
+    effective_degradation_reason = str(degradation_reason or "")[:120]
+    admission_reasons = [
+        str(reason)[:120]
+        for reason in admission.get("reason_codes", [])
+        if str(reason)
+    ] if isinstance(admission.get("reason_codes"), list) else []
+    if admission_degraded and effective_degradation_reason in {
+        "",
+        "not_a_fusion_route",
+    }:
+        effective_degradation_reason = admission_reasons[0] if admission_reasons else "route_admission_degraded"
+    effective_degraded = bool(runtime_degraded or admission_degraded)
+    return {
+        "schema": "axio_fusion_api.terra_execution_outcome.v1",
+        "applies": True,
+        "route_mode": route_mode,
+        "runtime_mode": mode,
+        "panel_phase_configured": bool(panel_phase_configured),
+        "panel_roles_admitted": admitted_panel_roles[:8],
+        "panel_roles_completed": completed[:8],
+        "judge_attempted": bool(judge_attempted),
+        "judge_completed": bool(judge_completed),
+        "synthesizer_attempted": bool(synthesizer_attempted),
+        "synthesizer_completed": bool(synthesizer_completed),
+        "mandatory_reservations_released": bool(mandatory_reservations_released),
+        "fallback_used": bool(fallback_used or admission_degraded),
+        "degraded": effective_degraded,
+        "degradation_reason": effective_degradation_reason,
+        "reason_codes": list(dict.fromkeys([*reason_codes, *admission_reasons]))[:12],
+        "raw_prompt_persisted": False,
+        "raw_profile_ids_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
 def _runtime_fusion_stage_outcome(
     route_plan: Mapping[str, Any],
     *,
@@ -1093,6 +1217,7 @@ def _runtime_fusion_stage_outcome(
     hermes_reference_completed_count: int = 0,
     terminal_state: str = "",
     hermes_feedback_stage_admission_blocked: bool = False,
+    completed_roles: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Describe whether the initially admitted Fusion schedule really finished.
 
@@ -1239,6 +1364,55 @@ def _runtime_fusion_stage_outcome(
         degradation_reason = ""
         runtime_degraded = False
 
+    terra_outcome = _terra_execution_outcome(
+        route_plan,
+        runtime_mode=(
+            "local_consensus"
+            if local_finalized
+            else (
+                "provider_judge_synthesis"
+                if execution_mode == "complete_fusion_finalized"
+                else (
+                    "tool_call_turn"
+                    if terminal_state == "tool_call_turn"
+                    else (
+                        "provider_failed"
+                        if terminal_state == "provider_execution_failed"
+                        else (
+                            "provider_judge_synthesis_degraded"
+                            if finalization_mode == "provider_judge_synthesis"
+                            else "direct_fallback"
+                        )
+                    )
+                )
+            )
+        ),
+        runtime_degraded=runtime_degraded,
+        degradation_reason=degradation_reason,
+        panel_phase_configured=(
+            isinstance(route_plan.get("runtime_fusion_panel_phase"), Mapping)
+            and route_plan["runtime_fusion_panel_phase"].get("configured") is True
+        ),
+        completed_roles=completed_roles,
+        judge_attempted=judge_call_count > 0,
+        judge_completed=judge_accepted,
+        synthesizer_attempted=synthesis_call_count > 0,
+        synthesizer_completed=synthesis_accepted,
+        mandatory_reservations_released=(
+            not reservation_enabled
+            or (
+                _safe_int(budget_lock.get("reserved_mandatory_stage_call_count"), default=0) == 0
+                and _safe_int(budget_lock.get("mandatory_stage_deadline_pending_ms"), default=0) == 0
+            )
+        ),
+        fallback_used=bool(
+            runtime_degraded
+            or (
+                finalization_mode == "provider_judge_synthesis"
+                and execution_mode != "complete_fusion_finalized"
+            )
+        ),
+    )
     return {
         "schema": "axio_fusion_api.runtime_fusion_stage_outcome.v1",
         "fusion_requested": fusion_requested,
@@ -1281,6 +1455,7 @@ def _runtime_fusion_stage_outcome(
         "execution_mode": execution_mode,
         "runtime_degraded": runtime_degraded,
         "degradation_reason": degradation_reason,
+        "terra_execution_outcome": terra_outcome,
         "raw_prompt_persisted": False,
         "raw_candidate_text_persisted": False,
         "raw_profile_id_persisted": False,
@@ -3287,6 +3462,11 @@ class FusionEngine:
                         budget_lock=call_budget.safe_dict(),
                         hermes_reference_completed_count=0,
                         terminal_state="provider_execution_failed",
+                        completed_roles=[
+                            candidate.role
+                            for candidate in candidates
+                            if candidate.status == "completed"
+                        ],
                     ),
                     "raw_prompt_persisted": False,
                     "secrets_persisted": False,
@@ -3709,6 +3889,12 @@ class FusionEngine:
             hermes_feedback_stage_admission_blocked=(
                 feedback_stage_admission.get("status") == "blocked"
             ),
+            completed_roles=[
+                candidate.role
+                for candidate in deduped
+                if candidate.status == "completed"
+                and (candidate.answer.strip() or candidate.tool_calls)
+            ],
         )
         trace = {
             "schema": "axio_fusion_api.execution_trace.v1",
@@ -3883,6 +4069,12 @@ class FusionEngine:
                     and (candidate.answer.strip() or candidate.tool_calls)
                 ),
                 terminal_state="tool_call_turn",
+                completed_roles=[
+                    candidate.role
+                    for candidate in candidates
+                    if candidate.status == "completed"
+                    and (candidate.answer.strip() or candidate.tool_calls)
+                ],
             ),
             "cache_hit": False,
             "budget_lock": call_budget.safe_dict(),

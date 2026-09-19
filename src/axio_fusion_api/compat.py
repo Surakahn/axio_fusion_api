@@ -1812,6 +1812,11 @@ def public_route_summary(route_plan: Mapping[str, Any]) -> dict[str, Any]:
     budget = route_plan.get("budget") if isinstance(route_plan.get("budget"), Mapping) else {}
     guards = route_plan.get("runtime_guards") if isinstance(route_plan.get("runtime_guards"), Mapping) else {}
     admission = route_plan.get("fusion_admission") if isinstance(route_plan.get("fusion_admission"), Mapping) else {}
+    terra_admission = (
+        route_plan.get("terra_execution_admission")
+        if isinstance(route_plan.get("terra_execution_admission"), Mapping)
+        else {}
+    )
     initial_call_plan = admission.get("initial_fusion_call_plan") if isinstance(admission.get("initial_fusion_call_plan"), Mapping) else {}
     initial_resource_admission = (
         admission.get("initial_fusion_resource_admission")
@@ -1861,6 +1866,7 @@ def public_route_summary(route_plan: Mapping[str, Any]) -> dict[str, Any]:
         "stage_profile_reuse": _public_stage_profile_reuse(stage_profile_reuse),
         "fusion_activated": bool(judge_contract.get("required")),
         "fusion_finalization_mode": finalization_mode,
+        "terra_execution_admission": _public_terra_execution_admission(terra_admission),
         "local_consensus_enabled": finalization_mode == "local_consensus",
         "provider_stage_calls_reserved": bool(
             guards.get("provider_stage_calls_reserved")
@@ -2145,6 +2151,11 @@ def _public_trace_summary(trace: Mapping[str, Any]) -> dict[str, Any]:
         if isinstance(trace.get("runtime_fusion_stage_outcome"), Mapping)
         else {}
     )
+    terra_outcome = (
+        fusion_stage_outcome.get("terra_execution_outcome")
+        if isinstance(fusion_stage_outcome.get("terra_execution_outcome"), Mapping)
+        else {}
+    )
     budget_lock = trace.get("budget_lock") if isinstance(trace.get("budget_lock"), Mapping) else {}
     cost_budget = trace.get("cost_budget") if isinstance(trace.get("cost_budget"), Mapping) else {}
     deadline_budget = trace.get("deadline_budget") if isinstance(trace.get("deadline_budget"), Mapping) else {}
@@ -2202,6 +2213,7 @@ def _public_trace_summary(trace: Mapping[str, Any]) -> dict[str, Any]:
         "runtime_fusion_complete_admitted_finalized": fusion_stage_outcome.get(
             "complete_admitted_fusion_finalized"
         ) is True,
+        "terra_execution": _public_terra_execution_outcome(terra_outcome),
         "budget_lock_skipped_call_count": _optional_int(budget_lock.get("skipped_call_count")) or 0,
         "mandatory_stage_reservation_enabled": budget_lock.get("mandatory_stage_reservation_enabled") is True,
         "mandatory_stage_reservation_skip_count": _optional_int(budget_lock.get("mandatory_stage_reservation_skip_count")) or 0,
@@ -2226,6 +2238,62 @@ def _public_trace_summary(trace: Mapping[str, Any]) -> dict[str, Any]:
         "raw_provider_model_ids_persisted": False,
         "raw_profile_ids_persisted": False,
         "raw_provider_outputs_persisted": False,
+    }
+
+
+def _public_terra_execution_admission(value: Mapping[str, Any]) -> dict[str, Any]:
+    counts = value.get("role_eligible_count_by_role")
+    return {
+        "schema": str(value.get("schema") or "axio_fusion_api.terra_execution_admission.v1")[:120],
+        "applies": value.get("applies") is True,
+        "requested_mode": str(value.get("requested_mode") or "not_applicable")[:64],
+        "admitted_mode": str(value.get("admitted_mode") or "not_applicable")[:64],
+        "required_roles": [str(role)[:80] for role in value.get("required_roles", []) if str(role)][:8]
+        if isinstance(value.get("required_roles"), list) else [],
+        "role_eligible_count": _optional_int(value.get("role_eligible_count")),
+        "role_eligible_count_by_role": {
+            str(role)[:80]: max(0, _optional_int(count) or 0)
+            for role, count in counts.items()
+            if str(role)
+        } if isinstance(counts, Mapping) else {},
+        "missing_roles": [str(role)[:80] for role in value.get("missing_roles", []) if str(role)][:8]
+        if isinstance(value.get("missing_roles"), list) else [],
+        "initial_panel_count": _optional_int(value.get("initial_panel_count")),
+        "provider_stage_required": value.get("provider_stage_required") is True,
+        "fallback_allowed": value.get("fallback_allowed") is True,
+        "degraded": value.get("degraded") is True,
+        "reason_codes": [str(reason)[:120] for reason in value.get("reason_codes", []) if str(reason)][:12]
+        if isinstance(value.get("reason_codes"), list) else [],
+        "raw_provider_names_persisted": False,
+        "raw_profile_ids_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _public_terra_execution_outcome(value: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "schema": str(value.get("schema") or "axio_fusion_api.terra_execution_outcome.v1")[:120],
+        "applies": value.get("applies") is True,
+        "route_mode": str(value.get("route_mode") or "not_applicable")[:64],
+        "runtime_mode": str(value.get("runtime_mode") or "not_applicable")[:64],
+        "panel_phase_configured": value.get("panel_phase_configured") is True,
+        "panel_roles_admitted": [str(role)[:80] for role in value.get("panel_roles_admitted", []) if str(role)][:8]
+        if isinstance(value.get("panel_roles_admitted"), list) else [],
+        "panel_roles_completed": [str(role)[:80] for role in value.get("panel_roles_completed", []) if str(role)][:8]
+        if isinstance(value.get("panel_roles_completed"), list) else [],
+        "judge_attempted": value.get("judge_attempted") is True,
+        "judge_completed": value.get("judge_completed") is True,
+        "synthesizer_attempted": value.get("synthesizer_attempted") is True,
+        "synthesizer_completed": value.get("synthesizer_completed") is True,
+        "mandatory_reservations_released": value.get("mandatory_reservations_released") is True,
+        "fallback_used": value.get("fallback_used") is True,
+        "degraded": value.get("degraded") is True,
+        "degradation_reason": str(value.get("degradation_reason") or "")[:120],
+        "reason_codes": [str(reason)[:120] for reason in value.get("reason_codes", []) if str(reason)][:12]
+        if isinstance(value.get("reason_codes"), list) else [],
+        "raw_provider_names_persisted": False,
+        "raw_profile_ids_persisted": False,
+        "secrets_persisted": False,
     }
 
 

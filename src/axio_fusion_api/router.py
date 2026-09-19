@@ -386,6 +386,13 @@ def build_route_plan(
         finalization_mode=finalization_mode,
         local_consensus_plan=local_consensus_plan,
     )
+    terra_execution_admission = _terra_execution_admission(
+        request=request,
+        roles=roles,
+        fusion_admission=fusion_admission,
+        role_gate=role_gate,
+        stage_profile_pool=stage_profile_pool,
+    )
     search_policy = _deliberative_search_policy(request, analysis, budget, selected, activated, roles)
     quality_diversity_archive = _quality_diversity_archive(analysis, selected, roles)
     provider_routing_policy = _provider_routing_policy(request, analysis, budget, scored, selected)
@@ -422,6 +429,7 @@ def build_route_plan(
         "routing_policy": _safe_routing_policy_application(policy_application),
         "privacy_policy": privacy_policy,
         "fusion_admission": fusion_admission,
+        "terra_execution_admission": terra_execution_admission,
         "role_gate": role_gate,
         "latency_constrained_panel": latency_constrained_panel,
         "tool_policy": tool_policy,
@@ -4527,6 +4535,189 @@ def _terra_direct_cascade_preferred(
         and not bool(analysis.get("vertical_domain_signals"))
         and not bool(analysis.get("decomposable"))
     )
+
+
+_TERRA_EXECUTION_EXPERT_ROLES = frozenset(
+    {
+        "primary_solver",
+        "independent_solver",
+        "critic",
+        "domain_specialist",
+        "short_verification",
+        "backup_solver",
+    }
+)
+_TERRA_EXECUTION_REASON_CODES = frozenset(
+    {
+        "direct_route_policy",
+        "provider_fusion_admitted",
+        "local_consensus_fallback",
+        "missing_primary_solver_role",
+        "missing_independent_solver_role",
+        "missing_domain_specialist_role",
+        "missing_short_verification_role",
+        "missing_critic_role",
+        "missing_judge_role",
+        "missing_synthesizer_role",
+        "insufficient_independent_capacity",
+        "call_budget_insufficient",
+        "deadline_budget_insufficient",
+        "provider_diversity_unmet",
+        "role_contract_blocked",
+    }
+)
+
+
+def _terra_execution_admission(
+    *,
+    request: FusionRequest,
+    roles: Sequence[Mapping[str, Any]],
+    fusion_admission: Mapping[str, Any],
+    role_gate: Mapping[str, Any],
+    stage_profile_pool: Sequence[ModelProfile],
+) -> dict[str, Any]:
+    """Publish one bounded Terra route contract for later runtime accounting.
+
+    Terra can deliberately use a direct cascade for a small low-risk request,
+    but a role-contract failure must never look like a successful Fusion route.
+    This receipt keeps the requested shape, admitted shape, role capacity and
+    stable degradation reasons together without persisting profile identity.
+    """
+
+    if request.public_model != "axio-terra":
+        return {
+            "schema": "axio_fusion_api.terra_execution_admission.v1",
+            "applies": False,
+            "requested_mode": "not_applicable",
+            "admitted_mode": "not_applicable",
+            "required_roles": [],
+            "role_eligible_count": 0,
+            "role_eligible_count_by_role": {},
+            "missing_roles": [],
+            "initial_panel_count": 0,
+            "provider_stage_required": False,
+            "fallback_allowed": True,
+            "degraded": False,
+            "reason_codes": [],
+            "raw_profile_ids_persisted": False,
+            "raw_model_names_persisted": False,
+            "secrets_persisted": False,
+        }
+
+    provider_gate = (
+        role_gate.get("provider_fusion")
+        if isinstance(role_gate.get("provider_fusion"), Mapping)
+        else {}
+    )
+    required_roles = list(
+        dict.fromkeys(
+            str(role)[:80]
+            for role in provider_gate.get("required_roles", [])
+            if str(role)
+        )
+    )
+    role_counts = {
+        role: len({
+            profile.canonical_identity
+            for profile in stage_profile_pool
+            if _screening_role_allowed(profile, role)
+        })
+        for role in required_roles
+    }
+    eligible_profile_ids = {
+        profile.canonical_identity
+        for profile in stage_profile_pool
+        if any(_screening_role_allowed(profile, role) for role in required_roles)
+    }
+    blocked_reasons = {
+        str(reason)
+        for reason in fusion_admission.get("blocked_reasons", [])
+        if str(reason)
+    }
+    force_reasons = {
+        str(reason)
+        for reason in fusion_admission.get("force_reasons", [])
+        if str(reason)
+    }
+    direct_policy = bool(
+        "low_risk_direct_cascade_preferred" in blocked_reasons
+        and not force_reasons
+    )
+    provider_shape_requested = bool(
+        not direct_policy
+        and required_roles
+        and any(role in required_roles for role in ("judge", "synthesizer"))
+    )
+    requested_mode = (
+        "provider_judge_synthesis" if provider_shape_requested else "direct"
+    )
+    admitted_mode = str(
+        fusion_admission.get("fusion_finalization_mode") or "direct"
+    )
+    if admitted_mode not in {"direct", "local_consensus", "provider_judge_synthesis"}:
+        admitted_mode = "direct"
+    missing_roles = (
+        [role for role in required_roles if role_counts.get(role, 0) <= 0]
+        if provider_shape_requested
+        else []
+    )
+    reason_codes: list[str] = []
+    if direct_policy:
+        reason_codes.append("direct_route_policy")
+    elif admitted_mode == "provider_judge_synthesis" and fusion_admission.get("activated") is True:
+        reason_codes.append("provider_fusion_admitted")
+    elif admitted_mode == "local_consensus" and fusion_admission.get("activated") is True:
+        reason_codes.append("local_consensus_fallback")
+    for role in missing_roles:
+        candidate = f"missing_{role}_role"
+        if candidate in _TERRA_EXECUTION_REASON_CODES:
+            reason_codes.append(candidate)
+    if "insufficient_independent_models" in blocked_reasons:
+        reason_codes.append("insufficient_independent_capacity")
+    if any("max_total_model_calls" in reason for reason in blocked_reasons):
+        reason_codes.append("call_budget_insufficient")
+    if any("latency" in reason or "deadline" in reason for reason in blocked_reasons):
+        reason_codes.append("deadline_budget_insufficient")
+    if any("provider_diversity" in reason for reason in blocked_reasons):
+        reason_codes.append("provider_diversity_unmet")
+    if any(reason.startswith("screening_role_gate_blocked_") for reason in blocked_reasons):
+        reason_codes.append("role_contract_blocked")
+    reason_codes = list(dict.fromkeys(reason_codes))
+    if not reason_codes and provider_shape_requested and admitted_mode == "direct":
+        reason_codes.append("role_contract_blocked")
+    expert_roles = {
+        str(row.get("role") or "")
+        for row in roles
+        if isinstance(row, Mapping) and str(row.get("role") or "") in _TERRA_EXECUTION_EXPERT_ROLES
+    }
+    degraded = bool(
+        provider_shape_requested
+        and (
+            admitted_mode != requested_mode
+            or bool(missing_roles)
+            or fusion_admission.get("activated") is not True
+        )
+    )
+    return {
+        "schema": "axio_fusion_api.terra_execution_admission.v1",
+        "applies": True,
+        "requested_mode": requested_mode,
+        "admitted_mode": admitted_mode,
+        "required_roles": required_roles,
+        "role_eligible_count": len(eligible_profile_ids),
+        "role_eligible_count_by_role": role_counts,
+        "missing_roles": missing_roles,
+        "initial_panel_count": len(expert_roles),
+        "provider_stage_required": requested_mode == "provider_judge_synthesis",
+        "fallback_allowed": bool(role_gate.get("direct", {}).get("passed"))
+        if isinstance(role_gate.get("direct"), Mapping)
+        else False,
+        "degraded": degraded,
+        "reason_codes": reason_codes,
+        "raw_profile_ids_persisted": False,
+        "raw_model_names_persisted": False,
+        "secrets_persisted": False,
+    }
 
 
 def _fusion_utility_estimate(

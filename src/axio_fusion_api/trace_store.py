@@ -84,6 +84,11 @@ def safe_execution_trace(response: FusionResponse, *, tenant_key: str = "") -> d
             else {}
         ),
         "fusion_admission": _safe_fusion_admission(route_plan.get("fusion_admission") if isinstance(route_plan.get("fusion_admission"), Mapping) else {}),
+        "terra_execution_admission": _safe_terra_execution_admission(
+            route_plan.get("terra_execution_admission")
+            if isinstance(route_plan.get("terra_execution_admission"), Mapping)
+            else {}
+        ),
         "stage_profile_reuse": _safe_stage_profile_reuse(stage_profile_reuse),
         "task_plan": _safe_task_plan(task_dag),
         "candidate_outputs": [_safe_candidate(candidate.safe_dict()) for candidate in response.candidates],
@@ -1358,7 +1363,50 @@ def _safe_early_exit(value: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _safe_terra_execution_outcome(value: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "schema": value.get("schema") or "axio_fusion_api.terra_execution_outcome.v1",
+        "applies": bool(value.get("applies")),
+        "route_mode": str(value.get("route_mode") or "not_applicable")[:64],
+        "runtime_mode": str(value.get("runtime_mode") or "not_applicable")[:64],
+        "panel_phase_configured": bool(value.get("panel_phase_configured")),
+        "panel_roles_admitted": [
+            str(role)[:80]
+            for role in value.get("panel_roles_admitted", [])
+            if str(role)
+        ][:8] if isinstance(value.get("panel_roles_admitted"), list) else [],
+        "panel_roles_completed": [
+            str(role)[:80]
+            for role in value.get("panel_roles_completed", [])
+            if str(role)
+        ][:8] if isinstance(value.get("panel_roles_completed"), list) else [],
+        "judge_attempted": bool(value.get("judge_attempted")),
+        "judge_completed": bool(value.get("judge_completed")),
+        "synthesizer_attempted": bool(value.get("synthesizer_attempted")),
+        "synthesizer_completed": bool(value.get("synthesizer_completed")),
+        "mandatory_reservations_released": bool(
+            value.get("mandatory_reservations_released")
+        ),
+        "fallback_used": bool(value.get("fallback_used")),
+        "degraded": bool(value.get("degraded")),
+        "degradation_reason": str(value.get("degradation_reason") or "")[:120],
+        "reason_codes": [
+            str(reason)[:120]
+            for reason in value.get("reason_codes", [])
+            if str(reason)
+        ][:12] if isinstance(value.get("reason_codes"), list) else [],
+        "raw_prompt_persisted": False,
+        "raw_profile_ids_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
 def _safe_runtime_fusion_stage_outcome(value: Mapping[str, Any]) -> dict[str, Any]:
+    terra = (
+        value.get("terra_execution_outcome")
+        if isinstance(value.get("terra_execution_outcome"), Mapping)
+        else {}
+    )
     return {
         "schema": value.get("schema") or "axio_fusion_api.runtime_fusion_stage_outcome.v1",
         "fusion_requested": bool(value.get("fusion_requested")),
@@ -1399,6 +1447,7 @@ def _safe_runtime_fusion_stage_outcome(value: Mapping[str, Any]) -> dict[str, An
         "execution_mode": str(value.get("execution_mode") or "")[:120],
         "runtime_degraded": bool(value.get("runtime_degraded")),
         "degradation_reason": str(value.get("degradation_reason") or "")[:120],
+        "terra_execution_outcome": _safe_terra_execution_outcome(terra),
         "raw_prompt_persisted": False,
         "raw_candidate_text_persisted": False,
         "raw_profile_id_persisted": False,
@@ -2085,6 +2134,44 @@ def _safe_policy_reason_codes(value: Any) -> list[str]:
         if len(safe) >= 12:
             break
     return safe
+
+
+def _safe_terra_execution_admission(value: Mapping[str, Any]) -> dict[str, Any]:
+    counts = value.get("role_eligible_count_by_role")
+    return {
+        "schema": value.get("schema") or "axio_fusion_api.terra_execution_admission.v1",
+        "applies": bool(value.get("applies")),
+        "requested_mode": str(value.get("requested_mode") or "not_applicable")[:64],
+        "admitted_mode": str(value.get("admitted_mode") or "not_applicable")[:64],
+        "required_roles": [
+            str(role)[:80]
+            for role in value.get("required_roles", [])
+            if str(role)
+        ][:8] if isinstance(value.get("required_roles"), list) else [],
+        "role_eligible_count": _optional_int(value.get("role_eligible_count")),
+        "role_eligible_count_by_role": {
+            str(role)[:80]: max(0, _optional_int(count) or 0)
+            for role, count in counts.items()
+            if str(role)
+        } if isinstance(counts, Mapping) else {},
+        "missing_roles": [
+            str(role)[:80]
+            for role in value.get("missing_roles", [])
+            if str(role)
+        ][:8] if isinstance(value.get("missing_roles"), list) else [],
+        "initial_panel_count": _optional_int(value.get("initial_panel_count")),
+        "provider_stage_required": bool(value.get("provider_stage_required")),
+        "fallback_allowed": bool(value.get("fallback_allowed")),
+        "degraded": bool(value.get("degraded")),
+        "reason_codes": [
+            str(reason)[:120]
+            for reason in value.get("reason_codes", [])
+            if str(reason)
+        ][:12] if isinstance(value.get("reason_codes"), list) else [],
+        "raw_profile_ids_persisted": False,
+        "raw_model_names_persisted": False,
+        "secrets_persisted": False,
+    }
 
 
 def _safe_fusion_admission(value: Mapping[str, Any]) -> dict[str, Any]:
