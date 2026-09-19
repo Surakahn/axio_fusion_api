@@ -17,8 +17,10 @@ provider，但候选角色适配分不得低于当前最佳的 90%，否则保�
 `provider_judge_synthesis`；Fast/Terra 的既有 role admission fail-closed 行为不变。
 
 本轮只修改离线路由算法与安全投影，不执行 provider screening、target benchmark 或修改
-r18 frozen 输入；生产 Axio 尚未重启，须在提交后按当前唯一回滚副本策略做受控发布与 health/
-route-plan 验证。CPA Plus 8317 不停止、不重启、不修改。
+r18 frozen 输入；提交 `6cf29c0` 已推送并按唯一回滚副本策略以 `setsid/nohup` 受控发布至
+Axio 18900 PID `3429473`。发布后 health=ready、21/21 runtime eligible、0 open circuits、
+三档 route-plan 通过；当前唯一回滚副本为 `private/axio_server.18900.console.log.pre-6cf29c0`。
+旧 `pre-b128137` 已在验证成功后删除。CPA Plus 8317 不停止、不重启、不修改。
 
 ## 2026-09-19 SQLite 备份原子发布与旧副本保护
 

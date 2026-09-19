@@ -33,9 +33,11 @@ target 强行晋升弱模型。
 
 ## 发布与后续
 
-本交接创建时生产 Axio 18900 尚未重启；发布前需保留一个新的 `pre-<commit>` 日志回滚副本，
-使用 `setsid/nohup` 受控切换并验证 `/health`、runtime snapshot、三档 route-plan。验证成功
-后删除旧回滚副本，只保留最新一个；不停止/重启/修改 CPA Plus 8317。
+里程碑提交 `6cf29c0` 已推送并完成生产发布：先保留
+`private/axio_server.18900.console.log.pre-6cf29c0`，再以 `setsid/nohup` 切换至 PID
+`3429473`。发布后 `/health=ready`、21/21 runtime eligible、0 open circuits、三档
+route-plan 通过；旧 `pre-b128137` 已删除，当前仅保留上述最新回滚副本。不停止/重启/修改
+CPA Plus 8317。
 
 该修复不提供 provider 能力、排名或 superiority 证据。r18 screening、transport admission、
 ranking、provider freeze、Harness/import 和 21-suite benchmark 仍按单向 gate 等待授权与

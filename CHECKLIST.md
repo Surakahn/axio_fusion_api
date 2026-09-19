@@ -12,8 +12,10 @@
   `1181 passed`，`compileall` 与 `git diff --check` 通过。
 - [x] 真实 serving registry 离线 Pro dry-run：4 profiles、2 role-eligible providers、target=2、
   diversity satisfied、`provider_judge_synthesis`；Fast/Terra direct fallback 保持不变。
-- [ ] 提交后仍需按最新回滚副本策略受控重启 Axio 18900 并验证 health、runtime、三档 route-plan；
-  不触碰 CPA Plus、r18 frozen inputs、provider screening 或 21-suite target campaign。
+- [x] 提交 `6cf29c0` 后按最新回滚副本策略受控重启 Axio 18900 至 PID `3429473`；health=ready、
+  21/21 runtime eligible、0 open circuits、三档 route-plan 通过；仅保留
+  `private/axio_server.18900.console.log.pre-6cf29c0`，不触碰 CPA Plus、r18 frozen inputs、
+  provider screening 或 21-suite target campaign。
 
 # 2026-09-19 SQLite 备份原子发布与旧副本保护
 
