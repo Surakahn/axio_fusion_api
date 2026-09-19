@@ -13,8 +13,8 @@ serving registry Pro dry-run 为 4 个 profile、2 个 role-eligible provider、
 `provider_diversity_satisfied=true`，角色为 cpa_plus + NVIDIA；Fast/Terra 仍按既有 role
 admission blocker 直接降级。该增量只改变离线路由选择与安全可观测性，不是 provider 能力或
 superiority 证据，不改变 r18 frozen plan/source/registry，也没有启动 screening 或 target
-benchmark。生产发布需另行执行唯一 Axio 回滚副本、setsid/nohup、health/runtime/route-plan
-验证；CPA Plus 8317 保持不变。
+benchmark。提交 `6cf29c0` 已按唯一 Axio 回滚副本、setsid/nohup、health/runtime/route-plan
+流程发布至 PID `3429473`，验证成功后仅保留 `pre-6cf29c0`；CPA Plus 8317 保持不变。
 
 ## 2026-09-19 SQLite 备份原子发布增量
 
