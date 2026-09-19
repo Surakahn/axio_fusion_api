@@ -5131,7 +5131,13 @@ def _safe_route_plan_response(route_plan: Mapping[str, Any]) -> dict[str, Any]:
         "request": request,
         "request_analysis": route_plan.get("request_analysis") if isinstance(route_plan.get("request_analysis"), Mapping) else {},
         "budget": route_plan.get("budget") if isinstance(route_plan.get("budget"), Mapping) else {},
+        "call_cost_contract": public_summary.get("call_cost_contract")
+        if isinstance(public_summary.get("call_cost_contract"), Mapping)
+        else {},
         "fusion_admission": route_plan.get("fusion_admission") if isinstance(route_plan.get("fusion_admission"), Mapping) else {},
+        "terra_execution_admission": public_summary.get("terra_execution_admission")
+        if isinstance(public_summary.get("terra_execution_admission"), Mapping)
+        else {},
         "model_selection_policy": route_plan.get("model_selection_policy") if isinstance(route_plan.get("model_selection_policy"), Mapping) else {},
         "quality_diversity_archive": route_plan.get("quality_diversity_archive") if isinstance(route_plan.get("quality_diversity_archive"), Mapping) else {},
         "provider_routing_policy": route_plan.get("provider_routing_policy") if isinstance(route_plan.get("provider_routing_policy"), Mapping) else {},

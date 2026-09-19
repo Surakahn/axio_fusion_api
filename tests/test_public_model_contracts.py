@@ -2,7 +2,7 @@ from axio_fusion_api.call_cost import (
     product_call_cost_contract,
     provider_call_cost_receipt,
 )
-from axio_fusion_api.compat import canonicalize_payload
+from axio_fusion_api.compat import canonicalize_payload, public_route_summary
 from axio_fusion_api.router import build_route_plan
 from axio_fusion_api.schemas import PUBLIC_MODELS, FusionRequest, canonical_public_model
 from axio_fusion_api.trace_store import safe_execution_trace
@@ -41,6 +41,7 @@ def test_each_product_keeps_distinct_route_algorithm_and_call_contract():
         assert route["strategy"].startswith(expected_strategy_prefix)
         assert route["call_cost_contract"]["public_model"] == model
         assert route["call_cost_contract"]["admitted_call_cap"] >= 1
+        assert public_route_summary(route)["call_cost_contract"]["public_model"] == model
 
 
 def test_call_cost_counts_attempts_and_does_not_claim_cheaper_without_benchmark():
