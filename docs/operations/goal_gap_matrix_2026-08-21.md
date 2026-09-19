@@ -1,5 +1,21 @@
 # Axio Fusion Goal 差距矩阵（2026-08-21）
 
+## 2026-09-19 SQLite 账本完整性与备份恢复门禁增量
+
+在共享租户预算账本已支持单主机多进程原子 reserve/settle/release、显式 operator
+recovery、在线 backup 后，本轮补齐 `SQLiteTenantBudgetLedger.integrity_check()`：
+以 `PRAGMA integrity_check` 加必需表列校验形成 fail-closed 门禁；`backup()` 在源库和
+副本两端均执行该检查。正常 receipt 仅含 schema/backend/valid 和安全布尔标志；损坏
+SQLite 或缺列 schema 返回 invariant，锁/暂时不可用仍为 retryable unavailable。
+
+验证：账本/预算/部署/真实增量流专项 `56 passed`，全量 `1171 passed`，L1/L2 与
+`git diff --check` 通过；无 provider/target 网络调用，r18 frozen 输入未改动。该增量
+只证明本地账本恢复前置检查，不证明磁盘满、自动 fencing、跨主机共享配额或公网上线。
+商业运维状态仍为 partial：下一步是磁盘/卷故障注入、跨主机 fencing 适配器设计，以及
+在可信 image pricing 与真实公共/operator key 完成后做外部 smoke；随后再回到 r18
+screening -> transport admission -> ranking -> freeze -> Harness/import -> 21-suite
+campaign 单向门禁。
+
 ## 用途与证据边界
 
 这份矩阵是每轮交接前的状态锚点，用来回答三个问题：产品已经真正完成什么、当前

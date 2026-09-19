@@ -189,11 +189,41 @@ def test_sqlite_ledger_online_backup_can_be_reopened_without_raw_metadata(tmp_pa
     assert receipt["schema"] == "axio_fusion_api.tenant_budget_ledger_backup.v1"
     assert len(receipt["sha256"]) == 64
     assert receipt["raw_path_persisted"] is False
+    integrity = ledger.integrity_check()
+    assert integrity["valid"] is True
+    assert integrity["sqlite_integrity_check"] == "ok"
+    assert integrity["raw_path_persisted"] is False
     restored = SQLiteTenantBudgetLedger(str(backup_path))
+    assert restored.integrity_check()["valid"] is True
     row = restored.snapshot(day="2026-09-19")["rows"][0]
     assert row["committed_usd"] == 0.15
     with pytest.raises(TenantBudgetLedgerInvariantError):
         ledger.backup(str(source_path))
+
+
+def test_sqlite_ledger_integrity_check_fails_closed_on_incomplete_schema(tmp_path):
+    path = tmp_path / "incomplete-budget.db"
+    ledger = SQLiteTenantBudgetLedger(str(path))
+    with sqlite3.connect(str(path)) as connection:
+        connection.execute("ALTER TABLE reservations RENAME COLUMN amount_usd TO amount_broken")
+    with pytest.raises(TenantBudgetLedgerInvariantError) as error:
+        ledger.integrity_check()
+    assert error.value.reason_code == "tenant_budget_shared_backend_invariant_failed"
+    with pytest.raises(TenantBudgetLedgerInvariantError):
+        ledger.backup(str(tmp_path / "should-not-backup.db"))
+
+
+def test_sqlite_ledger_integrity_check_classifies_malformed_file(tmp_path):
+    path = tmp_path / "malformed-budget.db"
+    ledger = SQLiteTenantBudgetLedger(str(path))
+    path.write_bytes(b"not-a-sqlite-database")
+    for suffix in ("-wal", "-shm"):
+        sidecar = path.with_name(path.name + suffix)
+        if sidecar.exists():
+            sidecar.unlink()
+    with pytest.raises(TenantBudgetLedgerInvariantError) as error:
+        ledger.integrity_check()
+    assert error.value.reason_code == "tenant_budget_shared_backend_invariant_failed"
 
 
 def test_atomic_reservation_is_shared_across_concurrent_workers():

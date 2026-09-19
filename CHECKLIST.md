@@ -1,5 +1,17 @@
 # Axio Fusion API Checklist
 
+# 2026-09-19 SQLite 账本完整性与备份恢复门禁
+
+- [x] `SQLiteTenantBudgetLedger.integrity_check()` 同时验证 SQLite `PRAGMA integrity_check`
+  和 `accounts`/`reservations` 必需 schema；正常结果仅返回 hash-safe receipt，不暴露路径、
+  租户或 secret。
+- [x] `backup()` 在源库复制前与目标副本完成后都执行完整性检查；损坏文件、缺列 schema
+  fail-closed 为 invariant，锁/暂时不可用保持 retryable unavailable。
+- [x] 覆盖正常账本、在线备份重开、缺列 schema、WAL sidecar 清理后的损坏文件故障注入；
+  账本/预算/部署/真实增量流专项 `56 passed`，全量 Python 3.11 回归 `1171 passed`。
+- [ ] 仍需完成磁盘满、卷可靠性、自动 fencing/租约恢复及跨主机共享后端审计；SQLite
+  不能宣称跨主机全局配额。
+
 # 2026-09-19 SQLite 共享租户预算账本适配器
 
 - [x] 新增 `SQLiteTenantBudgetLedger`，使用标准库 SQLite 的事务、WAL、busy timeout 和

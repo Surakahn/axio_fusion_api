@@ -1,5 +1,15 @@
 # Axio Fusion API Plan
 
+## 2026-09-19 SQLite 账本完整性与备份恢复门禁
+
+在已有 SQLite 共享租户预算账本之上补齐页级一致性和 schema 完整性检查。新增
+`SQLiteTenantBudgetLedger.integrity_check()`，使用 `PRAGMA integrity_check` 并校验
+`accounts`/`reservations` 必需表列；数据库损坏或 schema 不完整时 fail-closed，正常结果
+只返回 hash-safe readiness receipt。在线备份现在在复制前后都经过该门禁，避免仅凭备份文件
+存在和 SHA-256 误判为可恢复。专项验证覆盖正常源库、备份副本、缺列 schema、损坏文件；
+全量回归 `1171 passed`。本轮仍不执行 provider/target 网络调用，不修改 r18 frozen
+plan/source/registry，不改变 SQLite 仅限单主机多进程的部署边界。
+
 ## 2026-09-19 SQLite 共享租户预算账本适配器
 
 在 `TenantBudgetLedger` Protocol 之上新增标准库 SQLite 适配器，并由

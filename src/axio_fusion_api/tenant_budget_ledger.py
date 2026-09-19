@@ -427,6 +427,29 @@ class SQLiteTenantBudgetLedger:
     """
 
     backend_name = "sqlite_shared_file"
+    _REQUIRED_COLUMNS = {
+        "accounts": frozenset(
+            {"tenant_hash", "day", "budget_usd", "committed_usd", "reserved_usd", "updated_at"}
+        ),
+        "reservations": frozenset(
+            {
+                "reservation_id",
+                "tenant_hash",
+                "day",
+                "reservation_key",
+                "amount_usd",
+                "budget_usd",
+                "status",
+                "actual_cost_usd",
+                "overcommit",
+                "created_at",
+                "settled_at",
+                "settled_committed_usd",
+                "settled_reserved_usd",
+                "settlement_reason_code",
+            }
+        ),
+    }
 
     def __init__(self, path: str, *, timeout_seconds: float = 5.0) -> None:
         normalized = os.path.abspath(os.path.expanduser(str(path or "").strip()))
@@ -641,13 +664,18 @@ class SQLiteTenantBudgetLedger:
         parent = os.path.dirname(destination)
         if not parent or not os.path.isdir(parent):
             raise TenantBudgetLedgerInvariantError("backup parent directory must already exist")
+        self.integrity_check()
         source = None
         target = None
         try:
             source = self._connect()
             target = sqlite3.connect(destination, timeout=self._timeout_seconds, isolation_level=None)
+            target.row_factory = sqlite3.Row
             source.backup(target, pages=128, sleep=0.05)
             target.execute("PRAGMA synchronous = FULL")
+            self._integrity_receipt(target)
+        except TenantBudgetLedgerError:
+            raise
         except sqlite3.Error as error:
             raise TenantBudgetLedgerUnavailable("sqlite ledger backup failed") from error
         finally:
@@ -665,6 +693,56 @@ class SQLiteTenantBudgetLedger:
             "backend": self.backend_name,
             "bytes": backup_size,
             "sha256": backup_sha256,
+            "raw_path_persisted": False,
+            "raw_tenant_keys_persisted": False,
+            "raw_api_keys_persisted": False,
+            "secrets_persisted": False,
+        }
+
+    def integrity_check(self) -> dict[str, Any]:
+        """验证 SQLite 页级一致性和账本 schema，不暴露路径或原始数据。"""
+
+        try:
+            with self._connect() as connection:
+                return self._integrity_receipt(connection)
+        except TenantBudgetLedgerError:
+            raise
+        except sqlite3.DatabaseError as error:
+            if _is_corrupt_sqlite_error(error):
+                raise TenantBudgetLedgerInvariantError("sqlite ledger integrity check failed") from error
+            raise TenantBudgetLedgerUnavailable("sqlite ledger integrity check unavailable") from error
+
+    @classmethod
+    def _integrity_receipt(cls, connection: sqlite3.Connection) -> dict[str, Any]:
+        try:
+            rows = connection.execute("PRAGMA integrity_check").fetchall()
+            integrity_ok = bool(rows) and all(str(row[0]).lower() == "ok" for row in rows)
+            if not integrity_ok:
+                raise TenantBudgetLedgerInvariantError("sqlite ledger integrity check failed")
+            table_rows = connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('accounts', 'reservations')"
+            ).fetchall()
+            table_names = {str(row[0]) for row in table_rows}
+            if table_names != set(cls._REQUIRED_COLUMNS):
+                raise TenantBudgetLedgerInvariantError("sqlite ledger schema is incomplete")
+            for table_name, required_columns in cls._REQUIRED_COLUMNS.items():
+                columns = {
+                    str(row[1]) for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+                }
+                if not required_columns.issubset(columns):
+                    raise TenantBudgetLedgerInvariantError("sqlite ledger schema is incomplete")
+        except TenantBudgetLedgerError:
+            raise
+        except sqlite3.DatabaseError as error:
+            if _is_corrupt_sqlite_error(error):
+                raise TenantBudgetLedgerInvariantError("sqlite ledger integrity check failed") from error
+            raise TenantBudgetLedgerUnavailable("sqlite ledger integrity check unavailable") from error
+        return {
+            "schema": "axio_fusion_api.tenant_budget_ledger_integrity.v1",
+            "backend": SQLiteTenantBudgetLedger.backend_name,
+            "valid": True,
+            "sqlite_integrity_check": "ok",
+            "tables": sorted(cls._REQUIRED_COLUMNS),
             "raw_path_persisted": False,
             "raw_tenant_keys_persisted": False,
             "raw_api_keys_persisted": False,
@@ -880,6 +958,13 @@ def _sha256_file(path: str) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _is_corrupt_sqlite_error(error: sqlite3.DatabaseError) -> bool:
+    """区分不可恢复的数据库损坏与可重试的锁/暂时不可用。"""
+
+    message = str(error).lower()
+    return any(marker in message for marker in ("malformed", "not a database", "corrupt"))
 
 
 __all__ = [
