@@ -6,8 +6,12 @@
 可恢复副本。本轮将 `SQLiteTenantBudgetLedger.backup()` 改为同卷临时文件复制：源/临时副本
 完整性检查通过后才 `os.replace()` 原子发布；任何 SQLite、I/O 或替换失败都会清理临时文件
 并保留旧目标。新增回归覆盖成功发布、替换失败、旧副本保留、临时文件清理和恢复后重开。
-L1/L2、账本专项 `23 passed`，预算/部署/真实流式专项 `41 passed`；下一步执行完整回归。
-本轮不执行 provider/target 网络调用，不修改 r18 frozen 输入、serving registry 或 CPA Plus。
+L1/L2、账本专项 `23 passed`，预算/部署/真实流式专项 `41 passed`；全量 Python 3.11 回归
+`1179 passed`，`compileall` 与 `git diff --check` 通过。本轮不执行 provider screening 或
+target benchmark 调用，不修改 r18 frozen 输入或 serving registry；仅按代码发布流程受控重启
+Axio 18900。提交 `b128137` 已推送到 `origin/main`，服务恢复至 PID `3355306` 后 health、
+registry、runtime routing、三档 route-plan 均通过；8317 CPA Plus 未停止、未重启、未修改，
+当前唯一 Axio 回滚副本为 `private/axio_server.18900.console.log.pre-b128137`。
 
 ## 2026-09-19 Operator 账本诊断 CLI 与安全输出
 

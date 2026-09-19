@@ -4,9 +4,11 @@
 
 SQLite 在线备份现在采用同卷临时文件、双端完整性检查后原子替换；复制/磁盘/I/O/替换
 失败会清理临时文件并保留旧目标副本，避免产生看似存在但不可恢复的备份。账本专项
-`23 passed`，预算/部署/真实增量流专项 `41 passed`；完整回归待本轮结束执行。本增量只
-强化单主机账本恢复闭环，不改变 provider、screening、ranking、benchmark 或 serving
-registry。真实卷故障和跨主机 fencing 仍是商业运维的 partial 项。
+`23 passed`，预算/部署/真实增量流专项 `41 passed`，全量回归 `1179 passed`。提交
+`b128137` 已推送并受控发布至 Axio 18900 PID `3355306`，health/registry/runtime/三档
+route-plan 及 8317 CPA Plus 验证通过，仅保留 `pre-b128137` 回滚副本。本增量只强化单主机
+账本恢复闭环，不改变 provider screening、ranking、benchmark 或 serving registry。真实卷
+故障和跨主机 fencing 仍是商业运维的 partial 项。
 
 ## 2026-09-19 Operator 账本诊断 CLI 增量
 
