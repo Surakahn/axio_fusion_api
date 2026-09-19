@@ -1,5 +1,17 @@
 # Axio Fusion Goal 差距矩阵（2026-08-21）
 
+## 2026-09-19 Operator 账本诊断 CLI 增量
+
+新增 `tenant-budget-ledger-diagnostic` 运维入口，组合 SQLite `integrity_check()`、卷状态
+检查和可选在线 backup，输出固定 hash-safe receipt。缺失源文件不会隐式创建账本；缺失/损坏
+schema 为不可重试 invariant，卷只读/空间不足/I/O 为可重试 storage unavailable。验证为
+L1/L2、专项 `36 passed`、全量 `1178 passed`、compileall 与 diff check 通过。本增量只完善
+预算账本的可运维闭环，不改变 provider、screening、ranking、benchmark 或 serving registry。
+
+商业运维仍为 **partial**：诊断工具不等同真实卷故障演练，也不提供跨主机 fencing 实现。
+下一合法动作仍是隔离卷的有界故障注入、真实 `FencedTenantBudgetLedger` 后端选型及双副本
+网络分区/崩溃恢复审计；在其完成前公网 `shared_required` 继续 fail-closed。
+
 ## 2026-09-19 跨主机预算 fencing/epoch 契约增量
 
 新增 `LedgerFencingClaim` 和 `FencedTenantBudgetLedger` 协议，固定跨主机后端必须通过

@@ -1,5 +1,16 @@
 # Axio Fusion API Checklist
 
+# 2026-09-19 Operator 账本诊断 CLI 与安全输出
+
+- [x] 新增 `tenant-budget-ledger-diagnostic`，支持完整性、存储卷和可选在线备份检查，输出
+  固定 schema 的 hash-safe receipt。
+- [x] 缺失源文件不会被诊断命令隐式初始化；缺失/损坏/schema 不完整固定为 invariant
+  fail-closed，存储只读/空间不足/I/O 固定为 retryable storage unavailable。
+- [x] 回归覆盖成功备份、缺失源、空间门禁和敏感字段隔离；专项 `36 passed`，全量
+  Python 3.11 回归 `1178 passed`，`compileall` 与 `git diff --check` 通过。
+- [ ] 该 CLI 仍是单主机 SQLite 运维工具，不代表跨主机全局预算；真实卷故障演练和
+  `FencedTenantBudgetLedger` 后端审计仍待完成。
+
 # 2026-09-19 跨主机租户预算 fencing/epoch 契约
 
 - [x] 新增 `LedgerFencingClaim`：owner hash、正整数单调 epoch 和内存 token 的输入验证；

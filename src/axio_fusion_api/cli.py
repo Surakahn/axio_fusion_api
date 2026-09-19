@@ -165,6 +165,11 @@ from .server import (
 from .schemas import sha256_text
 from .trace_store import build_trace_report, write_json as write_trace_json
 from .tools import execute_tool_batch
+from .tenant_budget_ledger import (
+    SQLiteTenantBudgetLedger,
+    TenantBudgetLedgerError,
+    TenantBudgetLedgerInvariantError,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -787,6 +792,25 @@ def build_parser() -> argparse.ArgumentParser:
     registry_diagnostic.add_argument("--require-prefusion", action="store_true")
     registry_diagnostic.add_argument("--output", default=None)
     registry_diagnostic.set_defaults(func=cmd_registry_diagnostic)
+
+    ledger_diagnostic = sub.add_parser(
+        "tenant-budget-ledger-diagnostic",
+        help="检查 SQLite 租户预算账本完整性、存储卷和可选在线备份。",
+    )
+    ledger_diagnostic.add_argument("--path", required=True, help="账本路径；不会写入输出 receipt。")
+    ledger_diagnostic.add_argument(
+        "--backup",
+        default=None,
+        help="可选的独立备份目标路径；输出只包含备份哈希和安全状态。",
+    )
+    ledger_diagnostic.add_argument(
+        "--required-free-bytes",
+        type=int,
+        default=0,
+        help="额外的最低可用空间要求，必须为非负整数。",
+    )
+    ledger_diagnostic.add_argument("--output", default=None)
+    ledger_diagnostic.set_defaults(func=cmd_tenant_budget_ledger_diagnostic)
 
     execution_boundary = sub.add_parser("remote-api-execution-audit")
     execution_boundary.add_argument("--output", default=None)
@@ -2487,6 +2511,61 @@ def cmd_registry_diagnostic(args: argparse.Namespace) -> int:
     )
     _emit_json(payload, output=args.output)
     return 0 if payload.get("status") != "blocked" else 2
+
+
+def cmd_tenant_budget_ledger_diagnostic(args: argparse.Namespace) -> int:
+    try:
+        source_path = Path(str(args.path or "").strip()).expanduser()
+        if not source_path.is_file():
+            raise TenantBudgetLedgerInvariantError("sqlite ledger source file is required")
+        ledger = SQLiteTenantBudgetLedger(args.path)
+        integrity = ledger.integrity_check()
+        storage = ledger.storage_status(required_bytes=int(args.required_free_bytes))
+        ready = bool(integrity.get("valid") is True and storage.get("ready") is True)
+        payload = {
+            "schema": "axio_fusion_api.tenant_budget_ledger_diagnostic.v1",
+            "backend": ledger.backend_name,
+            "ready": ready,
+            "reason_code": "" if ready else "tenant_budget_shared_backend_storage_unavailable",
+            "retryable": bool(not ready),
+            "integrity": integrity,
+            "storage": storage,
+            "backup": ledger.backup(args.backup) if args.backup else None,
+            "raw_path_persisted": False,
+            "raw_tenant_keys_persisted": False,
+            "raw_api_keys_persisted": False,
+            "secrets_persisted": False,
+        }
+    except TenantBudgetLedgerError as error:
+        payload = {
+            "schema": "axio_fusion_api.tenant_budget_ledger_diagnostic.v1",
+            "backend": SQLiteTenantBudgetLedger.backend_name,
+            "ready": False,
+            "reason_code": error.reason_code,
+            "retryable": error.retryable,
+            "raw_path_persisted": False,
+            "raw_tenant_keys_persisted": False,
+            "raw_api_keys_persisted": False,
+            "secrets_persisted": False,
+        }
+        _emit_json(payload, output=args.output)
+        return 2
+    except ValueError:
+        payload = {
+            "schema": "axio_fusion_api.tenant_budget_ledger_diagnostic.v1",
+            "backend": SQLiteTenantBudgetLedger.backend_name,
+            "ready": False,
+            "reason_code": "tenant_budget_shared_backend_invariant_failed",
+            "retryable": False,
+            "raw_path_persisted": False,
+            "raw_tenant_keys_persisted": False,
+            "raw_api_keys_persisted": False,
+            "secrets_persisted": False,
+        }
+        _emit_json(payload, output=args.output)
+        return 2
+    _emit_json(payload, output=args.output)
+    return 0 if payload["ready"] else 2
 
 
 def cmd_remote_api_execution_audit(args: argparse.Namespace) -> int:

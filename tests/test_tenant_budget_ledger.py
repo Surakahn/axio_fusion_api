@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from axio_fusion_api.cli import main as fusion_cli_main
 from axio_fusion_api.tenant_budget_ledger import (
     LedgerFencingClaim,
     InMemoryTenantBudgetLedger,
@@ -293,6 +294,95 @@ def test_sqlite_ledger_storage_status_is_safe_and_detects_read_only_volume(tmp_p
     with pytest.raises(TenantBudgetLedgerStorageUnavailable) as error:
         ledger.backup(str(tmp_path / "storage-backup.db"))
     assert error.value.reason_code == "tenant_budget_shared_backend_storage_unavailable"
+
+
+def test_tenant_budget_ledger_diagnostic_cli_emits_safe_backup_receipt(tmp_path):
+    source = tmp_path / "operator-budget.db"
+    backup = tmp_path / "operator-budget.backup.db"
+    output = tmp_path / "diagnostic.json"
+    ledger = SQLiteTenantBudgetLedger(str(source))
+    reservation = ledger.reserve(
+        tenant_hash="tenant-hash",
+        day="2026-09-19",
+        amount_usd=0.10,
+        budget_usd=1.00,
+        reservation_key="operator-diagnostic",
+    )
+    ledger.settle(reservation_id=reservation.reservation_id, actual_cost_usd=0.08, success=True)
+    result = fusion_cli_main(
+        [
+            "tenant-budget-ledger-diagnostic",
+            "--path",
+            str(source),
+            "--backup",
+            str(backup),
+            "--required-free-bytes",
+            "1",
+            "--output",
+            str(output),
+        ]
+    )
+    assert result == 0
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    serialized = json.dumps(payload, sort_keys=True)
+    assert payload["ready"] is True
+    assert payload["reason_code"] == ""
+    assert payload["retryable"] is False
+    assert payload["integrity"]["valid"] is True
+    assert payload["storage"]["required_bytes"] == 1
+    assert payload["backup"]["storage_ready"] is True
+    assert str(source) not in serialized
+    assert str(backup) not in serialized
+    assert payload["secrets_persisted"] is False
+
+
+def test_tenant_budget_ledger_diagnostic_cli_does_not_create_missing_source(tmp_path):
+    source = tmp_path / "missing-budget.db"
+    output = tmp_path / "missing-diagnostic.json"
+    result = fusion_cli_main(
+        [
+            "tenant-budget-ledger-diagnostic",
+            "--path",
+            str(source),
+            "--output",
+            str(output),
+        ]
+    )
+    assert result == 2
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["ready"] is False
+    assert payload["reason_code"] == "tenant_budget_shared_backend_invariant_failed"
+    assert payload["retryable"] is False
+    assert not source.exists()
+    assert str(source) not in json.dumps(payload, sort_keys=True)
+
+
+def test_tenant_budget_ledger_diagnostic_cli_reports_storage_gate(tmp_path, monkeypatch):
+    source = tmp_path / "storage-gated-budget.db"
+    output = tmp_path / "storage-gated-diagnostic.json"
+    SQLiteTenantBudgetLedger(str(source))
+    monkeypatch.setattr(
+        os,
+        "statvfs",
+        lambda _: SimpleNamespace(f_bavail=0, f_frsize=4096, f_flag=0),
+    )
+    result = fusion_cli_main(
+        [
+            "tenant-budget-ledger-diagnostic",
+            "--path",
+            str(source),
+            "--required-free-bytes",
+            "1",
+            "--output",
+            str(output),
+        ]
+    )
+    assert result == 2
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["ready"] is False
+    assert payload["reason_code"] == "tenant_budget_shared_backend_storage_unavailable"
+    assert payload["retryable"] is True
+    assert payload["storage"]["free_bytes"] == 0
 
 
 def test_atomic_reservation_is_shared_across_concurrent_workers():

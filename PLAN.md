@@ -1,5 +1,19 @@
 # Axio Fusion API Plan
 
+## 2026-09-19 Operator 账本诊断 CLI 与安全输出
+
+新增 `tenant-budget-ledger-diagnostic` 运维命令，统一执行 SQLite 账本完整性检查、承载卷
+可写/空间检查和可选在线备份，并输出 `axio_fusion_api.tenant_budget_ledger_diagnostic.v1`
+hash-safe receipt。诊断模式不会为缺失源文件创建新账本；损坏/缺失 schema 以
+`tenant_budget_shared_backend_invariant_failed` fail-closed，卷只读、空间不足或 I/O 以
+`tenant_budget_shared_backend_storage_unavailable` 标记 retryable。路径、租户、token、API key
+和 secret 均不进入输出。L1/L2、账本/预算/部署专项 `36 passed`，全量回归 `1178 passed`；本轮
+不执行 provider/target 网络调用，不修改 r18 frozen 输入，不改变 serving registry。
+
+下一步仍是有界真实卷故障演练、跨主机 fencing 后端选择与双副本审计；在共享后端通过前保持
+公网 `shared_required` fail-closed，并随后回到 r18 screening -> transport admission ->
+ranking -> provider freeze -> Harness/import -> 21-suite campaign。
+
 ## 2026-09-19 跨主机租户预算 fencing/epoch 契约
 
 将跨主机共享账本从“未来设计”收敛为可审计的协议边界：新增
