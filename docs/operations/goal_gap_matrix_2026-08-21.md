@@ -1,5 +1,21 @@
 # Axio Fusion Goal 差距矩阵（2026-08-21）
 
+## 2026-09-19 Pro 跨 provider 角色多样性修复增量
+
+修复前 Pro 的 provider diversity target 直接使用全部 scored provider 数量，导致 Anthropic
+等尚未通过当前 Fusion role contract 的 provider 也被计入 target；同时 role-first panel 已满
+后无法以质量受限的候选替换同一 provider 的低优先级 profile。现在 target 只统计至少有一个
+当前 panel 角色可执行 profile 的 provider，并在补选时使用相对角色适配分 `0.90` 的质量下限。
+无法同时满足时不强行晋升弱模型，receipt 记录 `quality_floor` 或 `role_contract` 放宽原因。
+
+验证：路由专项 `72 passed`，多样性/trace 专项 `17 passed`，全量回归 `1181 passed`；r7
+serving registry Pro dry-run 为 4 个 profile、2 个 role-eligible provider、target=2、
+`provider_diversity_satisfied=true`，角色为 cpa_plus + NVIDIA；Fast/Terra 仍按既有 role
+admission blocker 直接降级。该增量只改变离线路由选择与安全可观测性，不是 provider 能力或
+superiority 证据，不改变 r18 frozen plan/source/registry，也没有启动 screening 或 target
+benchmark。生产发布需另行执行唯一 Axio 回滚副本、setsid/nohup、health/runtime/route-plan
+验证；CPA Plus 8317 保持不变。
+
 ## 2026-09-19 SQLite 备份原子发布增量
 
 SQLite 在线备份现在采用同卷临时文件、双端完整性检查后原子替换；复制/磁盘/I/O/替换

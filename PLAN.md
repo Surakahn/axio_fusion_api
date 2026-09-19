@@ -1,5 +1,25 @@
 # Axio Fusion API Plan
 
+## 2026-09-19 Pro 跨 provider 角色多样性修复
+
+离线 dry-run 审计发现 Pro 原先按全部 scored provider 计算多样性目标，且角色填充在
+`max_models` 已满时没有质量受限的跨 provider 替换。因此 serving registry 虽有 4 个
+provider，实际 panel 可能全部来自 cpa_plus，并把不可执行 role contract 的 provider 计入
+target。本轮将目标改为只统计当前 panel 角色合同可执行的 provider；角色补选优先选择新
+provider，但候选角色适配分不得低于当前最佳的 90%，否则保留质量并写出放宽原因。
+
+新增 route receipt 与 safe trace 字段：`provider_count_role_eligible`、
+`provider_diversity_min_relative_role_score`、`provider_diversity_relaxed_reason`。新增回归
+覆盖跨 provider 质量安全补选和无角色合同 provider 不虚增目标。验证结果为专项路由回归
+`72 passed`、trace/多样性回归 `17 passed`、全量 Python 3.11 回归 `1181 passed`，
+`compileall` 与 `git diff --check` 通过。真实 r7 serving registry 的 Pro dry-run 现为
+4 个 profile、2 个 role-eligible provider、target=2、diversity satisfied，保持
+`provider_judge_synthesis`；Fast/Terra 的既有 role admission fail-closed 行为不变。
+
+本轮只修改离线路由算法与安全投影，不执行 provider screening、target benchmark 或修改
+r18 frozen 输入；生产 Axio 尚未重启，须在提交后按当前唯一回滚副本策略做受控发布与 health/
+route-plan 验证。CPA Plus 8317 不停止、不重启、不修改。
+
 ## 2026-09-19 SQLite 备份原子发布与旧副本保护
 
 审计发现在线备份若在目标文件上直接复制，复制中断或磁盘错误可能留下半成品并覆盖已有

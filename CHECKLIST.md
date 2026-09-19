@@ -1,5 +1,20 @@
 # Axio Fusion API Checklist
 
+# 2026-09-19 Pro 跨 provider 角色多样性修复
+
+- [x] provider diversity target 只统计当前 panel 角色合同可执行的 provider，不再把 role
+  admission 明确排除的 provider 计入 target。
+- [x] 角色填充阶段允许质量安全的跨 provider 候选进入 panel；相对角色适配分下限固定为
+  `0.90`，不牺牲 primary、independent、critic 的质量合同。
+- [x] receipt/trace 暴露 role-eligible provider 数、质量下限和放宽原因，且继续只保存 hash-safe
+  metadata，不保存原始 provider/model。
+- [x] 回归覆盖跨 provider 补选和无角色合同 provider 排除；专项 `72 + 17 passed`，全量
+  `1181 passed`，`compileall` 与 `git diff --check` 通过。
+- [x] 真实 serving registry 离线 Pro dry-run：4 profiles、2 role-eligible providers、target=2、
+  diversity satisfied、`provider_judge_synthesis`；Fast/Terra direct fallback 保持不变。
+- [ ] 提交后仍需按最新回滚副本策略受控重启 Axio 18900 并验证 health、runtime、三档 route-plan；
+  不触碰 CPA Plus、r18 frozen inputs、provider screening 或 21-suite target campaign。
+
 # 2026-09-19 SQLite 备份原子发布与旧副本保护
 
 - [x] 在线备份先写同卷唯一临时文件，源/副本完整性检查通过后才原子替换目标文件。

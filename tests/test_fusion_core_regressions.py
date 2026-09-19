@@ -2721,6 +2721,129 @@ def test_local_consensus_blocks_when_only_one_channel_single_flight_pool_exists(
     assert route_plan["fusion_admission"]["activated"] is False
 
 
+def test_provider_panel_uses_quality_safe_cross_provider_role_candidate():
+    def profile(provider, model, roles, capability):
+        return normalize_profile(
+            {
+                "provider": provider,
+                "model": model,
+                "canonical_model_id": model,
+                "api_format": "chat",
+                "p50_latency_ms": 120,
+                "capabilities": {
+                    "daily_work": capability,
+                    "logic": capability,
+                    "agentic_tool_calling": capability,
+                    "structured_output": capability,
+                    "critique": capability,
+                    "long_context": capability,
+                },
+                "screening_allowed_roles": list(roles),
+            }
+        )
+
+    profiles = [
+        profile(
+            "primary-provider",
+            "primary",
+            ("primary_solver", "judge", "synthesizer"),
+            0.92,
+        ),
+        profile(
+            "evidence-provider",
+            "independent",
+            ("independent_solver", "judge", "synthesizer"),
+            0.90,
+        ),
+        profile(
+            "critic-provider",
+            "critic",
+            ("critic", "judge", "synthesizer"),
+            0.90,
+        ),
+        profile(
+            "primary-provider",
+            "same-provider-domain",
+            ("domain_specialist", "judge", "synthesizer"),
+            0.92,
+        ),
+        profile(
+            "diverse-provider",
+            "diverse-domain",
+            ("domain_specialist", "judge", "synthesizer"),
+            0.84,
+        ),
+    ]
+
+    route_plan = build_route_plan(
+        FusionRequest(
+            model="axio-pro",
+            prompt="Design and review a production workflow with an independent domain check.",
+        ),
+        profiles,
+    )
+
+    selected = route_plan["selected_models"]
+    policy = route_plan["model_selection_policy"]
+    selected_providers = {row["provider"] for row in selected}
+
+    assert "diverse-provider" in selected_providers
+    assert policy["provider_count_role_eligible"] == 4
+    assert policy["provider_count_target"] == 3
+    assert policy["provider_diversity_satisfied"] is True
+    assert policy["provider_diversity_relaxed_reason"] == ""
+
+
+def test_provider_diversity_target_excludes_profiles_without_panel_role_contract():
+    def profile(provider, model, roles):
+        return normalize_profile(
+            {
+                "provider": provider,
+                "model": model,
+                "canonical_model_id": model,
+                "api_format": "chat",
+                "p50_latency_ms": 120,
+                "capabilities": {
+                    "daily_work": 0.9,
+                    "logic": 0.9,
+                    "agentic_tool_calling": 0.9,
+                    "structured_output": 0.9,
+                    "critique": 0.9,
+                },
+                "screening_allowed_roles": list(roles),
+            }
+        )
+
+    route_plan = build_route_plan(
+        FusionRequest(model="axio-pro", prompt="Review this operational workflow."),
+        [
+            profile("primary-provider", "primary", ("primary_solver",)),
+            profile(
+                "hidden-provider-a",
+                "hidden-a",
+                ("unlisted_role",),
+            ),
+            profile(
+                "hidden-provider-b",
+                "hidden-b",
+                ("unlisted_role",),
+            ),
+            profile(
+                "hidden-provider-c",
+                "hidden-c",
+                ("unlisted_role",),
+            ),
+        ],
+    )
+
+    policy = route_plan["model_selection_policy"]
+    assert policy["provider_count_available"] == 4
+    assert policy["provider_count_role_eligible"] == 1
+    assert policy["provider_count_target"] == 1
+    assert policy["provider_diversity_satisfied"] is True
+    assert policy["provider_diversity_relaxed_reason"] == ""
+
+
 def test_local_consensus_runtime_uses_only_parallel_experts_and_marks_complete():
     class ExpertOnlyClient:
         def __init__(self):

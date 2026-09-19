@@ -19,6 +19,10 @@ LOCAL_CONSENSUS_OVERHEAD_MS = 75
 # gives the local quorum one bounded failure cushion.
 LOCAL_CONSENSUS_MAX_PANEL_SIZE = 4
 EXPERT_QUALITY_REPLACEMENT_TOLERANCE = 0.12
+# 跨 provider 的补选不能用绝对分数硬编码，因为不同角色的分数尺度会随
+# capability 轴变化。使用相对角色适配分下限，保留主模型质量并允许有意义的
+# provider 独立性进入 panel。
+PROVIDER_DIVERSITY_MIN_RELATIVE_ROLE_SCORE = 0.90
 ROUTE_COST_EXPERT_OUTPUT_TOKENS = 1024
 # Keep this equal to the largest Hermes Judge wire cap. A lower estimate would
 # admit a route whose real mandatory control packet can exceed its cost/time
@@ -2617,12 +2621,7 @@ def _select_panel(
     seen_canonical_identities: set[str] = set()
     seen_providers: set[str] = set()
     best_score = float(scored[0][1])
-    provider_count = len({profile.provider for profile, _ in scored})
     target_provider_count = 1
-    if max_models > 1 and provider_count > 1:
-        quality_target = float(budget.get("quality_target") or 0.0)
-        max_provider_target = 3 if request.public_model == "axio-pro" or quality_target >= 0.90 else 2
-        target_provider_count = min(provider_count, max_models, max_provider_target)
 
     def add(profile: ModelProfile) -> bool:
         if (
@@ -2656,6 +2655,27 @@ def _select_panel(
         # ``_screening_role_allowed`` treats it as an unrestricted profile.
         return any(
             _screening_role_allowed(profile, role) for role in panel_roles
+        )
+
+    # Provider diversity is an execution property, not an inventory count.
+    # Profiles that cannot perform any role in this panel must not inflate the
+    # target and create a permanently unsatisfied receipt.
+    role_eligible_provider_count = len(
+        {
+            profile.provider
+            for profile, _score in scored
+            if panel_role_allowed(profile)
+        }
+    )
+    if max_models > 1 and role_eligible_provider_count > 1:
+        quality_target = float(budget.get("quality_target") or 0.0)
+        max_provider_target = (
+            3 if request.public_model == "axio-pro" or quality_target >= 0.90 else 2
+        )
+        target_provider_count = min(
+            role_eligible_provider_count,
+            max_models,
+            max_provider_target,
         )
 
     role_targets = [
@@ -3178,10 +3198,42 @@ def _model_selection_policy(
     target_provider_count = 1
     fast_light_verify = _fast_light_verify_enabled(request, analysis, budget)
     diversity_enabled = request.public_model != "axio-fast" or fast_light_verify
-    if diversity_enabled and max_models > 1 and provider_count > 1:
+    panel_roles = list(
+        dict.fromkeys(
+            [
+                str(row.get("role") or "")
+                for row in role_blueprint
+                if isinstance(row, Mapping) and str(row.get("role") or "")
+            ]
+            + (["judge", "synthesizer"] if request.public_model != "axio-fast" else [])
+        )
+    )
+    role_eligible_providers = {
+        profile.provider
+        for profile, _score in scored
+        if any(_screening_role_allowed(profile, role) for role in panel_roles)
+    }
+    role_eligible_provider_count = len(role_eligible_providers)
+    if diversity_enabled and max_models > 1 and role_eligible_provider_count > 1:
         quality_target = float(budget.get("quality_target") or 0.0)
         max_provider_target = 3 if request.public_model == "axio-pro" or quality_target >= 0.90 else 2
-        target_provider_count = min(provider_count, max_models, max_provider_target)
+        target_provider_count = min(
+            role_eligible_provider_count,
+            max_models,
+            max_provider_target,
+        )
+    diversity_relaxed_reason = ""
+    if diversity_enabled and selected_provider_count < target_provider_count:
+        selected_providers = {profile.provider for profile in selected}
+        role_eligible_outside = {
+            profile.provider
+            for profile, _score in scored
+            if profile.provider not in selected_providers
+            and any(_screening_role_allowed(profile, role) for role in panel_roles)
+        }
+        diversity_relaxed_reason = (
+            "quality_floor" if role_eligible_outside else "role_contract"
+        )
     fast_direct_cascade = request.public_model == "axio-fast" and not fast_light_verify
     fast_deadline_ms = max(1, int(budget.get("max_latency_ms") or FAST_DIRECT_DEFAULT_DEADLINE_MS))
     fast_feasible_profiles = [
@@ -3206,10 +3258,13 @@ def _model_selection_policy(
         "canonical_model_panel_deduplication_satisfied": len(selected)
         == len(selected_canonical_identities),
         "provider_count_available": provider_count,
+        "provider_count_role_eligible": role_eligible_provider_count,
         "provider_count_target": target_provider_count,
         "provider_count_selected": selected_provider_count,
         "provider_diversity_satisfied": selected_provider_count >= target_provider_count,
-        "diversity_min_relative_score": 0.55,
+        "diversity_min_relative_score": PROVIDER_DIVERSITY_MIN_RELATIVE_ROLE_SCORE,
+        "provider_diversity_min_relative_role_score": PROVIDER_DIVERSITY_MIN_RELATIVE_ROLE_SCORE,
+        "provider_diversity_relaxed_reason": diversity_relaxed_reason,
         "error_correlation_aware_selection_enabled": True,
         "estimated_error_correlation": diversity_metrics["estimated_error_correlation"],
         "capability_complementarity": diversity_metrics["capability_complementarity"],
@@ -3526,10 +3581,33 @@ def _best_panel_profile_for_role(
             prefer_new_provider=prefer_new_provider,
         )
         role_score += _incremental_panel_complementarity(profile, selected, analysis)
-        candidates.append((profile, role_score))
+        candidates.append(
+            (
+                profile,
+                role_score,
+                profile.provider not in selected_providers,
+            )
+        )
     if not candidates:
         return None
     candidates.sort(key=lambda pair: pair[1], reverse=True)
+    if prefer_new_provider and selected_providers:
+        best_role_score = candidates[0][1]
+        quality_floor = (
+            best_role_score * PROVIDER_DIVERSITY_MIN_RELATIVE_ROLE_SCORE
+        )
+        diverse_candidates = [
+            row
+            for row in candidates
+            if row[2] and row[1] >= quality_floor
+        ]
+        if diverse_candidates:
+            # Keep the highest-quality candidate among the quality-safe
+            # alternatives.  The relative floor prevents a weak provider
+            # from displacing a materially stronger role owner merely to make
+            # the receipt look diverse.
+            diverse_candidates.sort(key=lambda pair: pair[1], reverse=True)
+            return diverse_candidates[0][0]
     return candidates[0][0]
 
 

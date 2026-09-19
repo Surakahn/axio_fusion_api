@@ -1804,6 +1804,15 @@ def _safe_model_selection_policy(value: Mapping[str, Any]) -> dict[str, Any]:
         "provider_count_selected": _optional_int(value.get("provider_count_selected")),
         "provider_diversity_satisfied": bool(value.get("provider_diversity_satisfied")),
         "diversity_min_relative_score": _optional_float(value.get("diversity_min_relative_score")),
+        "provider_count_role_eligible": _optional_int(
+            value.get("provider_count_role_eligible")
+        ),
+        "provider_diversity_min_relative_role_score": _optional_float(
+            value.get("provider_diversity_min_relative_role_score")
+        ),
+        "provider_diversity_relaxed_reason": str(
+            value.get("provider_diversity_relaxed_reason") or ""
+        )[:64],
         "error_correlation_aware_selection_enabled": bool(value.get("error_correlation_aware_selection_enabled")),
         "estimated_error_correlation": _optional_float(value.get("estimated_error_correlation")),
         "capability_complementarity": _optional_float(value.get("capability_complementarity")),
