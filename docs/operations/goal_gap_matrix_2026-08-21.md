@@ -45,13 +45,13 @@ provider 能力组合成 `axio-fast`、`axio-terra`、`axio-pro`。Harness 只�
   `private/runs/2026-08-26-composite-cohort-r18-harness-formal-gate/`。它只验证控制面
   语义，不覆盖 2026-08-21 旧 artifact；当前 execution plan 因缺少 provider freeze
   明确为 `blocked`。
-- 当前服务只读健康：`ready`（提交 `bfae5ac` 发布后 PID `2576971`；运行时代码来自 `4d56422`），公共模型为三档，四种协议可用，`auto -> proxy`，
+- 当前服务只读健康：`ready`（SQLite 完整性门禁提交 `eebb9ea` 发布后 PID `3066435`；公共模型为三档，四种协议可用，`auto -> proxy`），
   生产 loopback 为 `127.0.0.1:18900`，当前 serving registry 为 r7 probe-bound。
 - 当前 serving registry 身份已只读复核：21 个 physical profiles、15 个 logical
   models、21 个 live-available profiles、4 个 providers，且与 18900 进程的
   `AXIO_FUSION_REGISTRY_PATH` 绑定一致；AGENTS 中 r43 的 10-profile 数字仅是历史
   阶段检查项，不作为当前 r7 serving blocker。
-- 当前工程回归：`1142 passed, 0 skipped`（本轮图片成本计量专项与此前每日预算关闭状态投影、预算窗口恢复可观测性、非正 rate-limit 状态投影、rate-limit 窗口恢复可观测性、多路径错误投影一致性、四协议错误码一致性、流式断开资源释放、显式
+- 当前工程回归：`1171 passed`（本轮 SQLite 完整性/备份门禁与此前图片成本计量、预算关闭状态投影、预算窗口恢复可观测性、非正 rate-limit 状态投影、rate-limit 窗口恢复可观测性、多路径错误投影一致性、四协议错误码一致性、流式断开资源释放、显式
   fail-closed 鉴权、租户并发与此前路由/r18 binding/convergence 安全修复均通过）；这是代码
   契约证据，不是能力或质量证据。
 
@@ -205,7 +205,7 @@ SQLite 现有在线 backup API 和锁竞争 retryable 证据，备份副本可�
 | Harness 控制面 | **partial/ready offline** | hash-only pin、formal cohort gate、execution plan 状态机（blocked/execution-ready/post-execution-import-ready）、持久化状态、可恢复 supervisor、import audit、convergence gate | r18 provider freeze 尚未完成；新 successor 已正确将 diagnostic execution plan 标为 `blocked`，当前 `next_gate=screening`；即使 formal execution ready，也不会绕过 post-execution imports 或 target gate | freeze 后以同 cohort 15-unit/90-import 形态重建，先执行官方/审计 Harness 并导入，再审计放行 target |
 | 21-suite 资产 | **partial/blocked** | 9 类 21 套 matrix、case/source/decoding/统计合同；14 套可直接 materialize，6 套需 official import，GPQA 受授权门禁 | 没有完整同 cohort run；GPQA/官方 harness/import 仍不能冒充 ready | 先完成 baseline freeze 和官方/audited imports，再启动 target |
 | Benchmark campaign | **blocked** | 独立 evaluator、四面 API、paired statistics、Holm、effect size、3x latency、污染审计的代码/合同已具备 | `target_suite_calls_allowed=false`，无 provider baseline freeze，无 campaign 证据 | convergence 返回 `ready_for_target_campaign` 后再按锁定矩阵运行 |
-| 商业级运维 | **partial** | 生产 health ready；图片成本闭环提交 `9125ff2`/`048dfab`、预算预留与上界提交 `da216a8`，SQLite 备份与锁故障证据提交 `95c5b3b` 已以 setsid 受控发布至 PID `3025376`；proxy auto；atomic/safe receipts；secret/raw output 隔离；公开 capability warnings 已实际返回；public/operator key 比较使用 constant-time 语义；`current_channels.env` registry identity 已对齐 r7 serving identity；显式 auth fail-closed、租户并发 admission、每日预算 UTC reset `Retry-After`、预算/非正 rate-limit 关闭状态、image pricing readiness 均已实现；新增 SQLite 单主机共享账本适配器与 RuntimeState 显式接入 | 当前 18900 未启用 auth；正式公网仍需配置真实公共/operator key 并完成外部流量验证；verified image pricing、context/tool 能力字段为 unknown；SQLite 仅覆盖单主机多进程，自动 fencing/租约恢复、磁盘故障、共享卷可靠性、跨主机后端和外部流量验证尚未完成；跨 provider diversity 不足 | 完成 SQLite 磁盘/备份恢复与自动 fencing 审计，或接入经审计的跨主机原子后端；补齐 image pricing 后再启用公网预算；公网切换前完成真实 key 与外部 smoke；baseline 后补齐 admission metadata，并以 non-target/shadow 证据校准跨 provider 组合 |
+| 商业级运维 | **partial** | 生产 health ready；SQLite 完整性/备份门禁提交 `eebb9ea` 已以 setsid 受控发布至 PID `3066435`；图片成本闭环、预算预留与上界、atomic/safe receipts、secret/raw output 隔离、公开 capability warnings、constant-time key 比较、r7 registry identity、显式 auth fail-closed、租户并发 admission、每日预算 UTC reset `Retry-After`、预算/非正 rate-limit 关闭状态均已实现；proxy auto； | 当前 18900 未启用 auth；正式公网仍需配置真实公共/operator key 并完成外部流量验证；verified image pricing、context/tool 能力字段为 unknown；SQLite 仅覆盖单主机多进程，自动 fencing/租约恢复、磁盘故障/卷可靠性、跨主机后端和外部流量验证尚未完成；跨 provider diversity 不足 | 完成 SQLite 磁盘/备份恢复与自动 fencing 审计，或接入经审计的跨主机原子后端；补齐 image pricing 后再启用公网预算；公网切换前完成真实 key 与外部 smoke；baseline 后补齐 admission metadata，并以 non-target/shadow 证据校准跨 provider 组合 |
 | 代码质量与冗余 | **partial** | 核心 `src`、测试和控制面回归绿；关键边界有类型/异常/receipt | 历史 benchmark scripts 有重复 runner 与裸 `except`；不能在 baseline gate 前混入重构 | baseline freeze 后拆独立 legacy cleanup，逐文件 L1-L4 验证 |
 
 ## 当前必须保持不变的边界
