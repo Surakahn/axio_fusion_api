@@ -29,6 +29,19 @@ CPA Plus。
 - L4：全量 Python 3.11 回归 `1171 passed`；`git diff --check` 通过；无 provider/target
   网络调用，r18 frozen 输入和 serving registry 未修改。
 
+## 受控发布
+
+- 提交 `eebb9ea` 已推送到 `origin/main`。
+- Axio 18900 先保留当前 console log 为唯一回滚副本
+  `private/axio_server.18900.console.log.pre-eebb9ea`，随后以同一 `r7` probe-bound
+  registry、同一 image registry 和 `setsid/nohup` 受控恢复；当前 PID `3066435`。
+- 发布后 `/health` 为 `ready`，registry 为 `21/21` physical/available、`15/15`
+  logical/available、4 providers，runtime routing `healthy`、0 open circuit，网络
+  `auto -> proxy`；Fast/Terra/Pro route-plan 分别为
+  `fast_direct_cascade`、`terra_direct`、`pro_panel_judge_escalation`。
+- 已删除旧的 `pre-95c5b3b` 回滚副本，仅保留上述最新副本。8317 CPA Plus 仍监听，未停止、
+  未重启、未修改。
+
 ## 当前边界
 
 该门禁只证明 SQLite 文件在检查时可读且 schema 完整，不等同于磁盘满/卷丢失演练、自动
@@ -46,4 +59,3 @@ fencing/租约恢复或跨主机全局配额。SQLite 仍仅支持单主机共�
    做外部 smoke。
 4. 之后严格回到 credential-ready preflight -> r18 screening -> transport admission ->
    ranking -> provider freeze -> Harness/import/convergence -> 21-suite campaign。
-
