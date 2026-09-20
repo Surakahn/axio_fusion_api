@@ -5695,6 +5695,9 @@ def build_benchmark_scorecard(
                 "pricing_known_case_count": pricing_known_cases,
                 "pricing_unknown_case_count": max(0, total_cases - pricing_known_cases),
                 "provider_call_count": provider_call_count,
+                "provider_call_count_per_case": (
+                    None if total_cases <= 0 else round(max(0, provider_call_count) / total_cases, 8)
+                ),
             }
         )
     candidates.sort(
@@ -6858,6 +6861,109 @@ def _scorecard_provider_tier_receipt(run: Mapping[str, Any], *, rank: int, tier:
         "cost_per_case_usd": receipt["cost_per_case_usd"],
         "primary_score_per_dollar": receipt["primary_score_per_dollar"],
         "provider_call_count": receipt["provider_call_count"],
+        "provider_call_count_per_case": _provider_call_count_per_case(run),
+        "raw_provider_outputs_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _provider_call_count_per_case(run: Mapping[str, Any] | None) -> float | None:
+    """按 run 的 case 分母归一化 attempted provider calls。"""
+
+    if not isinstance(run, Mapping):
+        return None
+    calls = _optional_int(run.get("provider_call_count"))
+    cases = _optional_int(run.get("case_count"))
+    if calls is None or cases is None or calls < 0 or cases <= 0:
+        return None
+    return round(calls / cases, 8)
+
+
+def _paired_call_cost_evidence(
+    axio_run: Mapping[str, Any] | None,
+    baseline_run: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """检查调用成本比较是否绑定到完整的同 case 质量证据。"""
+
+    paired = _paired_case_stats(axio_run, baseline_run)
+    axio_cases = _optional_int(axio_run.get("case_count")) if isinstance(axio_run, Mapping) else None
+    baseline_cases = _optional_int(baseline_run.get("case_count")) if isinstance(baseline_run, Mapping) else None
+    common_cases = _optional_int(paired.get("common_case_count")) or 0
+    complete = bool(
+        common_cases > 0
+        and axio_cases is not None
+        and baseline_cases is not None
+        and axio_cases > 0
+        and axio_cases == baseline_cases == common_cases
+    )
+    return {
+        "paired_case_count": common_cases,
+        "paired_case_set_complete": complete,
+        "raw_case_content_persisted": False,
+    }
+
+
+def _relative_call_cost_comparison(
+    axio_run: Mapping[str, Any] | None,
+    baseline_run: Mapping[str, Any] | None,
+    *,
+    axio_score: float | None,
+    baseline_score: float | None,
+) -> dict[str, Any]:
+    """比较同一 case 集上的 attempted calls。
+
+    单模型 baseline 通常每个 case 只有一次 provider attempt。比较必须同时具备
+    完整重合的 case ID 集、质量分和调用分母；否则只能保留诊断值，不能产生便宜
+    结论。
+    """
+
+    axio_calls_per_case = _provider_call_count_per_case(axio_run)
+    baseline_calls_per_case = _provider_call_count_per_case(baseline_run)
+    paired_evidence = _paired_call_cost_evidence(axio_run, baseline_run)
+    ratio = (
+        None
+        if axio_calls_per_case is None or baseline_calls_per_case in (None, 0.0)
+        else round(axio_calls_per_case / baseline_calls_per_case, 8)
+    )
+    quality_ratio = (
+        None
+        if (
+            axio_score is None
+            or baseline_score is None
+            or axio_calls_per_case in (None, 0.0)
+            or baseline_calls_per_case in (None, 0.0)
+            or baseline_score == 0.0
+        )
+        else round(
+            (axio_score / axio_calls_per_case)
+            / (baseline_score / baseline_calls_per_case),
+            8,
+        )
+    )
+    if (
+        ratio is None
+        or axio_score is None
+        or baseline_score is None
+        or paired_evidence["paired_case_set_complete"] is not True
+    ):
+        status = "unverified_missing_paired_call_or_quality_data"
+        cheaper = None
+    else:
+        cheaper = bool(axio_score >= baseline_score and ratio < 1.0)
+        status = "proven" if cheaper else "quality_or_call_gate_not_met"
+    return {
+        "measurement": "attempted_provider_calls_per_case",
+        "axio_provider_call_count": _optional_int(axio_run.get("provider_call_count")) if isinstance(axio_run, Mapping) else None,
+        "baseline_provider_call_count": _optional_int(baseline_run.get("provider_call_count")) if isinstance(baseline_run, Mapping) else None,
+        "axio_provider_call_count_per_case": axio_calls_per_case,
+        "baseline_provider_call_count_per_case": baseline_calls_per_case,
+        "relative_call_count_ratio": ratio,
+        "relative_quality_per_call": quality_ratio,
+        **paired_evidence,
+        "cheaper_than_baseline": cheaper,
+        "cheaper_claim_status": status,
+        "usd_comparison_used": False,
+        "raw_provider_names_persisted": False,
         "raw_provider_outputs_persisted": False,
         "secrets_persisted": False,
     }
@@ -6881,6 +6987,12 @@ def _scorecard_axio_target_receipt(
     baseline_p95 = _optional_float(baseline_run.get("p95_case_latency_ms")) if isinstance(baseline_run, Mapping) else None
     latency_gate = _claim_latency_gate(axio_run, baseline_run)
     paired = _paired_case_stats(axio_run, baseline_run)
+    relative_call_cost = _relative_call_cost_comparison(
+        axio_run,
+        baseline_run,
+        axio_score=axio_score,
+        baseline_score=baseline_score,
+    )
     reason_codes = []
     if not isinstance(axio_run, Mapping):
         reason_codes.append("missing_axio_run")
@@ -6906,6 +7018,12 @@ def _scorecard_axio_target_receipt(
         "baseline_estimated_cost_usd": baseline_cost,
         "estimated_cost_delta_usd": None if axio_cost is None or baseline_cost is None else round(axio_cost - baseline_cost, 8),
         "cost_ratio_vs_baseline": None if axio_cost is None or baseline_cost in (None, 0.0) else round(axio_cost / baseline_cost, 6),
+        "relative_call_cost": relative_call_cost,
+        "axio_provider_call_count_per_case": relative_call_cost["axio_provider_call_count_per_case"],
+        "baseline_provider_call_count_per_case": relative_call_cost["baseline_provider_call_count_per_case"],
+        "relative_call_count_ratio": relative_call_cost["relative_call_count_ratio"],
+        "cheaper_than_baseline_by_call_count": relative_call_cost["cheaper_than_baseline"],
+        "call_cost_claim_status": relative_call_cost["cheaper_claim_status"],
         "axio_cost_per_case_usd": _run_cost_per_case_usd(axio_run),
         "baseline_cost_per_case_usd": _run_cost_per_case_usd(baseline_run),
         "axio_p50_latency_ms": axio_p50,

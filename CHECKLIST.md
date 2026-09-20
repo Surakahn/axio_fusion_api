@@ -1,5 +1,17 @@
 # Axio Fusion API Checklist
 
+# 2026-09-20 相对调用成本 scorecard paired case 门禁
+
+- [x] scorecard 按 attempted provider calls / case 计算相对调用比，调用分母包含失败、重试、
+  Judge 和 Synthesizer，不把成功调用数误当总成本。
+- [x] 便宜结论要求 Axio 与对应 provider baseline 的 case ID 集完整重合且 case 数一致；
+  partial/不同 case 集只保留诊断比值，`cheaper_than_baseline` fail-closed 为 `null`。
+- [x] 缺失质量、非法负调用数、质量未达到 baseline 或调用比不低于 1 时不允许 `proven`。
+- [x] 新增 scorecard 回归测试；本轮不执行 provider/target 网络调用，不改变 r18 frozen
+  输入、serving registry 或 CPA Plus。
+- [ ] 仍需在完整 21-suite 同 case campaign 中收集四协议质量、attempted-call、失败/重试、
+  p50/p95 延迟证据后，才可决定三模型的成本优势 claim。
+
 # 2026-09-19 三个独立公开模型与相对调用成本
 
 - [x] canonical public models 收敛为 `axio-luna`、`axio-terra`、`axio-sol`；旧

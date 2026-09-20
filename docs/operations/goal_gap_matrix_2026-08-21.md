@@ -1,5 +1,18 @@
 # Axio Fusion Goal 差距矩阵（2026-08-21）
 
+## 2026-09-20 相对调用成本 scorecard paired case 门禁增量
+
+benchmark scorecard 已将相对调用成本比较收紧为完整 paired case 证据：Axio 与对应
+provider baseline 必须有相同且完整重合的 case ID 集、相同正数 case 分母、质量分和
+attempted provider-call 计数。调用比仍包含失败、重试、Judge、Synthesizer，美元价格仅
+保留为独立诊断字段，不参与“更便宜”判断。若 case 集部分重叠、质量缺失、调用分母非法、
+Axio 质量低于 baseline 或调用比不低于 1，则 `cheaper_than_baseline` 为 `null` 或 `false`，
+不会生成 `proven`。
+
+新增 scorecard 专项回归；本轮仅离线修改和测试，不执行 provider/target 网络、不修改
+r18 frozen plan/source/registry、不切换 serving registry。该增量强化证据边界，仍不能
+替代完整 21-suite 同 case、四协议 parity、失败/重试、延迟和统计校正 campaign。
+
 ## 2026-09-19 三个独立公开模型与相对调用成本增量
 
 公开模型 canonical identity 已从历史 `axio-fast`/`axio-pro` 收敛为

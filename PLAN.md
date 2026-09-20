@@ -1,5 +1,18 @@
 # Axio Fusion API Plan
 
+## 2026-09-20 相对调用成本 scorecard 的 paired case 门禁
+
+benchmark scorecard 的相对调用成本比较现在不仅要求 Axio 与对应 provider baseline
+存在质量分和 attempted provider-call 分母，还要求两次 run 的 case ID 集完整重合、case
+数量相同且大于零。不同 case 子集、缺失质量或非法负调用数只能保留调用比诊断，
+`cheaper_than_baseline` 必须保持 `null`/`unverified`；只有质量不低于 baseline 且
+attempted calls per case 严格更低时才允许 `proven`。这样不会因 partial run、重试未计入
+或不同 case 分母造成虚假的成本优势。
+
+新增回归覆盖完整同 case 集、部分重叠 case 集、质量/调用门禁、缺失质量和负调用数；
+本轮不执行 provider/target 网络请求，不修改 r18 frozen 输入或 serving registry。详见
+`docs/handoffs/2026-09-20_paired_call_cost_scorecard.md`。
+
 ## 2026-09-19 三个独立公开模型与相对调用成本契约
 
 公开产品名称已收敛为 `axio-luna`、`axio-terra`、`axio-sol`。它们不是同一个
