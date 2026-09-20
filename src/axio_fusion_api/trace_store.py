@@ -1233,11 +1233,13 @@ def _safe_aggregation_decision(value: Mapping[str, Any]) -> dict[str, Any]:
         "schema": str(value.get("schema") or "axio_fusion_api.aggregation_decision.v1")[:120],
         "decision": str(value.get("decision") or "unknown")[:64],
         "finalization_mode": str(value.get("finalization_mode") or "direct")[:64],
-        "candidate_count": _optional_int(value.get("candidate_count")) or 0,
+        "candidate_count": max(0, min(1_000_000, _optional_int(value.get("candidate_count")) or 0)),
         "best_candidate_id_sha256": str(value.get("best_candidate_id_sha256") or "")[:64],
-        "best_candidate_calibrated_confidence": _optional_float(value.get("best_candidate_calibrated_confidence")),
+        "best_candidate_calibrated_confidence": _bounded_unit_float(
+            value.get("best_candidate_calibrated_confidence")
+        ),
         "confidence_band": str(value.get("confidence_band") or "none")[:16],
-        "quality_target": _optional_float(value.get("quality_target")),
+        "quality_target": _bounded_unit_float(value.get("quality_target")),
         "quality_gate_status": str(value.get("quality_gate_status") or "unknown")[:32],
         "quality_gap_triggered": bool(value.get("quality_gap_triggered")),
         "quality_gap_reason_codes": [str(item)[:120] for item in reasons if str(item)][:16],
@@ -1249,7 +1251,9 @@ def _safe_aggregation_decision(value: Mapping[str, Any]) -> dict[str, Any]:
         "judge_ready_for_synthesis": bool(value.get("judge_ready_for_synthesis")),
         "repair_required": bool(value.get("repair_required")),
         "repair_attempted": bool(value.get("repair_attempted")),
-        "synthesis_provider_call_count": _optional_int(value.get("synthesis_provider_call_count")) or 0,
+        "synthesis_provider_call_count": max(
+            0, min(1_000_000, _optional_int(value.get("synthesis_provider_call_count")) or 0)
+        ),
         "synthesis_output_accepted": bool(value.get("synthesis_output_accepted")),
         "early_exit_triggered": bool(value.get("early_exit_triggered")),
         "abstention_recommended": bool(value.get("abstention_recommended")),
@@ -2754,6 +2758,11 @@ def _optional_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _bounded_unit_float(value: Any) -> float | None:
+    parsed = _optional_float(value)
+    return None if parsed is None else max(0.0, min(1.0, parsed))
 
 
 def _optional_int(value: Any) -> int | None:
