@@ -1,5 +1,19 @@
 # Axio Fusion API Plan
 
+## 2026-09-20 trace_store 推理执行证据闭环
+
+`reasoning_execution_receipt.v1` 现在从候选内存结果完整进入 `trace_store` 的安全
+持久化投影。空 task receipt 使用固定 bounded 默认值；native、mapped、unverified
+passthrough 三种状态保留 requested/effective effort、budget、协议 transport、映射
+范围和验证状态；provider/model 原文、URL、prompt 与 secret 均被丢弃。这样四种公共
+协议共用的执行 trace 不会因 `schemas.py` 与 `trace_store.py` 的投影分叉而丢失推理
+传输证据。
+
+新增 `tests/test_trace_store_reasoning_receipt.py` 覆盖空 receipt、三种 effort 状态、
+native budget 和敏感字段隔离。该修复只改变安全观测投影，不改变路由、预算或 provider
+wire 行为；仍需在获授权的 endpoint-bound probe 与完整 21-suite campaign 中填充
+live native effort/质量/成本/延迟证据。
+
 ## 2026-09-20 reasoning_effort 执行证据契约
 
 新增 `reasoning_execution_receipt.v1`，把四种公共 API 归一化后的逻辑推理强度与

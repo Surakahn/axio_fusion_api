@@ -6,7 +6,12 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from .call_cost import provider_call_cost_receipt
-from .schemas import FusionResponse, sha256_text, stable_json
+from .schemas import (
+    FusionResponse,
+    _safe_reasoning_execution_receipt,
+    sha256_text,
+    stable_json,
+)
 from .tool_contract import tool_call_safe_summary
 
 
@@ -781,6 +786,7 @@ def _safe_candidate_task_execution(value: Mapping[str, Any]) -> dict[str, Any]:
             "node_receipts": [],
             "checkpoint_receipts": [],
             "replica_routing": _safe_replica_routing({}),
+            "reasoning_transport_receipt": _safe_reasoning_execution_receipt({}),
             "hermes_process_stage": "",
             "runtime_recovery_reference": False,
             "raw_prompt_persisted": False,
@@ -825,6 +831,11 @@ def _safe_candidate_task_execution(value: Mapping[str, Any]) -> dict[str, Any]:
         "replica_routing": _safe_replica_routing(
             value.get("replica_routing")
             if isinstance(value.get("replica_routing"), Mapping)
+            else {}
+        ),
+        "reasoning_transport_receipt": _safe_reasoning_execution_receipt(
+            value.get("reasoning_transport_receipt")
+            if isinstance(value.get("reasoning_transport_receipt"), Mapping)
             else {}
         ),
         "hermes_process_stage": str(value.get("hermes_process_stage") or "")[:40],

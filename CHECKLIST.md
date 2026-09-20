@@ -1,5 +1,15 @@
 # Axio Fusion API Checklist
 
+# 2026-09-20 trace_store 推理执行证据闭环
+
+- [x] `trace_store.py` 复用 bounded `reasoning_execution_receipt.v1` 安全投影，空值与
+  非空值均保留 requested/effective effort、budget、transport、映射和验证状态。
+- [x] native、mapped、unverified passthrough 三态及 native budget 回归通过；provider
+  model、URL、prompt、API key 等敏感输入不会进入 trace。
+- [x] 四种公共协议共用的安全执行 trace 不再丢失 orchestrator 已生成的 reasoning receipt。
+- [ ] 仍需在真实 endpoint-bound probe 和完整 21-suite paired campaign 中取得 live
+  reasoning、质量、调用次数和延迟证据；本轮离线测试不构成 provider 能力结论。
+
 # 2026-09-20 reasoning_effort 执行证据契约
 
 - [x] 新增 `reasoning_execution_receipt.v1`，统一四种公共 API 的逻辑 effort、budget、
