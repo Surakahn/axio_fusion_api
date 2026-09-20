@@ -29,6 +29,7 @@ from .schemas import (
     FusionResponse,
     ModelProfile,
     normalize_reasoning_effort,
+    reasoning_execution_receipt,
     rough_token_count,
     sha256_text,
     stable_json,
@@ -4503,6 +4504,17 @@ class FusionEngine:
             # caller's native task turn without adding orchestration context.
             prompt_is_already_assembled=not direct_fast_route,
         )
+        # Capture the exact role-local logical effort before the provider
+        # adapter renders its protocol-specific field.  This receipt is safe
+        # to persist and remains explicit when the transport is only an
+        # unverified Chat/Responses passthrough.
+        task_execution = {
+            **dict(task_execution),
+            "reasoning_transport_receipt": reasoning_execution_receipt(
+                profile,
+                provider_request,
+            ),
+        }
         prompt, system, budget_receipt = _apply_provider_context_budget(
             profile,
             provider_request,

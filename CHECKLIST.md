@@ -1,5 +1,40 @@
 # Axio Fusion API Checklist
 
+# 2026-09-20 reasoning_effort 执行证据契约
+
+- [x] 新增 `reasoning_execution_receipt.v1`，统一四种公共 API 的逻辑 effort、budget、
+  provider transport、映射方向和验证状态；不持久化 provider/model、URL、prompt 或 secret。
+- [x] orchestrator 每个候选 role 的 `task_execution` 绑定 receipt；安全投影保留
+  native/mapped/unverified 三态，`max -> high` 不得标成 native max。
+- [x] unknown Chat/Responses 兼容透传只标记 `unverified_effort_passthrough`；candidate、
+  unsupported 与未验证 native max 继续 fail-closed，不影响 provider fallback。
+- [x] Anthropic/Gemini 已验证 thinking budget 使用相同 receipt 语义；新增专项
+  `tests/test_reasoning_transport.py`，L1 与专项回归 `35 passed`。
+- [ ] 仍需在获授权的真实 endpoint-bound reasoning probe 和完整 21-suite campaign 中
+  填充 native max/各 effort 的 live 证据；当前离线 receipt 不构成 provider 能力或质量结论。
+
+# 2026-09-20 Benchmark run 恢复完整性门禁
+
+- [x] 正式 campaign 恢复前校验 run schema、suite/candidate/API surface、task/mode 和
+  prompt/decoding contract。
+- [x] 恢复前校验完整 case 数、case hash 集、每 case provider-call 与总调用数对账；partial
+  run、case 漂移和 retry/Judge/Synthesizer 调用缺失均标记 `repair_required`。
+- [x] progress plan 暴露 hash-only case digest、provider-call 数和修复状态，不持久化原始
+  prompt、标签、provider 输出或 secret。
+- [x] 新增本地恢复完整性回归；本轮未执行 provider/target 网络，不修改 frozen 输入或服务。
+- [ ] 仍需在获授权的完整 21-suite campaign 中验证中断/恢复与四协议 paired-run 证据闭环。
+
+# 2026-09-20 最终 scorecard 审计接入 paired-call 证据
+
+- [x] final audit 的 candidate/provider tier efficiency gate 检查 attempted provider-call
+  per case，不再只检查美元成本和延迟字段。
+- [x] Axio-baseline comparison 顶层暴露并校验 relative call ratio、paired case count 和
+  complete case-set 标志，和嵌套 `relative_call_cost` 保持一致。
+- [x] 完整 campaign fixture、scorecard、成本专项回归通过；partial case 集继续
+  fail-closed，不生成成本优势 claim。
+- [ ] 仍需在真实获授权的完整 21-suite campaign 中填充这些字段，再进行最终 quality/cost/
+  latency claim 审批。
+
 # 2026-09-20 相对调用成本 scorecard paired case 门禁
 
 - [x] scorecard 按 attempted provider calls / case 计算相对调用比，调用分母包含失败、重试、

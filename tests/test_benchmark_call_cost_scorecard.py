@@ -1,6 +1,9 @@
 from axio_fusion_api.evaluation import (
     _provider_call_count_per_case,
     _relative_call_cost_comparison,
+    _scorecard_candidate_efficiency_reason_codes,
+    _scorecard_comparison_efficiency_reason_codes,
+    _scorecard_provider_tier_efficiency_reason_codes,
 )
 
 
@@ -83,3 +86,49 @@ def test_call_cost_does_not_normalize_negative_attempts_as_free_calls():
     run = _run(candidate_id="axio-luna", score=0.8, calls=-1, case_ids=["a"])
     assert _provider_call_count_per_case(run) is None
 
+
+def test_scorecard_efficiency_audit_requires_relative_call_fields():
+    candidate = {
+        "total_estimated_cost_usd": 1.0,
+        "cost_per_case_usd": 1.0,
+        "provider_call_count": 1,
+        "average_latency_ms": 10.0,
+        "p50_latency_ms": 10.0,
+        "p95_latency_ms": 10.0,
+    }
+    assert "missing_provider_call_count_per_case" in _scorecard_candidate_efficiency_reason_codes(candidate)
+
+    tier = {
+        "estimated_cost_usd": 1.0,
+        "cost_per_case_usd": 1.0,
+        "provider_call_count": 1,
+        "p50_case_latency_ms": 10.0,
+        "p95_case_latency_ms": 10.0,
+    }
+    assert "missing_provider_call_count_per_case" in _scorecard_provider_tier_efficiency_reason_codes(tier)
+
+    comparison = {
+        "axio_estimated_cost_usd": 1.0,
+        "baseline_estimated_cost_usd": 1.0,
+        "axio_cost_per_case_usd": 1.0,
+        "baseline_cost_per_case_usd": 1.0,
+        "axio_p50_latency_ms": 10.0,
+        "baseline_p50_latency_ms": 10.0,
+        "axio_p95_latency_ms": 10.0,
+        "baseline_p95_latency_ms": 10.0,
+    }
+    reasons = _scorecard_comparison_efficiency_reason_codes(comparison)
+    assert "missing_relative_call_count_ratio" in reasons
+    assert "missing_paired_case_count" in reasons
+    assert "paired_case_set_incomplete" in reasons
+
+    comparison.update(
+        {
+            "axio_provider_call_count_per_case": 1.0,
+            "baseline_provider_call_count_per_case": 1.0,
+            "relative_call_count_ratio": 1.0,
+            "paired_case_count": 2,
+            "paired_case_set_complete": True,
+        }
+    )
+    assert _scorecard_comparison_efficiency_reason_codes(comparison) == []

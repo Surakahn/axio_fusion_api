@@ -7022,6 +7022,8 @@ def _scorecard_axio_target_receipt(
         "axio_provider_call_count_per_case": relative_call_cost["axio_provider_call_count_per_case"],
         "baseline_provider_call_count_per_case": relative_call_cost["baseline_provider_call_count_per_case"],
         "relative_call_count_ratio": relative_call_cost["relative_call_count_ratio"],
+        "paired_case_count": relative_call_cost["paired_case_count"],
+        "paired_case_set_complete": relative_call_cost["paired_case_set_complete"],
         "cheaper_than_baseline_by_call_count": relative_call_cost["cheaper_than_baseline"],
         "call_cost_claim_status": relative_call_cost["cheaper_claim_status"],
         "axio_cost_per_case_usd": _run_cost_per_case_usd(axio_run),
@@ -7692,6 +7694,7 @@ def run_benchmark_campaign(
             run_unit_id = str(unit.get("run_unit_id") or api_surface_id)
             run_path = runs_dir / f"{_safe_filename(suite_id)}__{_safe_filename(run_unit_id)}.json"
             imported_path = _imported_run_path_for_unit(spec, unit)
+            resume_validation = _benchmark_run_resume_validation_not_checked()
             if imported_path:
                 run = _normalize_imported_run_for_campaign(
                     _load_imported_run(imported_path),
@@ -7701,13 +7704,50 @@ def run_benchmark_campaign(
                 write_json(run_path, run)
                 status = "imported"
             elif resume and run_path.exists():
-                run = _normalize_imported_run_for_campaign(
-                    json.loads(run_path.read_text(encoding="utf-8")),
+                expected_case_hashes, expected_case_count = _expected_benchmark_case_hashes(
+                    dataset_path,
                     suite_id=suite_id,
-                    candidate_id=run_unit_id,
+                    task_format=task_format,
+                    limit=selected_limit,
                 )
-                write_json(run_path, run)
-                status = "resumed"
+                try:
+                    existing_run = json.loads(run_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError, TypeError):
+                    existing_run = None
+                resume_validation = _benchmark_run_resume_validation(
+                    existing_run,
+                    suite_id=suite_id,
+                    unit=unit,
+                    task_format=task_format,
+                    live=live,
+                    expected_case_count=expected_case_count,
+                    expected_case_hashes=expected_case_hashes,
+                )
+                if resume_validation["valid"]:
+                    run = _normalize_imported_run_for_campaign(
+                        existing_run,
+                        suite_id=suite_id,
+                        candidate_id=run_unit_id,
+                    )
+                    write_json(run_path, run)
+                    status = "resumed"
+                else:
+                    run = run_benchmark_dataset(
+                        suite_id=suite_id,
+                        dataset_path=dataset_path,
+                        candidate_id=candidate_id,
+                        api_format=api_format,
+                        task_format=task_format,
+                        registry_path=registry_path,
+                        limit=selected_limit,
+                        live=live,
+                        client=client,
+                        code_timeout_seconds=code_timeout_seconds,
+                        axio_gateway_url=axio_gateway_url,
+                        provider_profiles=selection_context.get("provider_profiles"),
+                    )
+                    write_json(run_path, run)
+                    status = "repaired"
             else:
                 run = run_benchmark_dataset(
                     suite_id=suite_id,
@@ -7750,6 +7790,7 @@ def run_benchmark_campaign(
                     "mean_score": run.get("mean_score"),
                     "estimated_cost_usd": run.get("estimated_cost_usd"),
                     "provider_call_count": run.get("provider_call_count"),
+                    "resume_validation": resume_validation,
                     "dataset_path_sha256": sha256_text(str(dataset_path)),
                     "raw_dataset_path_persisted": False,
                     "raw_prompt_persisted": False,
@@ -8792,11 +8833,25 @@ def build_benchmark_campaign_progress_plan(
             api_format = _api_format_for_run_unit(unit)
             candidate_type = str(unit.get("candidate_type") or "")
             run_path = runs_dir / f"{_safe_filename(suite_id)}__{_safe_filename(run_unit_id)}.json"
+            dataset_path = _suite_dataset_path(spec)
+            selected_limit = _optional_int(spec.get("limit"))
+            expected_case_hashes: set[str] | None = None
+            expected_case_count: int | None = None
+            if dataset_path:
+                expected_case_hashes, expected_case_count = _expected_benchmark_case_hashes(
+                    dataset_path,
+                    suite_id=suite_id,
+                    task_format=str(spec.get("task_format") or (suite.task_format if suite else "auto")),
+                    limit=selected_limit,
+                )
             status, run_summary = _campaign_progress_run_status(
                 run_path,
                 suite_id=suite_id,
                 unit=unit,
                 min_cases_per_suite=min_cases_per_suite,
+                expected_case_count=expected_case_count,
+                expected_case_hashes=expected_case_hashes,
+                task_format=str(spec.get("task_format") or (suite.task_format if suite else "auto")),
             )
             suite_bucket["expected_run_count"] += 1
             suite_bucket[f"{status}_run_count"] = int(suite_bucket.get(f"{status}_run_count") or 0) + 1
@@ -8936,12 +8991,202 @@ def build_benchmark_campaign_progress_plan(
     }
 
 
+def _benchmark_run_resume_validation_not_checked() -> dict[str, Any]:
+    return {
+        "schema": "axio_fusion_api.benchmark_run_resume_validation.v1",
+        "status": "not_checked",
+        "valid": True,
+        "reason_codes": [],
+        "raw_run_payload_persisted": False,
+        "raw_case_content_persisted": False,
+        "raw_provider_outputs_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _expected_benchmark_case_hashes(
+    dataset_path: str | Path | None,
+    *,
+    suite_id: str,
+    task_format: str,
+    limit: int | None,
+) -> tuple[set[str] | None, int | None]:
+    """Rebuild the private case hash set without persisting benchmark content."""
+
+    if not dataset_path:
+        return None, None
+    selected_path = Path(dataset_path)
+    if not selected_path.is_file():
+        return None, None
+    selected_format = _suite_task_format(suite_id) if task_format == "auto" else str(task_format or "multiple_choice")
+    try:
+        cases = (
+            _load_multiple_choice_cases(selected_path, limit=limit)
+            if selected_format == "multiple_choice"
+            else _load_generic_cases(selected_path, limit=limit)
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+        return None, None
+    hashes: list[str] = []
+    for index, case in enumerate(cases):
+        if selected_format == "multiple_choice":
+            identity = {"q": case.get("question"), "o": case.get("options")}
+        else:
+            identity = {
+                "suite_id": suite_id,
+                "index": index,
+                "prompt": case.get("prompt") or case.get("question") or case.get("input") or case.get("source") or "",
+                "category": case.get("category") or case.get("subject") or "",
+            }
+        hashes.append(sha256_text(json.dumps(identity, ensure_ascii=False, sort_keys=True)))
+    return set(hashes), len(cases)
+
+
+def _benchmark_run_resume_validation(
+    payload: Any,
+    *,
+    suite_id: str,
+    unit: Mapping[str, Any],
+    task_format: str,
+    live: bool,
+    expected_case_count: int | None,
+    expected_case_hashes: set[str] | None,
+) -> dict[str, Any]:
+    """Validate an existing run before it can be reused by a campaign.
+
+    This is deliberately stricter than scorecard validation: a run is reusable
+    only when its full case set and attempted-call receipt are internally
+    consistent.  Failed provider calls remain valid observations as long as
+    their case rows are present; a truncated case list is always repairable.
+    """
+
+    reasons: list[str] = []
+    if not isinstance(payload, Mapping):
+        reasons.append("run_artifact_unreadable_or_invalid_json")
+        payload = {}
+    schema = str(payload.get("schema") or "")
+    if schema not in {
+        "axio_fusion_api.benchmark_run.v2",
+        "axio_fusion_api.multiple_choice_benchmark_run.v1",
+    }:
+        reasons.append("run_artifact_schema_unrecognized")
+    if str(payload.get("suite_id") or "") != suite_id:
+        reasons.append("suite_id_mismatch")
+    if not _campaign_progress_run_unit_matches(payload, unit):
+        reasons.append("run_unit_identity_mismatch")
+    expected_candidate = _candidate_id_for_run_unit(unit)
+    expected_api_format = _api_format_for_run_unit(unit)
+    if _is_axio_public_candidate(expected_candidate):
+        observed_format = normalize_api_format(str(payload.get("api_format") or ""))
+        if observed_format != normalize_api_format(expected_api_format):
+            reasons.append("api_format_mismatch")
+        if str(payload.get("api_surface_id") or "") != _api_surface_id_for_run_unit(unit):
+            reasons.append("api_surface_id_mismatch")
+    elif str(payload.get("api_format") or expected_api_format) != expected_api_format:
+        reasons.append("api_format_mismatch")
+    observed_task_format = str(payload.get("task_format") or "")
+    selected_task_format = _suite_task_format(suite_id) if task_format == "auto" else str(task_format or "multiple_choice")
+    if observed_task_format and observed_task_format != selected_task_format:
+        reasons.append("task_format_mismatch")
+    mode = str(payload.get("mode") or "")
+    if mode not in {"live" if live else "dry_run", "official_import"}:
+        reasons.append("run_mode_mismatch")
+    rows = payload.get("case_results") if isinstance(payload.get("case_results"), list) else []
+    case_count = _optional_int(payload.get("case_count"))
+    attempted_count = _optional_int(payload.get("attempted_count"))
+    provider_call_count = _optional_int(payload.get("provider_call_count"))
+    if case_count is None or case_count <= 0:
+        reasons.append("case_count_missing_or_zero")
+    if expected_case_count is not None and case_count != expected_case_count:
+        reasons.append("case_count_not_equal_dataset")
+    if case_count is not None and len(rows) != case_count:
+        reasons.append("case_result_count_incomplete")
+    if attempted_count is None or attempted_count < 0:
+        reasons.append("attempted_count_missing_or_negative")
+    elif case_count is not None and attempted_count > case_count:
+        reasons.append("attempted_count_exceeds_case_count")
+    if provider_call_count is None or provider_call_count < 0:
+        reasons.append("provider_call_count_missing_or_negative")
+    row_call_count = 0
+    completed_count = 0
+    case_hashes: list[str] = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            reasons.append("case_result_not_object")
+            continue
+        status = str(row.get("status") or "")
+        if status == "completed":
+            completed_count += 1
+        row_calls = _optional_int(row.get("provider_call_count"))
+        if row_calls is None or row_calls < 0:
+            reasons.append("case_provider_call_count_missing_or_negative")
+        else:
+            row_call_count += row_calls
+        case_hash = _case_hash_from_result(row)
+        if case_hash:
+            case_hashes.append(case_hash)
+        else:
+            reasons.append("case_hash_missing")
+    if attempted_count is not None and attempted_count != completed_count:
+        reasons.append("attempted_count_receipt_mismatch")
+    if provider_call_count is not None and provider_call_count != row_call_count:
+        reasons.append("provider_call_count_receipt_mismatch")
+    unique_hashes = set(case_hashes)
+    if len(unique_hashes) != len(case_hashes):
+        reasons.append("duplicate_case_hashes")
+    if expected_case_hashes is not None and unique_hashes != expected_case_hashes:
+        reasons.append("case_hash_set_mismatch")
+    if _contains_true_raw_persisted_flag(payload):
+        reasons.append("unsafe_raw_persistence_flag_detected")
+    if mode == "official_import":
+        harness_binding = _run_official_harness_binding_receipt(
+            payload,
+            suite_id=suite_id,
+            task_format=selected_task_format,
+        )
+        if harness_binding.get("harness_receipt_required") is True and harness_binding.get("harness_receipt_valid") is not True:
+            reasons.extend(
+                f"official_harness_{reason}"
+                for reason in harness_binding.get("harness_receipt_reason_codes", [])
+            )
+    else:
+        expected_prompt_hash = _prompt_protocol_sha256_for_suite(suite_id, selected_task_format)
+        expected_decoding_hash = _decoding_config_sha256_for_suite(suite_id, selected_task_format)
+        if str(payload.get("prompt_protocol_sha256") or "") != expected_prompt_hash:
+            reasons.append("prompt_protocol_hash_mismatch")
+        if str(payload.get("decoding_config_sha256") or "") != expected_decoding_hash:
+            reasons.append("decoding_config_hash_mismatch")
+    clean_reasons = sorted(set(reasons))
+    return {
+        "schema": "axio_fusion_api.benchmark_run_resume_validation.v1",
+        "status": "ready" if not clean_reasons else "repair_required",
+        "valid": not clean_reasons,
+        "reason_codes": clean_reasons,
+        "case_count": case_count,
+        "attempted_count": attempted_count,
+        "provider_call_count": provider_call_count,
+        "case_hash_count": len(unique_hashes),
+        "case_hash_set_sha256": sha256_text(stable_json(sorted(unique_hashes))) if unique_hashes else "",
+        "expected_case_count": expected_case_count,
+        "expected_case_hash_set_sha256": (
+            sha256_text(stable_json(sorted(expected_case_hashes))) if expected_case_hashes else ""
+        ),
+        "raw_run_payload_persisted": False,
+        "raw_case_content_persisted": False,
+        "raw_provider_outputs_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
 def _campaign_progress_run_status(
     run_path: Path,
     *,
     suite_id: str,
     unit: Mapping[str, Any],
     min_cases_per_suite: int,
+    expected_case_count: int | None = None,
+    expected_case_hashes: set[str] | None = None,
+    task_format: str = "auto",
 ) -> tuple[str, dict[str, Any]]:
     if not run_path.exists():
         return "missing", {
@@ -8949,6 +9194,9 @@ def _campaign_progress_run_status(
             "run_artifact_sha256": "",
             "case_count": None,
             "attempted_count": None,
+            "provider_call_count": None,
+            "resume_validation_status": "not_checked",
+            "repair_required": True,
         }
     try:
         payload = json.loads(run_path.read_text(encoding="utf-8"))
@@ -8958,6 +9206,9 @@ def _campaign_progress_run_status(
             "run_artifact_sha256": "",
             "case_count": None,
             "attempted_count": None,
+            "provider_call_count": None,
+            "resume_validation_status": "repair_required",
+            "repair_required": True,
         }
     if not isinstance(payload, Mapping):
         return "invalid", {
@@ -8965,31 +9216,44 @@ def _campaign_progress_run_status(
             "run_artifact_sha256": "",
             "case_count": None,
             "attempted_count": None,
+            "provider_call_count": None,
+            "resume_validation_status": "repair_required",
+            "repair_required": True,
         }
-    reasons = []
-    if str(payload.get("suite_id") or "") != suite_id:
-        reasons.append("suite_id_mismatch")
-    if not _campaign_progress_run_unit_matches(payload, unit):
-        reasons.append("run_unit_identity_mismatch")
+    validation = _benchmark_run_resume_validation(
+        payload,
+        suite_id=suite_id,
+        unit=unit,
+        task_format=task_format,
+        live=str(payload.get("mode") or "") == "live",
+        expected_case_count=expected_case_count,
+        expected_case_hashes=expected_case_hashes,
+    )
+    reasons = list(validation.get("reason_codes") or [])
     case_count = _optional_int(payload.get("case_count"))
     attempted_count = _optional_int(payload.get("attempted_count"))
+    provider_call_count = _optional_int(payload.get("provider_call_count"))
     effective_min_cases = _effective_min_cases_for_suite(suite_id, min_cases_per_suite)
     if case_count is None or case_count <= 0:
         reasons.append("case_count_missing_or_zero")
     elif case_count < effective_min_cases:
         reasons.append("case_count_below_effective_minimum")
-    if attempted_count is None or attempted_count < max(1, case_count or 0):
-        reasons.append("attempted_count_incomplete")
-    if _contains_true_raw_persisted_flag(payload):
-        reasons.append("unsafe_raw_persistence_flag_detected")
+    clean_reasons = sorted(set(reasons))
     return (
-        "invalid" if reasons else "completed",
+        "invalid" if clean_reasons else "completed",
         {
-            "reason_codes": sorted(set(reasons)),
+            "reason_codes": clean_reasons,
             "run_artifact_sha256": sha256_text(stable_json(payload)),
             "case_count": case_count,
             "attempted_count": attempted_count,
+            "provider_call_count": provider_call_count,
             "effective_min_cases": effective_min_cases,
+            "case_hash_count": validation.get("case_hash_count"),
+            "case_hash_set_sha256": validation.get("case_hash_set_sha256") or "",
+            "expected_case_count": expected_case_count,
+            "expected_case_hash_set_sha256": validation.get("expected_case_hash_set_sha256") or "",
+            "resume_validation_status": "ready" if not clean_reasons else "repair_required",
+            "repair_required": bool(clean_reasons),
             "raw_run_payload_persisted": False,
         },
     )
@@ -17668,6 +17932,8 @@ def _scorecard_candidate_efficiency_reason_codes(row: Mapping[str, Any]) -> list
         reasons.append("missing_cost_per_case_usd")
     if _optional_int(row.get("provider_call_count")) is None:
         reasons.append("missing_provider_call_count")
+    if _optional_float(row.get("provider_call_count_per_case")) is None:
+        reasons.append("missing_provider_call_count_per_case")
     if _optional_float(row.get("average_latency_ms")) is None:
         reasons.append("missing_average_latency_ms")
     if _optional_float(row.get("p50_latency_ms")) is None:
@@ -17685,6 +17951,8 @@ def _scorecard_provider_tier_efficiency_reason_codes(row: Mapping[str, Any]) -> 
         reasons.append("missing_cost_per_case_usd")
     if _optional_int(row.get("provider_call_count")) is None:
         reasons.append("missing_provider_call_count")
+    if _optional_float(row.get("provider_call_count_per_case")) is None:
+        reasons.append("missing_provider_call_count_per_case")
     if _optional_float(row.get("p50_case_latency_ms")) is None:
         reasons.append("missing_p50_case_latency_ms")
     if _optional_float(row.get("p95_case_latency_ms")) is None:
@@ -17706,6 +17974,17 @@ def _scorecard_comparison_efficiency_reason_codes(row: Mapping[str, Any]) -> lis
     ):
         if _optional_float(row.get(field)) is None:
             reasons.append(f"missing_{field}")
+    for field in (
+        "axio_provider_call_count_per_case",
+        "baseline_provider_call_count_per_case",
+        "relative_call_count_ratio",
+    ):
+        if _optional_float(row.get(field)) is None:
+            reasons.append(f"missing_{field}")
+    if _optional_int(row.get("paired_case_count")) is None:
+        reasons.append("missing_paired_case_count")
+    if row.get("paired_case_set_complete") is not True:
+        reasons.append("paired_case_set_incomplete")
     return reasons
 
 

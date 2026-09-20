@@ -1,5 +1,48 @@
 # Axio Fusion API Plan
 
+## 2026-09-20 reasoning_effort 执行证据契约
+
+新增 `reasoning_execution_receipt.v1`，把四种公共 API 归一化后的逻辑推理强度与
+provider-local transport 决策绑定到每个 role 的 `task_execution`。receipt 只保留
+请求/有效 effort、thinking budget、协议格式、transport 状态、映射方向与验证状态；不
+保存 provider/model 原文、URL、prompt 或 secret。unknown profile 的 Chat/Responses
+兼容透传标记为 `unverified_effort_passthrough`，candidate/unsupported 不伪造验证；只有
+endpoint-bound probe 已验证且请求值为 native target 时才标记
+`native_reasoning_effort_verified=true`，例如 `max -> high` 映射明确保持
+`native_reasoning_effort_verified=false`。
+
+该 receipt 已在 orchestrator 的候选 role 执行路径生成，并由安全候选 task receipt
+固定投影；Anthropic/Gemini 的已验证 thinking budget 也使用同一语义。新增专项覆盖
+unknown passthrough、mapped max、native max 和 native budget。L1 与 reasoning transport
+专项 `35 passed`，未执行 provider screening/target benchmark 网络请求，未重启服务。
+详见 `docs/handoffs/2026-09-20_reasoning_effort_execution_receipt.md`。
+
+## 2026-09-20 Benchmark run 恢复完整性门禁
+
+正式 `benchmark-campaign` 与 `benchmark-campaign-progress-plan` 现在对已有 run artifact
+执行统一的 hash-safe 恢复校验：schema、suite/candidate/API surface、task/mode、完整 case
+数量与 case hash 集、每 case attempted provider-call receipt、总 provider-call 对账、prompt/
+decoding contract 以及敏感字段旗标必须全部一致，才允许 `resumed`/`completed`。partial、
+损坏、旧 schema、case 集漂移或调用对账不一致的 artifact 会标记 `repair_required` 并重新
+执行该 run；失败 provider 调用仍作为观测保留，不会被错误当成缺失 case。progress plan 额外
+输出 case hash digest、provider-call 数和修复状态，便于中断后安全续跑。
+
+新增恢复完整性回归覆盖 partial case、case hash 漂移、schema 不识别、provider-call 总数
+对账和敏感字段隔离。本轮只执行本地 fixture，未启动 provider/target 网络调用，未修改 r18
+frozen 输入、serving registry 或生产服务。详见
+`docs/handoffs/2026-09-20_benchmark_resume_integrity.md`。
+
+## 2026-09-20 最终 scorecard 审计接入 paired-call 证据
+
+最终 benchmark completion audit 现在把相对调用成本字段纳入正式效率门禁：候选与 provider
+tier 必须有 attempted provider-call per case；Axio 对应 baseline 比较必须有调用比、正数
+paired case count 以及完整同 case 集标志。嵌套 `relative_call_cost` 与比较行顶层字段保持
+一致，避免 scorecard 有数据但 final audit 未读取的证据断链。合法完整 campaign fixture 已
+回归通过；部分 case 集仍 fail-closed，不得生成成本优势 claim。
+
+本轮未执行 provider/target 网络请求，不修改 r18 frozen 输入或 serving registry。详见
+`docs/handoffs/2026-09-20_scorecard_audit_call_cost_binding.md`。
+
 ## 2026-09-20 相对调用成本 scorecard 的 paired case 门禁
 
 benchmark scorecard 的相对调用成本比较现在不仅要求 Axio 与对应 provider baseline

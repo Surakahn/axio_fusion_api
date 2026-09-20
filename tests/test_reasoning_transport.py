@@ -25,7 +25,11 @@ from axio_fusion_api.providers import (
     reasoning_transport_probe_binding,
 )
 from axio_fusion_api.registry import normalize_profile
-from axio_fusion_api.schemas import FusionRequest, normalize_reasoning_budget_tokens
+from axio_fusion_api.schemas import (
+    FusionRequest,
+    normalize_reasoning_budget_tokens,
+    reasoning_execution_receipt,
+)
 from axio_fusion_api.provider_enrollment import _apply_runtime_reasoning_probe
 
 
@@ -128,6 +132,90 @@ def test_reasoning_budget_contract_requires_a_positive_integer():
     assert normalize_reasoning_budget_tokens(0) is None
     assert normalize_reasoning_budget_tokens(-1) is None
     assert normalize_reasoning_budget_tokens(False) is None
+
+
+def test_reasoning_execution_receipt_keeps_unknown_passthrough_unverified():
+    profile = _profile(
+        api_format="chat",
+        reasoning_transport={"status": "unknown"},
+    )
+    receipt = reasoning_execution_receipt(
+        profile,
+        FusionRequest(model="axio-luna", prompt="hello", reasoning_effort="max"),
+    )
+
+    assert receipt["effort_wire_mode"] == "unverified_passthrough"
+    assert receipt["transport_verified"] is False
+    assert receipt["native_reasoning_effort_verified"] is None
+    assert receipt["status"] == "unverified_effort_passthrough"
+    assert receipt["raw_provider_model_id_persisted"] is False
+
+
+def test_reasoning_execution_receipt_distinguishes_verified_mapping_from_native_max():
+    profile = _profile(
+        api_format="responses",
+        reasoning_transport={
+            "status": "verified",
+            "transport": "responses_reasoning",
+            "supported_efforts": ["low", "medium", "high"],
+            "effort_map": {"max": "high"},
+        },
+    )
+    receipt = reasoning_execution_receipt(
+        profile,
+        FusionRequest(model="axio-terra", prompt="hello", reasoning_effort="max"),
+    )
+
+    assert receipt["effective_reasoning_effort"] == "high"
+    assert receipt["effort_wire_mode"] == "mapped"
+    assert receipt["reasoning_mapping_applied"] is True
+    assert receipt["native_reasoning_effort_verified"] is False
+    assert receipt["status"] == "verified_effort_mapping"
+
+
+def test_reasoning_execution_receipt_marks_native_max_only_after_verified_probe():
+    profile = _profile(
+        api_format="responses",
+        reasoning_transport={
+            "status": "verified",
+            "transport": "responses_reasoning",
+            "supported_efforts": ["low", "medium", "high", "max"],
+        },
+    )
+    receipt = reasoning_execution_receipt(
+        profile,
+        FusionRequest(model="axio-sol", prompt="hello", reasoning_effort="max"),
+    )
+
+    assert receipt["effective_reasoning_effort"] == "max"
+    assert receipt["effort_wire_mode"] == "native"
+    assert receipt["native_reasoning_effort_verified"] is True
+    assert receipt["status"] == "native_effort_verified"
+
+
+def test_reasoning_execution_receipt_carries_verified_native_budget_without_raw_fields():
+    profile = _profile(
+        api_format="anthropic",
+        reasoning_transport={
+            "status": "verified",
+            "transport": "anthropic_thinking",
+            "supported_budget_tokens": [2048],
+        },
+    )
+    receipt = reasoning_execution_receipt(
+        profile,
+        FusionRequest(
+            model="axio-terra",
+            prompt="hello",
+            reasoning_budget_tokens=2048,
+        ),
+    )
+
+    assert receipt["effective_reasoning_budget_tokens"] == 2048
+    assert receipt["budget_wire_mode"] == "native_verified"
+    assert receipt["native_reasoning_budget_verified"] is True
+    assert receipt["transport_verified"] is True
+    assert receipt["secrets_persisted"] is False
 
 
 def test_reasoning_effort_partitions_request_fingerprint_and_safe_summary():

@@ -1551,6 +1551,121 @@ class FusionRequest:
         }
 
 
+def reasoning_execution_receipt(
+    profile: ModelProfile,
+    request: FusionRequest,
+) -> dict[str, Any]:
+    """Return a safe receipt for one provider-local reasoning decision.
+
+    The public request carries one logical effort contract, while providers
+    expose different wire fields (or no verified field at all).  This helper
+    is deliberately independent of the HTTP adapter so the orchestrator and
+    durable trace layer use exactly the same fail-closed semantics.  In
+    particular, a best-effort passthrough is never reported as native
+    verification, and an explicit ``xhigh -> max`` map remains mapped rather
+    than being mislabelled as native ``max``.
+    """
+
+    requested_effort = normalize_reasoning_effort(request.reasoning_effort)
+    requested_budget = normalize_reasoning_budget_tokens(
+        request.reasoning_budget_tokens
+    )
+    config = (
+        dict(profile.reasoning_transport)
+        if isinstance(profile.reasoning_transport, Mapping)
+        else {}
+    )
+    transport_status = str(config.get("status") or "unknown").strip().casefold()
+    if transport_status not in _REASONING_TRANSPORT_STATUSES:
+        transport_status = "unknown"
+    effort_resolution = profile.resolve_reasoning_transport_details(requested_effort)
+    budget_transport, effective_budget = profile.resolve_reasoning_budget(
+        requested_effort,
+        requested_budget,
+    )
+    transport = str(effort_resolution.get("transport") or budget_transport or "")
+    effective_effort = str(effort_resolution.get("effective_effort") or "")
+    mapping_applied = effort_resolution.get("mapping_applied") is True
+    mapping_direction = str(
+        effort_resolution.get("mapping_direction") or "unavailable"
+    )[:80]
+    mapping_scope = str(effort_resolution.get("mapping_scope") or "")[:32]
+    effort_verified = effort_resolution.get("transport_verified") is True
+    budget_verified = bool(budget_transport and effective_budget is not None)
+    native_efforts = set(_reasoning_effort_values(config.get("supported_efforts")))
+    native_effort_verified: bool | None
+    if not requested_effort:
+        native_effort_verified = None
+    elif effort_verified and not mapping_applied and requested_effort in native_efforts:
+        native_effort_verified = True
+    elif effort_verified and mapping_applied:
+        # A verified mapped target proves the transport, not the caller's
+        # original native effort.  Keep this explicitly false so benchmark
+        # gates cannot mistake ``max -> high`` for native max evidence.
+        native_effort_verified = False
+    elif transport_status in {"candidate", "unsupported"} or (
+        requested_effort and not effort_verified and transport_status not in {"", "unknown"}
+    ):
+        native_effort_verified = False
+    else:
+        # Unknown profiles may use the bounded compatibility passthrough for
+        # Chat/Responses, but no endpoint evidence exists yet.
+        native_effort_verified = None
+
+    effort_wire_mode = "not_forwarded"
+    if effort_verified:
+        effort_wire_mode = "mapped" if mapping_applied else "native"
+    elif (
+        requested_effort
+        and not effort_verified
+        and transport_status in {"", "unknown"}
+        and _reasoning_transport_api_format(profile.api_format) in {"chat", "responses"}
+    ):
+        effort_wire_mode = "unverified_passthrough"
+
+    budget_wire_mode = "native_verified" if budget_verified else "not_forwarded"
+    if requested_budget is not None and not budget_verified:
+        budget_wire_mode = "unverified_or_unsupported"
+    if requested_effort and budget_verified and not effort_verified:
+        budget_wire_mode = "effort_to_budget_mapping"
+
+    if effort_wire_mode == "native" and native_effort_verified is True:
+        status = "native_effort_verified"
+    elif effort_wire_mode == "mapped" and effort_verified:
+        status = "verified_effort_mapping"
+    elif budget_wire_mode in {"native_verified", "effort_to_budget_mapping"}:
+        status = "verified_budget_transport"
+    elif effort_wire_mode == "unverified_passthrough":
+        status = "unverified_effort_passthrough"
+    elif requested_effort or requested_budget is not None:
+        status = "unsupported_or_unverified"
+    else:
+        status = "not_requested"
+
+    return {
+        "schema": "axio_fusion_api.reasoning_execution_receipt.v1",
+        "api_format": _reasoning_transport_api_format(profile.api_format),
+        "requested_reasoning_effort": requested_effort,
+        "requested_reasoning_budget_tokens": requested_budget,
+        "effective_reasoning_effort": effective_effort,
+        "effective_reasoning_budget_tokens": effective_budget,
+        "reasoning_transport": transport,
+        "transport_status": transport_status,
+        "transport_verified": effort_verified or budget_verified,
+        "native_reasoning_effort_verified": native_effort_verified,
+        "native_reasoning_budget_verified": budget_verified,
+        "effort_wire_mode": effort_wire_mode,
+        "budget_wire_mode": budget_wire_mode,
+        "reasoning_mapping_applied": mapping_applied,
+        "reasoning_mapping_direction": mapping_direction,
+        "reasoning_mapping_scope": mapping_scope,
+        "status": status,
+        "raw_provider_model_id_persisted": False,
+        "raw_provider_url_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
 @dataclass(frozen=True)
 class CandidateResult:
     candidate_id: str
@@ -1706,6 +1821,75 @@ def _safe_tool_execution_summary(value: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _safe_reasoning_execution_receipt(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Project one reasoning receipt without accepting arbitrary provider data."""
+
+    if not isinstance(value, Mapping) or not value:
+        return {
+            "schema": "axio_fusion_api.reasoning_execution_receipt.v1",
+            "api_format": "",
+            "requested_reasoning_effort": "",
+            "requested_reasoning_budget_tokens": None,
+            "effective_reasoning_effort": "",
+            "effective_reasoning_budget_tokens": None,
+            "reasoning_transport": "",
+            "transport_status": "unknown",
+            "transport_verified": False,
+            "native_reasoning_effort_verified": None,
+            "native_reasoning_budget_verified": False,
+            "effort_wire_mode": "not_forwarded",
+            "budget_wire_mode": "not_forwarded",
+            "reasoning_mapping_applied": False,
+            "reasoning_mapping_direction": "unavailable",
+            "reasoning_mapping_scope": "",
+            "status": "not_recorded",
+            "raw_provider_model_id_persisted": False,
+            "raw_provider_url_persisted": False,
+            "secrets_persisted": False,
+        }
+    requested_budget = normalize_reasoning_budget_tokens(
+        value.get("requested_reasoning_budget_tokens")
+    )
+    effective_budget = normalize_reasoning_budget_tokens(
+        value.get("effective_reasoning_budget_tokens")
+    )
+    native_effort = value.get("native_reasoning_effort_verified")
+    return {
+        "schema": str(
+            value.get("schema") or "axio_fusion_api.reasoning_execution_receipt.v1"
+        )[:120],
+        "api_format": str(value.get("api_format") or "")[:24],
+        "requested_reasoning_effort": normalize_reasoning_effort(
+            value.get("requested_reasoning_effort")
+        ),
+        "requested_reasoning_budget_tokens": requested_budget,
+        "effective_reasoning_effort": normalize_reasoning_effort(
+            value.get("effective_reasoning_effort")
+        ),
+        "effective_reasoning_budget_tokens": effective_budget,
+        "reasoning_transport": str(value.get("reasoning_transport") or "")[:48],
+        "transport_status": str(value.get("transport_status") or "unknown")[:24],
+        "transport_verified": value.get("transport_verified") is True,
+        "native_reasoning_effort_verified": (
+            native_effort if isinstance(native_effort, bool) else None
+        ),
+        "native_reasoning_budget_verified": value.get(
+            "native_reasoning_budget_verified"
+        ) is True,
+        "effort_wire_mode": str(value.get("effort_wire_mode") or "not_forwarded")[:40],
+        "budget_wire_mode": str(value.get("budget_wire_mode") or "not_forwarded")[:40],
+        "reasoning_mapping_applied": value.get("reasoning_mapping_applied") is True,
+        "reasoning_mapping_direction": str(
+            value.get("reasoning_mapping_direction") or "unavailable"
+        )[:80],
+        "reasoning_mapping_scope": str(value.get("reasoning_mapping_scope") or "")[:32],
+        "status": str(value.get("status") or "unknown")[:48],
+        "raw_provider_model_id_persisted": False,
+        "raw_provider_url_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
 def _safe_candidate_standardization_summary(value: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(value, Mapping) or not value:
         return {
@@ -1767,6 +1951,7 @@ def _safe_candidate_task_execution_summary(value: Mapping[str, Any]) -> dict[str
             "node_receipts": [],
             "checkpoint_receipts": [],
             "replica_routing": _safe_replica_routing_summary({}),
+            "reasoning_transport_receipt": _safe_reasoning_execution_receipt({}),
             "provider_error_code": "",
             "provider_http_status": None,
             "provider_error_class": "",
@@ -1816,6 +2001,11 @@ def _safe_candidate_task_execution_summary(value: Mapping[str, Any]) -> dict[str
         "replica_routing": _safe_replica_routing_summary(
             value.get("replica_routing")
             if isinstance(value.get("replica_routing"), Mapping)
+            else {}
+        ),
+        "reasoning_transport_receipt": _safe_reasoning_execution_receipt(
+            value.get("reasoning_transport_receipt")
+            if isinstance(value.get("reasoning_transport_receipt"), Mapping)
             else {}
         ),
         "provider_error_code": provider_error_code,
