@@ -2306,11 +2306,11 @@ def _public_aggregation_decision(value: Mapping[str, Any]) -> dict[str, Any]:
         "finalization_mode": str(value.get("finalization_mode") or "direct")[:64],
         "candidate_count": max(0, _optional_int(value.get("candidate_count")) or 0),
         "best_candidate_id_sha256": str(value.get("best_candidate_id_sha256") or "")[:64],
-        "best_candidate_calibrated_confidence": _optional_float(
+        "best_candidate_calibrated_confidence": _bounded_unit_float(
             value.get("best_candidate_calibrated_confidence")
         ),
         "confidence_band": str(value.get("confidence_band") or "none")[:16],
-        "quality_target": _optional_float(value.get("quality_target")),
+        "quality_target": _bounded_unit_float(value.get("quality_target")),
         "quality_gate_status": str(value.get("quality_gate_status") or "unknown")[:32],
         "quality_gap_triggered": value.get("quality_gap_triggered") is True,
         "quality_gap_reason_codes": [
@@ -2797,6 +2797,11 @@ def _optional_float(value: Any) -> float | None:
         return None if value in (None, "") else float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _bounded_unit_float(value: Any) -> float | None:
+    parsed = _optional_float(value)
+    return None if parsed is None else max(0.0, min(1.0, parsed))
 
 
 def _optional_int(value: Any) -> int | None:
