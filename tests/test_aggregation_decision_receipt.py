@@ -269,3 +269,43 @@ def test_public_trace_summary_projects_aggregation_decision_without_content():
     assert decision["best_candidate_id_sha256"] == "b" * 64
     assert "private candidate" not in serialized
     assert "private prompt" not in serialized
+
+
+def test_public_ranked_candidate_receipts_are_bounded_anonymous_and_cross_protocol():
+    request = FusionRequest(model="axio-sol", prompt="private prompt")
+    judge = {
+        "ranked_candidates": [
+            {
+                "candidate_id": "candidate-1",
+                "profile_id": "provider-secret-profile",
+                "score": 1.7,
+                "calibrated_confidence": -0.2,
+                "answer_claim_support_fraction": 0.8,
+                "answer": "private candidate answer",
+            }
+        ]
+    }
+    response = FusionResponse(
+        text="final answer",
+        request=request,
+        route_plan={},
+        judge_result=judge,
+        trace={"judge_result": judge},
+    )
+
+    summaries = []
+    for api_format in ("chat/completions", "responses", "anthropic", "gemini"):
+        rendered = render_response(response, api_format=api_format)
+        summaries.append(rendered["metadata"]["fusion_trace_summary"]["ranked_candidate_receipts"])
+
+    assert all(rows == summaries[0] for rows in summaries)
+    receipt = summaries[0][0]
+    assert receipt["rank"] == 1
+    assert len(receipt["candidate_id_sha256"]) == 64
+    assert len(receipt["profile_id_sha256"]) == 64
+    assert receipt["score"] == 1.0
+    assert receipt["calibrated_confidence"] == 0.0
+    assert receipt["answer_claim_support_fraction"] == 0.8
+    serialized = json.dumps(receipt, ensure_ascii=False)
+    assert "private candidate answer" not in serialized
+    assert "provider-secret-profile" not in serialized

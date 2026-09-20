@@ -1757,6 +1757,11 @@ def _stream_metadata(
         "external_model_name": response.request.public_model,
         "provider_calls_recorded": response.provider_calls_recorded,
         "request_fingerprint": response.request.request_fingerprint,
+        "fusion_trace_summary": _public_trace_summary(
+            response.trace,
+            route_plan=response.route_plan,
+            judge_result=response.judge_result,
+        ),
         "output_text_normalization": dict(normalization_receipt or derived_receipt),
         "raw_prompt_persisted": False,
         "raw_source_text_persisted": False,
@@ -1778,6 +1783,7 @@ def _response_metadata(
         "fusion_trace_summary": _public_trace_summary(
             response.trace,
             route_plan=response.route_plan,
+            judge_result=response.judge_result,
         ),
         "provider_calls_recorded": response.provider_calls_recorded,
         "request_fingerprint": response.request.request_fingerprint,
@@ -2167,6 +2173,7 @@ def _public_trace_summary(
     trace: Mapping[str, Any],
     *,
     route_plan: Mapping[str, Any] | None = None,
+    judge_result: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     early_exit = trace.get("early_exit") if isinstance(trace.get("early_exit"), Mapping) else {}
     panel_repair = trace.get("panel_repair") if isinstance(trace.get("panel_repair"), Mapping) else {}
@@ -2190,6 +2197,10 @@ def _public_trace_summary(
         trace.get("aggregation_decision")
         if isinstance(trace.get("aggregation_decision"), Mapping)
         else {}
+    )
+    judge_source = judge_result if isinstance(judge_result, Mapping) else trace.get("judge_result", {})
+    ranked_candidate_receipts = _public_ranked_candidate_receipts(
+        judge_source if isinstance(judge_source, Mapping) else {}
     )
     tool_call_arbitration = trace.get("tool_call_arbitration") if isinstance(trace.get("tool_call_arbitration"), Mapping) else {}
     cache_replay = trace.get("cache_replay") if isinstance(trace.get("cache_replay"), Mapping) else {}
@@ -2221,6 +2232,7 @@ def _public_trace_summary(
         "provider_judge_required": fusion_stage_outcome.get("provider_judge_required") is True,
         "provider_synthesizer_required": fusion_stage_outcome.get("provider_synthesizer_required") is True,
         "candidate_count": len(candidate_receipts),
+        "ranked_candidate_receipts": ranked_candidate_receipts,
         "aggregation_decision": _public_aggregation_decision(aggregation_decision),
         "cache_hit": bool(trace.get("cache_hit")),
         "cache_replay": cache_replay.get("replayed") is True,
@@ -2282,6 +2294,36 @@ def _public_trace_summary(
         "raw_profile_ids_persisted": False,
         "raw_provider_outputs_persisted": False,
     }
+
+
+def _public_ranked_candidate_receipts(judge: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Expose bounded anonymous ranking evidence without candidate content."""
+
+    ranked = judge.get("ranked_candidates") if isinstance(judge.get("ranked_candidates"), list) else []
+    receipts: list[dict[str, Any]] = []
+    for rank, row in enumerate(ranked[:16], start=1):
+        if not isinstance(row, Mapping):
+            continue
+        candidate_id = str(row.get("candidate_id") or "")
+        profile_hash = _sha256_or_empty(row.get("profile_id_sha256"))
+        if not profile_hash:
+            raw_profile_id = str(row.get("profile_id") or "")
+            profile_hash = sha256_text(raw_profile_id) if raw_profile_id else ""
+        receipts.append(
+            {
+                "rank": rank,
+                "candidate_id_sha256": sha256_text(candidate_id) if candidate_id else "",
+                "profile_id_sha256": profile_hash,
+                "score": _bounded_unit_float(row.get("score")),
+                "calibrated_confidence": _bounded_unit_float(row.get("calibrated_confidence")),
+                "answer_claim_support_fraction": _bounded_unit_float(
+                    row.get("answer_claim_support_fraction")
+                ),
+                "raw_candidate_text_persisted": False,
+                "raw_provider_identifiers_persisted": False,
+            }
+        )
+    return receipts
 
 
 def _public_aggregation_decision(value: Mapping[str, Any]) -> dict[str, Any]:

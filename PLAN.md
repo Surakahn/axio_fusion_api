@@ -1,5 +1,14 @@
 # Axio Fusion API Plan
 
+## 2026-09-20 公共聚合排序证据投影
+
+四种协议的公共 `fusion_trace_summary` 新增 bounded/hash-safe 的匿名排序回执，最多保留 16
+个 rank；只输出候选/profile SHA-256、score、校准置信度和 claim support fraction。非法数值
+被限制到 `[0,1]`，非法 digest 不透传；候选正文、provider/model 标识、prompt 和 secret
+继续 fail-closed。四协议共用同一投影并通过 parity 回归，专项 `43 passed`。该证据只改善
+运行时可观测性，不代表 provider 排名、benchmark 质量、成本优势或 superiority；真实
+endpoint-bound probe 与 21-suite paired campaign 仍按冻结 gate 执行。
+
 ## 2026-09-20 Official imported run 完整性门禁
 
 补齐 official/audited Harness imported run 的内部账本校验。新增

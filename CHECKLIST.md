@@ -1,5 +1,15 @@
 # Axio Fusion API Checklist
 
+# 2026-09-20 公共聚合排序证据投影
+
+- [x] 四协议 `fusion_trace_summary` 投影最多 16 条匿名 ranked candidate receipt，保留
+  rank、SHA-256 和 bounded score/confidence/support fraction，不暴露候选正文、provider、
+  profile 原文、prompt 或 secret。
+- [x] 非法 profile digest fail-closed，候选/profile 标识统一 hash；Chat、Responses、
+  Anthropic、Gemini metadata parity 回归通过，专项 `43 passed`。
+- [ ] 该运行时证据不等同 provider 排名、benchmark 质量、成本优势或 superiority；仍需在
+  获授权的 endpoint-bound probe 与完整 21-suite paired campaign 中进行独立验证。
+
 # 2026-09-20 Official imported run 完整性门禁
 
 - [x] 新增 `imported_run_integrity.v1` hash-safe receipt，校验 imported run 的 case 数、
