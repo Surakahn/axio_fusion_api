@@ -1065,10 +1065,8 @@ def create_http_server(
                 self.wfile.write(response_body)
                 self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError, OSError):
-                # A client timeout can close the socket while a buffered
-                # provider result is being serialized. Treat it like the
-                # incremental path: the request is already abandoned and
-                # must not produce a server-side traceback.
+                # 客户端超时可能在缓冲 provider 结果序列化时关闭 socket；按流式路径处理，
+                # 请求已经放弃时只关闭连接，不向服务日志冒泡堆栈。
                 self.close_connection = True
                 return
 
