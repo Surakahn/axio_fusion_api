@@ -1,5 +1,15 @@
 # Axio Fusion API Checklist
 
+# 2026-09-20 最终 claim 终态与 fallback 错误观测
+
+- [x] 最终 claim summary 要求 `status=live_complete`；缺失、`partial`、`blocked` 和其他
+  状态以 `campaign_not_live_complete` fail-closed，新增终态专项与 fixture 回归。
+- [x] Provider request-local trace 记录 bounded `provider_error_code_counts`、
+  `provider_http_status_counts`，覆盖失败、重试和恢复成功路径，不保存原始 body、URL、
+  prompt、模型名或 secret；provider traffic-control/HTTP contract 专项 `64 passed`。
+- [ ] 这些离线门禁不替代真实 screening、transport admission、baseline freeze、四协议 live
+  parity 或 21-suite paired benchmark；当前 r19 仍为 `partial/ready_for_ranking=false`。
+
 # 2026-09-20 公共聚合排序证据投影
 
 - [x] 四协议 `fusion_trace_summary` 投影最多 16 条匿名 ranked candidate receipt，保留

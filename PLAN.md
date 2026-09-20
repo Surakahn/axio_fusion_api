@@ -1,5 +1,18 @@
 # Axio Fusion API Plan
 
+## 2026-09-20 最终 claim 终态门禁与 provider fallback 错误可观测性
+
+最终 benchmark claim summary 现在要求 campaign 明确写出 `status=live_complete`；缺失、
+`partial`、`blocked` 或其他状态统一 fail-closed，避免仅凭运行数或可篡改摘要进入最终审计。
+Provider request-local trace 新增 bounded `provider_error_code_counts` 与
+`provider_http_status_counts`，覆盖最终失败和先失败后由重试/密钥轮换恢复的路径；不记录
+原始响应、URL、prompt、模型名或 secret，也不改变 fallback/retry 决策。
+
+新增终态、provider traffic-control 与 HTTP contract 回归；当前 focused 证据 `67 passed`，
+final-audit 选择集 `33 passed`。这些是离线工程和可观测性证据，不是 provider 排名、质量、
+成本优势或 superiority 证据。r19 screening 仍为 partial，必须继续保持 ranking/freeze/target
+campaign withheld。
+
 ## 2026-09-20 公共聚合排序证据投影
 
 四种协议的公共 `fusion_trace_summary` 新增 bounded/hash-safe 的匿名排序回执，最多保留 16
