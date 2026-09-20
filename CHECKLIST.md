@@ -170,6 +170,9 @@
   单调 epoch、旧 claim 拒绝和非法 claim 回归通过。
 - [ ] 尚未接入真实跨主机 Redis/SQL/共识后端，也未完成网络分区、双副本崩溃恢复、epoch
   冲突和跨副本外部 smoke；SQLite 不能宣称全局配额。
+- [x] 新增 `audit_fenced_ledger_backend()` 离线契约审计：固定检查 fencing 后端名称与五个
+  原子操作，SQLite/不完整实现 fail-closed，并输出不含实例身份的安全 receipt；专项回归通过。
+  该审计不替代真实跨主机后端与故障演练。
 
 # 2026-09-19 SQLite 账本存储卷故障与可重试错误闭环
 
