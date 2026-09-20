@@ -15374,6 +15374,7 @@ def _load_json_artifact(path: Path | None) -> dict[str, Any]:
 def _final_campaign_summary(campaign: Mapping[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     missing = []
     mode = str(campaign.get("mode") or "")
+    status = str(campaign.get("status") or "")
     expected = _optional_int(campaign.get("expected_run_count"))
     completed = _optional_int(campaign.get("completed_or_resumed_run_count"))
     missing_suite_count = _optional_int(campaign.get("missing_suite_count")) or 0
@@ -15393,6 +15394,16 @@ def _final_campaign_summary(campaign: Mapping[str, Any]) -> tuple[dict[str, Any]
         missing.append({"kind": "campaign_artifact_unavailable"})
     elif mode != "live":
         missing.append({"kind": "campaign_not_live", "mode": mode or "missing"})
+    # Run counts alone do not prove that the campaign reached its terminal
+    # success state.  A partial/blocked artifact can retain the expected
+    # count after a resume or manual edit; final claims must be fail-closed.
+    if campaign and status != "live_complete":
+        missing.append(
+            {
+                "kind": "campaign_not_live_complete",
+                "status": status or "missing",
+            }
+        )
     if campaign and provider_selection != EXTERNAL_PROVIDER_RANKING_SELECTION_MODE:
         missing.append(
             {
@@ -15486,6 +15497,7 @@ def _final_campaign_summary(campaign: Mapping[str, Any]) -> tuple[dict[str, Any]
     return (
         {
             "mode": mode,
+            "status": status or None,
             "expected_run_count": expected,
             "completed_or_resumed_run_count": completed,
             "candidate_count": campaign_candidate_count,
