@@ -1,5 +1,16 @@
 # Axio Fusion API Checklist
 
+# 2026-09-20 缓冲响应客户端断开边界
+
+- [x] `_write_buffered_response` 对 header/body/flush 的 peer disconnect 使用与流式路径
+  一致的受控处理，不再打印 `BrokenPipeError` 服务线程堆栈。
+- [x] 新增 buffered boundary 回归；流式断流、runtime activation、部署契约和
+  benchmark runtime 专项共 `51 passed`。
+- [x] 全量 Python 3.11 回归 `1204 passed`，`py_compile`、`compileall`、`git diff --check`
+  通过。
+- [ ] provider/代理 timeout 仍需在环境恢复后重做四协议 live smoke；本修复不构成
+  provider 能力、native reasoning、质量或 parity 证据。
+
 # 2026-09-20 trace_store 推理执行证据闭环
 
 - [x] `trace_store.py` 复用 bounded `reasoning_execution_receipt.v1` 安全投影，空值与

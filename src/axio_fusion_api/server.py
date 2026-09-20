@@ -1057,11 +1057,20 @@ def create_http_server(
             response_headers: Mapping[str, str],
             response_body: bytes,
         ) -> None:
-            self.send_response(status)
-            for key, value in response_headers.items():
-                self.send_header(key, value)
-            self.end_headers()
-            self.wfile.write(response_body)
+            try:
+                self.send_response(status)
+                for key, value in response_headers.items():
+                    self.send_header(key, value)
+                self.end_headers()
+                self.wfile.write(response_body)
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                # A client timeout can close the socket while a buffered
+                # provider result is being serialized. Treat it like the
+                # incremental path: the request is already abandoned and
+                # must not produce a server-side traceback.
+                self.close_connection = True
+                return
 
         def _dispatch_incremental_stream(
             self,

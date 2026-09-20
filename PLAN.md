@@ -1,5 +1,17 @@
 # Axio Fusion API Plan
 
+## 2026-09-20 缓冲响应客户端断开边界
+
+生产 smoke 发现 provider/代理等待超过客户端窗口后，缓冲 HTTP 响应在写回时会把
+`BrokenPipeError` 冒泡为服务线程堆栈。流式路径已有取消和资源释放保护，但
+`_write_buffered_response` 尚未复用该边界语义。本轮将状态行、headers、body 和 flush
+统一放入 `BrokenPipeError`/`ConnectionResetError`/`OSError` 保护；客户端已关闭时只
+标记连接关闭并返回，不改变 provider 错误码、预算结算、路由或公共响应契约。
+
+新增 buffered HTTP boundary 回归，并与真实流式断开、runtime activation、部署契约和
+benchmark runtime 一起验证。该修复只改善断流运维信号，仍不把 provider timeout 当成
+能力结论；四协议上游连通性需在代理/凭据恢复后单独重测。
+
 ## 2026-09-20 trace_store 推理执行证据闭环
 
 `reasoning_execution_receipt.v1` 现在从候选内存结果完整进入 `trace_store` 的安全

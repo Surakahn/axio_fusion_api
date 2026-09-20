@@ -36,6 +36,48 @@ from axio_fusion_api.schemas import FusionResponse
 from axio_fusion_api.server import create_http_server
 
 
+def test_buffered_response_disconnect_is_absorbed_at_http_boundary() -> None:
+    class BrokenWriter:
+        def write(self, payload: bytes) -> int:
+            del payload
+            raise BrokenPipeError("client closed buffered response")
+
+        def flush(self) -> None:
+            return None
+
+    gateway = create_http_server(
+        host="127.0.0.1",
+        port=0,
+        live=False,
+        engine=FusionEngine(
+            [normalize_profile({"provider": "buffered-fixture", "model": "buffered-model"})]
+        ),
+        record_trace=False,
+        record_runtime=False,
+    )
+    handler_type = gateway.RequestHandlerClass
+    handler = object.__new__(handler_type)
+    handler.wfile = BrokenWriter()
+    handler.close_connection = False
+    response_events: list[tuple[str, object]] = []
+    handler.send_response = lambda status: response_events.append(("status", status))
+    handler.send_header = lambda key, value: response_events.append((key, value))
+    handler.end_headers = lambda: response_events.append(("end", None))
+
+    try:
+        handler._write_buffered_response(
+            504,
+            {"Content-Type": "application/json"},
+            b'{"error":"upstream_timeout"}',
+        )
+    finally:
+        gateway.server_close()
+
+    assert response_events[:2] == [("status", 504), ("Content-Type", "application/json")]
+    assert response_events[-1] == ("end", None)
+    assert handler.close_connection is True
+
+
 @pytest.mark.parametrize(
     ("api_format", "start_marker", "delta_marker", "terminal_marker"),
     [
