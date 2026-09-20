@@ -25355,7 +25355,6 @@ def test_standalone_benchmark_final_audit_rejects_digest_match_without_binding_r
     methodology = build_benchmark_methodology_manifest()
     campaign = {
         "schema": "axio_fusion_api.benchmark_campaign.v1",
-        "status": "live_complete",
         "mode": "live",
         "status": "live_complete",
         "suite_spec_count": len(benchmark_manifest()["suites"]),
