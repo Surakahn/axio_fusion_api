@@ -1,5 +1,26 @@
 # Axio Fusion API Plan
 
+## 2026-09-20 Official imported run 完整性门禁
+
+补齐 official/audited Harness imported run 的内部账本校验。新增
+`axio_fusion_api.imported_run_integrity.v1` hash-safe receipt，在既有
+`_validate_imported_runs()` admission 前统一检查 `case_count` 与 `case_results` 长度、
+每案 case hash 的缺失/重复、`attempted_count` 与 completed case 对账、逐案与总
+`provider_call_count` 对账，以及顶层 prompt/decoding hash 与 Harness receipt 的绑定；若有
+`import_receipt.imported_case_count`，也必须与 run case 数一致。空 JSON、截断、重复 case、
+调用数漂移、prompt 绑定冲突和 raw persistence flag 均 fail-closed，安全 receipt 只保存计数、
+摘要 hash 和 reason code，不保存原始 case、prompt、输出、路径或 secret。
+
+新增 `tests/test_imported_run_integrity.py`，覆盖完整导入、截断/重复/hash、attempted 与
+provider-call 对账、prompt 绑定、unsafe persistence 和空对象边界；新增专项与 benchmark
+acquisition/execution/resume/official campaign 回归共 `32 passed`，全量 Python 3.11 回归
+`1228 passed`，L1/L2 已通过。当前仍未
+执行 provider/target 网络、不修改 r19 frozen 输入、serving registry 或生产服务；完整
+21-suite campaign、四协议 live parity、质量/延迟/调用成本及 final audit 仍必须等待
+screening -> transport admission -> ranking -> freeze -> Harness convergence gates。
+
+详见 `docs/handoffs/2026-09-20_imported_run_integrity.md`。
+
 ## 2026-09-20 四协议 Responses/Gemini 兼容契约收敛
 
 本轮补齐两个公共 API 边界缺口。Responses 续接请求在服务端合并历史后，原先仍把

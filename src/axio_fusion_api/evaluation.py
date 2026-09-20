@@ -23405,6 +23405,157 @@ def _run_case_hash_set(run: Mapping[str, Any]) -> set[str]:
     return hashes
 
 
+def _imported_run_case_accounting(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Return case, attempt, and provider-call accounting for an import."""
+
+    reasons: list[str] = []
+    rows = payload.get("case_results") if isinstance(payload.get("case_results"), list) else None
+    if rows is None:
+        rows = []
+        reasons.append("missing_case_results")
+    case_count = _optional_int(payload.get("case_count"))
+    if case_count is None or case_count <= 0:
+        reasons.append("case_count_missing_or_zero")
+    elif len(rows) != case_count:
+        reasons.append("case_result_count_incomplete")
+    attempted_count = _optional_int(payload.get("attempted_count"))
+    if attempted_count is None or attempted_count < 0:
+        reasons.append("attempted_count_missing_or_negative")
+    provider_call_count = _optional_int(payload.get("provider_call_count"))
+    if provider_call_count is None or provider_call_count < 0:
+        reasons.append("provider_call_count_missing_or_negative")
+
+    completed_count = 0
+    row_call_count = 0
+    missing_call_count = 0
+    case_hashes: list[str] = []
+    missing_hash_count = 0
+    for row in rows:
+        if not isinstance(row, Mapping):
+            reasons.extend(
+                (
+                    "case_result_not_object",
+                    "case_hash_missing",
+                    "case_provider_call_count_missing_or_negative",
+                )
+            )
+            missing_hash_count += 1
+            missing_call_count += 1
+            continue
+        completed_count += int(str(row.get("status") or "") == "completed")
+        row_calls = _optional_int(row.get("provider_call_count"))
+        if row_calls is None or row_calls < 0:
+            missing_call_count += 1
+            reasons.append("case_provider_call_count_missing_or_negative")
+        else:
+            row_call_count += row_calls
+        case_hash = _case_hash_from_result(row)
+        if case_hash:
+            case_hashes.append(case_hash)
+        else:
+            missing_hash_count += 1
+            reasons.append("case_hash_missing")
+    if attempted_count is not None and attempted_count != completed_count:
+        reasons.append("attempted_count_receipt_mismatch")
+    if provider_call_count is not None and provider_call_count != row_call_count:
+        reasons.append("provider_call_count_receipt_mismatch")
+    unique_hashes = set(case_hashes)
+    duplicate_hash_count = max(0, len(case_hashes) - len(unique_hashes))
+    if duplicate_hash_count:
+        reasons.append("duplicate_case_hashes")
+    return {
+        "reasons": reasons,
+        "rows": rows,
+        "case_count": case_count,
+        "attempted_count": attempted_count,
+        "completed_count": completed_count,
+        "provider_call_count": provider_call_count,
+        "row_call_count": row_call_count,
+        "missing_call_count": missing_call_count,
+        "case_hashes": unique_hashes,
+        "missing_hash_count": missing_hash_count,
+        "duplicate_hash_count": duplicate_hash_count,
+    }
+
+
+def _imported_run_binding_receipt(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Check prompt/decoding hashes and the optional import count receipt."""
+
+    reasons: list[str] = []
+    prompt_hash = str(payload.get("prompt_protocol_sha256") or "").strip().lower()
+    decoding_hash = str(payload.get("decoding_config_sha256") or "").strip().lower()
+    harness_receipt = payload.get("harness_receipt") if isinstance(payload.get("harness_receipt"), Mapping) else {}
+    harness_prompt_hash = str(harness_receipt.get("prompt_protocol_sha256") or "").strip().lower()
+    harness_decoding_hash = str(harness_receipt.get("decoding_config_sha256") or "").strip().lower()
+    if not _looks_like_sha256(prompt_hash):
+        reasons.append("prompt_protocol_hash_missing_or_invalid")
+    if not _looks_like_sha256(decoding_hash):
+        reasons.append("decoding_config_hash_missing_or_invalid")
+    if _looks_like_sha256(harness_prompt_hash) and prompt_hash != harness_prompt_hash:
+        reasons.append("prompt_protocol_hash_receipt_mismatch")
+    if _looks_like_sha256(harness_decoding_hash) and decoding_hash != harness_decoding_hash:
+        reasons.append("decoding_config_hash_receipt_mismatch")
+    import_receipt = payload.get("import_receipt") if isinstance(payload.get("import_receipt"), Mapping) else {}
+    imported_case_count = _optional_int(import_receipt.get("imported_case_count"))
+    return {
+        "reasons": reasons,
+        "prompt_protocol_sha256": prompt_hash if _looks_like_sha256(prompt_hash) else "",
+        "decoding_config_sha256": decoding_hash if _looks_like_sha256(decoding_hash) else "",
+        "harness_prompt_protocol_match": bool(
+            _looks_like_sha256(harness_prompt_hash) and prompt_hash == harness_prompt_hash
+        ),
+        "harness_decoding_config_match": bool(
+            _looks_like_sha256(harness_decoding_hash) and decoding_hash == harness_decoding_hash
+        ),
+        "imported_case_count": imported_case_count,
+    }
+
+
+def _imported_run_integrity_receipt(
+    payload: Mapping[str, Any],
+    *,
+    suite_id: str,
+    task_format: str,
+) -> dict[str, Any]:
+    """Validate one official imported run without retaining raw evidence."""
+
+    del task_format
+    accounting = _imported_run_case_accounting(payload)
+    binding = _imported_run_binding_receipt(payload)
+    case_count = accounting["case_count"]
+    imported_case_count = binding["imported_case_count"]
+    reasons = list(accounting["reasons"]) + list(binding["reasons"])
+    if imported_case_count is not None and case_count is not None and imported_case_count != case_count:
+        reasons.append("imported_case_count_receipt_mismatch")
+    clean_reasons = sorted(set(reasons))
+    case_hashes = accounting["case_hashes"]
+    return {
+        "schema": "axio_fusion_api.imported_run_integrity.v1",
+        "status": "valid" if not clean_reasons else "invalid",
+        "valid": not clean_reasons,
+        "reason_codes": clean_reasons,
+        "case_count": case_count,
+        "case_result_count": len(accounting["rows"]),
+        "attempted_count": accounting["attempted_count"],
+        "completed_case_count": accounting["completed_count"],
+        "provider_call_count": accounting["provider_call_count"],
+        "case_provider_call_count": accounting["row_call_count"],
+        "missing_provider_call_count": accounting["missing_call_count"],
+        "case_hash_count": len(case_hashes),
+        "missing_case_hash_count": accounting["missing_hash_count"],
+        "duplicate_case_hash_count": accounting["duplicate_hash_count"],
+        "case_hash_set_sha256": _case_hash_set_digest(suite_id, sorted(case_hashes)) if case_hashes else "",
+        "prompt_protocol_sha256": binding["prompt_protocol_sha256"],
+        "decoding_config_sha256": binding["decoding_config_sha256"],
+        "harness_prompt_protocol_match": binding["harness_prompt_protocol_match"],
+        "harness_decoding_config_match": binding["harness_decoding_config_match"],
+        "raw_case_hashes_persisted": False,
+        "raw_prompt_persisted": False,
+        "raw_provider_outputs_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
 def _load_imported_run(path: str | Path) -> dict[str, Any]:
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(payload, Mapping):
@@ -23483,6 +23634,24 @@ def _validate_imported_runs(
             if requires_official_harness:
                 receipt = payload.get("harness_receipt") if isinstance(payload.get("harness_receipt"), Mapping) else {}
                 reasons.extend(_harness_receipt_reasons(receipt, suite_id=suite_id, task_format=task_format))
+            integrity = _imported_run_integrity_receipt(
+                payload,
+                suite_id=suite_id,
+                task_format=task_format,
+            )
+            reasons.extend(str(reason) for reason in integrity.get("reason_codes", []))
+        else:
+            integrity = {
+                "schema": "axio_fusion_api.imported_run_integrity.v1",
+                "status": "not_checked",
+                "valid": False,
+                "reason_codes": ["import_payload_unavailable"],
+                "raw_case_hashes_persisted": False,
+                "raw_prompt_persisted": False,
+                "raw_provider_outputs_persisted": False,
+                "secrets_persisted": False,
+            }
+            reasons.extend(str(reason) for reason in integrity["reason_codes"])
         invalid += int(bool(reasons))
         valid += int(not reasons)
         receipts.append(
@@ -23492,6 +23661,7 @@ def _validate_imported_runs(
                 "import_path_sha256": sha256_text(str(path)),
                 "valid": not reasons,
                 "reason_codes": sorted(set(reasons)),
+                "integrity": integrity,
                 "raw_candidate_id_persisted": False,
                 "raw_import_path_persisted": False,
             }

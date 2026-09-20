@@ -1,5 +1,17 @@
 # Axio Fusion API Checklist
 
+# 2026-09-20 Official imported run 完整性门禁
+
+- [x] 新增 `imported_run_integrity.v1` hash-safe receipt，校验 imported run 的 case 数、
+  case hash 唯一性、attempted/completed 对账、逐案/总 provider-call 对账和 import count。
+- [x] 顶层 prompt/decoding contract 与官方 Harness receipt 绑定；空 JSON、截断、重复 case、
+  调用数漂移、绑定冲突和 unsafe persistence 均 fail-closed，不输出原始 case/prompt/output。
+- [x] 新增专项 `tests/test_imported_run_integrity.py`；与 benchmark acquisition、execution、
+  resume、v4 Harness、official campaign 回归共 `32 passed`，全量 Python 3.11 回归
+  `1228 passed`，L1/L2 通过。
+- [ ] 该增量仍是离线 imported evidence gate，不能替代 live Harness 执行、screening、21-suite
+  paired quality/latency/call-cost 证据；r19 screening 继续单进程、只读观察。
+
 # 2026-09-20 四协议 Responses/Gemini 兼容契约收敛
 
 - [x] Responses continuation 在服务端 request-local metadata 绑定上一个响应 ID；buffered
