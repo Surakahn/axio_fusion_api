@@ -1,5 +1,16 @@
 # Axio Fusion API Checklist
 
+# 2026-09-20 Pre-Fusion 排名证据可信度投影
+
+- [x] logical candidate 暴露 `prefusion_operational_evidence_confidence.v1`，绑定研究先验、
+  strict-stream reliability 与 physical replica coverage。
+- [x] operational confidence 使用三项证据保守最小值；invalid replica 计数 fail-closed，
+  uncertainty 明确不属于统计置信区间或 benchmark 质量证据。
+- [x] 主排序仍固定使用 operational score，仅在既有键完全相同时使用 confidence 稳定 tie-break。
+- [x] 新增 `tests/test_prefusion_ranking.py`，与 model-screening 专项共 `104 passed`；L1/L2 通过。
+- [ ] 尚未执行 live provider screening；双源 non-target、transport admission、complete-pool
+  ranking、provider freeze、Harness/import 和 21-suite paired campaign 仍按 frozen gate 推进。
+
 # 2026-09-20 r18 当前零网络 verifier 复核
 
 - [x] 当前 registry、frozen plan/source、operational admission、两份 preflight receipt

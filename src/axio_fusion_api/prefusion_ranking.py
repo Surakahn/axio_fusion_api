@@ -21,6 +21,9 @@ from .schemas import CAPABILITY_AXES, is_sha256_digest, sha256_text
 PREFUSION_OPERATIONAL_RANKING_SCHEMA = (
     "axio_fusion_api.prefusion_operational_ranking.v1"
 )
+PREFUSION_OPERATIONAL_EVIDENCE_SCHEMA = (
+    "axio_fusion_api.prefusion_operational_evidence_confidence.v1"
+)
 PREFUSION_OPERATIONAL_RANKING_WEIGHTS = {
     "research_quality": 0.70,
     "research_confidence": 0.10,
@@ -287,6 +290,45 @@ def operational_score(
     )
 
 
+def operational_evidence_confidence(
+    *,
+    research_confidence: Any,
+    stream_reliability: Any,
+    available_replica_count: Any,
+    physical_replica_count: Any,
+) -> dict[str, Any]:
+    """为一个 logical model 生成保守的 serving evidence 可信度投影。
+
+    这是 operational evidence 投影，不是统计置信区间，也不是 benchmark
+    质量估计。取研究可信度、严格流式可靠性和物理 replica 覆盖率的最小值，
+    防止较强先验掩盖缺失或失败的 serving 证据。
+    """
+
+    try:
+        available = max(0, int(available_replica_count))
+    except (TypeError, ValueError):
+        available = 0
+    try:
+        physical = max(0, int(physical_replica_count))
+    except (TypeError, ValueError):
+        physical = 0
+    coverage = available / physical if physical else 0.0
+    research = clamp01(research_confidence)
+    reliability = clamp01(stream_reliability)
+    confidence = clamp01(min(research, reliability, coverage))
+    return {
+        "schema": PREFUSION_OPERATIONAL_EVIDENCE_SCHEMA,
+        "research_confidence": research,
+        "stream_reliability": reliability,
+        "replica_coverage": clamp01(coverage),
+        "operational_confidence": confidence,
+        "operational_uncertainty": clamp01(1.0 - confidence),
+        "confidence_method": "conservative_minimum_of_prior_stream_and_replica_coverage",
+        "statistical_confidence_interval": False,
+        "benchmark_quality_evidence": False,
+    }
+
+
 def operational_rank_rows(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """Sort available logical rows and assign contiguous operational ranks."""
 
@@ -300,6 +342,13 @@ def operational_rank_rows(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, A
                 row.get("fastest_observed_latency_ms")
                 or row.get("fastest_observed_p50_latency_ms")
                 or 90_000.0
+            ),
+            -clamp01(
+                row.get("operational_evidence_confidence", {}).get(
+                    "operational_confidence"
+                )
+                if isinstance(row.get("operational_evidence_confidence"), Mapping)
+                else row.get("operational_confidence_score")
             ),
             str(row.get("canonical_identity_sha256") or ""),
         )
@@ -394,6 +443,12 @@ def build_operational_model_rows(
         ]
         available_replica_count = int(summary.get("successful_replica_count") or 0)
         physical_replica_count = int(summary.get("replica_count") or len(replicas))
+        evidence_confidence = operational_evidence_confidence(
+            research_confidence=confidence,
+            stream_reliability=reliability,
+            available_replica_count=available_replica_count,
+            physical_replica_count=physical_replica_count,
+        )
         rows.append(
             {
                 "rank": int(ranking.get("rank") or 0),
@@ -446,6 +501,13 @@ def build_operational_model_rows(
                     stream_reliability=reliability,
                     latency=latency_score,
                 ),
+                "operational_evidence_confidence": evidence_confidence,
+                "operational_confidence_score": evidence_confidence[
+                    "operational_confidence"
+                ],
+                "operational_uncertainty_score": evidence_confidence[
+                    "operational_uncertainty"
+                ],
                 "fastest_observed_latency_ms": summary.get(
                     "fastest_observed_latency_ms",
                     summary.get("fastest_latency_ms"),
@@ -485,12 +547,14 @@ __all__ = [
     "PREFUSION_BROAD_CAPABILITY_OVERALL_THRESHOLD",
     "PREFUSION_OPERATIONAL_RANKING_SCHEMA",
     "PREFUSION_OPERATIONAL_RANKING_WEIGHTS",
+    "PREFUSION_OPERATIONAL_EVIDENCE_SCHEMA",
     "clamp01",
     "capability_axis_coverage",
     "operational_rank_rows",
     "build_operational_model_rows",
     "aggregate_profile_role_projection",
     "operational_score",
+    "operational_evidence_confidence",
     "probe_row_is_successful",
     "probe_success_summary",
     "research_quality_score",

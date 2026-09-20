@@ -1,5 +1,19 @@
 # Axio Fusion API Plan
 
+## 2026-09-20 Pre-Fusion 排名证据可信度投影
+
+模型探索/排名链路新增 `prefusion_operational_evidence_confidence.v1`：对每个 logical
+candidate 记录 research prior confidence、严格流式成功率、物理 replica coverage，以及
+三项证据最小值形成的保守 operational confidence 和 uncertainty。它明确标注不是统计
+置信区间、benchmark 质量或 superiority 证据。固定 operational score 仍是主排序键，只有
+score、研究质量、流式可靠性和延迟完全相同时才使用 evidence confidence 做稳定 tie-break，
+因此不会改变既有路由权重或 r18 frozen artifact。
+
+新增离线专项覆盖 invalid replica count fail-closed 和稳定排序；`104 passed`。本轮未执行
+provider/target 网络、未修改 r18 frozen plan/source/registry。后续仍需在凭据门通过后完成
+双源 non-target screening、complete-pool ranking、provider baseline freeze 与 21-suite
+paired campaign，且不得把该 operational projection 当成质量或成本声明。
+
 ## 2026-09-20 r18 当前零网络 verifier 复核
 
 使用当前生产 registry、r18 frozen plan/source、r7 private operational admission 和两
