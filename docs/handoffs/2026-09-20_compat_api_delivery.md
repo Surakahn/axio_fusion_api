@@ -53,6 +53,17 @@ Gemini 路由之前只在 body 没有 `model` 时使用 URL 模型，因此
 - standalone 关键兼容筛选：`6 passed`。
 - `git diff --check` 通过。
 
+随后按项目门禁执行完整 Python 3.11 回归：
+
+```text
+PYTHONPATH=src python3.11 -m pytest tests/ -x -q --tb=short
+1219 passed in 293.11s
+```
+
+此前交接中记录的 standalone `passed_request_count=11` 是旧进程状态；当前标准
+`/v1beta/models/axio-terra:generateContent` 路径解析和三公开模型四协议自检均已通过。
+这次复核仍未执行 provider/target 网络调用。
+
 ## 风险与后续
 
 本轮证明的是本地协议归一化、响应字段和错误门禁，不证明任何 provider 的 live transport、
@@ -62,4 +73,3 @@ live smoke、Responses continuation 跨协议 parity，以及正式 paired bench
 工作树可能同时包含其他 agent 的 orchestrator/trace_store/aggregation 增量；提交时必须
 按文件边界审阅，不能覆盖或回退那些改动。生产发布前沿既有流程保留唯一 rollback backup，
 并执行 health、三模型 route-plan、四协议 smoke 和 CPA Plus 可用性检查。
-
