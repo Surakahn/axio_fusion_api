@@ -786,6 +786,10 @@ def _record_provider_request_receipt(
     traffic_control_wait_ms: float = 0.0,
     rate_limit_event_count: int = 0,
     shared_key_pool_short_circuit: bool = False,
+    error_code: str = "",
+    http_status: int | None = None,
+    error_code_counts: Mapping[str, int] | None = None,
+    http_status_counts: Mapping[str, int] | None = None,
 ) -> None:
     receipts = getattr(_PROVIDER_REQUEST_TRACE_LOCAL, "receipts", None)
     if not isinstance(receipts, list):
@@ -809,6 +813,22 @@ def _record_provider_request_receipt(
             ),
             "rate_limit_event_count": max(0, int(rate_limit_event_count or 0)),
             "shared_key_pool_short_circuit": bool(shared_key_pool_short_circuit),
+            "error_code": str(error_code or "")[:80],
+            "http_status": (
+                max(100, min(599, int(http_status)))
+                if http_status is not None and str(http_status).lstrip("-").isdigit()
+                else None
+            ),
+            "error_code_counts": {
+                str(key)[:80]: max(0, int(value))
+                for key, value in (error_code_counts or {}).items()
+                if str(key)[:80] and int(value) > 0
+            },
+            "http_status_counts": {
+                str(key): max(0, int(value))
+                for key, value in (http_status_counts or {}).items()
+                if str(key).isdigit() and 100 <= int(key) <= 599 and int(value) > 0
+            },
         }
     )
 
@@ -834,6 +854,30 @@ def _finish_provider_request_trace() -> dict[str, Any]:
             if str(row.get("stream_content_type") or "")
         }
     )
+    error_code_counts: dict[str, int] = {}
+    http_status_counts: dict[str, int] = {}
+    for row in rows:
+        row_counts = row.get("error_code_counts")
+        if isinstance(row_counts, Mapping):
+            for key, value in row_counts.items():
+                error_code = str(key)[:80]
+                if error_code:
+                    error_code_counts[error_code] = error_code_counts.get(error_code, 0) + max(0, int(value))
+        else:
+            error_code = str(row.get("error_code") or "")[:80]
+            if error_code:
+                error_code_counts[error_code] = error_code_counts.get(error_code, 0) + 1
+        row_status_counts = row.get("http_status_counts")
+        if isinstance(row_status_counts, Mapping):
+            for key, value in row_status_counts.items():
+                status_key = str(key)
+                if status_key.isdigit() and 100 <= int(status_key) <= 599:
+                    http_status_counts[status_key] = http_status_counts.get(status_key, 0) + max(0, int(value))
+        else:
+            status = row.get("http_status")
+            if isinstance(status, int) and 100 <= status <= 599:
+                key = str(status)
+                http_status_counts[key] = http_status_counts.get(key, 0) + 1
     return {
         "provider_request_count": len(rows),
         "provider_request_success_count": sum(1 for row in rows if row.get("status") == "success"),
@@ -850,6 +894,8 @@ def _finish_provider_request_trace() -> dict[str, Any]:
         "stream_protocols": stream_protocols,
         "stream_protocol": stream_protocols[0] if len(stream_protocols) == 1 else "",
         "stream_content_types": stream_content_types,
+        "provider_error_code_counts": dict(sorted(error_code_counts.items())),
+        "provider_http_status_counts": dict(sorted(http_status_counts.items())),
         "stream_content_type": (
             stream_content_types[0] if len(stream_content_types) == 1 else ""
         ),
@@ -5661,6 +5707,16 @@ def _post_json(
                     traffic_control_wait_ms=traffic_control_wait_ms,
                     rate_limit_event_count=rate_limit_event_count,
                     shared_key_pool_short_circuit=shared_key_pool_short_circuit,
+                    error_code_counts={
+                        str(row.get("error_code") or "")[:80]: 1
+                        for row in attempts
+                        if str(row.get("error_code") or "")
+                    },
+                    http_status_counts={
+                        str(row.get("http_status")): 1
+                        for row in attempts
+                        if isinstance(row.get("http_status"), int)
+                    },
                 )
                 return result
         if (
@@ -5690,6 +5746,18 @@ def _post_json(
         traffic_control_wait_ms=traffic_control_wait_ms,
         rate_limit_event_count=rate_limit_event_count,
         shared_key_pool_short_circuit=shared_key_pool_short_circuit,
+        error_code=last_error.error_code if last_error else "provider_request_failed",
+        http_status=last_error.http_status if last_error else None,
+        error_code_counts={
+            str(row.get("error_code") or "")[:80]: 1
+            for row in attempts
+            if str(row.get("error_code") or "")
+        },
+        http_status_counts={
+            str(row.get("http_status")): 1
+            for row in attempts
+            if isinstance(row.get("http_status"), int)
+        },
     )
     raise ProviderExecutionError(
         _safe_attempt_summary(

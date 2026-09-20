@@ -146,6 +146,8 @@ def test_shared_key_pool_stops_after_first_429_and_keeps_safe_trace(monkeypatch)
     assert receipt["key_attempt_count"] == 1
     assert receipt["transport_attempt_count"] == 1
     assert receipt["rate_limit_event_count"] == 1
+    assert receipt["provider_error_code_counts"] == {"http_error": 1}
+    assert receipt["provider_http_status_counts"] == {"429": 1}
     assert receipt["shared_key_pool_short_circuit"] is True
     serialized = f"{receipt} {exc_info.value}"
     assert "traffic.fixture" not in serialized
@@ -194,6 +196,8 @@ def test_independent_key_pool_can_fail_over_after_a_429(monkeypatch):
     assert receipt["transport_attempt_count"] == 2
     assert receipt["rate_limit_event_count"] == 1
     assert receipt["shared_key_pool_short_circuit"] is False
+    assert receipt["provider_error_code_counts"] == {"http_error": 1}
+    assert receipt["provider_http_status_counts"] == {"429": 1}
 
 
 def test_channel_scope_cooldown_blocks_a_different_model_before_provider_io(monkeypatch):
