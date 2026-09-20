@@ -29,3 +29,12 @@ handler 只标记 `close_connection=True` 并返回；不会泄露 provider 细�
 记录为受控连通性失败；待凭据/代理/上游恢复后，需重新执行四协议 live smoke，不能
 用 timeout 结果宣称 parity、native reasoning 或模型质量。
 
+## 生产发布
+
+- 提交 `8ae4015` 已推送到 `origin/main`；
+- Axio 18900 以 `setsid/nohup` 受控恢复至 PID `1382464`；
+- 发布后 `/health=ready`、21/21 runtime eligible、0 open circuits，三模型 route-plan
+  和 CPA Plus 8317 根端点 HTTP 200 均通过；
+- CPA Plus 未停止、未重启、未修改；
+- 当前唯一 Axio 回滚副本为 `private/axio_server.18900.console.log.pre-8ae4015`，
+  更旧的 `pre-3e50c7b` 已移除。

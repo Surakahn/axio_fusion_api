@@ -29,7 +29,7 @@
 
 ## 发布后状态
 
-- Axio 18900 已以 `setsid/nohup` 受控恢复，当前 PID `1359051`；
+- Axio 18900 已以 `setsid/nohup` 受控恢复，当前 PID `1382464`；
 - `/health` 为 `ready`，21/21 physical profiles runtime eligible，公开模型为
   `axio-luna`、`axio-terra`、`axio-sol`，网络为 `auto -> proxy`；
 - 三个模型 route-plan 均生成成功：Luna `fast_direct_cascade`、Terra `terra_direct`、
@@ -38,7 +38,7 @@
 - 四种 live API smoke 在 20 秒上游等待窗口内均未返回，服务只记录客户端超时后的
   `BrokenPipe`，进程和 health 未受影响。这是 provider/代理连通性失败，不是协议路由
   或产品开发失败，未将其计入 native reasoning 或质量证据；
-- 当前唯一 Axio 回滚副本为 `private/axio_server.18900.console.log.pre-3e50c7b`。
+- 当前唯一 Axio 回滚副本为 `private/axio_server.18900.console.log.pre-8ae4015`。
 
 离线验证和生产发布均未改变 r18 frozen 输入；本轮 provider smoke 的受控失败仍需在
 凭据、代理和上游恢复后重新执行，不能用超时结果宣称四协议 live parity。
