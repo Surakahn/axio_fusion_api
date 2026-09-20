@@ -25355,7 +25355,9 @@ def test_standalone_benchmark_final_audit_rejects_digest_match_without_binding_r
     methodology = build_benchmark_methodology_manifest()
     campaign = {
         "schema": "axio_fusion_api.benchmark_campaign.v1",
+        "status": "live_complete",
         "mode": "live",
+        "status": "live_complete",
         "suite_spec_count": len(benchmark_manifest()["suites"]),
         "candidate_count": 6,
         "expected_run_count": len(runs),
@@ -25440,6 +25442,7 @@ def test_standalone_benchmark_final_audit_rejects_missing_or_unfilled_source_man
     campaign = {
         "schema": "axio_fusion_api.benchmark_campaign.v1",
         "mode": "live",
+        "status": "live_complete",
         "suite_spec_count": len(benchmark_manifest()["suites"]),
         "candidate_count": 6,
         "expected_run_count": len(runs),
@@ -28815,6 +28818,7 @@ def _write_complete_final_audit_campaign(tmp_path, runs, name):
     campaign = {
         "schema": "axio_fusion_api.benchmark_campaign.v1",
         "mode": "live",
+        "status": "live_complete",
         "suite_spec_count": len(benchmark_manifest()["suites"]),
         "candidate_count": len(candidate_ids),
         "run_unit_count": len(run_unit_ids),
