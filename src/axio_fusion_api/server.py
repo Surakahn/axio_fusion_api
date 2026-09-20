@@ -60,6 +60,7 @@ from .schemas import (
     FusionResponse,
     FusionPolicy,
     PUBLIC_MODELS,
+    PUBLIC_MODEL_ALIASES,
     logical_model_count,
     safe_provider_error_class,
     safe_provider_error_code,
@@ -249,9 +250,14 @@ def handle_request(
         if not budget["allowed"]:
             return respond(_tenant_budget_exhausted_response(budget))
     if endpoint == "gemini":
-        route_model = _gemini_route_model(route)
-        if route_model and "model" not in payload:
-            payload = {**payload, "model": route_model}
+        payload, gemini_error = _bind_gemini_route_model(payload, route)
+        if gemini_error:
+            return respond(
+                _json_response(
+                    400,
+                    {"error": {"message": gemini_error[1], "code": gemini_error[0]}},
+                )
+            )
     continuation: ResponseContinuation | None = None
     if endpoint == "responses" and "previous_response_id" in payload:
         continuation = runtime_state().get_response_continuation(
@@ -604,9 +610,14 @@ def _prepare_incremental_stream_request(
         if not budget["allowed"]:
             return None, respond(_tenant_budget_exhausted_response(budget))
     if endpoint == "gemini":
-        route_model = _gemini_route_model(route)
-        if route_model and "model" not in payload:
-            payload = {**payload, "model": route_model}
+        payload, gemini_error = _bind_gemini_route_model(payload, route)
+        if gemini_error:
+            return None, respond(
+                _json_response(
+                    400,
+                    {"error": {"message": gemini_error[1], "code": gemini_error[0]}},
+                )
+            )
     continuation: ResponseContinuation | None = None
     if endpoint == "responses" and "previous_response_id" in payload:
         continuation = runtime_state().get_response_continuation(
@@ -748,6 +759,7 @@ def _merge_responses_continuation(
     merged = hydrate_tool_result_names(_append_response_history_without_duplicates(prior, incoming))
     metadata = dict(request.metadata)
     metadata["_axio_current_prompt_in_history"] = _history_contains_prompt(merged, request.prompt)
+    metadata["_axio_previous_response_id"] = str(continuation.response_id or "")[:160]
     return replace(request, history=tuple(merged), metadata=metadata)
 
 
@@ -4621,6 +4633,41 @@ def _gemini_route_model(route: str) -> str:
     tail = route.split(marker, 1)[1]
     suffix = ":streamGenerateContent" if tail.endswith(":streamGenerateContent") else ":generateContent"
     return unquote(tail[: -len(suffix)]) if tail.endswith(suffix) else ""
+
+
+def _bind_gemini_route_model(
+    payload: Mapping[str, Any],
+    route: str,
+) -> tuple[dict[str, Any], tuple[str, str] | None]:
+    """将 Gemini URL 中的模型与 body 绑定，拒绝静默模型降级或错配。"""
+
+    if not route.startswith(("/v1beta/models/", "/v1/models/", "/models/")):
+        return {}, (
+            "gemini_model_path_invalid",
+            "Gemini endpoint must use /v1beta/models/{model} or /v1/models/{model}.",
+        )
+    route_model = _gemini_route_model(route).strip().casefold()
+    canonical_route_model = PUBLIC_MODEL_ALIASES.get(route_model)
+    if not canonical_route_model:
+        return {}, (
+            "gemini_model_path_invalid",
+            "Gemini endpoint must include one supported model in the URL path.",
+        )
+    body_value = payload.get("model")
+    body_model = str(body_value or "").strip().casefold()
+    if body_model:
+        canonical_body_model = PUBLIC_MODEL_ALIASES.get(body_model)
+        if not canonical_body_model:
+            return {}, (
+                "gemini_model_unsupported",
+                "The Gemini request body contains an unsupported model.",
+            )
+        if canonical_body_model != canonical_route_model:
+            return {}, (
+                "gemini_model_path_mismatch",
+                "The Gemini URL model and request body model must match.",
+            )
+    return {**dict(payload), "model": canonical_route_model}, None
 
 
 def _decode_json(body: bytes | str | None) -> dict[str, Any]:

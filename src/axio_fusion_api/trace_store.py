@@ -114,6 +114,11 @@ def safe_execution_trace(response: FusionResponse, *, tenant_key: str = "") -> d
         ),
         "judge_result": _safe_judge(judge),
         "early_exit": _safe_early_exit(trace.get("early_exit") if isinstance(trace.get("early_exit"), Mapping) else {}),
+        "aggregation_decision": _safe_aggregation_decision(
+            trace.get("aggregation_decision")
+            if isinstance(trace.get("aggregation_decision"), Mapping)
+            else {}
+        ),
         "candidate_deduplication": _safe_candidate_deduplication(
             trace.get("candidate_deduplication") if isinstance(trace.get("candidate_deduplication"), Mapping) else {}
         ),
@@ -1205,6 +1210,53 @@ def _safe_judge(value: Mapping[str, Any]) -> dict[str, Any]:
             if isinstance(row, Mapping)
         ],
         "raw_candidate_text_persisted": False,
+    }
+
+
+def _safe_aggregation_decision(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Project the finalization gate without retaining candidate content."""
+
+    if not isinstance(value, Mapping) or not value:
+        return {
+            "schema": "axio_fusion_api.aggregation_decision.v1",
+            "decision": "not_recorded",
+            "candidate_count": 0,
+            "abstention_recommended": False,
+            "raw_candidate_text_persisted": False,
+            "raw_prompt_persisted": False,
+            "raw_provider_output_persisted": False,
+            "secrets_persisted": False,
+        }
+    blocking = value.get("blocking_gap_counts") if isinstance(value.get("blocking_gap_counts"), Mapping) else {}
+    reasons = value.get("quality_gap_reason_codes") if isinstance(value.get("quality_gap_reason_codes"), list) else []
+    return {
+        "schema": str(value.get("schema") or "axio_fusion_api.aggregation_decision.v1")[:120],
+        "decision": str(value.get("decision") or "unknown")[:64],
+        "finalization_mode": str(value.get("finalization_mode") or "direct")[:64],
+        "candidate_count": _optional_int(value.get("candidate_count")) or 0,
+        "best_candidate_id_sha256": str(value.get("best_candidate_id_sha256") or "")[:64],
+        "best_candidate_calibrated_confidence": _optional_float(value.get("best_candidate_calibrated_confidence")),
+        "confidence_band": str(value.get("confidence_band") or "none")[:16],
+        "quality_target": _optional_float(value.get("quality_target")),
+        "quality_gate_status": str(value.get("quality_gate_status") or "unknown")[:32],
+        "quality_gap_triggered": bool(value.get("quality_gap_triggered")),
+        "quality_gap_reason_codes": [str(item)[:120] for item in reasons if str(item)][:16],
+        "blocking_gap_counts": {
+            str(key)[:80]: max(0, _optional_int(item) or 0)
+            for key, item in blocking.items()
+            if str(key)
+        },
+        "judge_ready_for_synthesis": bool(value.get("judge_ready_for_synthesis")),
+        "repair_required": bool(value.get("repair_required")),
+        "repair_attempted": bool(value.get("repair_attempted")),
+        "synthesis_provider_call_count": _optional_int(value.get("synthesis_provider_call_count")) or 0,
+        "synthesis_output_accepted": bool(value.get("synthesis_output_accepted")),
+        "early_exit_triggered": bool(value.get("early_exit_triggered")),
+        "abstention_recommended": bool(value.get("abstention_recommended")),
+        "raw_candidate_text_persisted": False,
+        "raw_prompt_persisted": False,
+        "raw_provider_output_persisted": False,
+        "secrets_persisted": False,
     }
 
 

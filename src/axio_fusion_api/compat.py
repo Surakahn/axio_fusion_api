@@ -412,7 +412,7 @@ def render_response(
             "max_output_tokens": response.request.max_output_tokens,
             "max_tool_calls": None,
             "parallel_tool_calls": len(tool_calls) > 1,
-            "previous_response_id": None,
+            "previous_response_id": _responses_previous_response_id(response),
             "reasoning": {"effort": None, "summary": None},
             "service_tier": "default",
             "text": {
@@ -822,7 +822,7 @@ class IncrementalStreamRenderer:
             "max_output_tokens": self.request.max_output_tokens,
             "max_tool_calls": None,
             "parallel_tool_calls": False,
-            "previous_response_id": None,
+            "previous_response_id": _responses_previous_response_id_for_request(self.request),
             "reasoning": {"effort": None, "summary": None},
             "service_tier": "default",
             "text": {"format": {"type": "text"}},
@@ -1223,7 +1223,7 @@ def render_stream_events(
             "max_output_tokens": response.request.max_output_tokens,
             "max_tool_calls": None,
             "parallel_tool_calls": len(tool_calls) > 1,
-            "previous_response_id": None,
+            "previous_response_id": _responses_previous_response_id(response),
             "reasoning": {"effort": None, "summary": None},
             "service_tier": "default",
             "text": {"format": {"type": "text"}},
@@ -1810,6 +1810,18 @@ def _responses_continuation_metadata(metadata: Mapping[str, Any], *, stored: boo
     }
 
 
+def _responses_previous_response_id(response: FusionResponse) -> str | None:
+    return _responses_previous_response_id_for_request(response.request)
+
+
+def _responses_previous_response_id_for_request(request: FusionRequest) -> str | None:
+    """仅从服务端注入的内部标记恢复 Responses 的上一个公开响应 ID。"""
+
+    value = request.metadata.get("_axio_previous_response_id")
+    previous_id = str(value or "").strip()
+    return previous_id[:160] or None
+
+
 def public_route_summary(route_plan: Mapping[str, Any]) -> dict[str, Any]:
     selected = route_plan.get("selected_models") if isinstance(route_plan.get("selected_models"), list) else []
     roles = route_plan.get("roles") if isinstance(route_plan.get("roles"), list) else []
@@ -2174,6 +2186,11 @@ def _public_trace_summary(
     deadline_budget = trace.get("deadline_budget") if isinstance(trace.get("deadline_budget"), Mapping) else {}
     circuit_breakers = trace.get("circuit_breakers") if isinstance(trace.get("circuit_breakers"), Mapping) else {}
     candidate_receipts = trace.get("candidate_receipts") if isinstance(trace.get("candidate_receipts"), list) else []
+    aggregation_decision = (
+        trace.get("aggregation_decision")
+        if isinstance(trace.get("aggregation_decision"), Mapping)
+        else {}
+    )
     tool_call_arbitration = trace.get("tool_call_arbitration") if isinstance(trace.get("tool_call_arbitration"), Mapping) else {}
     cache_replay = trace.get("cache_replay") if isinstance(trace.get("cache_replay"), Mapping) else {}
     cache_origin = trace.get("cache_origin_completion") if isinstance(trace.get("cache_origin_completion"), Mapping) else {}
@@ -2204,6 +2221,7 @@ def _public_trace_summary(
         "provider_judge_required": fusion_stage_outcome.get("provider_judge_required") is True,
         "provider_synthesizer_required": fusion_stage_outcome.get("provider_synthesizer_required") is True,
         "candidate_count": len(candidate_receipts),
+        "aggregation_decision": _public_aggregation_decision(aggregation_decision),
         "cache_hit": bool(trace.get("cache_hit")),
         "cache_replay": cache_replay.get("replayed") is True,
         "cache_process_executed_this_request": cache_replay.get(
@@ -2263,6 +2281,63 @@ def _public_trace_summary(
         "raw_provider_model_ids_persisted": False,
         "raw_profile_ids_persisted": False,
         "raw_provider_outputs_persisted": False,
+    }
+
+
+def _public_aggregation_decision(value: Mapping[str, Any]) -> dict[str, Any]:
+    """向四种公共协议投影最终聚合门禁，不暴露候选正文或 provider 输出。"""
+
+    if not isinstance(value, Mapping) or not value:
+        return {
+            "schema": "axio_fusion_api.aggregation_decision.v1",
+            "decision": "not_recorded",
+            "candidate_count": 0,
+            "abstention_recommended": False,
+            "raw_candidate_text_persisted": False,
+            "raw_prompt_persisted": False,
+            "raw_provider_output_persisted": False,
+            "secrets_persisted": False,
+        }
+    reasons = value.get("quality_gap_reason_codes")
+    blocking = value.get("blocking_gap_counts")
+    return {
+        "schema": str(value.get("schema") or "axio_fusion_api.aggregation_decision.v1")[:120],
+        "decision": str(value.get("decision") or "unknown")[:64],
+        "finalization_mode": str(value.get("finalization_mode") or "direct")[:64],
+        "candidate_count": max(0, _optional_int(value.get("candidate_count")) or 0),
+        "best_candidate_id_sha256": str(value.get("best_candidate_id_sha256") or "")[:64],
+        "best_candidate_calibrated_confidence": _optional_float(
+            value.get("best_candidate_calibrated_confidence")
+        ),
+        "confidence_band": str(value.get("confidence_band") or "none")[:16],
+        "quality_target": _optional_float(value.get("quality_target")),
+        "quality_gate_status": str(value.get("quality_gate_status") or "unknown")[:32],
+        "quality_gap_triggered": value.get("quality_gap_triggered") is True,
+        "quality_gap_reason_codes": [
+            str(item)[:120] for item in reasons if str(item)
+        ][:16]
+        if isinstance(reasons, list)
+        else [],
+        "blocking_gap_counts": {
+            str(key)[:80]: max(0, _optional_int(item) or 0)
+            for key, item in blocking.items()
+            if str(key)
+        }
+        if isinstance(blocking, Mapping)
+        else {},
+        "judge_ready_for_synthesis": value.get("judge_ready_for_synthesis") is True,
+        "repair_required": value.get("repair_required") is True,
+        "repair_attempted": value.get("repair_attempted") is True,
+        "synthesis_provider_call_count": max(
+            0, _optional_int(value.get("synthesis_provider_call_count")) or 0
+        ),
+        "synthesis_output_accepted": value.get("synthesis_output_accepted") is True,
+        "early_exit_triggered": value.get("early_exit_triggered") is True,
+        "abstention_recommended": value.get("abstention_recommended") is True,
+        "raw_candidate_text_persisted": False,
+        "raw_prompt_persisted": False,
+        "raw_provider_output_persisted": False,
+        "secrets_persisted": False,
     }
 
 

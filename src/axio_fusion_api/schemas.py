@@ -30,6 +30,7 @@ PUBLIC_MODEL_ALIASES = {
     "axio-fast": "axio-luna",
     "axio-luna": "axio-luna",
     "terra": "axio-terra",
+    "axio-terra": "axio-terra",
     "budget": "axio-terra",
     "balanced": "axio-terra",
     "high": "axio-sol",

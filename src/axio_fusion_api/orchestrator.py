@@ -3872,6 +3872,14 @@ class FusionEngine:
             judge_output_accepted=judge_output_accepted,
             aggregator_output_accepted=synthesis_output_accepted,
         )
+        aggregation_decision = _aggregation_decision_receipt(
+            route_plan,
+            fusion_panel_candidates,
+            judge_result,
+            early_exit=early_exit,
+            synthesis_provider_call_count=synthesis_call_count,
+            synthesis_output_accepted=synthesis_output_accepted,
+        )
         runtime_fusion_stage_outcome = _runtime_fusion_stage_outcome(
             route_plan,
             completed_candidate_count=len(fusion_panel_candidates),
@@ -3920,6 +3928,7 @@ class FusionEngine:
             "early_exit": early_exit,
             "candidate_deduplication": candidate_deduplication,
             "panel_repair": panel_repair,
+            "aggregation_decision": aggregation_decision,
             "synthesis_compression": synthesis_compression,
             "runtime_fusion_stage_outcome": runtime_fusion_stage_outcome,
             "feedback_stage_admission": feedback_stage_admission,
@@ -12119,6 +12128,121 @@ def _local_consensus_finalize_decision(
         ),
         "raw_candidate_text_persisted": False,
         "raw_profile_id_persisted": False,
+        "secrets_persisted": False,
+    }
+
+
+def _aggregation_decision_receipt(
+    route_plan: Mapping[str, Any],
+    candidates: Sequence[CandidateResult],
+    judge_result: Mapping[str, Any],
+    *,
+    early_exit: Mapping[str, Any] | None,
+    synthesis_provider_call_count: int,
+    synthesis_output_accepted: bool,
+) -> dict[str, Any]:
+    """Summarize the bounded finalization decision for one request.
+
+    The runtime has several legitimate aggregation paths (provider synthesis,
+    local consensus, early exit, and degraded best-candidate fallback).  A
+    single receipt makes the quality gate and the remaining repair risk
+    explicit without changing the selected path or persisting answer text.
+    ``abstention_recommended`` is advisory: callers still receive the normal
+    bounded fallback answer, while operators and clients can distinguish it
+    from a quality-gated finalization.
+    """
+
+    usable = [
+        candidate
+        for candidate in candidates
+        if candidate.status == "completed"
+        and (candidate.answer.strip() or candidate.tool_calls)
+    ]
+    best = _best_candidate(usable, judge_result)
+    best_confidence = _candidate_calibrated_confidence(best, judge_result) if best else None
+    quality_gap = _quality_target_gap(route_plan, usable, judge_result)
+    blocking = _judge_blocking_gap_counts(judge_result)
+    unresolved_blockers = [key for key, count in blocking.items() if count > 0]
+    repair_required = bool(quality_gap.get("triggered") or unresolved_blockers)
+    repair_attempted = any(
+        candidate.role == "targeted_escalation" for candidate in usable
+    )
+    budget = route_plan.get("budget") if isinstance(route_plan.get("budget"), Mapping) else {}
+    finalization_mode = str(
+        budget.get("fusion_finalization_mode")
+        or route_plan.get("fusion_finalization_mode")
+        or "direct"
+    )[:64]
+    early_exit_triggered = bool(
+        isinstance(early_exit, Mapping) and early_exit.get("triggered") is True
+    )
+    if not usable:
+        decision = "abstain"
+    elif synthesis_output_accepted:
+        decision = "provider_synthesis"
+    elif finalization_mode == "local_consensus":
+        decision = "local_consensus"
+    elif early_exit_triggered:
+        decision = "early_exit_best_candidate"
+    else:
+        decision = "degraded_best_candidate"
+
+    target = _safe_float(budget.get("quality_target"), default=0.0)
+    confidence_floor = _optional_float(quality_gap.get("confidence_floor"))
+    if best_confidence is None:
+        confidence_band = "none"
+    elif confidence_floor is not None and best_confidence >= confidence_floor:
+        confidence_band = "high"
+    elif confidence_floor is not None and best_confidence >= max(0.0, confidence_floor - 0.10):
+        confidence_band = "medium"
+    else:
+        confidence_band = "low"
+
+    gate_status = "passed"
+    if not usable:
+        gate_status = "abstain"
+    elif repair_required:
+        gate_status = "degraded" if synthesis_output_accepted else "repair_required"
+    abstention_recommended = bool(
+        not usable
+        or (
+            gate_status == "repair_required"
+            and not early_exit_triggered
+            and synthesis_provider_call_count <= 0
+        )
+    )
+    reason_codes = list(quality_gap.get("reason_codes", [])) if isinstance(quality_gap.get("reason_codes"), list) else []
+    reason_codes.extend(unresolved_blockers)
+    if not usable:
+        reason_codes.append("no_usable_candidate")
+    if repair_attempted and not repair_required:
+        reason_codes.append("targeted_repair_closed_gap")
+    if synthesis_output_accepted:
+        reason_codes.append("synthesis_output_accepted")
+    return {
+        "schema": "axio_fusion_api.aggregation_decision.v1",
+        "decision": decision,
+        "finalization_mode": finalization_mode,
+        "candidate_count": len(usable),
+        "best_candidate_id": best.candidate_id if best else "",
+        "best_candidate_id_sha256": sha256_text(best.candidate_id) if best else "",
+        "best_candidate_calibrated_confidence": round(best_confidence, 4) if best_confidence is not None else None,
+        "confidence_band": confidence_band,
+        "quality_target": round(target, 4),
+        "quality_gate_status": gate_status,
+        "quality_gap_triggered": bool(quality_gap.get("triggered")),
+        "quality_gap_reason_codes": [str(item)[:120] for item in reason_codes if str(item)][:16],
+        "blocking_gap_counts": {str(key): max(0, int(value)) for key, value in blocking.items()},
+        "judge_ready_for_synthesis": judge_result.get("ready_for_synthesis") is True,
+        "repair_required": repair_required,
+        "repair_attempted": repair_attempted,
+        "synthesis_provider_call_count": max(0, int(synthesis_provider_call_count)),
+        "synthesis_output_accepted": bool(synthesis_output_accepted),
+        "early_exit_triggered": early_exit_triggered,
+        "abstention_recommended": abstention_recommended,
+        "raw_candidate_text_persisted": False,
+        "raw_prompt_persisted": False,
+        "raw_provider_output_persisted": False,
         "secrets_persisted": False,
     }
 

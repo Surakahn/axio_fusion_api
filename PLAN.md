@@ -1,5 +1,22 @@
 # Axio Fusion API Plan
 
+## 2026-09-20 四协议 Responses/Gemini 兼容契约收敛
+
+本轮补齐两个公共 API 边界缺口。Responses 续接请求在服务端合并历史后，原先仍把
+`previous_response_id` 固定返回为 `null`，导致客户端无法按原生响应对象确认续接链；现由
+服务端在 request-local metadata 注入上一个已验证的响应 ID，buffered 响应、Responses
+SSE 的 in-progress/failed/completed 对象统一投影该字段，且不把原始上下文或用户 metadata
+写入安全 receipt。Gemini URL 模型原先只在 body 缺少 `model` 时注入，body 可与 URL 指向
+不同模型，未知路径还会静默降级为 Terra；现统一绑定 `/v1beta/models/`、`/v1/models/`
+和 `/models/` 路径，兼容公开别名但拒绝未知模型、非标准路径与 URL/body 错配，并让
+buffered 和增量 SSE preparation 使用同一门禁。
+
+新增离线兼容回归覆盖 Responses 续接字段、SSE 生命周期、Gemini 错配/未知路径和增量
+准备阶段。专项 `68 passed`，公共模型/content/fusion 回归 `132 passed`，standalone
+兼容筛选 `6 passed`；未执行 provider/target 网络，不修改 r18 frozen 输入。后续需在
+provider 凭据门通过后重做四协议 live smoke 和正式 paired parity；本轮不构成 provider
+能力、reasoning native、质量或成本结论。
+
 ## 2026-09-20 Pre-Fusion 排名证据可信度投影
 
 模型探索/排名链路新增 `prefusion_operational_evidence_confidence.v1`：对每个 logical
@@ -3737,3 +3754,13 @@ prompt-composer 成本使用同一租户 lease。该工程增量已通过 `1145 
 frozen plan/source/registry，不产生 provider/target 证据。多副本部署前必须设计共享预算
 账本或明确单实例配额边界。下一主线仍为凭据轮换后唯一 r18 screening -> transport
 admission -> ranking -> freeze -> Harness/import -> 21-suite campaign。
+# 2026-09-20 聚合决策 Receipt 与公共 Trace 投影
+
+- [x] 将 provider synthesis、local consensus、early exit、degraded fallback 和 abstain
+  统一为 `aggregation_decision.v1`，记录质量门禁、校准置信度、修复和 Synthesizer 结果。
+- [x] `trace_store.safe_execution_trace()` 与 compat 四协议公共 `fusion_trace_summary`
+  接入 bounded 聚合决策投影；不保存 prompt、候选文本、provider 原始输出或 secret。
+- [x] 新增专项回归，覆盖质量通过、质量缺口、degraded synthesis、无候选和公共安全投影；
+  本轮专项共 `40 passed`，未执行 provider/benchmark 网络。
+- [ ] 仍需在获授权 endpoint-bound probe 和完整 21-suite holdout campaign 中校准阈值、
+  弃答率、质量/调用成本/延迟，不把 advisory receipt 当成 superiority 证据。

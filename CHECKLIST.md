@@ -1,5 +1,19 @@
 # Axio Fusion API Checklist
 
+# 2026-09-20 四协议 Responses/Gemini 兼容契约收敛
+
+- [x] Responses continuation 在服务端 request-local metadata 绑定上一个响应 ID；buffered
+  响应与 Responses SSE 的 in-progress/terminal/failed 对象返回 `previous_response_id`，不
+  持久化原始历史、prompt、tool output 或 caller 私有 metadata。
+- [x] Gemini `/v1beta/models/`、`/v1/models/`、`/models/` 路由与 body 模型统一 canonical
+  绑定；未知模型、非标准路径和 URL/body mismatch 固定返回 bounded 400 错误，不再静默
+  使用 axio-terra；buffered 与 incremental stream preparation 共用门禁。
+- [x] 新增 `tests/test_compat_api_contracts.py`；兼容专项 `68 passed`，公共模型/content/
+  fusion 回归 `132 passed`，standalone 关键兼容筛选 `6 passed`；L1/L2 与 `git diff --check`
+  通过。
+- [ ] provider/代理恢复后重做四协议 live smoke、continuation 跨协议 parity 与正式
+  paired benchmark；离线回归不能替代 endpoint-bound transport、质量、延迟或成本证据。
+
 # 2026-09-20 Pre-Fusion 排名证据可信度投影
 
 - [x] logical candidate 暴露 `prefusion_operational_evidence_confidence.v1`，绑定研究先验、
@@ -1617,3 +1631,14 @@ its unchecked items are not the current cohort's execution plan.
   部分绑定 fail-fast；完整绑定和得分证据可生成 `shadow_candidate`，仍禁止自动激活。
   新增回归覆盖真实 artifact digest 比对与 partial-binding rejection；全量回归
   `1083 passed, 7 skipped`，没有 provider/target 网络调用。
+# 2026-09-20 聚合决策 Receipt 与公共 Trace 投影
+
+- [x] `aggregation_decision.v1` 统一记录 provider synthesis、local consensus、early exit、
+  degraded fallback 和 abstain 决策。
+- [x] receipt 包含质量目标、校准置信度、quality gap reason、blocking gap、修复状态、
+  Synthesizer 接受状态和 advisory `abstention_recommended`。
+- [x] 内部安全 trace 与四种公共协议 trace summary 均使用 bounded/hash-safe 投影；tool-call
+  中间轮次保持 `not_recorded`，不伪造最终聚合结论。
+- [x] 聚合/推理/Hermes/compat 专项 `40 passed`；L1/L2 通过。
+- [ ] provider/benchmark 网络未执行；仍需获授权的真实 probe 与完整 21-suite holdout 校准，
+  才能评估质量、弃答、调用成本和延迟，不做提前 superiority claim。
