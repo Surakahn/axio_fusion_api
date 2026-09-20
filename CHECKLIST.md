@@ -1,5 +1,15 @@
 # Axio Fusion API Checklist
 
+# 2026-09-20 r18 当前零网络 verifier 复核
+
+- [x] 当前 registry、frozen plan/source、operational admission、两份 preflight receipt
+  与 proxy policy 重新绑定核验；无 PID 状态为 `ready_for_operator_authorization`。
+- [x] 误传 18900 服务 PID 被 `pid_not_matching` fail-closed；未启动 screening、未修改
+  frozen artifact；修正后 `pid.status=not_started`，所有 provider/target/network call
+  flags 为 false。
+- [ ] 仍需明确的 live screening operator gate；verifier ready 不等于授权或 provider
+  能力证据。
+
 # 2026-09-20 缓冲响应客户端断开边界
 
 - [x] `_write_buffered_response` 对 header/body/flush 的 peer disconnect 使用与流式路径

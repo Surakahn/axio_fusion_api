@@ -1,5 +1,20 @@
 # Axio Fusion API Plan
 
+## 2026-09-20 r18 当前零网络 verifier 复核
+
+使用当前生产 registry、r18 frozen plan/source、r7 private operational admission 和两
+份 credential/preflight receipt 重新执行 `verify_screening_preflight.py`。第一次把 Axio
+18900 服务 PID 误传为 screening PID，正确返回 `blocked/pid_not_matching`；未修改任何
+frozen artifact。去掉 `--pid` 后正确得到 `ready_for_operator_authorization`、空
+`reason_codes`、`pid.status=not_started`，proxy policy valid，provider/target/network
+calls 全为 false，safe receipt SHA-256 为
+`9e2fed685743449bd88675bed12ad209691a6059f68e2b70892c641330f6a9d8`。
+
+该状态只证明 screening 启动前控制面自洽，不授予 live screening，也不证明 transport
+admission、provider 能力、排序、成本、延迟或 21-suite 质量；下一步仍必须沿 frozen
+screening -> transport admission -> ranking -> freeze -> Harness/import -> campaign
+单向 gate 执行。
+
 ## 2026-09-20 缓冲响应客户端断开边界
 
 生产 smoke 发现 provider/代理等待超过客户端窗口后，缓冲 HTTP 响应在写回时会把
