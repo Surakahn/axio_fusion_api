@@ -13,11 +13,13 @@ from axio_fusion_api.cli import main as fusion_cli_main
 from axio_fusion_api.tenant_budget_ledger import (
     LedgerFencingClaim,
     InMemoryTenantBudgetLedger,
+    InMemoryFencedTenantBudgetLedger,
     SQLiteTenantBudgetLedger,
     TenantBudgetLedgerFencingStale,
     TenantBudgetLedgerInvariantError,
     TenantBudgetLedgerStorageUnavailable,
     TenantBudgetLedgerUnavailable,
+    audit_fenced_ledger_backend,
 )
 
 
@@ -34,6 +36,41 @@ class _ReferenceFencingAuthority:
     def assert_current(self, claim):
         if claim.epoch != self._epoch:
             raise TenantBudgetLedgerFencingStale()
+
+
+class _CompleteFencedBackend:
+    fencing_backend_name = "test_consensus_backend"
+
+    def claim_fencing_epoch(self):
+        return None
+
+    def reserve_fenced(self):
+        return None
+
+    def settle_fenced(self):
+        return None
+
+    def release_fenced(self):
+        return None
+
+    def recover_fenced(self):
+        return None
+
+
+def test_fenced_backend_audit_is_safe_and_admits_complete_contract():
+    receipt = audit_fenced_ledger_backend(_CompleteFencedBackend())
+    assert receipt["schema"] == "axio_fusion_api.fenced_ledger_backend_audit.v1"
+    assert receipt["cross_host_fencing_admitted"] is True
+    assert receipt["reason_codes"] == []
+    assert receipt["raw_backend_identity_persisted"] is False
+
+
+def test_fenced_backend_audit_rejects_sqlite_and_partial_contract(tmp_path):
+    receipt = audit_fenced_ledger_backend(SQLiteTenantBudgetLedger(str(tmp_path / "ledger.db")))
+    assert receipt["cross_host_fencing_admitted"] is False
+    assert "sqlite_backend_not_cross_host_fenced" in receipt["reason_codes"]
+    assert "fencing_backend_name_missing" in receipt["reason_codes"]
+    assert "fenced_operation_missing" in receipt["reason_codes"]
 
 
 def test_sqlite_ledger_is_idempotent_across_two_instances(tmp_path):
@@ -110,6 +147,40 @@ def test_fencing_claim_rejects_non_hash_owner_and_non_positive_epoch():
         LedgerFencingClaim(owner_hash="raw-owner", epoch=1, token="token")
     with pytest.raises(TenantBudgetLedgerInvariantError):
         LedgerFencingClaim(owner_hash="b" * 64, epoch=0, token="token")
+
+
+def test_in_memory_fenced_ledger_rejects_stale_claim_and_preserves_idempotency():
+    ledger = InMemoryFencedTenantBudgetLedger()
+    owner_hash = "c" * 64
+    stale = ledger.claim_fencing_epoch(owner_hash=owner_hash)
+    current = ledger.claim_fencing_epoch(owner_hash=owner_hash)
+    with pytest.raises(TenantBudgetLedgerFencingStale):
+        ledger.reserve_fenced(
+            fencing_claim=stale,
+            tenant_hash="tenant-hash",
+            day="2026-09-20",
+            amount_usd=0.10,
+            budget_usd=1.00,
+            reservation_key="stale-request",
+        )
+    reservation = ledger.reserve_fenced(
+        fencing_claim=current,
+        tenant_hash="tenant-hash",
+        day="2026-09-20",
+        amount_usd=0.10,
+        budget_usd=1.00,
+        reservation_key="same-request",
+    )
+    replay = ledger.reserve_fenced(
+        fencing_claim=current,
+        tenant_hash="tenant-hash",
+        day="2026-09-20",
+        amount_usd=0.10,
+        budget_usd=1.00,
+        reservation_key="same-request",
+    )
+    assert replay.reservation_id == reservation.reservation_id
+    assert replay.idempotent_replay is True
 
 
 def test_sqlite_ledger_serializes_cross_instance_reservations(tmp_path):

@@ -255,6 +255,44 @@ class FencedTenantBudgetLedger(TenantBudgetLedger, Protocol):
         """验证 fencing 后执行显式 operator recovery。"""
 
 
+def audit_fenced_ledger_backend(backend: Any) -> dict[str, Any]:
+    """离线审计 fencing 后端是否满足运行时接入契约。
+
+    该审计只检查可观察的接口形状，不执行写入、网络请求或 claim。SQLite 和
+    普通账本即使具有部分同名方法，也不会被错误标记为跨主机 fencing 后端。
+    返回值仅包含类型名、布尔值和方法名，适合安全 artifact 持久化。
+    """
+    required_methods = (
+        "claim_fencing_epoch",
+        "reserve_fenced",
+        "settle_fenced",
+        "release_fenced",
+        "recover_fenced",
+    )
+    backend_name = getattr(backend, "fencing_backend_name", None)
+    method_status = {
+        name: callable(getattr(backend, name, None)) for name in required_methods
+    }
+    name_valid = isinstance(backend_name, str) and bool(backend_name.strip())
+    sqlite_like = backend.__class__.__name__.lower().startswith("sqlite")
+    reasons: list[str] = []
+    if not name_valid:
+        reasons.append("fencing_backend_name_missing")
+    if not all(method_status.values()):
+        reasons.append("fenced_operation_missing")
+    if sqlite_like:
+        reasons.append("sqlite_backend_not_cross_host_fenced")
+    return {
+        "schema": "axio_fusion_api.fenced_ledger_backend_audit.v1",
+        "backend_type": backend.__class__.__name__,
+        "fencing_backend_name_present": name_valid,
+        "required_methods": method_status,
+        "cross_host_fencing_admitted": not reasons,
+        "reason_codes": reasons,
+        "raw_backend_identity_persisted": False,
+    }
+
+
 @dataclass
 class _ReservationRecord:
     reservation_id: str
@@ -531,6 +569,61 @@ class InMemoryTenantBudgetLedger:
             raise TenantBudgetLedgerInvariantError("tenant hash, day and reservation key are required")
         if _finite_nonnegative(amount_usd) is None or _finite_nonnegative(budget_usd) is None:
             raise TenantBudgetLedgerInvariantError("budget values must be finite and non-negative")
+
+
+class InMemoryFencedTenantBudgetLedger:
+    """离线 fencing 适配器，用于双副本/旧 claim 故障测试。
+
+    该实现只在单进程内提供原子 epoch 校验，绝不代表跨主机共享后端；生产部署
+    必须注入真正由 Redis/SQL/共识系统原子执行 claim 与预算写入的实现。
+    """
+
+    backend_name = "in_memory_fenced_test_only"
+    fencing_backend_name = "in_memory_fencing_test_only"
+
+    def __init__(self, ledger: InMemoryTenantBudgetLedger | None = None) -> None:
+        self._ledger = ledger or InMemoryTenantBudgetLedger()
+        self._lock = threading.Lock()
+        self._epoch = 0
+        self._claim: LedgerFencingClaim | None = None
+
+    def claim_fencing_epoch(self, *, owner_hash: str) -> LedgerFencingClaim:
+        with self._lock:
+            self._epoch += 1
+            claim = LedgerFencingClaim(
+                owner_hash=owner_hash,
+                epoch=self._epoch,
+                token=uuid.uuid4().hex,
+            )
+            self._claim = claim
+            return claim
+
+    def _assert_claim(self, claim: LedgerFencingClaim) -> None:
+        if not isinstance(claim, LedgerFencingClaim):
+            raise TenantBudgetLedgerInvariantError("fencing claim is required")
+        with self._lock:
+            current = self._claim
+            if current is None or claim.epoch != current.epoch or claim.token != current.token:
+                raise TenantBudgetLedgerFencingStale()
+
+    def reserve_fenced(self, *, fencing_claim: LedgerFencingClaim, **kwargs: Any) -> LedgerReservation:
+        self._assert_claim(fencing_claim)
+        return self._ledger.reserve(**kwargs)
+
+    def settle_fenced(self, *, fencing_claim: LedgerFencingClaim, **kwargs: Any) -> LedgerSettlement:
+        self._assert_claim(fencing_claim)
+        return self._ledger.settle(**kwargs)
+
+    def release_fenced(self, *, fencing_claim: LedgerFencingClaim, **kwargs: Any) -> LedgerSettlement:
+        self._assert_claim(fencing_claim)
+        return self._ledger.release(**kwargs)
+
+    def recover_fenced(self, *, fencing_claim: LedgerFencingClaim, **kwargs: Any) -> LedgerSettlement:
+        self._assert_claim(fencing_claim)
+        return self._ledger.recover(**kwargs)
+
+    def snapshot(self, **kwargs: Any) -> dict[str, Any]:
+        return self._ledger.snapshot(**kwargs)
 
 
 class SQLiteTenantBudgetLedger:
@@ -1173,6 +1266,7 @@ def _is_storage_sqlite_error(error: sqlite3.Error) -> bool:
 
 __all__ = [
     "InMemoryTenantBudgetLedger",
+    "InMemoryFencedTenantBudgetLedger",
     "LedgerReservation",
     "LedgerFencingClaim",
     "LedgerReservationStatus",

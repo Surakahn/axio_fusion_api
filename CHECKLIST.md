@@ -160,6 +160,8 @@
 
 # 2026-09-19 跨主机租户预算 fencing/epoch 契约
 
+- [x] 新增 `InMemoryFencedTenantBudgetLedger` 离线适配器，覆盖 epoch/token 原子校验、旧
+  claim 拒绝与 reservation key 幂等；明确标记为 test-only，不冒充跨主机生产后端。
 - [x] 新增 `LedgerFencingClaim`：owner hash、正整数单调 epoch 和内存 token 的输入验证；
   safe receipt 仅保存 token SHA-256，原始 token 不可持久化。
 - [x] 新增 `FencedTenantBudgetLedger` 协议，要求 `claim_fencing_epoch` 与四个
