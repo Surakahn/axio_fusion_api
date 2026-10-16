@@ -30894,10 +30894,20 @@ def _bizbench_python_command(path: Path) -> list[str]:
     if os.name != "posix" or shutil.which("bwrap") is None:
         raise OSError("bizbench_sandbox_unavailable")
     python_path = "/usr/local/bin/python3.11"
+    runtime_bind: tuple[str, str] | None = None
     if not Path(python_path).exists():
-        python_path = str(Path(sys.executable).resolve())
+        runtime_root = Path(sys.base_prefix).resolve()
+        runtime_python = runtime_root / "bin" / "python"
+        if not runtime_python.is_file():
+            runtime_python = runtime_root / "bin" / "python3.11"
+        if runtime_python.is_file():
+            sandbox_runtime = "/tmp/axio_bizbench_python_runtime"
+            runtime_bind = (str(runtime_root), sandbox_runtime)
+            python_path = f"{sandbox_runtime}/bin/{runtime_python.name}"
+        else:
+            python_path = str(Path(sys.executable).resolve())
     sandbox_path = "/tmp/axio_bizbench_candidate.py"
-    return [
+    command = [
         "bwrap",
         "--die-with-parent",
         "--unshare-net",
@@ -30925,13 +30935,28 @@ def _bizbench_python_command(path: Path) -> list[str]:
         "/dev",
         "--tmpfs",
         "/tmp",
-        "--ro-bind",
-        str(path),
-        sandbox_path,
-        python_path,
-        "-I",
-        sandbox_path,
     ]
+    if runtime_bind is not None:
+        command.extend(
+            [
+                "--dir",
+                runtime_bind[1],
+                "--ro-bind",
+                runtime_bind[0],
+                runtime_bind[1],
+            ]
+        )
+    command.extend(
+        [
+            "--ro-bind",
+            str(path),
+            sandbox_path,
+            python_path,
+            "-I",
+            sandbox_path,
+        ]
+    )
+    return command
 
 
 def _bizbench_safe_builtins_source(variable_name: str) -> str:
